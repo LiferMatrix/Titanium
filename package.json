@@ -1,0 +1,21 @@
+{
+  "name": "trading-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "combined_trading_bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.10.0",
+    "ccxt": "^4.4.91",
+    "dotenv": "^16.5.0",
+    "grammy": "^1.36.3",
+    "technicalindicators": "^3.1.0",
+    "winston": "^3.17.0"
+  }
+}
