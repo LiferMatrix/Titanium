@@ -1,130 +1,10 @@
-require('dotenv').config();
-const ccxt = require('ccxt');
-const TechnicalIndicators = require('technicalindicators');
-const { Bot } = require('grammy');
-const winston = require('winston');
-const axios = require('axios');
-
-// ================= CONFIGURAÇÃO ================= //
-const config = {
-  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
-  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
-  INTERVALO_ALERTA_3M_MS: 180000,
-  TEMPO_COOLDOWN_MS: 15 * 60 * 1000,
-  WPR_PERIOD: 26,
-  WPR_LOW_THRESHOLD: -97,
-  WPR_HIGH_THRESHOLD: -2,
-  ATR_PERIOD: 14,
-  RSI_PERIOD: 14,
-  FI_PERIOD: 13,
-  ATR_PERCENT_MIN: 0.5,
-  ATR_PERCENT_MAX: 3.0,
-  CACHE_TTL: 10 * 60 * 1000,
-  EMA_34_PERIOD: 34,
-  EMA_89_PERIOD: 89,
-  MAX_CACHE_SIZE: 100,
-  MAX_HISTORICO_ALERTAS: 10,
-  HEARTBEAT_INTERVAL_MS: 60 * 60 * 1000 // 1 hora
-};
-
-// Logger
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-  transports: [
-    new winston.transports.File({ filename: 'quick_trading_bot.log' }),
-    new winston.transports.Console()
-  ]
-});
-
-// Estado global
-const state = {
-  ultimoAlertaPorAtivo: {},
-  ultimoEstocastico: {},
-  wprTriggerState: {},
-  ultimoRompimento: {},
-  ultimoEMACruzamento: {},
-  dataCache: new Map()
-};
-
-// Validação de variáveis de ambiente
-function validateEnv() {
-  const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'COINS'];
-  for (const key of required) {
-    if (!process.env[key]) {
-      logger.error(`Missing environment variable: ${key}`);
-      process.exit(1);
-    }
+r
+   {
+  const
+  secret: p
   }
 }
-validateEnv();
-
-// Inicialização do Telegram e Exchanges
-const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
-const exchangeSpot = new ccxt.binance({
-  apiKey: process.env.BINANCE_API_KEY,
-  secret: process.env.BINANCE_SECRET_KEY,
-  enableRateLimit: true,
-  timeout: 30000,
-  options: { defaultType: 'spot' }
-});
-const exchangeFutures = new ccxt.binance({
-  apiKey: process.env.BINANCE_API_KEY,
-  secret: process.env.BINANCE_SECRET_KEY,
-  enableRateLimit: true,
-  timeout: 30000,
-  options: { defaultType: 'future' }
-});
-
-// ================= UTILITÁRIOS ================= //
-async function withRetry(fn, retries = 5, delayBase = 1000) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (e) {
-      if (attempt === retries) {
-        logger.warn(`Falha após ${retries} tentativas: ${e.message}`);
-        throw e;
-      }
-      const delay = Math.pow(2, attempt - 1) * delayBase;
-      logger.info(`Tentativa ${attempt} falhou, retry após ${delay}ms: ${e.message}`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-}
-
-function getCachedData(key) {
-  const cacheEntry = state.dataCache.get(key);
-  if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
-    logger.info(`Usando cache para ${key}`);
-    return cacheEntry.data;
-  }
-  state.dataCache.delete(key);
-  return null;
-}
-
-function setCachedData(key, data) {
-  if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
-    const oldestKey = state.dataCache.keys().next().value;
-    state.dataCache.delete(oldestKey);
-    logger.info(`Cache cheio, removido item mais antigo: ${oldestKey}`);
-  }
-  state.dataCache.set(key, { timestamp: Date.now(), data });
-  setTimeout(() => {
-    if (state.dataCache.has(key) && Date.now() - state.dataCache.get(key).timestamp >= config.CACHE_TTL) {
-      state.dataCache.delete(key);
-      logger.info(`Cache limpo para ${key}`);
-    }
-  }, config.CACHE_TTL + 1000);
-}
-
-async function limitConcurrency(items, fn, limit = 5) {
-  const results = [];
-  for (let i = 0; i < items.length; i += limit) {
-    const batch = items.slice(i, i + limit);
-    const batchResults = await Promise.all(batch.map(item => fn(item)));
-    results.push(...batchResults);
+stKey}`);
   }
   return results;
 }
@@ -158,22 +38,7 @@ function calculateRSI(data) {
     period: config.RSI_PERIOD,
     values: data.map(d => d.close || d[4])
   });
-  return rsi.filter(v => !isNaN(v));
-}
-
-function calculateOBV(data) {
-  let obv = 0;
-  const obvValues = [data[0].volume || data[0][5]];
-  for (let i = 1; i < data.length; i++) {
-    const curr = data[i];
-    const prev = data[i - 1];
-    const currClose = curr.close || curr[4];
-    const prevClose = prev.close || prev[4];
-    const volume = curr.volume || curr[5];
-    if (isNaN(currClose) || isNaN(prevClose) || isNaN(volume)) continue;
-    if (currClose > prevClose) obv += volume;
-    else if (currClose < prevClose) obv -= volume;
-    obvValues.push(obv);
+  return 
   }
   return obvValues;
 }
@@ -236,42 +101,7 @@ function calculateStochastic(data, periodK = 5, smoothK = 3, periodD = 3) {
 function calculateEMA(data, period) {
   if (!data || data.length < period) return [];
   const ema = TechnicalIndicators.EMA.calculate({
-    period: period,
-    values: data.map(d => d.close || d[4])
-  });
-  return ema.filter(v => !isNaN(v));
-}
-
-function detectarQuebraEstrutura(ohlcv) {
-  if (!ohlcv || ohlcv.length < 2) return { estruturaAlta: 0, estruturaBaixa: 0, buyLiquidityZones: [], sellLiquidityZones: [] };
-  const lookbackPeriod = 20;
-  const previousCandles = ohlcv.slice(0, -1).slice(-lookbackPeriod);
-  const highs = previousCandles.map(c => c.high || c[2]).filter(h => !isNaN(h));
-  const lows = previousCandles.map(c => c.low || c[3]).filter(l => !isNaN(l));
-  const volumes = previousCandles.map(c => c.volume || c[5]).filter(v => !isNaN(v));
-  if (highs.length === 0 || lows.length === 0 || volumes.length === 0) {
-    return { estruturaAlta: 0, estruturaBaixa: 0, buyLiquidityZones: [], sellLiquidityZones: [] };
-  }
-  const maxHigh = Math.max(...highs);
-  const minLow = Math.min(...lows);
-  const volumeThreshold = Math.max(...volumes) * 0.7;
-  const buyLiquidityZones = [];
-  const sellLiquidityZones = [];
-  previousCandles.forEach(candle => {
-    const high = candle.high || candle[2];
-    const low = candle.low || candle[3];
-    const volume = candle.volume || candle[5];
-    if (volume >= volumeThreshold && !isNaN(low) && !isNaN(high)) {
-      if (low <= minLow * 1.01) buyLiquidityZones.push(low);
-      if (high >= maxHigh * 0.99) sellLiquidityZones.push(high);
-    }
-  });
-  return {
-    estruturaAlta: maxHigh,
-    estruturaBaixa: minLow,
-    buyLiquidityZones: [...new Set(buyLiquidityZones)].sort((a, b) => b - a).slice(0, 3),
-    sellLiquidityZones: [...new Set(sellLiquidityZones)].sort((a, b) => a - b).slice(0, 3)
-  };
+    period: p
 }
 
 function calculateVolumeProfile(ohlcv, priceStepPercent = 0.1) {
@@ -340,24 +170,6 @@ async function fetchLSR(symbol) {
     setCachedData(cacheKey, result);
     return result;
   } catch (e) {
-    logger.warn(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
-    return getCachedData(cacheKey) || { value: null, isRising: false, percentChange: '0.00' };
-  }
-}
-
-async function fetchOpenInterest(symbol, timeframe, retries = 5) {
-  const cacheKey = `oi_${symbol}_${timeframe}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const oiData = await withRetry(() => exchangeFutures.fetchOpenInterestHistory(symbol, timeframe, undefined, 30));
-    if (!oiData || oiData.length < 3) {
-      logger.warn(`Dados insuficientes de Open Interest para ${symbol} no timeframe ${timeframe}: ${oiData?.length || 0} registros`);
-      if (retries > 0) {
-        const delay = Math.pow(2, 5 - retries) * 1000;
-        logger.info(`Tentando novamente para ${symbol} no timeframe ${timeframe}, tentativas restantes: ${retries}, delay: ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await fetchOpenInterest(symbol, timeframe, retries - 1);
       }
       if (timeframe === '5m') {
         logger.info(`Fallback para timeframe 15m para ${symbol}`);
