@@ -774,11 +774,10 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
 }
 
 async function sendAlert1h2h(symbol, data) {
-  const { ohlcv15m, ohlcv3m, ohlcv1h, ohlcvDiario, ohlcv4h, price, wpr2h, wpr1h, rsi1h, atr, cvd, obv, lsr, fiValues, zonas, volumeProfile, orderBookLiquidity, isOIRising5m, estocasticoD, estocastico4h, fundingRate } = data;
+  const { ohlcv15m, ohlcv3m, ohlcv1h, ohlcvDiario, ohlcv4h, price, wpr2h, wpr1h, rsi1h, atr, lsr, zonas, volumeProfile, orderBookLiquidity, isOIRising5m, estocasticoD, estocastico4h, fundingRate, oi15m } = data;
   const agora = Date.now();
   if (state.ultimoAlertaPorAtivo[symbol]?.['1h_2h'] && agora - state.ultimoAlertaPorAtivo[symbol]['1h_2h'] < config.TEMPO_COOLDOWN_MS) return;
   const aggressiveDelta = await calculateAggressiveDelta(symbol);
-  const fiBear3 = fiValues[fiValues.length - 1] < 0;
   const atrPercent = (atr / price) * 100;
   if (!state.wprTriggerState[symbol]) state.wprTriggerState[symbol] = { '1h_2h': { buyTriggered: false, sellTriggered: false } };
   if (wpr2h <= config.WPR_LOW_THRESHOLD && wpr1h <= config.WPR_LOW_THRESHOLD) {
@@ -800,16 +799,14 @@ async function sendAlert1h2h(symbol, data) {
   const entryLow = format(price - 0.3 * atr);
   const entryHigh = format(price + 0.5 * atr);
   const isSellSignal = state.wprTriggerState[symbol]['1h_2h'].sellTriggered && 
-                      cvd < 0 && 
-                      obv < 0 && 
                       rsi1h > 68 && 
-                      !isOIRising5m && 
                       (lsr.value === null || lsr.value >= 2.5) && 
-                      fiBear3 && 
                       atrPercent >= config.ATR_PERCENT_MIN && 
                       atrPercent <= config.ATR_PERCENT_MAX && 
                       aggressiveDelta.isSignificant && 
-                      !aggressiveDelta.isBuyPressure;
+                      !aggressiveDelta.isBuyPressure && 
+                      !isOIRising5m && 
+                      !oi15m.isRising;
   const targets = isSellSignal
     ? [2, 4, 6, 8].map(mult => format(price - mult * atr)).join(" / ")
     : [2, 4, 6, 8].map(mult => format(price + mult * atr)).join(" / ");
@@ -862,17 +859,15 @@ async function sendAlert1h2h(symbol, data) {
     `   POC Bear: ${vpSellZonesText}\n` +
     ` ☑︎ Gerencie seu Risco - @J4Rviz\n`;
   if (state.wprTriggerState[symbol]['1h_2h'].buyTriggered && 
-      cvd > 0 && 
-      obv > 0 && 
       (lsr.value === null || lsr.value < 1.4) && 
-      fiValues[fiValues.length - 1] > 0 && 
       atrPercent >= config.ATR_PERCENT_MIN && 
       atrPercent <= config.ATR_PERCENT_MAX && 
-      isOIRising5m && 
       aggressiveDelta.isSignificant && 
-      aggressiveDelta.isBuyPressure) {
+      aggressiveDelta.isBuyPressure && 
+      isOIRising5m && 
+      oi15m.isRising) {
     try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🟢*Possível Compra WPR *\n\n${alertText}`, {
+      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🟢*Reversão - Compra WPR *\n\n${alertText}`, {
         parse_mode: 'Markdown',
         disable_web_page_preview: true
       }));
@@ -884,7 +879,7 @@ async function sendAlert1h2h(symbol, data) {
     }
   } else if (isSellSignal) {
     try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🔴*Possível Correção WPR *\n\n${alertText}`, {
+      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🔴*Venda - Correção WPR *\n\n${alertText}`, {
         parse_mode: 'Markdown',
         disable_web_page_preview: true
       }));
@@ -1008,7 +1003,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando scalp');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime-💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime2-💹Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
