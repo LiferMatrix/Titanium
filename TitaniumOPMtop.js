@@ -253,7 +253,8 @@ function detectarQuebraEstrutura(ohlcv) {
   }
   const maxHigh = Math.max(...highs);
   const minLow = Math.min(...lows);
-  const volumeThreshold = Math.max(...volumes) * 0.7;
+  const avgVolume = volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
+  const volumeThreshold = avgVolume;
   const buyLiquidityZones = [];
   const sellLiquidityZones = [];
   previousCandles.forEach(candle => {
@@ -390,10 +391,14 @@ async function fetchOpenInterest(symbol, timeframe, retries = 5) {
     }
     const oiValues = validOiData.map(d => d.openInterest).filter(v => v !== undefined);
     const sortedOi = [...oiValues].sort((a, b) => a - b);
-    const median = sortedOi[Math.floor(sortedOi.length / 2)];
-    const filteredOiData = validOiData.filter(d => d.openInterest >= median * 0.5 && d.openInterest <= median * 1.5);
+    const q1 = sortedOi[Math.floor(sortedOi.length / 4)];
+    const q3 = sortedOi[Math.floor(3 * sortedOi.length / 4)];
+    const iqr = q3 - q1;
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+    const filteredOiData = validOiData.filter(d => d.openInterest >= lowerBound && d.openInterest <= upperBound);
     if (filteredOiData.length < 3) {
-      logger.warn(`Registros válidos após filtro de outliers insuficientes para ${symbol} no timeframe ${timeframe}: ${filteredOiData.length}`);
+      logger.warn(`Registros válidos após filtro IQR insuficientes para ${symbol} no timeframe ${timeframe}: ${filteredOiData.length}`);
       if (retries > 0) {
         const delay = Math.pow(2, 5 - retries) * 1000;
         logger.info(`Tentando novamente para ${symbol} no timeframe ${timeframe}, tentativas restantes: ${retries}, delay: ${delay}ms`);
@@ -457,15 +462,22 @@ async function calculateAggressiveDelta(symbol, timeframe = '3m', limit = 100) {
     const trades = await withRetry(() => exchangeSpot.fetchTrades(symbol, undefined, limit));
     let buyVolume = 0;
     let sellVolume = 0;
+    const volumes = trades.map(trade => trade.amount).filter(amount => !isNaN(amount));
+    const avgVolume = volumes.length > 0 ? volumes.reduce((sum, v) => sum + v, 0) / volumes.length : 0;
+    const minVolumeThreshold = avgVolume * 0.001; // 0.1% do volume médio
     for (const trade of trades) {
       const { side, amount, price } = trade;
-      if (!side || !amount || !price || isNaN(amount) || isNaN(price)) continue;
+      if (!side || !amount || !price || isNaN(amount) || isNaN(price) || amount < minVolumeThreshold) continue;
       if (side === 'buy') buyVolume += amount;
       else if (side === 'sell') sellVolume += amount;
     }
-    const delta = buyVolume - sellVolume;
     const totalVolume = buyVolume + sellVolume;
-    const deltaPercent = totalVolume !== 0 ? (delta / totalVolume * 100).toFixed(2) : '0.00';
+    if (totalVolume === 0) {
+      logger.warn(`Volume total zero para ${symbol}, retornando delta neutro`);
+      return { delta: 0, deltaPercent: 0, isBuyPressure: false, isSignificant: false };
+    }
+    const delta = buyVolume - sellVolume;
+    const deltaPercent = (delta / totalVolume * 100).toFixed(2);
     const result = {
       delta,
       deltaPercent: parseFloat(deltaPercent),
@@ -473,7 +485,7 @@ async function calculateAggressiveDelta(symbol, timeframe = '3m', limit = 100) {
       isSignificant: Math.abs(deltaPercent) > 10
     };
     setCachedData(cacheKey, result);
-    logger.info(`Delta Agressivo para ${symbol}: Buy=${buyVolume}, Sell=${sellVolume}, Delta=${delta}, Delta%=${deltaPercent}%`);
+    logger.info(`Delta Agressivo para ${symbol}: Buy=${buyVolume}, Sell=${sellVolume}, Delta=${delta}, Delta%=${deltaPercent}%, MinVolumeThreshold=${minVolumeThreshold}`);
     return result;
   } catch (e) {
     logger.error(`Erro ao calcular Delta Agressivo para ${symbol}: ${e.message}`);
@@ -896,7 +908,7 @@ async function checkConditions() {
   try {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv3mRawFutures = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, Math.max(config.FI_PERIOD + 2, config.EMA_89_PERIOD + 1)));
+      const ohlcv3mRawFutures = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, Math.max(config.EMA_34_PERIOD + 1, config.EMA_89_PERIOD + 1)));
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, config.WPR_PERIOD + 1));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, config.WPR_PERIOD + 1));
       const ohlcv2hRaw = getCachedData(`${cacheKeyPrefix}_2h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '2h', undefined, config.WPR_PERIOD + 1));
@@ -927,21 +939,18 @@ async function checkConditions() {
       const wpr2hValues = calculateWPR(ohlcv2h);
       const wpr1hValues = calculateWPR(ohlcv1h);
       const rsi1hValues = calculateRSI(ohlcv1h);
-      const obvValues = calculateOBV(ohlcv3m);
-      const cvd = calculateCVD(ohlcv3m);
       const lsr = await fetchLSR(symbol);
       const oi5m = await fetchOpenInterest(symbol, '5m');
       const oi15m = await fetchOpenInterest(symbol, '15m');
       const fundingRate = await fetchFundingRate(symbol);
       const atrValues = calculateATR(ohlcv15m);
-      const fiValues = calculateForceIndex(ohlcv3m, config.FI_PERIOD);
       const zonas = detectarQuebraEstrutura(ohlcv15m);
       const volumeProfile = calculateVolumeProfile(ohlcv15m);
       const estocasticoD = calculateStochastic(ohlcvDiario, 5, 3, 3);
       const estocastico4h = calculateStochastic(ohlcv4h, 5, 3, 3);
       const ema34Values = calculateEMA(ohlcv3m, config.EMA_34_PERIOD);
       const ema89Values = calculateEMA(ohlcv3m, config.EMA_89_PERIOD);
-      if (!wpr2hValues.length || !wpr1hValues.length || !rsi1hValues.length || !atrValues.length || !fiValues.length || !ema34Values.length || !ema89Values.length) {
+      if (!wpr2hValues.length || !wpr1hValues.length || !rsi1hValues.length || !atrValues.length || !ema34Values.length || !ema89Values.length) {
         logger.warn(`Indicadores insuficientes para ${symbol}, pulando...`);
         return;
       }
@@ -989,10 +998,10 @@ async function checkConditions() {
         wpr1h: wpr1hValues[wpr1hValues.length - 1],
         rsi1h: rsi1hValues[rsi1hValues.length - 1],
         atr: atrValues[atrValues.length - 1],
-        cvd, obv: obvValues[obvValues.length - 1], lsr, fiValues, zonas,
+        lsr, zonas,
         volumeProfile, orderBookLiquidity: await fetchLiquidityZones(symbol),
         isOIRising5m: oi5m.isRising,
-        estocasticoD, estocastico4h, fundingRate
+        estocasticoD, estocastico4h, fundingRate, oi15m
       });
     }, 5);
   } catch (e) {
@@ -1003,7 +1012,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando scalp');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime2-💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime3-💹Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
