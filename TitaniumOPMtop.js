@@ -576,7 +576,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🟢 *Rompimento de Alta*\n\n` +
+      alertText = `🟢 *Rompimento de Alta📈*\n\n` +
                   `🔹 Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -592,7 +592,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
                   `   Liquid. Venda: ${sellZonesText}\n` +
                   `   POC Bull: ${vpBuyZonesText}\n` +
                   `   POC Bear: ${vpSellZonesText}\n` +
-                  `☑︎  🤖 @J4Rviz`;
+                  `☑︎Gerencie seu Risco 🤖 @J4Rviz`;
       state.ultimoRompimento[symbol]['15m'] = agora;
       state.ultimoRompimento[symbol].historico.push({ nivel: nivelRompido, direcao: 'alta', timestamp: agora });
       state.ultimoRompimento[symbol].historico = state.ultimoRompimento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -615,7 +615,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔴 *Rompimento de Baixa*\n\n` +
+      alertText = `🔴 *Rompimento de Baixa📉*\n\n` +
                   `🔹 Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -631,7 +631,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
                   `   Liquid. Venda: ${sellZonesText}\n` +
                   `   POC Bull: ${vpBuyZonesText}\n` +
                   `   POC Bear: ${vpSellZonesText}\n` +
-                  `☑︎  🤖 @J4Rviz`;
+                  `☑︎Gerencie seu Risco 🤖 @J4Rviz`;
       state.ultimoRompimento[symbol]['15m'] = agora;
       state.ultimoRompimento[symbol].historico.push({ nivel: nivelRompido, direcao: 'baixa', timestamp: agora });
       state.ultimoRompimento[symbol].historico = state.ultimoRompimento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -713,7 +713,7 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🟢 *Analisar Compra #CrossEma34/89*\n\n` +
+      alertText = `🟢 *Analisar Compra #CrossEma34⤴️89*\n\n` +
                   `🔹 Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -729,7 +729,7 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
                   `   Liquid. Venda: ${sellZonesText}\n` +
                   `   POC Bull: ${vpBuyZonesText}\n` +
                   `   POC Bear: ${vpSellZonesText}\n` +
-                  `☑︎  🤖 @J4Rviz`;
+                  `☑︎Gerencie seu Risco 🤖 @J4Rviz`;
       state.ultimoEMACruzamento[symbol]['3m'] = agora;
       state.ultimoEMACruzamento[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoEMACruzamento[symbol].historico = state.ultimoEMACruzamento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -749,7 +749,7 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔴 *Analisar Correção #CrossEma34/89*\n\n` +
+      alertText = `🔴 *Analisar Correção #CrossEma34⤵️89*\n\n` +
                   `🔹 Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -765,7 +765,7 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
                   `   Liquid. Venda: ${sellZonesText}\n` +
                   `   POC Bull: ${vpBuyZonesText}\n` +
                   `   POC Bear: ${vpSellZonesText}\n` +
-                  `☑︎  🤖 @J4Rviz`;
+                  `☑︎Gerencie seu Risco 🤖 @J4Rviz`;
       state.ultimoEMACruzamento[symbol]['3m'] = agora;
       state.ultimoEMACruzamento[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoEMACruzamento[symbol].historico = state.ultimoEMACruzamento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -869,7 +869,7 @@ async function sendAlert1h2h(symbol, data) {
     `   Liquid. Venda: ${sellZonesText}\n` +
     `   POC Bull: ${vpBuyZonesText}\n` +
     `   POC Bear: ${vpSellZonesText}\n` +
-    ` ☑︎ Gerencie seu Risco - @J4Rviz\n`;
+    `☑︎Gerencie seu Risco 🤖 @J4Rviz\n`;
   if (state.wprTriggerState[symbol]['1h_2h'].buyTriggered && 
       (lsr.value === null || lsr.value < 1.4) && 
       atrPercent >= config.ATR_PERCENT_MIN && 
@@ -879,7 +879,7 @@ async function sendAlert1h2h(symbol, data) {
       isOIRising5m && 
       oi15m.isRising) {
     try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🟢*Reversão - Compra WPR *\n\n${alertText}`, {
+      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🟢*Reversão -✳️Compra WPR✳️*\n\n${alertText}`, {
         parse_mode: 'Markdown',
         disable_web_page_preview: true
       }));
@@ -891,7 +891,7 @@ async function sendAlert1h2h(symbol, data) {
     }
   } else if (isSellSignal) {
     try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🔴*Venda - Correção WPR *\n\n${alertText}`, {
+      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `🔴*Venda - 🔻Correção WPR🔻*\n\n${alertText}`, {
         parse_mode: 'Markdown',
         disable_web_page_preview: true
       }));
@@ -1012,7 +1012,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando scalp');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime3-💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Optimus Prime4-💹Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
