@@ -526,7 +526,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
   let lsrSymbol = '🔘Consol.';
   if (lsr.value !== null) {
     if (lsr.value <= 1.4) lsrSymbol = '✅Baixo';
-    else if (lsr.value >= 3) lsrSymbol = '📛Alto';
+    else if (lsr.value >= 2.8) lsrSymbol = '📛Alto';
   }
   let fundingRateEmoji = '';
   if (fundingRate.current !== null) {
@@ -666,7 +666,7 @@ async function sendAlertEMACruzamento3m(symbol, price, zonas, ohlcv15m, rsi1h, l
   let lsrSymbol = '🔘Consol.';
   if (lsr.value !== null) {
     if (lsr.value <= 1.4) lsrSymbol = '✅Baixo';
-    else if (lsr.value >= 3) lsrSymbol = '📛Alto';
+    else if (lsr.value >= 2.8) lsrSymbol = '📛Alto';
   }
   let fundingRateEmoji = '';
   if (fundingRate.current !== null) {
@@ -831,8 +831,8 @@ async function sendAlert1h2h(symbol, data) {
   const obSellZonesText = orderBookLiquidity.sellLiquidityZones.map(format).join(' / ') || 'N/A';
   let lsrSymbol = '🔘Consol.';
   if (lsr.value !== null) {
-    if (lsr.value <= 1.3) lsrSymbol = '✅Baixo';
-    else if (lsr.value >= 3) lsrSymbol = '📛Alto';
+    if (lsr.value <= 1.4) lsrSymbol = '✅Baixo';
+    else if (lsr.value >= 2.8) lsrSymbol = '📛Alto';
   }
   const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
   let fundingRateEmoji = '';
