@@ -451,23 +451,27 @@ async function sendTelegramMessage(message) {
 
 // ================= ALERTAS ================= //
 async function sendMonitorAlert(coins) {
-  const topLowRsi = coins
-    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD)
-    .sort((a, b) => a.rsi - b.rsi)
-    .slice(0, config.MAX_COINS_PER_ALERT);
-  const topHighRsi = coins
-    .filter(c => c.rsi !== null && c.rsi > config.RSI_OVERBOUGHT_THRESHOLD)
-    .sort((a, b) => b.rsi - a.rsi)
-    .slice(0, config.MAX_COINS_PER_ALERT);
-
   const format = (v, precision = 2) => isNaN(v) || v === null ? 'N/A' : v.toFixed(precision);
   const formatPrice = (price) => price < 1 ? price.toFixed(8) : price < 10 ? price.toFixed(6) : price < 100 ? price.toFixed(4) : price.toFixed(2);
 
-  logger.info(`Moedas com RSI baixo: ${topLowRsi.length}, Moedas com RSI alto: ${topHighRsi.length}`);
+  // RSI mais baixos (sobrevenda) com OI 5m e 15m subindo
+  const topLowRsiWithRisingOI = coins
+    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.oi5m.isRising && c.oi15m.isRising)
+    .sort((a, b) => a.rsi - b.rsi)
+    .slice(0, config.MAX_COINS_PER_ALERT);
 
-  if (topLowRsi.length > 0) {
-    let starAlertText = `🟢*RSI mais Baixos✅*\n\n`; // Título alterado
-    starAlertText += await Promise.all(topLowRsi.map(async (coin, i) => {
+  // RSI mais altos (sobrecompra) com OI 5m e 15m caindo
+  const topHighRsiWithFallingOI = coins
+    .filter(c => c.rsi !== null && c.rsi > config.RSI_OVERBOUGHT_THRESHOLD && !c.oi5m.isRising && !c.oi15m.isRising)
+    .sort((a, b) => b.rsi - a.rsi)
+    .slice(0, config.MAX_COINS_PER_ALERT);
+
+  logger.info(`RSI baixo com OI subindo: ${topLowRsiWithRisingOI.length}, RSI alto com OI caindo: ${topHighRsiWithFallingOI.length}`);
+
+  // Alerta para RSI mais baixos com OI subindo
+  if (topLowRsiWithRisingOI.length > 0) {
+    let oiRisingAlertText = `🟢*RSI Baixo com OI Subindo 🚀*\n\n`;
+    oiRisingAlertText += await Promise.all(topLowRsiWithRisingOI.map(async (coin, i) => {
       const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${coin.symbol.replace('/', '')}&interval=15`;
       const deltaText = coin.delta.isBuyPressure ? `💹${format(coin.delta.deltaPercent)}%` : `⭕${format(coin.delta.deltaPercent)}%`;
       let lsrSymbol = '';
@@ -516,16 +520,17 @@ async function sendMonitorAlert(coins) {
              `   Resistência: ${formatPrice(coin.supportResistance.resistance)}\n` +
              anomalyText;
     })).then(results => results.join('\n'));
-    starAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
+    oiRisingAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
 
-    logger.info(`Tamanho da mensagem de RSI baixo: ${starAlertText.length} caracteres`);
-    await sendTelegramMessage(starAlertText);
-    logger.info('Alerta de moedas com RSI em sobrevenda enviado com sucesso');
+    logger.info(`Tamanho da mensagem de RSI baixo com OI subindo: ${oiRisingAlertText.length} caracteres`);
+    await sendTelegramMessage(oiRisingAlertText);
+    logger.info('Alerta de moedas com RSI em sobrevenda e OI subindo enviado com sucesso');
   }
 
-  if (topHighRsi.length > 0) {
-    let skullAlertText = `🔴*RSI mais altos💥*\n\n`; // Título alterado
-    skullAlertText += await Promise.all(topHighRsi.map(async (coin, i) => {
+  // Alerta para RSI mais altos com OI caindo
+  if (topHighRsiWithFallingOI.length > 0) {
+    let oiFallingAlertText = `🔴*RSI Alto com OI Caindo 📉*\n\n`;
+    oiFallingAlertText += await Promise.all(topHighRsiWithFallingOI.map(async (coin, i) => {
       const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${coin.symbol.replace('/', '')}&interval=15`;
       const deltaText = coin.delta.isBuyPressure ? `💹${format(coin.delta.deltaPercent)}%` : `⭕${format(coin.delta.deltaPercent)}%`;
       let lsrSymbol = '';
@@ -574,16 +579,16 @@ async function sendMonitorAlert(coins) {
              `   Resistência: ${formatPrice(coin.supportResistance.resistance)}\n` +
              anomalyText;
     })).then(results => results.join('\n'));
-    skullAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
+    oiFallingAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
 
-    logger.info(`Tamanho da mensagem de RSI alto: ${skullAlertText.length} caracteres`);
-    await sendTelegramMessage(skullAlertText);
-    logger.info('Alerta de moedas com RSI em sobrecompra enviado com sucesso');
+    logger.info(`Tamanho da mensagem de RSI alto com OI caindo: ${oiFallingAlertText.length} caracteres`);
+    await sendTelegramMessage(oiFallingAlertText);
+    logger.info('Alerta de moedas com RSI em sobrecompra e OI caindo enviado com sucesso');
   }
 
-  if (topLowRsi.length === 0 && topHighRsi.length === 0) {
-    await sendTelegramMessage('🤖 Titanium Monitor ativo! Nenhuma moeda com RSI < 35 ou > 65 detectada.');
-    logger.info('Nenhuma moeda com RSI < 35 ou > 65, alerta de teste enviado.');
+  if (topLowRsiWithRisingOI.length === 0 && topHighRsiWithFallingOI.length === 0) {
+    await sendTelegramMessage('🤖 Titanium Monitor ativo! Nenhuma moeda com RSI < 30 com OI subindo ou RSI > 70 com OI caindo detectada.');
+    logger.info('Nenhuma moeda com RSI < 30 com OI subindo ou RSI > 70 com OI caindo, alerta de teste enviado.');
   } else {
     logger.info('Alertas de monitoramento processados com sucesso');
   }
