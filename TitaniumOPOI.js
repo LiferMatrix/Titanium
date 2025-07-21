@@ -17,9 +17,9 @@ const config = {
   LIMIT_TRADES_DELTA: 100,
   VOLUME_SPIKE_THRESHOLD: 2,
   FUNDING_RATE_CHANGE_THRESHOLD: 0.005,
-  RSI_OVERSOLD_THRESHOLD: 35, // Ajustado para teste
-  RSI_OVERBOUGHT_THRESHOLD: 65, // Ajustado para teste
-  MAX_COINS_PER_ALERT: 10, // Limite de moedas por mensagem
+  RSI_OVERSOLD_THRESHOLD: 30, // Ajustado para teste
+  RSI_OVERBOUGHT_THRESHOLD: 70, // Ajustado para teste
+  MAX_COINS_PER_ALERT: 3, // Alterado de 10 para 3
   MAX_MESSAGE_LENGTH: 4000 // Limite de caracteres por mensagem
 };
 
@@ -466,7 +466,7 @@ async function sendMonitorAlert(coins) {
   logger.info(`Moedas com RSI baixo: ${topLowRsi.length}, Moedas com RSI alto: ${topHighRsi.length}`);
 
   if (topLowRsi.length > 0) {
-    let starAlertText = `🟢*RSI-💥Monitor💥 *\n\n`;
+    let starAlertText = `🟢*RSI mais Baixos✅*\n\n`; // Título alterado
     starAlertText += await Promise.all(topLowRsi.map(async (coin, i) => {
       const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${coin.symbol.replace('/', '')}&interval=15`;
       const deltaText = coin.delta.isBuyPressure ? `💹${format(coin.delta.deltaPercent)}%` : `⭕${format(coin.delta.deltaPercent)}%`;
@@ -490,7 +490,7 @@ async function sendMonitorAlert(coins) {
       const oi15mText = coin.oi15m.isRising ? '⬆️ Subindo' : '⬇️ Descendo';
       const isVolumeSpike = await detectVolumeSpike(coin.symbol);
       const isFundingAnomaly = await detectFundingRateChange(coin.symbol, coin.funding.current);
-      const anomalyText = isVolumeSpike || isFundingAnomaly ? `🚨 Anomalia: ${isVolumeSpike ? 'Pico de Volume' : ''}${isVolumeSpike && isFundingAnomaly ? ' | ' : ''}${isFundingAnomaly ? 'Mudança no Funding Rate' : ''}\n` : '';
+      const anomalyText = isVolumeSpike || isFundingAnomaly ? `🚨 Anomalia: ${isVolumeSpike ? '📈Pico de Volume📈' : ''}${isVolumeSpike && isFundingAnomaly ? ' | ' : ''}${isFundingAnomaly ? 'Mudança no Funding Rate' : ''}\n` : '';
       const stoch4hK = coin.stoch4h.k !== null ? format(coin.stoch4h.k) : 'N/A';
       const stoch4hD = coin.stoch4h.d !== null ? format(coin.stoch4h.d) : 'N/A';
       const stoch4hKEmoji = getStochasticEmoji(coin.stoch4h.k);
@@ -516,7 +516,7 @@ async function sendMonitorAlert(coins) {
              `   Resistência: ${formatPrice(coin.supportResistance.resistance)}\n` +
              anomalyText;
     })).then(results => results.join('\n'));
-    starAlertText += `\n☑︎ 🤖 Gerencie seu risco - @J4Rviz`;
+    starAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
 
     logger.info(`Tamanho da mensagem de RSI baixo: ${starAlertText.length} caracteres`);
     await sendTelegramMessage(starAlertText);
@@ -524,7 +524,7 @@ async function sendMonitorAlert(coins) {
   }
 
   if (topHighRsi.length > 0) {
-    let skullAlertText = `🔴*RSI-💥Monitor💥 *\n\n`;
+    let skullAlertText = `🔴*RSI mais altos💥*\n\n`; // Título alterado
     skullAlertText += await Promise.all(topHighRsi.map(async (coin, i) => {
       const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${coin.symbol.replace('/', '')}&interval=15`;
       const deltaText = coin.delta.isBuyPressure ? `💹${format(coin.delta.deltaPercent)}%` : `⭕${format(coin.delta.deltaPercent)}%`;
@@ -574,7 +574,7 @@ async function sendMonitorAlert(coins) {
              `   Resistência: ${formatPrice(coin.supportResistance.resistance)}\n` +
              anomalyText;
     })).then(results => results.join('\n'));
-    skullAlertText += `\n☑︎ 🤖 Gerencie seu risco - @J4Rviz`;
+    skullAlertText += `\n☑︎ 🤖 Monitor - @J4Rviz`;
 
     logger.info(`Tamanho da mensagem de RSI alto: ${skullAlertText.length} caracteres`);
     await sendTelegramMessage(skullAlertText);
@@ -715,7 +715,7 @@ async function checkCoins() {
 async function main() {
   logger.info('Iniciando monitor de moedas');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RSI MONITOR !'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RSI MONITOR 2 !'));
     await checkCoins();
     setInterval(checkCoins, config.INTERVALO_ALERTA_MS);
   } catch (e) {
