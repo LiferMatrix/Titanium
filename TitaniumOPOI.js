@@ -102,6 +102,11 @@ function setCachedData(key, data) {
   state.dataCache.set(key, { timestamp: Date.now(), data });
 }
 
+// Função para limpar o sufixo :USDT do símbolo
+function cleanSymbol(symbol) {
+  return symbol.replace(/:USDT$/, '');
+}
+
 // Limpeza periódica do cache
 setInterval(() => {
   const now = Date.now();
@@ -164,7 +169,7 @@ function normalizeOHLCV(data, symbol) {
   if (normalized.length === 0) {
     logger.warn(`Nenhum dado OHLCV válido após normalização para ${symbol}`);
   } else {
-    logger.info(` dados OHLCV normalizados para ${symbol}: ${normalized.length} velas`);
+    logger.info(`Dados OHLCV normalizados para ${symbol}: ${normalized.length} velas`);
   }
   return normalized;
 }
@@ -505,7 +510,7 @@ async function sendMonitorAlert(coins) {
       const stoch1dKEmoji = getStochasticEmoji(coin.stoch1d.k);
       const stoch1dDEmoji = getStochasticEmoji(coin.stoch1d.d);
       const stoch1dDir = getSetaDirecao(coin.stoch1d.k, coin.stoch1d.previousK);
-      return `${i + 1}. 🔹 *${coin.symbol}* [- TradingView](${tradingViewLink})\n` +
+      return `${i + 1}. 🔹 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
@@ -564,7 +569,7 @@ async function sendMonitorAlert(coins) {
       const stoch1dKEmoji = getStochasticEmoji(coin.stoch1d.k);
       const stoch1dDEmoji = getStochasticEmoji(coin.stoch1d.d);
       const stoch1dDir = getSetaDirecao(coin.stoch1d.k, coin.stoch1d.previousK);
-      return `${i + 1}. 🔻 *${coin.symbol}* [- TradingView](${tradingViewLink})\n` +
+      return `${i + 1}. 🔻 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
@@ -587,9 +592,6 @@ async function sendMonitorAlert(coins) {
   }
 
   if (topLowRsiWithRisingOI.length === 0 && topHighRsiWithFallingOI.length === 0) {
-    await sendTelegramMessage('🤖 Titanium Monitor ativo! Nenhuma moeda com RSI < 30 com OI subindo ou RSI > 70 com OI caindo detectada.');
-    logger.info('Nenhuma moeda com RSI < 30 com OI subindo ou RSI > 70 com OI caindo, alerta de teste enviado.');
-  } else {
     logger.info('Alertas de monitoramento processados com sucesso');
   }
 }
