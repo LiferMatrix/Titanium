@@ -451,6 +451,11 @@ function getStochasticEmoji(value) {
   return value < 10 ? "🔵" : value < 25 ? "🟢" : value <= 55 ? "🟡" : value <= 70 ? "🟠" : value <= 80 ? "🔴" : "💥";
 }
 
+function getATREmoji(atrPercent) {
+  if (!atrPercent || isNaN(atrPercent)) return "";
+  return atrPercent < 0.2 ? "🔵Ruim" : atrPercent < 0.5 ? "🟢Regular" : atrPercent <= 1.5 ? "🟡Médio" : atrPercent <= 3 ? "🟠Bom" : atrPercent <= 5 ? "🔴Muito Bom" : "💥Excelente";
+}
+
 function getSetaDirecao(current, previous) {
   if (!current || !previous) return "➡️";
   return current > previous ? "⬆️" : current < previous ? "⬇️" : "➡️";
@@ -547,13 +552,16 @@ async function sendMonitorAlert(coins) {
       const stoch1dDEmoji = getStochasticEmoji(coin.stoch1d.d);
       const stoch1dDir = getSetaDirecao(coin.stoch1d.k, coin.stoch1d.previousK);
       const adxText = coin.adx !== null ? format(coin.adx) : 'N/A';
-      const adxNote = coin.adx !== null && coin.adx >= 20 && coin.adx <= 30 ? '🟣 Analisar🟣' : '';
+      const adxNote = coin.adx !== null && coin.adx >= 20 && coin.adx <= 30 ? '🟣Analisar🟣' : '';
+      const atrEmoji = getATREmoji(coin.atrPercent);
       return `${i + 1}. 🔹 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
+             `   RSI (4h): ${format(coin.rsi4h)}\n` +
              `   ADX (15m): ${adxText}${adxNote ? ` ${adxNote}` : ''}\n` +
+             `   ATR (15m): ${format(coin.atr, 8)}${atrEmoji}\n` +
              `   Stoch (4h): %K ${stoch4hK}${stoch4hKEmoji} ${stoch4hDir} \n` +
              `   Stoch (1d): %K ${stoch1dK}${stoch1dKEmoji} ${stoch1dDir} \n` +
              `   Vol.Delta: ${deltaText}\n` +
@@ -610,12 +618,15 @@ async function sendMonitorAlert(coins) {
       const stoch1dDir = getSetaDirecao(coin.stoch1d.k, coin.stoch1d.previousK);
       const adxText = coin.adx !== null ? format(coin.adx) : 'N/A';
       const adxNote = coin.adx !== null && coin.adx >= 20 && coin.adx <= 30 ? '⚠️ Possível operação' : '';
+      const atrEmoji = getATREmoji(coin.atrPercent);
       return `${i + 1}. 🔻 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
+             `   RSI (4h): ${format(coin.rsi4h)}\n` +
              `   ADX (15m): ${adxText}${adxNote ? ` ${adxNote}` : ''}\n` +
+             `   ATR (15m): ${format(coin.atr, 8)}${atrEmoji}\n` +
              `   Stoch (4h): %K ${stoch4hK}${stoch4hKEmoji} ${stoch4hDir} | %D ${stoch4hD}${stoch4hDEmoji}\n` +
              `   Stoch (1d): %K ${stoch1dK}${stoch1dKEmoji} ${stoch1dDir} | %D ${stoch1dD}${stoch1dDEmoji}\n` +
              `   Vol.Delta: ${deltaText}\n` +
@@ -697,7 +708,7 @@ async function checkCoins() {
         }
 
         const ohlcv4hRaw = getCachedData(`ohlcv_${symbol}_4h`) ||
-          await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '4h', undefined, 8));
+          await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '4h', undefined, config.RSI_PERIOD + 1));
         setCachedData(`ohlcv_${symbol}_4h`, ohlcv4hRaw);
         const ohlcv4h = normalizeOHLCV(ohlcv4hRaw, symbol);
         if (!ohlcv4h.length) {
@@ -725,7 +736,9 @@ async function checkCoins() {
 
         const rsi = calculateRSI(ohlcv15m, symbol);
         const rsi1h = calculateRSI(ohlcv1h, symbol);
+        const rsi4h = calculateRSI(ohlcv4h, symbol);
         const atr = calculateATR(ohlcv15m, symbol);
+        const atrPercent = atr && price ? parseFloat((atr / price * 100).toFixed(2)) : null;
         const adx = calculateADX(ohlcv15m, symbol);
         const lsr = (await fetchLSR(symbol)).value;
         const funding = await fetchFundingRate(symbol);
@@ -740,9 +753,9 @@ async function checkCoins() {
         const volumeSpike = await detectVolumeSpike(symbol);
         const fundingAnomaly = await detectFundingRateChange(symbol, funding.current);
 
-        logger.info(`Moeda processada: ${symbol}, RSI: ${rsi}, RSI1h: ${rsi1h}, ADX: ${adx}, Stoch4h: K=${stoch4h.k}, D=${stoch4h.d}, Stoch1d: K=${stoch1d.k}, D=${stoch1d.d}, LSR: ${lsr}`);
+        logger.info(`Moeda processada: ${symbol}, RSI: ${rsi}, RSI1h: ${rsi1h}, RSI4h: ${rsi4h}, ATR: ${atr}, ATR%: ${atrPercent}, ADX: ${adx}, Stoch4h: K=${stoch4h.k}, D=${stoch4h.d}, Stoch1d: K=${stoch1d.k}, D=${stoch1d.d}, LSR: ${lsr}`);
 
-        return { symbol, price, rsi, rsi1h, atr, adx, lsr, funding, delta, oi5m, oi15m, volume, volumeSpike, fundingAnomaly, stoch4h, stoch1d, supportResistance };
+        return { symbol, price, rsi, rsi1h, rsi4h, atr, atrPercent, adx, lsr, funding, delta, oi5m, oi15m, volume, volumeSpike, fundingAnomaly, stoch4h, stoch1d, supportResistance };
       } catch (e) {
         logger.warn(`Erro ao processar ${symbol}: ${e.message}`);
         return null;
@@ -751,7 +764,7 @@ async function checkCoins() {
 
     const validCoins = coinsData.filter(coin => coin !== null);
     logger.info(`Moedas válidas processadas: ${validCoins.length}`);
-    validCoins.forEach(coin => logger.info(`Moeda: ${coin.symbol}, RSI: ${coin.rsi}, RSI1h: ${coin.rsi1h}, ADX: ${coin.adx}, Stoch4h: K=${coin.stoch4h.k}, D=${coin.stoch4h.d}, Stoch1d: K=${coin.stoch1d.k}, D=${coin.stoch1d.d}, LSR: ${coin.lsr}`));
+    validCoins.forEach(coin => logger.info(`Moeda: ${coin.symbol}, RSI: ${coin.rsi}, RSI1h: ${coin.rsi1h}, RSI4h: ${coin.rsi4h}, ATR: ${coin.atr}, ATR%: ${coin.atrPercent}, ADX: ${coin.adx}, Stoch4h: K=${coin.stoch4h.k}, D=${coin.stoch4h.d}, Stoch1d: K=${coin.stoch1d.k}, D=${coin.stoch1d.d}, LSR: ${coin.lsr}`));
     if (validCoins.length > 0) {
       await sendMonitorAlert(validCoins);
     } else {
@@ -765,7 +778,7 @@ async function checkCoins() {
 async function main() {
   logger.info('Iniciando monitor de moedas');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RADAR ATIVO !'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RADAR  !'));
     await checkCoins();
     setInterval(checkCoins, config.INTERVALO_ALERTA_MS);
   } catch (e) {
