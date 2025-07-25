@@ -538,7 +538,7 @@ async function sendMonitorAlert(coins) {
 
   // RSI baixo com cruzamento de alta (EMA13 > EMA21) e LSR < 2.5
   const topLowRsiWithBullishEMA = coins
-    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover && c.lsr !== null && c.lsr < 1.6)
+    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover && c.lsr !== null && c.lsr < 2.5)
     .sort((a, b) => a.rsi - b.rsi)
     .slice(0, config.MAX_COINS_PER_ALERT);
 
@@ -593,9 +593,9 @@ async function sendMonitorAlert(coins) {
       const target1 = coin.atr !== null && coin.price !== null ? coin.price + coin.atr : null;
       const target2 = coin.atr !== null && coin.price !== null ? coin.price + 2 * coin.atr : null;
       const target3 = coin.atr !== null && coin.price !== null ? coin.price + 3 * coin.atr : null;
-      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price - coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price - 1.7 * coin.atr : null;
       const targetsText = target1 && target2 && target3 && stopLoss 
-        ? `, T1: ${formatPrice(target1)}, T2: ${formatPrice(target2)}, T3: ${formatPrice(target3)}, SL: ${formatPrice(stopLoss)}`
+        ? `, ▪︎T1: ${formatPrice(target1)}, ▪︎T2: ${formatPrice(target2)}, ▪︎T3: ${formatPrice(target3)}, ⛔Stop: ${formatPrice(stopLoss)}`
         : '';
       return `${i + 1}. 🔹 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}${targetsText}\n` +
@@ -665,9 +665,9 @@ async function sendMonitorAlert(coins) {
       const target1 = coin.atr !== null && coin.price !== null ? coin.price - coin.atr : null;
       const target2 = coin.atr !== null && coin.price !== null ? coin.price - 2 * coin.atr : null;
       const target3 = coin.atr !== null && coin.price !== null ? coin.price - 3 * coin.atr : null;
-      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price + coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price + 1.7 * coin.atr : null;
       const targetsText = target1 && target2 && target3 && stopLoss 
-        ? `, T1: ${formatPrice(target1)}, T2: ${formatPrice(target2)}, T3: ${formatPrice(target3)}, SL: ${formatPrice(stopLoss)}`
+        ? `, ▪︎T1: ${formatPrice(target1)}, ▪︎T2: ${formatPrice(target2)}, ▪︎T3: ${formatPrice(target3)}, ⛔Stop: ${formatPrice(stopLoss)}`
         : '';
       return `${i + 1}. 🔻 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
              `   💲 Preço: ${formatPrice(coin.price)}${targetsText}\n` +
