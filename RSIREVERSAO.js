@@ -20,8 +20,8 @@ const config = {
   LIMIT_TRADES_DELTA: 100,
   VOLUME_SPIKE_THRESHOLD: 2,
   FUNDING_RATE_CHANGE_THRESHOLD: 0.005,
-  RSI_OVERSOLD_THRESHOLD: 50, // Ajustado para teste
-  RSI_OVERBOUGHT_THRESHOLD: 70, // Ajustado para teste
+  RSI_OVERSOLD_THRESHOLD: 55, // Ajustado para teste
+  RSI_OVERBOUGHT_THRESHOLD: 65, // Ajustado para teste
   MAX_COINS_PER_ALERT: 3, // Alterado de 10 para 3
   MAX_MESSAGE_LENGTH: 4000 // Limite de caracteres por mensagem
 };
