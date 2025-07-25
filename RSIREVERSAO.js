@@ -590,8 +590,15 @@ async function sendMonitorAlert(coins) {
       const adxText = coin.adx !== null ? format(coin.adx) : 'N/A';
       const adxNote = coin.adx !== null && coin.adx >= 20 && coin.adx <= 30 ? '🟣Analisar🟣' : '';
       const atrEmoji = getATREmoji(coin.atrPercent);
+      const target1 = coin.atr !== null && coin.price !== null ? coin.price + coin.atr : null;
+      const target2 = coin.atr !== null && coin.price !== null ? coin.price + 2 * coin.atr : null;
+      const target3 = coin.atr !== null && coin.price !== null ? coin.price + 3 * coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price - coin.atr : null;
+      const targetsText = target1 && target2 && target3 && stopLoss 
+        ? `, T1: ${formatPrice(target1)}, T2: ${formatPrice(target2)}, T3: ${formatPrice(target3)}, SL: ${formatPrice(stopLoss)}`
+        : '';
       return `${i + 1}. 🔹 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
-             `   💲 Preço: ${formatPrice(coin.price)}\n` +
+             `   💲 Preço: ${formatPrice(coin.price)}${targetsText}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
@@ -655,8 +662,15 @@ async function sendMonitorAlert(coins) {
       const adxText = coin.adx !== null ? format(coin.adx) : 'N/A';
       const adxNote = coin.adx !== null && coin.adx >= 20 && coin.adx <= 30 ? '🟣Analisar🟣' : '';
       const atrEmoji = getATREmoji(coin.atrPercent);
+      const target1 = coin.atr !== null && coin.price !== null ? coin.price - coin.atr : null;
+      const target2 = coin.atr !== null && coin.price !== null ? coin.price - 2 * coin.atr : null;
+      const target3 = coin.atr !== null && coin.price !== null ? coin.price - 3 * coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price + coin.atr : null;
+      const targetsText = target1 && target2 && target3 && stopLoss 
+        ? `, T1: ${formatPrice(target1)}, T2: ${formatPrice(target2)}, T3: ${formatPrice(target3)}, SL: ${formatPrice(stopLoss)}`
+        : '';
       return `${i + 1}. 🔻 *${cleanSymbol(coin.symbol)}* [- TradingView](${tradingViewLink})\n` +
-             `   💲 Preço: ${formatPrice(coin.price)}\n` +
+             `   💲 Preço: ${formatPrice(coin.price)}${targetsText}\n` +
              `   LSR: ${lsrText}\n` +
              `   RSI (15m): ${format(coin.rsi)}\n` +
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
