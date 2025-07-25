@@ -604,7 +604,7 @@ async function sendMonitorAlert(coins) {
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
              `   RSI (4h): ${format(coin.rsi4h)}\n` +
              `   ADX (15m): ${adxText}${adxNote ? ` ${adxNote}` : ''}\n` +
-             `   ATR (15m): ${format(coin.atr, 8)}${atrEmoji}\n` +
+             `   ATR (15m): ${format(coin.atr, 4)}${atrEmoji}\n` +
              `   Stoch (4h): %K ${stoch4hK}${stoch4hKEmoji} ${stoch4hDir} \n` +
              `   Stoch (1d): %K ${stoch1dK}${stoch1dKEmoji} ${stoch1dDir} \n` +
              `   Vol.Delta: ${deltaText}\n` +
@@ -676,7 +676,7 @@ async function sendMonitorAlert(coins) {
              `   RSI (1h): ${format(coin.rsi1h)}\n` +
              `   RSI (4h): ${format(coin.rsi4h)}\n` +
              `   ADX (15m): ${adxText}${adxNote ? ` ${adxNote}` : ''}\n` +
-             `   ATR (15m): ${format(coin.atr, 8)}${atrEmoji}\n` +
+             `   ATR (15m): ${format(coin.atr, 4)}${atrEmoji}\n` +
              `   Stoch (4h): %K ${stoch4hK}${stoch4hKEmoji} ${stoch4hDir} | %D ${stoch4hD}${stoch4hDEmoji}\n` +
              `   Stoch (1d): %K ${stoch1dK}${stoch1dKEmoji} ${stoch1dDir} | %D ${stoch1dD}${stoch1dDEmoji}\n` +
              `   Vol.Delta: ${deltaText}\n` +
