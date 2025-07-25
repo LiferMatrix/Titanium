@@ -538,7 +538,7 @@ async function sendMonitorAlert(coins) {
 
   // RSI baixo com cruzamento de alta (EMA13 > EMA21) e LSR < 2.5
   const topLowRsiWithBullishEMA = coins
-    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover && c.lsr !== null && c.lsr < 2.5)
+    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover && c.lsr !== null && c.lsr < 1.6)
     .sort((a, b) => a.rsi - b.rsi)
     .slice(0, config.MAX_COINS_PER_ALERT);
 
