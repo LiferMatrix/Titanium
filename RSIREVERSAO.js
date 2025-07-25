@@ -536,19 +536,19 @@ async function sendMonitorAlert(coins) {
   const format = (v, precision = 2) => isNaN(v) || v === null ? 'N/A' : v.toFixed(precision);
   const formatPrice = (price) => price < 1 ? price.toFixed(8) : price < 10 ? price.toFixed(6) : price < 100 ? price.toFixed(4) : price.toFixed(2);
 
-  // RSI baixo com cruzamento de alta (EMA13 > EMA21)
+  // RSI baixo com cruzamento de alta (EMA13 > EMA21) e LSR < 2.5
   const topLowRsiWithBullishEMA = coins
-    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover)
+    .filter(c => c.rsi !== null && c.rsi < config.RSI_OVERSOLD_THRESHOLD && c.emaCrossover.isBullishCrossover && c.lsr !== null && c.lsr < 2.5)
     .sort((a, b) => a.rsi - b.rsi)
     .slice(0, config.MAX_COINS_PER_ALERT);
 
-  // RSI alto com cruzamento de baixa (EMA13 < EMA21)
+  // RSI alto com cruzamento de baixa (EMA13 < EMA21) e LSR > 2.5
   const topHighRsiWithBearishEMA = coins
-    .filter(c => c.rsi !== null && c.rsi > config.RSI_OVERBOUGHT_THRESHOLD && c.emaCrossover.isBearishCrossover)
+    .filter(c => c.rsi !== null && c.rsi > config.RSI_OVERBOUGHT_THRESHOLD && c.emaCrossover.isBearishCrossover && c.lsr !== null && c.lsr > 2.5)
     .sort((a, b) => b.rsi - a.rsi)
     .slice(0, config.MAX_COINS_PER_ALERT);
 
-  logger.info(`RSI baixo com cruzamento de alta: ${topLowRsiWithBullishEMA.length}, RSI alto com cruzamento de baixa: ${topHighRsiWithBearishEMA.length}`);
+  logger.info(`RSI baixo com cruzamento de alta e LSR < 2.5: ${topLowRsiWithBullishEMA.length}, RSI alto com cruzamento de baixa e LSR > 2.5: ${topHighRsiWithBearishEMA.length}`);
 
   // Alerta para RSI baixo com cruzamento de alta
   if (topLowRsiWithBullishEMA.length > 0) {
