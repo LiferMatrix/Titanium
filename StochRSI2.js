@@ -649,7 +649,7 @@ async function sendMonitorAlert(coins) {
     .sort((a, b) => b.rsi - a.rsi)
     .slice(0, config.MAX_COINS_PER_ALERT);
 
-  logger.info(`Low RSI with bullish EMA and LSR < 2.5: ${topLowRsiWithBullishEMA.length}, High RSI with bearish EMA and LSR > 2.5: ${topHighRsiWithBearishEMA.length}`);
+  logger.info(`Low RSI with bullish EMA and LSR < 1.8: ${topLowRsiWithBullishEMA.length}, High RSI with bearish EMA and LSR > 2.5: ${topHighRsiWithBearishEMA.length}`);
 
   if (topLowRsiWithBullishEMA.length > 0) {
     let emaBullishAlertText = `🟢*RSI Baixo + Tendência (EMA${config.EMA_FAST_PERIOD}⤴️EMA${config.EMA_SLOW_PERIOD} 3m) 📈*\n\n`;
@@ -693,7 +693,7 @@ async function sendMonitorAlert(coins) {
       const target1 = coin.atr !== null && coin.price !== null ? coin.price + coin.atr : null;
       const target2 = coin.atr !== null && coin.price !== null ? coin.price + 2 * coin.atr : null;
       const target3 = coin.atr !== null && coin.price !== null ? coin.price + 3 * coin.atr : null;
-      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price - 1.7 * coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price - 2.5 * coin.atr : null;
       const targetsText = target1 && target2 && target3 && stopLoss 
         ? `, ▪︎T1: ${formatPrice(target1)}, ▪︎T2: ${formatPrice(target2)}, ▪︎T3: ${formatPrice(target3)}, ⛔Stop: ${formatPrice(stopLoss)}`
         : '';
@@ -763,7 +763,7 @@ async function sendMonitorAlert(coins) {
       const target1 = coin.atr !== null && coin.price !== null ? coin.price - coin.atr : null;
       const target2 = coin.atr !== null && coin.price !== null ? coin.price - 2 * coin.atr : null;
       const target3 = coin.atr !== null && coin.price !== null ? coin.price - 3 * coin.atr : null;
-      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price + 1.7 * coin.atr : null;
+      const stopLoss = coin.atr !== null && coin.price !== null ? coin.price + 2.5 * coin.atr : null;
       const targetsText = target1 && target2 && target3 && stopLoss 
         ? `, ▪︎T1: ${formatPrice(target1)}, ▪︎T2: ${formatPrice(target2)}, ▪︎T3: ${formatPrice(target3)}, ⛔Stop: ${formatPrice(stopLoss)}`
         : '';
