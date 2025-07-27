@@ -396,10 +396,28 @@ function getSetaDirecao(current, previous) {
 }
 
 async function sendAlertEMATrend(symbol, data) {
-  const { ohlcv15m, ohlcv1h, ohlcv3m, price, rsi1h, lsr, fundingRate, aggressiveDelta, oi5m, oi15m, atr, ema34_3m, ema89_3m } = data;
+  const { ohlcv15m, ohlcv1h, ohlcv3m, price, rsi1h, lsr, fundingRate, aggressiveDelta, oi5m, oi15m, atr, ema34_3m, ema89_3m, ema34_3mValues, ema89_3mValues } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
-  if (state.ultimoAlertaPorAtivo[symbol]['3m'] && agora - state.ultimoAlertaPorAtivo[symbol]['3m'] < config.TEMPO_COOLDOWN_MS) return;
+  if (state.ultimoAlertaPorAtivo[symbol]['3m'] && agora - state.ultimoAlertaPorAtivo[symbol]['3m'] < config.TEMPO_COOLDOWN_MS) {
+    logger.info(`Cooldown ativo para ${symbol}, último alerta: ${state.ultimoAlertaPorAtivo[symbol]['3m']}`);
+    return;
+  }
+
+  // Validar EMAs
+  if (isNaN(ema34_3m) || isNaN(ema89_3m) || !ema34_3mValues.length || !ema89_3mValues.length) {
+    logger.warn(`EMAs inválidas para ${symbol}: EMA34_3m=${ema34_3m}, EMA89_3m=${ema89_3m}`);
+    return;
+  }
+
+  // Detectar cruzamento das EMAs
+  const ema34_3m_prev = ema34_3mValues[ema34_3mValues.length - 2];
+  const ema89_3m_prev = ema89_3mValues[ema89_3mValues.length - 2];
+  const isBuyCrossover = ema34_3m > ema89_3m && ema34_3m_prev <= ema89_3m_prev;
+  const isSellCrossover = ema34_3m < ema89_3m && ema34_3m_prev >= ema89_3m_prev;
+
+  // Log para depuração
+  logger.info(`EMAs para ${symbol}: EMA34_3m=${ema34_3m}, EMA89_3m=${ema89_3m}, EMA34_3m_prev=${ema34_3m_prev}, EMA89_3m_prev=${ema89_3m_prev}, BuyCrossover=${isBuyCrossover}, SellCrossover=${isSellCrossover}`);
 
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
@@ -458,8 +476,8 @@ async function sendAlertEMATrend(symbol, data) {
   const stopSell = format(price + 3.5 * atr);
 
   let alertText = '';
-  // Condições para compra: EMA 34 > EMA 89 (3m), RSI 1h < 60, OI 5m e 15m subindo, LSR < 1.5, Delta >= 10%, Volatilidade >= 0.5%
-  const isBuySignal = ema34_3m > ema89_3m &&
+  // Condições para compra: Cruzamento de alta (EMA 34 > EMA 89), RSI 1h < 60, OI 5m e 15m subindo, LSR < 1.5, Delta >= 10%, Volatilidade >= 0.5%
+  const isBuySignal = isBuyCrossover &&
                       rsi1h < 60 && 
                       oi5m.isRising &&
                       oi15m.isRising && 
@@ -467,14 +485,17 @@ async function sendAlertEMATrend(symbol, data) {
                       aggressiveDelta.deltaPercent >= config.DELTA_BUY_MIN &&
                       volatility >= config.VOLATILITY_MIN;
   
-  // Condições para venda: EMA 34 < EMA 89 (3m), RSI 1h > 68, OI 5m e 15m caindo, LSR > 2.9, Delta <= -10%, Volatilidade >= 0.5%
-  const isSellSignal = ema34_3m < ema89_3m &&
-                       rsi1h > 68 && 
+  // Condições para venda: Cruzamento de baixa (EMA 34 < EMA 89), RSI 1h > 68, OI 5m e 15m caindo, LSR > 2.5, Delta <= -10%, Volatilidade >= 0.5%
+  const isSellSignal = isSellCrossover &&
+                       rsi1h > 60 && 
                        !oi5m.isRising &&
                        !oi15m.isRising && 
                        (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        aggressiveDelta.deltaPercent <= config.DELTA_SELL_MAX &&
                        volatility >= config.VOLATILITY_MIN;
+
+  // Log das condições
+  logger.info(`Condições para ${symbol}: BuySignal=${isBuySignal}, SellSignal=${isSellSignal}, RSI1h=${rsi1h}, OI5m=${oi5m.isRising}, OI15m=${oi15m.isRising}, LSR=${lsr.value}, Delta=${aggressiveDelta.deltaPercent}, Volatility=${volatility.toFixed(4)}`);
 
   if (isBuySignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
@@ -557,7 +578,7 @@ async function checkConditions() {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 50));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, config.RSI_PERIOD + 1));
-      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 90));
+      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 150));
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
       setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
@@ -578,6 +599,12 @@ async function checkConditions() {
         return;
       }
 
+      // Validar número de candles para EMA 89
+      if (ohlcv3m.length < 89) {
+        logger.warn(`Candles insuficientes para ${symbol} no timeframe 3m: ${ohlcv3m.length}`);
+        return;
+      }
+
       const rsi1hValues = calculateRSI(ohlcv1h);
       const oi5m = await fetchOpenInterest(symbol, '5m');
       const oi15m = await fetchOpenInterest(symbol, '15m');
@@ -593,6 +620,9 @@ async function checkConditions() {
         return;
       }
 
+      // Log dos últimos 5 candles para depuração
+      logger.info(`Últimos 5 candles 3m para ${symbol}: ${JSON.stringify(ohlcv3m.slice(-5))}`);
+
       await sendAlertEMATrend(symbol, {
         ohlcv15m,
         ohlcv1h,
@@ -606,7 +636,9 @@ async function checkConditions() {
         oi15m,
         atr: atrValues[atrValues.length - 1],
         ema34_3m: ema34_3mValues[ema34_3mValues.length - 1],
-        ema89_3m: ema89_3mValues[ema89_3mValues.length - 1]
+        ema89_3m: ema89_3mValues[ema89_3mValues.length - 1],
+        ema34_3mValues,
+        ema89_3mValues
       });
     }, 5);
   } catch (e) {
