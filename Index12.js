@@ -17,12 +17,12 @@ const config = {
   RSI_OVERBOUGHT: 70, // Limite de sobrecomprado para venda
   LSR_BUY_MAX: 1.4, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
-  DELTA_BUY_MIN: 10, // Limite mínimo de Delta Agressivo para compra (%)
-  DELTA_SELL_MAX: -10, // Limite máximo de Delta Agressivo para venda (%)
+  DELTA_BUY_MIN: 20, // Limite mínimo de Delta Agressivo para compra (%)
+  DELTA_SELL_MAX: -20, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
-  VOLATILITY_MIN: 0.005, // Volatilidade mínima (ATR/preço ≥ 0.5%)
+  VOLATILITY_MIN: 0.009, // Volatilidade mínima (ATR/preço ≥ 0.5%)
 };
 
 // Logger
