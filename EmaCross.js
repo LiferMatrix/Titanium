@@ -514,7 +514,7 @@ async function sendAlertEMATrend(symbol, data) {
     : '🔘Neutro';
   const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
   const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
-  const emaCrossoverText = isBullishCrossover ? `EMA 34/89 (3m): Bullish 🟢` : isBearishCrossover ? `EMA 34/89 (3m): Bearish 🔴` : `EMA 34/89 (3m): Neutro`;
+  const emaCrossoverText = isBullishCrossover ? `🔘EMA 34/89 (3m): Bullish ✅` : isBearishCrossover ? `🔘EMA 34/89 (3m): Bearish 🛑` : `🔘EMA 34/89 (3m): 🔘Sem Confir.`;
   const stoch4hText = stoch4h !== 'N/A' ? `Stoch 4h: ${stoch4h} ${getStochasticEmoji(parseFloat(stoch4h))}` : '🔹 Stoch 4h';
   const stoch1dText = stoch1d !== 'N/A' ? `Stoch 1d: ${stoch1d} ${getStochasticEmoji(parseFloat(stoch1d))}` : '🔹 Stoch 1d';
 
@@ -559,7 +559,7 @@ async function sendAlertEMATrend(symbol, data) {
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🟢*Compra⤴️ / Reversão *\n\n` +
+      alertText = `✳️*Compra⤴️ / Reversão *\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -593,7 +593,7 @@ async function sendAlertEMATrend(symbol, data) {
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔴*Correção⤵️ / Realizar Lucros/Parcial *\n\n` +
+      alertText = `🛑*Correção⤵️ / Realizar Lucros/Parcial *\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
