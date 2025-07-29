@@ -16,9 +16,9 @@ const config = {
   RSI_OVERSOLD: 45, // Limite de sobrevendido para compra
   RSI_OVERBOUGHT: 70, // Limite de sobrecomprado para venda
   LSR_BUY_MAX: 1.4, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
-  DELTA_BUY_MIN: 20, // Limite mínimo de Delta Agressivo para compra (%)
-  DELTA_SELL_MAX: -20, // Limite máximo de Delta Agressivo para venda (%)
+  LSR_SELL_MIN: 2.7, // Limite mínimo de LSR para venda
+  DELTA_BUY_MIN: 25, // Limite mínimo de Delta Agressivo para compra (%)
+  DELTA_SELL_MAX: -25, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
@@ -536,7 +536,7 @@ async function sendAlertRSITrend(symbol, data) {
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🟢*Compra / Reversão *\n\n` +
+      alertText = `🟢*Compra Vol / Reversão *\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -570,7 +570,7 @@ async function sendAlertRSITrend(symbol, data) {
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔴*Correção / Realizar Lucros/Parcial *\n\n` +
+      alertText = `🔴*Correção Vol / Realizar Lucros/Parcial *\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -683,7 +683,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RSI Pressure💹Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
