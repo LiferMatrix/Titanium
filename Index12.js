@@ -87,6 +87,16 @@ async function withRetry(fn, retries = 5, delayBase = 1000) {
   }
 }
 
+async function isOnline() {
+  try {
+    await axios.get('https://api.binance.com/api/v3/ping', { timeout: 5000 });
+    return true;
+  } catch (e) {
+    logger.warn('Sem conexão com a internet ou API da Binance indisponível.');
+    return false;
+  }
+}
+
 function getCachedData(key) {
   const cacheEntry = state.dataCache.get(key);
   if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
@@ -682,10 +692,24 @@ async function checkConditions() {
 
 async function main() {
   logger.info('Iniciando simple trading bot');
+  let wasOffline = false;
   try {
     await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium RSI Pressure💹Start...'));
-    await checkConditions();
-    setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
+    async function runCheck() {
+      const online = await isOnline();
+      if (online && wasOffline) {
+        await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🌐 Conexão restaurada!'));
+        wasOffline = false;
+      } else if (!online) {
+        wasOffline = true;
+        logger.warn('Bot pausado devido à falta de conexão com a internet. Tentando novamente em 30 segundos...');
+        setTimeout(runCheck, 30000);
+        return;
+      }
+      await checkConditions();
+      setTimeout(runCheck, config.INTERVALO_ALERTA_3M_MS);
+    }
+    runCheck();
   } catch (e) {
     logger.error(`Erro ao iniciar bot: ${e.message}`);
   }
