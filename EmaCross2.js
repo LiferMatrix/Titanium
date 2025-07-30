@@ -59,14 +59,14 @@ const exchangeSpot = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
-  timeout: 30000,
+  timeout: 60000,
   options: { defaultType: 'spot' }
 });
 const exchangeFutures = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
-  timeout: 30000,
+  timeout: 60000,
   options: { defaultType: 'future' }
 });
 
@@ -437,7 +437,7 @@ async function sendAlertEMATrend(symbol, data) {
 
   // Validar cruzamento EMA
   if (!emaCrossover) {
-    logger.warn(`Cruzamento EMA 34/89 inválido para ${symbol}`);
+    logger.warn(`Cruzamento EMA 13/34 inválido para ${symbol}`);
     return;
   }
 
@@ -446,7 +446,7 @@ async function sendAlertEMATrend(symbol, data) {
   const isBearishCrossover = emaCrossover.isBearish;
 
   // Log para depuração
-  logger.info(`EMA 34/89 (3m) para ${symbol}: Bullish=${isBullishCrossover}, Bearish=${isBearishCrossover}, EMA34=${emaCrossover.emaFast}, EMA89=${emaCrossover.emaSlow}`);
+  logger.info(`EMA 13/34 (3m) para ${symbol}: Bullish=${isBullishCrossover}, Bearish=${isBearishCrossover}, EMA13=${emaCrossover.emaFast}, EMA34=${emaCrossover.emaSlow}`);
 
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
@@ -500,7 +500,7 @@ async function sendAlertEMATrend(symbol, data) {
   }
 
   const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=3`;
-  const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
+  const rsi1hEmoji = rsi1h > 60 ? "📛" : rsi1h < 40 ? "✅" : "";
   let lsrSymbol = '🔘Consol.';
   if (lsr.value !== null) {
     if (lsr.value <= 1.4) lsrSymbol = '✅Baixo';
@@ -524,7 +524,7 @@ async function sendAlertEMATrend(symbol, data) {
     : '🔘Neutro';
   const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
   const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
-  const emaCrossoverText = isBullishCrossover ? `🔘EMA 34/89 (3m): Bullish ✅` : isBearishCrossover ? `🔘EMA 34/89 (3m): Bearish 🛑` : `🔘EMA 34/89 (3m): 🔘Sem Confir.`;
+  const emaCrossoverText = isBullishCrossover ? `🔘EMA: Bullish ✅` : isBearishCrossover ? `🔘EMA: Bearish 🛑` : `🔘EMA: 🔘Sem Confir.`;
   const stoch4hText = stoch4h !== 'N/A' ? `Stoch 4h: ${stoch4h} ${getStochasticEmoji(parseFloat(stoch4h))}` : '🔹 Stoch 4h';
   const stoch1dText = stoch1d !== 'N/A' ? `Stoch 1d: ${stoch1d} ${getStochasticEmoji(parseFloat(stoch1d))}` : '🔹 Stoch 1d';
 
@@ -532,8 +532,7 @@ async function sendAlertEMATrend(symbol, data) {
   const sellZonesText = zonas.sellLiquidityZones.map(format).join(' / ') || 'N/A';
   const vpBuyZonesText = volumeProfile.buyLiquidityZones.map(format).join(' / ') || 'N/A';
   const vpSellZonesText = volumeProfile.sellLiquidityZones.map(format).join(' / ') || 'N/A';
-  const obBuyZonesText = orderBookLiquidity.buyLiquidityZones.map(format).join(' / ') || 'N/A';
-  const obSellZonesText = orderBookLiquidity.sellLiquidityZones.map(format).join(' / ') || 'N/A';
+  
 
   const entryLow = format(price - 0.3 * atr);
   const entryHigh = format(price + 0.5 * atr);
@@ -543,7 +542,7 @@ async function sendAlertEMATrend(symbol, data) {
   const stopSell = format(price + 3.5 * atr);
 
   let alertText = '';
-  // Condições para compra: EMA 34 cruza acima da EMA 89 (3m), RSI 1h < 60, OI 5m e 15m subindo, LSR < 2.7, Delta >= 20%, Volatilidade >= 0.5%
+  // Condições para compra: EMA 13 cruza acima da EMA 34 (3m), RSI 1h < 60, OI 5m e 15m subindo, LSR < 2.7, Delta >= 20%, Volatilidade >= 0.5%
   const isBuySignal = isBullishCrossover &&
                       rsi1h < 60 && 
                       oi5m.isRising &&
@@ -552,7 +551,7 @@ async function sendAlertEMATrend(symbol, data) {
                       aggressiveDelta.deltaPercent >= config.DELTA_BUY_MIN &&
                       volatility >= config.VOLATILITY_MIN;
   
-  // Condições para venda: EMA 34 cruza abaixo da EMA 89 (3m), RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.8, Delta <= -20%, Volatilidade >= 0.5%
+  // Condições para venda: EMA 13 cruza abaixo da EMA 34 (3m), RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.8, Delta <= -20%, Volatilidade >= 0.5%
   const isSellSignal = isBearishCrossover &&
                        rsi1h > 60 && 
                        !oi5m.isRising &&
@@ -562,7 +561,7 @@ async function sendAlertEMATrend(symbol, data) {
                        volatility >= config.VOLATILITY_MIN;
 
   // Log das condições
-  logger.info(`Condições para ${symbol}: BuySignal=${isBuySignal}, SellSignal=${isSellSignal}, EMA34/89(3m)=${isBullishCrossover ? 'Bullish' : isBearishCrossover ? 'Bearish' : 'Neutro'}, RSI1h=${rsi1h}, OI5m=${oi5m.isRising}, OI15m=${oi15m.isRising}, LSR=${lsr.value}, Delta=${aggressiveDelta.deltaPercent}, Volatility=${volatility.toFixed(4)}`);
+  logger.info(`Condições para ${symbol}: BuySignal=${isBuySignal}, SellSignal=${isSellSignal}, EMA13/34(3m)=${isBullishCrossover ? 'Bullish' : isBearishCrossover ? 'Bearish' : 'Neutro'}, RSI1h=${rsi1h}, OI5m=${oi5m.isRising}, OI15m=${oi15m.isRising}, LSR=${lsr.value}, Delta=${aggressiveDelta.deltaPercent}, Volatility=${volatility.toFixed(4)}`);
 
   if (isBuySignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
@@ -596,7 +595,7 @@ async function sendAlertEMATrend(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['3m'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, EMA 34/89(3m)=Bullish, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, Delta=${aggressiveDelta.deltaPercent}%, NearBuyZone=${isNearBuyZone}, Volatility=${volatility.toFixed(4)}`);
+      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, EMA 13/34(3m)=Bullish, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, Delta=${aggressiveDelta.deltaPercent}%, NearBuyZone=${isNearBuyZone}, Volatility=${volatility.toFixed(4)}`);
     }
   } else if (isSellSignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
@@ -630,7 +629,7 @@ async function sendAlertEMATrend(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['3m'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, EMA 34/89(3m)=Bearish, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, Delta=${aggressiveDelta.deltaPercent}%, NearSellZone=${isNearSellZone}, Volatility=${volatility.toFixed(4)}`);
+      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, EMA 13/34(3m)=Bearish, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, Delta=${aggressiveDelta.deltaPercent}%, NearSellZone=${isNearSellZone}, Volatility=${volatility.toFixed(4)}`);
     }
   }
 
@@ -720,7 +719,7 @@ async function main() {
   logger.info('Iniciando simple trading bot');
   let wasOffline = false;
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Emas 💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium EmaCross2 💹Start...'));
     async function runCheck() {
       const online = await isOnline();
       if (online && wasOffline) {
