@@ -13,7 +13,7 @@ const config = {
   INTERVALO_ALERTA_3M_MS: 5 * 60 * 1000, // 5 minutos
   TEMPO_COOLDOWN_MS: 30 * 60 * 1000, // 30 minutos
   RSI_PERIOD: 14,
-  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
   DELTA_BUY_MIN: 20, // Limite mínimo de Delta Agressivo para compra (%)
   DELTA_SELL_MAX: -20, // Limite máximo de Delta Agressivo para venda (%)
@@ -21,8 +21,8 @@ const config = {
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
   VOLATILITY_MIN: 0.005, // Volatilidade mínima (ATR/preço ≥ 0.8%)
-  EMA_FAST: 34, // Período da EMA rápida
-  EMA_SLOW: 89, // Período da EMA lenta
+  EMA_FAST: 13, // Período da EMA rápida
+  EMA_SLOW: 34, // Período da EMA lenta
 };
 
 // Logger
