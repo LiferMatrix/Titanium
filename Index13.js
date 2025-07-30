@@ -17,12 +17,12 @@ const config = {
   RSI_OVERBOUGHT: 70, // Limite de sobrecomprado para venda
   LSR_BUY_MAX: 1.8, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.7, // Limite mínimo de LSR para venda
-  DELTA_BUY_MIN: 25, // Limite mínimo de Delta Agressivo para compra (%)
-  DELTA_SELL_MAX: -25, // Limite máximo de Delta Agressivo para venda (%)
+  DELTA_BUY_MIN: 15, // Limite mínimo de Delta Agressivo para compra (%)
+  DELTA_SELL_MAX: -15, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
-  VOLATILITY_MIN: 0.009, // Volatilidade mínima (ATR/preço ≥ 0.5%)
+  VOLATILITY_MIN: 0.005, // Volatilidade mínima (ATR/preço ≥ 0.5%)
 };
 
 // Logger
@@ -474,7 +474,7 @@ async function sendAlertRSITrend(symbol, data) {
   const emaCrossover = detectEMACrossover(ema13, ema34);
 
   // Condições para compra: RSI 15m <= 45, RSI 1h < 60, OI 5m e 15m subindo, LSR < 1.8
-  //, Delta >= 25%, Volatilidade >= 0.9%
+  //, Delta >= 25%, Volatilidade >= 0.5%
   const isBuySignal = isOversold &&
                       rsi1h < 60 &&
                       oi5m.isRising &&
@@ -483,7 +483,7 @@ async function sendAlertRSITrend(symbol, data) {
                       aggressiveDelta.deltaPercent >= config.DELTA_BUY_MIN &&
                       calculateVolatility(ohlcv15m, price) >= config.VOLATILITY_MIN;
 
-  // Condições para venda: RSI 15m >= 70, RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.7, Delta <= -25%, Volatilidade >= 0.9%
+  // Condições para venda: RSI 15m >= 70, RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.7, Delta <= -25%, Volatilidade >= 0.5%
   const isSellSignal = isOverbought &&
                        rsi1h > 60 &&
                        !oi5m.isRising &&
@@ -589,15 +589,13 @@ async function sendAlertRSITrend(symbol, data) {
     const rsi15mText = rsi15m ? `RSI 15m: ${rsi15m.toFixed(2)} ${isOversold ? '🟢' : isOverbought ? '🔴' : ''}` : '🔹 RSI';
     const stoch4hText = stoch4h !== 'N/A' ? `Stoch 4h: ${stoch4h} ${getStochasticEmoji(parseFloat(stoch4h))}` : '🔹 Stoch 4h';
     const stoch1dText = stoch1d !== 'N/A' ? `Stoch 1d: ${stoch1d} ${getStochasticEmoji(parseFloat(stoch1d))}` : '🔹 Stoch 1d';
-    const emaText = `EMA 13: ${format(ema13[ema13.length - 1])}, EMA 34: ${format(ema34[ema34.length - 1])}`;
+    const emaText = `EMA 13/34`;
 
     const buyZonesText = zonas.buyLiquidityZones.map(format).join(' / ') || 'N/A';
     const sellZonesText = zonas.sellLiquidityZones.map(format).join(' / ') || 'N/A';
     const vpBuyZonesText = volumeProfile.buyLiquidityZones.map(format).join(' / ') || 'N/A';
     const vpSellZonesText = volumeProfile.sellLiquidityZones.map(format).join(' / ') || 'N/A';
-    const obBuyZonesText = orderBookLiquidity.buyLiquidityZones.map(format).join(' / ') || 'N/A';
-    const obSellZonesText = orderBookLiquidity.sellLiquidityZones.map(format).join(' / ') || 'N/A';
-
+    
     const entryLow = format(price - 0.3 * atr);
     const entryHigh = format(price + 0.5 * atr);
     const targetsBuy = [1.5, 3, 4.5, 6].map(mult => format(price + mult * atr)).join(" / ");
