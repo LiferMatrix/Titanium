@@ -15,10 +15,10 @@ const config = {
   RSI_PERIOD: 14,
   RSI_OVERSOLD: 45, // Limite de sobrevendido para compra
   RSI_OVERBOUGHT: 70, // Limite de sobrecomprado para venda
-  LSR_BUY_MAX: 1.8, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 1.9, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.7, // Limite mínimo de LSR para venda
-  DELTA_BUY_MIN: 15, // Limite mínimo de Delta Agressivo para compra (%)
-  DELTA_SELL_MAX: -15, // Limite máximo de Delta Agressivo para venda (%)
+  DELTA_BUY_MIN: 10, // Limite mínimo de Delta Agressivo para compra (%)
+  DELTA_SELL_MAX: -30, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
@@ -473,21 +473,21 @@ async function sendAlertRSITrend(symbol, data) {
   }
   const emaCrossover = detectEMACrossover(ema13, ema34);
 
-  // Condições para compra: RSI 15m <= 45, RSI 1h < 60, OI 5m e 15m subindo, LSR < 1.8
-  //, Delta >= 25%, Volatilidade >= 0.5%
+  // Condições para compra: RSI 15m <= 45, RSI 1h < 60, OI 5m e 15m subindo, LSR < 2.1
+  //, Delta >= 10%, Volatilidade >= 0.5%
   const isBuySignal = isOversold &&
                       rsi1h < 60 &&
-                      oi5m.isRising &&
-                      oi15m.isRising &&
+                      //oi5m.isRising &&
+                      //oi15m.isRising &&
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       aggressiveDelta.deltaPercent >= config.DELTA_BUY_MIN &&
                       calculateVolatility(ohlcv15m, price) >= config.VOLATILITY_MIN;
 
-  // Condições para venda: RSI 15m >= 70, RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.7, Delta <= -25%, Volatilidade >= 0.5%
+  // Condições para venda: RSI 15m >= 70, RSI 1h > 60, OI 5m e 15m caindo, LSR > 2.7, Delta <= -20%, Volatilidade >= 0.5%
   const isSellSignal = isOverbought &&
                        rsi1h > 60 &&
-                       !oi5m.isRising &&
-                       !oi15m.isRising &&
+                       //!oi5m.isRising &&
+                       //!oi15m.isRising &&
                        (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        aggressiveDelta.deltaPercent <= config.DELTA_SELL_MAX &&
                        calculateVolatility(ohlcv15m, price) >= config.VOLATILITY_MIN;
