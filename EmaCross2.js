@@ -15,7 +15,7 @@ const config = {
   RSI_PERIOD: 14,
   LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
-  DELTA_BUY_MIN: 20, // Limite mínimo de Delta Agressivo para compra (%)
+  DELTA_BUY_MIN: 10, // Limite mínimo de Delta Agressivo para compra (%)
   DELTA_SELL_MAX: -20, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
