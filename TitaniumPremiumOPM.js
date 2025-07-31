@@ -12,7 +12,9 @@ const config = {
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   API_DELAY_MS: 1000, // Delay entre chamadas à API
   INTERVALO_MONITORAMENTO_MS: 5 * 60 * 1000, // 5 minutos
-  MAX_RETRIES: 5 // Número de tentativas para validação
+  MAX_RETRIES: 5, // Número de tentativas para validação
+  MAX_RECONNECT_RETRIES: 5, // Número de tentativas de reconexão
+  RECONNECT_BASE_DELAY_MS: 1000 // Delay base para reconexão (ms)
 };
 
 // Logger
@@ -44,9 +46,9 @@ function validateEnv() {
 }
 validateEnv();
 
-const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
+let bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 
-const exchangeSpot = new ccxt.binance({
+let exchangeSpot = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
@@ -54,7 +56,7 @@ const exchangeSpot = new ccxt.binance({
   options: { defaultType: 'spot' }
 });
 
-const exchangeFutures = new ccxt.binance({
+let exchangeFutures = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
@@ -62,13 +64,59 @@ const exchangeFutures = new ccxt.binance({
   options: { defaultType: 'future' }
 });
 
-const exchangeMargin = new ccxt.binance({
+let exchangeMargin = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
   timeout: 30000,
   options: { defaultType: 'margin' }
 });
+
+// Função de reconexão para Binance e Telegram
+async function reconectar(service, maxRetries = config.MAX_RECONNECT_RETRIES) {
+  let retries = 0;
+  let delay = config.RECONNECT_BASE_DELAY_MS;
+
+  while (retries < maxRetries) {
+    try {
+      if (service === 'binance') {
+        logger.info(`Tentando reconectar à Binance (tentativa ${retries + 1}/${maxRetries})...`);
+        // Tentar recarregar mercados para verificar conexão
+        await Promise.all([
+          exchangeSpot.loadMarkets(true),
+          exchangeFutures.loadMarkets(true),
+          exchangeMargin.loadMarkets(true)
+        ]);
+        logger.info('Reconexão à Binance bem-sucedida');
+        return true;
+      } else if (service === 'telegram') {
+        logger.info(`Tentando reconectar ao Telegram (tentativa ${retries + 1}/${maxRetries})...`);
+        // Parar e reiniciar o bot
+        await bot.stop();
+        bot = new Bot(config.TELEGRAM_BOT_TOKEN);
+        // Verificar conexão com getMe
+        await bot.api.getMe();
+        logger.info('Reconexão ao Telegram bem-sucedida');
+        return true;
+      }
+    } catch (e) {
+      retries++;
+      const errorMessage = e.message.toLowerCase();
+      logger.warn(`Falha na reconexão a ${service} (tentativa ${retries}/${maxRetries}): ${e.message}`);
+      
+      if (retries === maxRetries) {
+        logger.error(`Falha ao reconectar a ${service} após ${maxRetries} tentativas`);
+        return false;
+      }
+
+      // Backoff exponencial com máximo de 60s
+      const backoffDelay = Math.min(delay * Math.pow(2, retries - 1), 60000);
+      logger.info(`Aguardando ${backoffDelay/1000}s antes da próxima tentativa de reconexão a ${service}`);
+      await new Promise(resolve => setTimeout(resolve, backoffDelay));
+    }
+  }
+  return false;
+}
 
 // Função para tentar a validação com retries
 async function tryValidateSymbol(symbol, exchange, retries = config.MAX_RETRIES) {
@@ -81,6 +129,13 @@ async function tryValidateSymbol(symbol, exchange, retries = config.MAX_RETRIES)
       return !!markets[symbol];
     } catch (e) {
       logger.warn(`Tentativa ${attempt}/${retries} falhou ao validar ${symbol} no ${exchange.options.defaultType}: ${e.message}`);
+      if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+        const reconnected = await reconectar('binance');
+        if (!reconnected) {
+          logger.error(`Falha ao reconectar à Binance. Cancelando validação de ${symbol}`);
+          return false;
+        }
+      }
       if (attempt === retries) {
         logger.error(`Falha ao validar ${symbol} após ${retries} tentativas: ${e.message}`);
         return false;
@@ -93,33 +148,28 @@ async function tryValidateSymbol(symbol, exchange, retries = config.MAX_RETRIES)
 
 // Função para validar símbolo em spot, futuros e margem
 async function validateSymbol(symbol) {
-  // Normalizar símbolo (ex.: BTCUSDT -> BTC/USDT)
   const normalizedSymbol = symbol.includes('/') ? symbol : `${symbol.replace(/USDT$/, '')}/USDT`;
 
-  // Tentar formatos alternativos
   const alternativeFormats = [
     normalizedSymbol,
-    symbol.includes('SOL') ? `${symbol.replace(/SOLUSDT$/, '')}/USDT` : normalizedSymbol, // Ex.: RAYSOLUSDT -> RAY/USDT
-    symbol.replace(/F3B/, ''), // Ex.: BROCCOLIF3BUSDT -> BROCCOLIUSDT
-    symbol.replace(/F3B/, '').includes('/') ? symbol.replace(/F3B/, '') : `${symbol.replace(/F3BUSDT$/, '')}/USDT` // Ex.: BROCCOLIF3BUSDT -> BROCCOLI/USDT
-  ].filter((v, i, a) => a.indexOf(v) === i); // Remover duplicatas
+    symbol.includes('SOL') ? `${symbol.replace(/SOLUSDT$/, '')}/USDT` : normalizedSymbol,
+    symbol.replace(/F3B/, ''),
+    symbol.replace(/F3B/, '').includes('/') ? symbol.replace(/F3B/, '') : `${symbol.replace(/F3BUSDT$/, '')}/USDT`
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
   for (const testSymbol of alternativeFormats) {
-    // Validar em spot
     const isValidSpot = await tryValidateSymbol(testSymbol, exchangeSpot);
     if (isValidSpot) {
       logger.info(`Par ${testSymbol} válido no mercado spot`);
       return { symbol: testSymbol, market: 'spot' };
     }
 
-    // Validar em futuros
     const isValidFutures = await tryValidateSymbol(testSymbol, exchangeFutures);
     if (isValidFutures) {
       logger.info(`Par ${testSymbol} válido no mercado de futuros`);
       return { symbol: testSymbol, market: 'future' };
     }
 
-    // Validar em margem
     const isValidMargin = await tryValidateSymbol(testSymbol, exchangeMargin);
     if (isValidMargin) {
       logger.info(`Par ${testSymbol} válido no mercado de margem`);
@@ -130,7 +180,6 @@ async function validateSymbol(symbol) {
   }
 
   logger.warn(`Par inválido: ${symbol} (testado como ${alternativeFormats.join(', ')})`);
-  // Tentar monitorar mesmo se inválido, assumindo spot como padrão
   return { symbol: normalizedSymbol, market: 'spot' };
 }
 
@@ -147,7 +196,6 @@ async function iniciarMonitoramento(symbol, chatId) {
   paresMonitorados.add(normalizedSymbol);
   logger.info(`Iniciando monitoramento para ${normalizedSymbol} no mercado ${market}`);
 
-  // Escolher exchange com base no mercado
   const exchange = market === 'spot' ? exchangeSpot : market === 'future' ? exchangeFutures : exchangeMargin;
 
   setInterval(async () => {
@@ -158,7 +206,7 @@ async function iniciarMonitoramento(symbol, chatId) {
   return true;
 }
 
-// Função de monitoramento ajustada para incluir alvos
+// Função de monitoramento ajustada para reconexão
 async function monitorarZonas(symbol, chatId, exchange) {
   try {
     const ohlcv1h = await exchange.fetchOHLCV(symbol, '1h', undefined, 20);
@@ -206,7 +254,6 @@ async function monitorarZonas(symbol, chatId, exchange) {
     if (targets.bestBuyZone && Math.abs(price - parseFloat(targets.bestBuyZone.level)) / parseFloat(targets.bestBuyZone.level) < 0.005) {
       const alertaKey = `${symbol}_buy_${targets.bestBuyZone.level}`;
       if (!alertasEnviados[alertaKey] || Date.now() - alertasEnviados[alertaKey] > 3600 * 1000) {
-        // Selecionar até 3 take-profits de sellTargets e breakoutAbove
         const takeProfits = [
           ...targets.sellTargets.map((level, i) => ({ level, label: targets.buyExplanations[i]?.match(/\*(.*?)\*/)[1] || `Fib ${level.toFixed(4)}` })),
           ...targets.breakoutAbove.map(({ level, label }) => ({ level, label }))
@@ -216,10 +263,9 @@ async function monitorarZonas(symbol, chatId, exchange) {
           .slice(0, 3)
           .map((tp, i) => `TP${i + 1}: ${format(tp.level)} (${tp.label})`);
 
-        // Selecionar stop-loss (nível mais baixo de breakoutBelow ou Fib 0.0)
         const stopLossLevel = targets.breakoutBelow.length > 0
           ? Math.min(...targets.breakoutBelow.map(b => b.level))
-          : fibLevels['0.0'] || price * 0.95; // Fallback: 5% abaixo do preço atual
+          : fibLevels['0.0'] || price * 0.95;
         const stopLoss = `🛑 *Stop-Loss*: ${format(stopLossLevel)}`;
 
         const mensagem = `🟢 *ALERTA DE COMPRA: ${symbol}*\n` +
@@ -235,6 +281,17 @@ async function monitorarZonas(symbol, chatId, exchange) {
           logger.info(`Alerta de compra enviado para ${symbol} no preço ${format(price)}`);
         } catch (e) {
           logger.error(`Erro ao enviar alerta de compra para ${symbol}: ${e.message}`);
+          if (e.message.includes('ETELEGRAM') || e.message.includes('503') || e.message.includes('timeout')) {
+            const reconnected = await reconectar('telegram');
+            if (reconnected) {
+              logger.info(`Tentando reenviar alerta de compra para ${symbol} após reconexão`);
+              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+              alertasEnviados[alertaKey] = Date.now();
+              logger.info(`Alerta de compra reenviado para ${symbol} no preço ${format(price)}`);
+            } else {
+              logger.error(`Falha ao reenviar alerta de compra para ${symbol} após reconexão`);
+            }
+          }
         }
       }
     }
@@ -242,7 +299,6 @@ async function monitorarZonas(symbol, chatId, exchange) {
     if (targets.bestSellZone && Math.abs(price - parseFloat(targets.bestSellZone.level)) / parseFloat(targets.bestSellZone.level) < 0.005) {
       const alertaKey = `${symbol}_sell_${targets.bestSellZone.level}`;
       if (!alertasEnviados[alertaKey] || Date.now() - alertasEnviados[alertaKey] > 3600 * 1000) {
-        // Selecionar até 3 take-profits de buyTargets e breakoutBelow
         const takeProfits = [
           ...targets.buyTargets.map((level, i) => ({ level, label: targets.buyExplanations[i]?.match(/\*(.*?)\*/)[1] || `Fib ${level.toFixed(4)}` })),
           ...targets.breakoutBelow.map(({ level, label }) => ({ level, label }))
@@ -252,10 +308,9 @@ async function monitorarZonas(symbol, chatId, exchange) {
           .slice(0, 3)
           .map((tp, i) => `TP${i + 1}: ${format(tp.level)} (${tp.label})`);
 
-        // Selecionar stop-loss (nível mais alto de breakoutAbove ou Fib 100.0)
         const stopLossLevel = targets.breakoutAbove.length > 0
           ? Math.max(...targets.breakoutAbove.map(b => b.level))
-          : fibLevels['100.0'] || price * 1.05; // Fallback: 5% acima do preço atual
+          : fibLevels['100.0'] || price * 1.05;
         const stopLoss = `🛑 *Stop-Loss*: ${format(stopLossLevel)}`;
 
         const mensagem = `🔴 *ALERTA DE VENDA (Realização de Lucro): ${symbol}*\n` +
@@ -271,11 +326,32 @@ async function monitorarZonas(symbol, chatId, exchange) {
           logger.info(`Alerta de venda enviado para ${symbol} no preço ${format(price)}`);
         } catch (e) {
           logger.error(`Erro ao enviar alerta de venda para ${symbol}: ${e.message}`);
+          if (e.message.includes('ETELEGRAM') || e.message.includes('503') || e.message.includes('timeout')) {
+            const reconnected = await reconectar('telegram');
+            if (reconnected) {
+              logger.info(`Tentando reenviar alerta de venda para ${symbol} após reconexão`);
+              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+              alertasEnviados[alertaKey] = Date.now();
+              logger.info(`Alerta de venda reenviado para ${symbol} no preço ${format(price)}`);
+            } else {
+              logger.error(`Falha ao reenviar alerta de venda para ${symbol} após reconexão`);
+            }
+          }
         }
       }
     }
   } catch (e) {
     logger.warn(`Erro ao monitorar ${symbol}: ${e.message}`);
+    if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+      const reconnected = await reconectar('binance');
+      if (!reconnected) {
+        logger.error(`Falha ao reconectar à Binance. Parando monitoramento de ${symbol}`);
+        paresMonitorados.delete(symbol);
+        return;
+      }
+      logger.info(`Reconexão bem-sucedida. Retomando monitoramento de ${symbol}`);
+      return;
+    }
     if (e.message.includes('Invalid symbol') || e.message.includes('symbol not found')) {
       logger.warn(`Par ${symbol} não encontrado na API. Removendo do monitoramento.`);
       paresMonitorados.delete(symbol);
@@ -283,7 +359,7 @@ async function monitorarZonas(symbol, chatId, exchange) {
   }
 }
 
-// Funções de indicadores (mantidas do código original)
+// Funções de indicadores
 const rsiPeriod = 14;
 
 function calculateRSI(data) {
@@ -427,10 +503,16 @@ async function fetchLSR(symbol) {
     return { account: accountLSR, position: positionLSR };
   } catch (e) {
     logger.warn(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
-    return {
-      account: { value: null, status: "🔹 Indisponível", percentChange: 0 },
-      position: { value: null, status: "🔹 Indisponível", percentChange: 0 }
-    };
+    if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+      const reconnected = await reconectar('binance');
+      if (!reconnected) {
+        logger.error(`Falha ao reconectar à Binance para LSR de ${symbol}`);
+        return { account: { value: null, status: "🔹 Indisponível", percentChange: 0 }, position: { value: null, status: "🔹 Indisponível", percentChange: 0 } };
+      }
+      logger.info(`Reconexão bem-sucedida. Retentando LSR para ${symbol}`);
+      return await fetchLSR(symbol); // Tentar novamente após reconexão
+    }
+    return { account: { value: null, status: "🔹 Indisponível", percentChange: 0 }, position: { value: null, status: "🔹 Indisponível", percentChange: 0 } };
   }
 }
 
@@ -450,6 +532,15 @@ async function fetchOrderBook(symbol) {
     return { bids, asks, totalBidVolume, totalAskVolume };
   } catch (e) {
     logger.warn(`Erro ao buscar order book para ${symbol}: ${e.message}`);
+    if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+      const reconnected = await reconectar('binance');
+      if (!reconnected) {
+        logger.error(`Falha ao reconectar à Binance para order book de ${symbol}`);
+        return { bids: [], asks: [], totalBidVolume: 0, totalAskVolume: 0 };
+      }
+      logger.info(`Reconexão bem-sucedida. Retentando order book para ${symbol}`);
+      return await fetchOrderBook(symbol); // Tentar novamente após reconexão
+    }
     return { bids: [], asks: [], totalBidVolume: 0, totalAskVolume: 0 };
   }
 }
@@ -469,6 +560,15 @@ async function fetchFundingRate(symbol) {
     return { current: null, status: "🔹 Indisponível" };
   } catch (e) {
     logger.warn(`Erro ao buscar Funding Rate para ${symbol}: ${e.message}`);
+    if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+      const reconnected = await reconectar('binance');
+      if (!reconnected) {
+        logger.error(`Falha ao reconectar à Binance para funding rate de ${symbol}`);
+        return { current: null, status: "🔹 Indisponível" };
+      }
+      logger.info(`Reconexão bem-sucedida. Retentando funding rate para ${symbol}`);
+      return await fetchFundingRate(symbol); // Tentar novamente após reconexão
+    }
     return { current: null, status: "🔹 Indisponível" };
   }
 }
@@ -794,25 +894,57 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
 
 async function main() {
   logger.info('Iniciando bot de análise de criptomoedas');
-  try {
-    bot.catch((err) => {
-      logger.error(`Erro no bot: ${err.message}`, { stack: err.stack });
-    });
+  let retries = 0;
+  const maxRetries = config.MAX_RECONNECT_RETRIES;
 
-    // Carregar e remover duplicatas dos pares
-    const coins = [...new Set(config.PARES_MONITORADOS.map(coin => coin.trim().toUpperCase()))];
-    logger.info(`Preparando monitoramento para ${coins.length} pares únicos`);
+  while (retries < maxRetries) {
+    try {
+      bot.catch((err) => {
+        logger.error(`Erro no bot: ${err.message}`, { stack: err.stack });
+      });
 
-    // Iniciar monitoramento para cada par, validando um a um
-    coins.forEach((symbol, index) => {
-      setTimeout(async () => {
-        await iniciarMonitoramento(symbol, config.TELEGRAM_CHAT_ID);
-      }, index * config.API_DELAY_MS);
-    });
+      const coins = [...new Set(config.PARES_MONITORADOS.map(coin => coin.trim().toUpperCase()))];
+      logger.info(`Preparando monitoramento para ${coins.length} pares únicos`);
 
-    await bot.start();
-  } catch (e) {
-    logger.error(`Erro ao iniciar bot: ${e.message}`, { stack: e.stack });
+      coins.forEach((symbol, index) => {
+        setTimeout(async () => {
+          await iniciarMonitoramento(symbol, config.TELEGRAM_CHAT_ID);
+        }, index * config.API_DELAY_MS);
+      });
+
+      await bot.start();
+      logger.info('Bot iniciado com sucesso');
+      return; // Sucesso, sai do loop
+    } catch (e) {
+      retries++;
+      logger.error(`Erro ao iniciar bot (tentativa ${retries}/${maxRetries}): ${e.message}`, { stack: e.stack });
+      if (e.message.includes('ETELEGRAM') || e.message.includes('503') || e.message.includes('timeout')) {
+        const reconnected = await reconectar('telegram');
+        if (!reconnected) {
+          logger.error(`Falha ao reconectar ao Telegram após ${maxRetries} tentativas`);
+          if (retries === maxRetries) {
+            logger.error('Encerrando bot devido a falhas persistentes de conexão');
+            process.exit(1);
+          }
+        }
+      } else if (e.message.includes('ETIMEDOUT') || e.message.includes('ECONNRESET') || e.message.includes('429')) {
+        const reconnected = await reconectar('binance');
+        if (!reconnected) {
+          logger.error(`Falha ao reconectar à Binance após ${maxRetries} tentativas`);
+          if (retries === maxRetries) {
+            logger.error('Encerrando bot devido a falhas persistentes de conexão');
+            process.exit(1);
+          }
+        }
+      } else {
+        logger.error('Erro não relacionado à conexão. Encerrando bot');
+        process.exit(1);
+      }
+
+      const backoffDelay = Math.min(config.RECONNECT_BASE_DELAY_MS * Math.pow(2, retries - 1), 60000);
+      logger.info(`Aguardando ${backoffDelay/1000}s antes da próxima tentativa de inicialização`);
+      await new Promise(resolve => setTimeout(resolve, backoffDelay));
+    }
   }
 }
 
