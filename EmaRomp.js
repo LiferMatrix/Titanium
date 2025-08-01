@@ -94,7 +94,7 @@ async function reconnect() {
     await exchangeFutures.loadMarkets();
     state.isConnected = true;
     logger.info('Reconexão bem-sucedida.');
-    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Conexão com a Binance restabelecida.');
+    //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Conexão com a Binance restabelecida.');
   } catch (e) {
     logger.error(`Falha na reconexão: ${e.message}. Tentando novamente em ${config.RECONNECT_INTERVAL_MS}ms...`);
     setTimeout(reconnect, config.RECONNECT_INTERVAL_MS);
