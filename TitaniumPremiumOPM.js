@@ -214,12 +214,61 @@ function calculateEMA(data, period) {
   });
 }
 
-// Função de monitoramento ajustada para EMAs 8 e 21 no timeframe de 3 minutos
+// Função para calcular ATR
+function calculateATR(data, period = 14) {
+  if (!data || data.length < period + 1) {
+    logger.warn(`Dados insuficientes para calcular ATR de ${period} períodos: ${data?.length || 0} velas`);
+    return null;
+  }
+
+  const tr = data.slice(1).map((curr, i) => {
+    const prev = data[i];
+    const high = curr[2];
+    const low = curr[3];
+    const prevClose = prev[4];
+    return Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+  });
+
+  const atr = TechnicalIndicators.SMA.calculate({
+    period: period,
+    values: tr
+  });
+
+  return atr[atr.length - 1];
+}
+
+// Função para calcular ADX
+function calculateADX(data, period = 10) {
+  if (!data || data.length < period + 1) {
+    logger.warn(`Dados insuficientes para calcular ADX de ${period} períodos: ${data?.length || 0} velas`);
+    return null;
+  }
+
+  const adxResult = TechnicalIndicators.ADX.calculate({
+    high: data.map(d => d[2]).filter(h => !isNaN(h) && h !== null),
+    low: data.map(d => d[3]).filter(l => !isNaN(l) && l !== null),
+    close: data.map(d => d[4]).filter(c => !isNaN(c) && c !== null),
+    period: period
+  });
+
+  if (!adxResult || adxResult.length === 0) {
+    logger.warn(`Nenhum resultado do cálculo ADX`);
+    return null;
+  }
+
+  return adxResult[adxResult.length - 1].adx;
+}
+
+// Função de monitoramento ajustada para EMAs 8 e 21 no timeframe de 3 minutos com validação de ATR, ADX e LSR
 async function monitorarZonas(symbol, chatId, exchange) {
   try {
     // Buscar dados OHLCV para diferentes timeframes
     const ohlcv1h = await exchange.fetchOHLCV(symbol, '1h', undefined, 20);
-    const ohlcv15m = await exchange.fetchOHLCV(symbol, '15m', undefined, 20);
+    const ohlcv15m = await exchange.fetchOHLCV(symbol, '15m', undefined, 30); // Aumentado para 30 velas para ADX
     const ohlcvDiario = await exchange.fetchOHLCV(symbol, '1d', undefined, 20);
     const ohlcv4h = await exchange.fetchOHLCV(symbol, '4h', undefined, 20);
     const ohlcv3m = await exchange.fetchOHLCV(symbol, '3m', undefined, 30); // 30 velas para EMA 21
@@ -234,6 +283,16 @@ async function monitorarZonas(symbol, chatId, exchange) {
     const price = ohlcv1h[ohlcv1h.length - 1][4]; // Preço atual (fechamento da última vela de 1h)
     logger.info(`Preço atual de ${symbol}: ${price}`);
     const format = v => price < 1 ? v.toFixed(8) : price < 10 ? v.toFixed(6) : price < 100 ? v.toFixed(4) : v.toFixed(2);
+
+    // Calcular ATR no timeframe de 3 minutos
+    const atr = calculateATR(ohlcv3m, 14);
+    const minVolatilityThreshold = price * 0.005; // ATR deve ser pelo menos 0.5% do preço atual
+    logger.info(`ATR para ${symbol}: ${atr ? atr.toFixed(4) : 'null'}, Threshold: ${minVolatilityThreshold.toFixed(4)}`);
+
+    // Calcular ADX no timeframe de 15 minutos
+    const adx = calculateADX(ohlcv15m, 10);
+    const minADXThreshold = 25; // ADX mínimo de 25
+    logger.info(`ADX para ${symbol} (15m): ${adx ? adx.toFixed(2) : 'null'}, Threshold: ${minADXThreshold}`);
 
     // Calcular EMAs de 8 e 21 no timeframe de 3 minutos
     const ema8 = calculateEMA(ohlcv3m.map(c => ({ close: c[4] })), 8);
@@ -296,8 +355,12 @@ async function monitorarZonas(symbol, chatId, exchange) {
       logger.info(`Proximidade venda ${symbol}: ${Math.abs(price - parseFloat(targets.bestSellZone.level)) / parseFloat(targets.bestSellZone.level)}`);
     }
 
-    // Alerta de compra com gatilho de cruzamento de EMA
-    if (targets.bestBuyZone && Math.abs(price - parseFloat(targets.bestBuyZone.level)) / parseFloat(targets.bestBuyZone.level) < 0.005 && isBullishCrossover) {
+    // Construir link do TradingView
+    const tradingViewSymbol = symbol.replace('/', '').toUpperCase();
+    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${tradingViewSymbol}&interval=15`;
+
+    // Alerta de compra com gatilho de cruzamento de EMA, validação de ATR, e LSR
+    if (targets.bestBuyZone && Math.abs(price - parseFloat(targets.bestBuyZone.level)) / parseFloat(targets.bestBuyZone.level) < 0.005 && isBullishCrossover && atr && atr >= minVolatilityThreshold && lsrData.account.value && lsrData.account.value < 2) {
       const alertaKey = `${symbol}_buy_${targets.bestBuyZone.level}`;
       if (!alertasEnviados[alertaKey] || Date.now() - alertasEnviados[alertaKey] > 3600 * 1000) {
         const takeProfits = [
@@ -312,26 +375,26 @@ async function monitorarZonas(symbol, chatId, exchange) {
         const stopLossLevel = targets.breakoutBelow.length > 0
           ? Math.min(...targets.breakoutBelow.map(b => b.level))
           : fibLevels['0.0'] || price * 0.95;
-        const stopLoss = `🛑 *Stop-Loss*: ${format(stopLossLevel)}`;
+        const stopLoss = `◾ *Stop*: ${format(stopLossLevel)}`;
 
-        const mensagem = `🟢 *ALERTA DE COMPRA: ${symbol}*\n` +
+        const mensagem = `🟢 *ALERTA DE COMPRA: ${symbol}* [- TradingView](${tradingViewLink})\n` +
                          `💲 *Preço*: ${format(price)}\n` +
                          `📍 *Zona*: ${targets.bestBuyZone.label} (${targets.bestBuyZone.level})\n` +
-                         `📝 *Motivo*: ${targets.bestBuyZone.explanation} | EMA 8 cruzou acima da EMA 21 (3m)\n` +
+                         `📝 *Análise*: ${targets.bestBuyZone.explanation} | ◾EMA Bull | ATR ${atr.toFixed(4)} | ADX ${adx.toFixed(2)}  | ◾LSR ${lsrData.account.value.toFixed(2)}\n` +
                          `🎯 *Alvos*:\n` +
                          (takeProfits.length > 0 ? takeProfits.map(tp => `  • ${tp}`).join('\n') + '\n' : '  • Nenhum alvo de lucro identificado\n') +
                          stopLoss;
         try {
-          await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+          await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown', disable_web_page_preview: true });
           alertasEnviados[alertaKey] = Date.now();
-          logger.info(`Alerta de compra enviado para ${symbol} no preço ${format(price)} com cruzamento de EMA`);
+          logger.info(`Alerta de compra enviado para ${symbol} no preço ${format(price)} com cruzamento de EMA, ATR ${atr.toFixed(4)}, ADX ${adx.toFixed(2)} e LSR ${lsrData.account.value.toFixed(2)}`);
         } catch (e) {
           logger.error(`Erro ao enviar alerta de compra para ${symbol}: ${e.message}`);
           if (e.message.includes('ETELEGRAM') || e.message.includes('503') || e.message.includes('timeout')) {
             const reconnected = await reconectar('telegram');
             if (reconnected) {
               logger.info(`Tentando reenviar alerta de compra para ${symbol} após reconexão`);
-              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown', disable_web_page_preview: true });
               alertasEnviados[alertaKey] = Date.now();
               logger.info(`Alerta de compra reenviado para ${symbol} no preço ${format(price)}`);
             } else {
@@ -342,8 +405,8 @@ async function monitorarZonas(symbol, chatId, exchange) {
       }
     }
 
-    // Alerta de venda com gatilho de cruzamento de EMA
-    if (targets.bestSellZone && Math.abs(price - parseFloat(targets.bestSellZone.level)) / parseFloat(targets.bestSellZone.level) < 0.005 && isBearishCrossover) {
+    // Alerta de venda com gatilho de cruzamento de EMA, validação de ATR, e LSR
+    if (targets.bestSellZone && Math.abs(price - parseFloat(targets.bestSellZone.level)) / parseFloat(targets.bestSellZone.level) < 0.005 && isBearishCrossover && atr && atr >= minVolatilityThreshold && lsrData.account.value && lsrData.account.value > 2.7) {
       const alertaKey = `${symbol}_sell_${targets.bestSellZone.level}`;
       if (!alertasEnviados[alertaKey] || Date.now() - alertasEnviados[alertaKey] > 3600 * 1000) {
         const takeProfits = [
@@ -358,26 +421,26 @@ async function monitorarZonas(symbol, chatId, exchange) {
         const stopLossLevel = targets.breakoutAbove.length > 0
           ? Math.max(...targets.breakoutAbove.map(b => b.level))
           : fibLevels['100.0'] || price * 1.05;
-        const stopLoss = `🛑 *Stop-Loss*: ${format(stopLossLevel)}`;
+        const stopLoss = `◾ *Stop*: ${format(stopLossLevel)}`;
 
-        const mensagem = `🔴 *ALERTA DE VENDA (Realização de Lucro): ${symbol}*\n` +
+        const mensagem = `🔴 *ALERTA DE VENDA: ${symbol}* [- TradingView](${tradingViewLink})\n` +
                          `💲 *Preço*: ${format(price)}\n` +
                          `📍 *Zona*: ${targets.bestSellZone.label} (${targets.bestSellZone.level})\n` +
-                         `📝 *Motivo*: ${targets.bestSellZone.explanation} | EMA 8 cruzou abaixo da EMA 21 (3m)\n` +
+                         `📝 *Análise*: ${targets.bestSellZone.explanation} | ◾EMA Bear | ATR ${atr.toFixed(4)} | ADX ${adx.toFixed(2)}  | ◾LSR ${lsrData.account.value.toFixed(2)}\n` +
                          `🎯 *Alvos*:\n` +
                          (takeProfits.length > 0 ? takeProfits.map(tp => `  • ${tp}`).join('\n') + '\n' : '  • Nenhum alvo de lucro identificado\n') +
                          stopLoss;
         try {
-          await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+          await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown', disable_web_page_preview: true });
           alertasEnviados[alertaKey] = Date.now();
-          logger.info(`Alerta de venda enviado para ${symbol} no preço ${format(price)} com cruzamento de EMA`);
+          logger.info(`Alerta de venda enviado para ${symbol} no preço ${format(price)} com cruzamento de EMA, ATR ${atr.toFixed(4)}, ADX ${adx.toFixed(2)} e LSR ${lsrData.account.value.toFixed(2)}`);
         } catch (e) {
           logger.error(`Erro ao enviar alerta de venda para ${symbol}: ${e.message}`);
           if (e.message.includes('ETELEGRAM') || e.message.includes('503') || e.message.includes('timeout')) {
             const reconnected = await reconectar('telegram');
             if (reconnected) {
               logger.info(`Tentando reenviar alerta de venda para ${symbol} após reconexão`);
-              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
+              await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown', disable_web_page_preview: true });
               alertasEnviados[alertaKey] = Date.now();
               logger.info(`Alerta de venda reenviado para ${symbol} no preço ${format(price)}`);
             } else {
@@ -945,7 +1008,7 @@ async function main() {
   const maxRetries = config.MAX_RECONNECT_RETRIES;
 
   try {
-    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, "Teste de conexão do bot", { parse_mode: 'Markdown' });
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, "Titanium Bot OK", { parse_mode: 'Markdown' });
     logger.info('Mensagem de teste enviada ao Telegram');
   } catch (e) {
     logger.error(`Erro ao enviar mensagem de teste ao Telegram: ${e.message}`);
