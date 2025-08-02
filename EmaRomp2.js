@@ -14,7 +14,7 @@ const config = {
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // 15 minutos para Rompimento
   TEMPO_COOLDOWN_EMA_MS: 30 * 60 * 1000, // 30 minutos para EMA Trend
   RSI_PERIOD: 14,
-  LSR_BUY_MAX: 1.9, // Limite máximo de LSR para compra (EMA)
+  LSR_BUY_MAX: 1.6, // Limite máximo de LSR para compra (EMA)
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda (EMA)
   DELTA_BUY_MIN: 20, // Limite mínimo de Delta Agressivo para compra (%) (EMA)
   DELTA_SELL_MAX: -20, // Limite máximo de Delta Agressivo para venda (%) (EMA)
@@ -763,7 +763,8 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
   if (isValidPreviousCandle && 
       zonas.estruturaAlta > 0 && 
       previousClose < zonas.estruturaAlta && 
-      currentHigh >= zonas.estruturaAlta && 
+      currentHigh >= zonas.estruturaAlta &&
+      (lsr.value === null || lsr.value < 1.6) &&  
       isPriceRising 
       ) {
     const nivelRompido = zonas.estruturaAlta;
@@ -773,7 +774,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `📈 *Rompimento de Alta*\n\n` +
+      alertText = `💹 Rompimento de 🚀Alta🚀\n\n` +
                   `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -795,6 +796,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
              zonas.estruturaBaixa > 0 && 
              previousClose > zonas.estruturaBaixa && 
              currentLow <= zonas.estruturaBaixa && 
+             (lsr.value === null || lsr.value > 2.6) && 
              isPriceFalling  
              ) {
     const nivelRompido = zonas.estruturaBaixa;
@@ -804,7 +806,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `📉 *Rompimento de Baixa*\n\n` +
+      alertText = `🚨 Rompimento de 🔻Baixa🔻\n\n` +
                   `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
