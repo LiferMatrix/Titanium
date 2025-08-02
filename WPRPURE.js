@@ -677,15 +677,69 @@ async function checkConditions() {
   }
 }
 
+// Função de reconexão
+async function reconectar() {
+  const maxTentativas = 5;
+  const delayBase = 5000; // 5 segundos
+  let isOnline = false;
+
+  while (!isOnline) {
+    for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
+      try {
+        // Testar conectividade com uma chamada simples à API da Binance
+        await exchangeSpot.fetchTime();
+        logger.info('Conexão com a internet estabelecida.');
+        isOnline = true;
+        break;
+      } catch (e) {
+        logger.error(`Falha na conexão, tentativa ${tentativa}/${maxTentativas}: ${e.message}`);
+        if (tentativa === maxTentativas) {
+          logger.warn('Máximo de tentativas de reconexão atingido. Aguardando antes de novo ciclo...');
+          await new Promise(resolve => setTimeout(resolve, delayBase * 2));
+          break;
+        }
+        const delay = Math.pow(2, tentativa - 1) * delayBase;
+        logger.info(`Aguardando ${delay}ms antes da próxima tentativa de reconexão...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  return isOnline;
+}
+
 async function main() {
   logger.info('Iniciando scalp');
   try {
+    // Verificar conexão inicial
+    await reconectar();
+    
+    // Enviar mensagem de inicialização
     await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium WPR 💹Start...'));
+    
+    // Iniciar verificação de condições
     await checkConditions();
-    setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
+    
+    // Configurar intervalo com verificação de conexão
+    setInterval(async () => {
+      try {
+        await reconectar();
+        await checkConditions();
+      } catch (e) {
+        logger.error(`Erro no ciclo de verificação: ${e.message}`);
+        logger.info('Tentando reconectar...');
+        await reconectar();
+      }
+    }, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
     logger.error(`Erro ao iniciar bot: ${e.message}`);
+    logger.info('Tentando reconectar...');
+    await reconectar();
+    // Reiniciar o bot após reconexão
+    setTimeout(main, 5000);
   }
 }
 
-main().catch(e => logger.error(`Erro fatal: ${e.message}`));
+main().catch(e => {
+  logger.error(`Erro fatal: ${e.message}`);
+  setTimeout(main, 10000); // Tentar reiniciar após 10 segundos em caso de erro fatal
+});
