@@ -764,6 +764,9 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       zonas.estruturaAlta > 0 && 
       previousClose < zonas.estruturaAlta && 
       currentHigh >= zonas.estruturaAlta &&
+      estocasticoD?.k < 80 && 
+      estocastico4h?.k < 80 &&
+      rsi1h < 60 &&
       (lsr.value === null || lsr.value < 1.6) &&  
       isPriceRising 
       ) {
