@@ -505,7 +505,7 @@ async function sendAlertFGV(symbol, data) {
                       rsi1h < 60 && 
                       oi5m.isRising &&
                       oi15m.isRising && 
-                      (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
+                      //(lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       aggressiveDelta.deltaPercent >= config.DELTA_BUY_MIN &&
                       ema8_3m > ema21_3m &&
                       volatility >= config.VOLATILITY_MIN;
@@ -515,7 +515,7 @@ async function sendAlertFGV(symbol, data) {
                        rsi1h > 68 && 
                        !oi5m.isRising &&
                        !oi15m.isRising && 
-                       (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
+                       //(lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        aggressiveDelta.deltaPercent <= config.DELTA_SELL_MAX &&
                        ema8_3m < ema21_3m &&
                        volatility >= config.VOLATILITY_MIN;
@@ -536,16 +536,16 @@ async function sendAlertFGV(symbol, data) {
                   `🔹 ${oi5mText}\n` +
                   `🔹 ${oi15mText}\n` +
                   `🔹 ${emaText}\n` +
-                  `🔹 Entr.: ${entryLow}...${entryHigh}\n` +
-                  `🎯 Tps: ${targetsBuy}\n` +
-                  `⛔ Stop: ${stopBuy}\n` +
+                  //`🔹 Entr.: ${entryLow}...${entryHigh}\n` +
+                  //`🎯 Tps: ${targetsBuy}\n` +
+                  //`⛔ Stop: ${stopBuy}\n` +
                   `   Romp. de Baixa: ${format(zonas.estruturaBaixa)}\n` +
                   `   Romp. de Alta: ${format(zonas.estruturaAlta)}\n` +
-                  `   Liquid. Bull: ${buyZonesText}\n` +
-                  `   Liquid. Bear: ${sellZonesText}\n` +
+                 // `   Liquid. Bull: ${buyZonesText}\n` +
+                 // `   Liquid. Bear: ${sellZonesText}\n` +
                   `   Poc Bull: ${vpBuyZonesText}\n` +
                   `   Poc Bear: ${vpSellZonesText}\n` +
-                  ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz\n`;
+                  ` ☑︎ Monitor -🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -567,16 +567,16 @@ async function sendAlertFGV(symbol, data) {
                   `🔹 ${oi5mText}\n` +
                   `🔹 ${oi15mText}\n` +
                   `🔹 ${emaText}\n` +
-                  `🔹 Entr.: ${entryLow}...${entryHigh}\n` +
-                  `🎯 Tps: ${targetsSell}\n` +
-                  `⛔ Stop: ${stopSell}\n` +
+                 // `🔹 Entr.: ${entryLow}...${entryHigh}\n` +
+                  //`🎯 Tps: ${targetsSell}\n` +
+                 // `⛔ Stop: ${stopSell}\n` +
                   `   Romp. de Baixa: ${format(zonas.estruturaBaixa)}\n` +
                   `   Romp. de Alta: ${format(zonas.estruturaAlta)}\n` +
-                  `   Liquid. Bull: ${buyZonesText}\n` +
-                  `   Liquid. Bear: ${sellZonesText}\n` +
+                  //`   Liquid. Bull: ${buyZonesText}\n` +
+                  //`   Liquid. Bear: ${sellZonesText}\n` +
                   `   Poc Bull: ${vpBuyZonesText}\n` +
                   `   Poc Bear: ${vpSellZonesText}\n` +
-                  ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz\n`;
+                  ` ☑︎ Monitor -🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
