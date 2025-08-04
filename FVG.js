@@ -15,8 +15,8 @@ const config = {
   RSI_PERIOD: 14,
   FGV_BUY_MIN: 1.5, // Limite mínimo de FGV para compra (15m, %)
   FGV_SELL_MAX: -1.5, // Limite máximo de FGV para venda (15m, %)
-  LSR_BUY_MAX: 1.9, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.5, // Limite mínimo de LSR para venda
+  //LSR_BUY_MAX: 1.9, // Limite máximo de LSR para compra
+  //LSR_SELL_MIN: 2.5, // Limite mínimo de LSR para venda
   DELTA_BUY_MIN: 10, // Limite mínimo de Delta Agressivo para compra (%)
   DELTA_SELL_MAX: -10, // Limite máximo de Delta Agressivo para venda (%)
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
