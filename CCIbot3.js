@@ -10,6 +10,7 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,ENJUSDT").split(","),
+  CACHE_TTL: 5 * 60 * 1000, // 5 minutos
 };
 
 // ================= LOGGER ================= //
@@ -34,18 +35,70 @@ const cache = {
   ticker: {},
   lsr: {},
   fundingRate: {},
-  ttl: 5 * 60 * 1000, // 5 minutos
+  ttl: config.CACHE_TTL,
 };
 
-function getCachedData(key, symbol, fetchFunction, timeframe, limit) {
-  const now = Date.now();
-  if (cache[key][symbol] && now - cache[key][symbol].timestamp < cache.ttl) {
-    return cache[key][symbol].data;
+// ================= UTILITÁRIOS ================= //
+async function withRetry(fn, retries = 3, delayBase = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt === retries) {
+        logger.warn(`Falha após ${retries} tentativas: ${e.message}`);
+        throw e;
+      }
+      const delay = Math.pow(2, attempt - 1) * delayBase;
+      logger.info(`Tentativa ${attempt} falhou, retry após ${delay}ms: ${e.message}`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
-  return fetchFunction().then(data => {
-    cache[key][symbol] = { data, timestamp: now };
-    return data;
-  });
+}
+
+function getCachedData(key, symbol) {
+  const cacheKey = `${key}_${symbol}`;
+  const cacheEntry = cache[key][symbol];
+  if (cacheEntry && Date.now() - cacheEntry.timestamp < cache.ttl && cacheEntry.data?.value !== null) {
+    logger.info(`Usando cache para ${cacheKey}`);
+    return cacheEntry.data;
+  }
+  return null;
+}
+
+function setCachedData(key, symbol, data) {
+  const cacheKey = `${key}_${symbol}`;
+  cache[key][symbol] = { data, timestamp: Date.now() };
+}
+
+// Função para buscar LSR usando a API de futuros da Binance
+async function fetchLSR(symbol) {
+  const cacheKey = `lsr_${symbol}`;
+  const cached = getCachedData('lsr', symbol);
+  if (cached) return cached;
+  try {
+    const symbolWithoutSlash = symbol.replace('/', '');
+    const res = await withRetry(() => axios.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio', {
+      params: { symbol: symbolWithoutSlash, period: '5m', limit: 2 }
+    }));
+    if (!res.data || res.data.length < 2) {
+      logger.warn(`Dados insuficientes de LSR para ${symbol}: ${res.data?.length || 0} registros`);
+      return { value: null, error: 'Dados insuficientes', isRising: false, percentChange: '0.00' };
+    }
+    const currentLSR = parseFloat(res.data[0].longShortRatio);
+    const previousLSR = parseFloat(res.data[1].longShortRatio);
+    if (isNaN(currentLSR) || currentLSR < 0 || isNaN(previousLSR) || previousLSR < 0) {
+      logger.warn(`LSR inválido para ${symbol}`);
+      return { value: null, error: 'LSR inválido', isRising: false, percentChange: '0.00' };
+    }
+    const percentChange = previousLSR !== 0 ? ((currentLSR - previousLSR) / previousLSR * 100).toFixed(2) : '0.00';
+    const result = { value: currentLSR, isRising: currentLSR > previousLSR, percentChange };
+    setCachedData('lsr', symbol, result);
+    logger.info(`LSR obtido para ${symbol}: ${currentLSR}, variação: ${percentChange}%`);
+    return result;
+  } catch (e) {
+    logger.warn(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
+    return { value: null, error: `Erro ao buscar LSR: ${e.message}`, isRising: false, percentChange: '0.00' };
+  }
 }
 
 // ================= INICIALIZAÇÃO ================= //
@@ -53,12 +106,13 @@ const binance = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
+  options: { defaultType: 'spot' }
 });
 const binanceFutures = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
   secret: process.env.BINANCE_SECRET_KEY,
   enableRateLimit: true,
-  options: { defaultType: 'future' },
+  options: { defaultType: 'future', defaultSubType: 'linear' }
 });
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 
@@ -68,13 +122,13 @@ const emaShortLength = 5;
 const emaLongLength = 13;
 const rsiLength = 14;
 const supportResistanceLength = 20;
-const atrLength = 14; // Período para cálculo do ATR
+const atrLength = 14;
 const timeframe15m = '15m';
 const timeframe1h = '1h';
 const timeframe3m = '3m';
-const volumeLookback = 20; // Período para cálculo da média de volume
-const volumeMultiplier = 2; // Volume atual deve ser 2x maior que a média
-const minVolatility = 0.001; // Volatilidade mínima (ATR como 0.1% do preço)
+const volumeLookback = 20;
+const volumeMultiplier = 2;
+const minVolatility = 0.001;
 
 // Estado para rastrear o último sinal enviado
 const lastSignals = {};
@@ -130,37 +184,24 @@ function calculateVolumeAnomaly(ohlcv, lookback = volumeLookback) {
 }
 
 // ================= MONITORAMENTO INDIVIDUAL ================= //
-async function monitorPair(symbol, index) {
+async function monitorPair(symbol) {
   const symbolWithSlash = symbol.replace('USDT', '/USDT');
   try {
     logger.info(`Verificando ${symbol} (${symbolWithSlash})...`);
 
     // Buscar dados em paralelo
     const [ohlcv15m, ohlcv1h, ohlcv3m, ticker, lsr, fundingRate] = await Promise.all([
-      getCachedData('ohlcv15m', symbol, () =>
-        binance.fetchOHLCV(symbolWithSlash, timeframe15m, undefined, Math.max(cciLength + emaLongLength, supportResistanceLength, atrLength)),
-        timeframe15m, Math.max(cciLength + emaLongLength, supportResistanceLength, atrLength)
-      ),
-      getCachedData('ohlcv1h', symbol, () =>
-        binance.fetchOHLCV(symbolWithSlash, timeframe1h, undefined, rsiLength + 1),
-        timeframe1h, rsiLength + 1
-      ),
-      getCachedData('ohlcv3m', symbol, () =>
-        binance.fetchOHLCV(symbolWithSlash, timeframe3m, undefined, volumeLookback),
-        timeframe3m, volumeLookback
-      ),
-      getCachedData('ticker', symbol, () =>
-        binance.fetchTicker(symbolWithSlash),
-        null, null
-      ),
-      getCachedData('lsr', symbol, () =>
-        binanceFutures.fetchFundingRate(symbolWithSlash).then(data => ({ value: data.longShortRatio || null })),
-        null, null
-      ),
-      getCachedData('fundingRate', symbol, () =>
-        binanceFutures.fetchFundingRate(symbolWithSlash).then(data => ({ current: data.fundingRate || null, isRising: data.fundingRate > 0 })),
-        null, null
-      )
+      withRetry(() => binance.fetchOHLCV(symbolWithSlash, timeframe15m, undefined, Math.max(cciLength + emaLongLength, supportResistanceLength, atrLength))
+        .then(data => { setCachedData('ohlcv15m', symbol, data); return data; })),
+      withRetry(() => binance.fetchOHLCV(symbolWithSlash, timeframe1h, undefined, rsiLength + 1)
+        .then(data => { setCachedData('ohlcv1h', symbol, data); return data; })),
+      withRetry(() => binance.fetchOHLCV(symbolWithSlash, timeframe3m, undefined, volumeLookback)
+        .then(data => { setCachedData('ohlcv3m', symbol, data); return data; })),
+      withRetry(() => binance.fetchTicker(symbolWithSlash)
+        .then(data => { setCachedData('ticker', symbol, data); return data; })),
+      fetchLSR(symbolWithSlash),
+      withRetry(() => binanceFutures.fetchFundingRate(symbolWithSlash)
+        .then(data => { setCachedData('fundingRate', symbol, { current: data.fundingRate || null, isRising: data.fundingRate > 0 }); return { current: data.fundingRate || null, isRising: data.fundingRate > 0 }; }))
     ]);
 
     // Validações
@@ -181,6 +222,13 @@ async function monitorPair(symbol, index) {
     }
     if (!ticker || ticker.last === undefined) {
       logger.warn(`Preço não disponível para ${symbol}`);
+      return;
+    }
+
+    // Verificar se houve erro no LSR
+    if (lsr.error) {
+      logger.warn(`Não foi possível obter LSR para ${symbol}: ${lsr.error}`);
+      await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Não foi possível obter LSR para ${symbol}: ${lsr.error}`);
       return;
     }
 
@@ -247,23 +295,29 @@ async function monitorPair(symbol, index) {
     const priceFormatted = price.toFixed(8);
 
     // Definir alvos e stop loss
-    const tp1 = (parseFloat(price) + parseFloat(atrValue)).toFixed(8); // Preço + 1×ATR
-    const tp2 = (parseFloat(price) + 2 * parseFloat(atrValue)).toFixed(8); // Preço + 2×ATR
-    const tp3 = (parseFloat(price) + 3 * parseFloat(atrValue)).toFixed(8); // Preço + 3×ATR
-    const slBuy = (parseFloat(price) - 2.7 * parseFloat(atrValue)).toFixed(8); // Preço - 2.5×ATR
-    const tp1Sell = (parseFloat(price) - parseFloat(atrValue)).toFixed(8); // Preço - 1×ATR
-    const tp2Sell = (parseFloat(price) - 2 * parseFloat(atrValue)).toFixed(8); // Preço - 2×ATR
-    const tp3Sell = (parseFloat(price) - 3 * parseFloat(atrValue)).toFixed(8); // Preço - 3×ATR
-    const slSell = (parseFloat(price) + 2.7 * parseFloat(atrValue)).toFixed(8); // Preço + 2.5×ATR
+    const tp1 = (parseFloat(price) + parseFloat(atrValue)).toFixed(8);
+    const tp2 = (parseFloat(price) + 2 * parseFloat(atrValue)).toFixed(8);
+    const tp3 = (parseFloat(price) + 3 * parseFloat(atrValue)).toFixed(8);
+    const slBuy = (parseFloat(price) - 2.7 * parseFloat(atrValue)).toFixed(8);
+    const tp1Sell = (parseFloat(price) - parseFloat(atrValue)).toFixed(8);
+    const tp2Sell = (parseFloat(price) - 2 * parseFloat(atrValue)).toFixed(8);
+    const tp3Sell = (parseFloat(price) - 3 * parseFloat(atrValue)).toFixed(8);
+    const slSell = (parseFloat(price) + 2.7 * parseFloat(atrValue)).toFixed(8);
 
     // Definir emoji para RSI de 1h
     const rsi1hEmoji = rsi1hValue < 50 ? '🟢' : rsi1hValue > 70 ? '🔴' : '';
 
-    // Definir LSR Symbol
+    // Definir LSR Symbol e texto com variação
     let lsrSymbol = '🔘 Consol.';
+    let lsrText = lsr.value !== null ? `${lsr.value.toFixed(2)} (${lsr.percentChange}%)` : '🔹 Indisp.';
     if (lsr.value !== null) {
       if (lsr.value <= 1.4) lsrSymbol = '✅ Baixo';
       else if (lsr.value >= 2.8) lsrSymbol = '📛 Alto';
+    } else {
+      lsrSymbol = '⚠️ Padrão (1.0)';
+    }
+    if (lsr.error) {
+      lsrText = `1.00 (${lsr.error})`;
     }
 
     // Definir Funding Rate Emoji
@@ -282,40 +336,41 @@ async function monitorPair(symbol, index) {
 
     // Enviar alertas com critério de RSI, alvos, stop loss, LSR e Funding Rate
     if (crossover && rsi1hValue < 55 && rsiRising && isVolumeAnomaly && isMinVolatility && lastSignals[symbol] !== 'COMPRA') {
-      const message = `💹CCI Cross Vol Bull💥: ${symbol}*
+      const message = `💹 *CCI Cross Vol Bull💥: ${symbol}*
 - *Preço Atual*: $${priceFormatted}
 - *RSI (15m)*: ${rsi15mValue}
 - ${rsi1hEmoji} *RSI (1h)*: ${rsi1hValue}
-- *LSR*: ${lsr.value !== null ? lsr.value.toFixed(2) : 'Indisponível'} ${lsrSymbol}
+- *LSR*: ${lsrText} ${lsrSymbol}
 - *Fund. Rate*: ${fundingRateText}
-- 🟰Resistência*: $${resistanceValue}
-- ➖Suporte*: $${supportValue}
+- *🟰Resistência*: $${resistanceValue}
+- *➖Suporte*: $${supportValue}
 - *TP1*: $${tp1} 
 - *TP2*: $${tp2} 
 - *TP3*: $${tp3} 
-- ⛔Stop*: $${slBuy} `;
+- *⛔Stop*: $${slBuy} `;
       await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown', disable_web_page_preview: true });
       lastSignals[symbol] = 'COMPRA';
       logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima)`);
     } else if (crossunder && rsi1hValue > 60 && rsiFalling && isVolumeAnomaly && isMinVolatility && lastSignals[symbol] !== 'VENDA') {
-      const message = `🔻CCI Cross Vol Bear💥: ${symbol}*
+      const message = `🔻 *CCI Cross Vol Bear💥: ${symbol}*
 - *Preço Atual*: $${priceFormatted}
 - *RSI (15m)*: ${rsi15mValue}
 - ${rsi1hEmoji} *RSI (1h)*: ${rsi1hValue}
-- *LSR*: ${lsr.value !== null ? lsr.value.toFixed(2) : 'Indisponível'} ${lsrSymbol}
+- *LSR*: ${lsrText} ${lsrSymbol}
 - *Fund. Rate*: ${fundingRateText}
-- 🟰Resistência*: $${resistanceValue}
-- ➖Suporte*: $${supportValue}
+- *🟰Resistência*: $${resistanceValue}
+- *➖Suporte*: $${supportValue}
 - *TP1*: $${tp1Sell} 
 - *TP2*: $${tp2Sell} 
 - *TP3*: $${tp3Sell} 
-- ⛔Stop*: $${slSell} `;
+- *⛔Stop*: $${slSell} `;
       await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown', disable_web_page_preview: true });
       lastSignals[symbol] = 'VENDA';
       logger.info(`Sinal de VENDA enviado para ${symbol} (RSI descendo, volume anormal, volatilidade mínima)`);
     }
   } catch (error) {
     logger.error(`Erro ao monitorar ${symbol}: ${error.message}`);
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `❌ Erro ao monitorar ${symbol}: ${error.message}`);
   }
 }
 
@@ -323,7 +378,7 @@ async function monitorPair(symbol, index) {
 async function monitorCCICrossovers() {
   for (let i = 0; i < config.PARES_MONITORADOS.length; i++) {
     const symbol = config.PARES_MONITORADOS[i];
-    setTimeout(() => monitorPair(symbol, i), i * 1000); // 1 segundo por par
+    setTimeout(() => monitorPair(symbol), i * 5000);
   }
 }
 
@@ -334,13 +389,12 @@ async function startBot() {
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
     await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Start *\nMonitorando ${pairCount} pares: ${pairsList}`, { parse_mode: 'Markdown' });
     logger.info('Bot iniciado com sucesso');
+    setInterval(monitorCCICrossovers, 5 * 60 * 1000); // 5 minutos
+    monitorCCICrossovers();
   } catch (error) {
     logger.error(`Erro ao iniciar o bot: ${error.message}`);
     await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `❌ Erro ao iniciar o bot: ${error.message}`);
   }
-
-  setInterval(monitorCCICrossovers, 5 * 60 * 1000); // 5 minutos
-  monitorCCICrossovers();
 }
 
 // ================= COMANDOS DO TELEGRAM ================= //
