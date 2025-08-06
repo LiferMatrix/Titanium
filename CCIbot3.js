@@ -1,4 +1,4 @@
-require('dotenv').config();
+  require('dotenv').config();
 const ccxt = require('ccxt');
 const TechnicalIndicators = require('technicalindicators');
 const { Bot } = require('grammy');
@@ -336,7 +336,7 @@ async function monitorPair(symbol) {
 
     // Enviar alertas com critério de RSI, alvos, stop loss, LSR e Funding Rate
     if (crossover && rsi1hValue < 55 && rsiRising && isVolumeAnomaly && isMinVolatility && lastSignals[symbol] !== 'COMPRA') {
-      const message = `💹 *CCI Cross Vol Bull💥: ${symbol}*
+      const message = `🔔 💹CCI Cross💹: ${symbol}*
 - *Preço Atual*: $${priceFormatted}
 - *RSI (15m)*: ${rsi15mValue}
 - ${rsi1hEmoji} *RSI (1h)*: ${rsi1hValue}
@@ -352,7 +352,7 @@ async function monitorPair(symbol) {
       lastSignals[symbol] = 'COMPRA';
       logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima)`);
     } else if (crossunder && rsi1hValue > 60 && rsiFalling && isVolumeAnomaly && isMinVolatility && lastSignals[symbol] !== 'VENDA') {
-      const message = `🔻 *CCI Cross Vol Bear💥: ${symbol}*
+      const message = `🔔 🔻CCI Cross🔻 : ${symbol}*
 - *Preço Atual*: $${priceFormatted}
 - *RSI (15m)*: ${rsi15mValue}
 - ${rsi1hEmoji} *RSI (1h)*: ${rsi1hValue}
@@ -370,7 +370,7 @@ async function monitorPair(symbol) {
     }
   } catch (error) {
     logger.error(`Erro ao monitorar ${symbol}: ${error.message}`);
-    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `❌ Erro ao monitorar ${symbol}: ${error.message}`);
+    //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `❌ Erro ao monitorar ${symbol}: ${error.message}`);
   }
 }
 
@@ -387,7 +387,7 @@ async function startBot() {
   try {
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Start *\nMonitorando ${pairCount} pares: ${pairsList}`, { parse_mode: 'Markdown' });
+    await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium CCI *\nMonitorando ${pairCount} pares: ${pairsList}`, { parse_mode: 'Markdown' });
     logger.info('Bot iniciado com sucesso');
     setInterval(monitorCCICrossovers, 5 * 60 * 1000); // 5 minutos
     monitorCCICrossovers();
