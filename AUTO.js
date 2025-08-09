@@ -98,7 +98,7 @@ const MONITORED_PAIRS = [
   'PENDLE/USDT',
   'RARE/USDT',
   'ROSE/USDT',
-  'SOL/USDT',
+  'RSR/USDT',
   'STX/USDT',
   'ZRO/USDT',
   'SYS/USDT',
