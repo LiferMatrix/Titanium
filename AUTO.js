@@ -104,6 +104,12 @@ const MONITORED_PAIRS = [
   'SYS/USDT',
   'TRU/USDT',
   'RLC/USDT',
+  'APT/USDT',
+  'ATA/USDT',
+  'AR/USDT',
+  'IOST/USDT',
+  'IOTX/USDT',
+  'ILV/USDT',
   'LINK/USDT'
 ];
 
