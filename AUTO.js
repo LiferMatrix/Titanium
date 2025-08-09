@@ -81,6 +81,29 @@ const MONITORED_PAIRS = [
   'ZK/USDT',
   'SUSHI/USDT',
   'POL/USDT',
+  '1000BONK/USDT',
+  '1000PEPE/USDT',
+  '1000SHIB/USDT',
+  'API3/USDT',
+  'HBAR/USDT',
+  'EGLD/USDT',
+  'GMX/USDT',
+  'IMX/USDT',
+  'GRT/USDT',
+  'LTC/USDT',
+  'KSM/USDT',
+  'MANA/USDT',
+  'SAND/USDT',
+  'ONDO/USDT',
+  'PENDLE/USDT',
+  'RARE/USDT',
+  'ROSE/USDT',
+  'SOL/USDT',
+  'STX/USDT',
+  'ZRO/USDT',
+  'SYS/USDT',
+  'TRU/USDT',
+  'RLC/USDT',
   'LINK/USDT'
 ];
 
@@ -735,11 +758,11 @@ async function sendRandomPairAnalysis() {
     const randomIndex = Math.floor(Math.random() * MONITORED_PAIRS.length);
     const symbol = MONITORED_PAIRS[randomIndex];
     logger.info(`Enviando análise automática para ${symbol}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `🔄  🤖 Titanium Análise Estrutural para ${symbol}...`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `🔄 Gerando análise automática para ${symbol}...`);
     await sendStatusReport(symbol, TELEGRAM_CHAT_ID);
   } catch (e) {
     logger.error(`Erro ao enviar análise automática: ${e.message}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ 🤖 Erro ao gerar análise : ${e.message}`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise automática: ${e.message}`);
   }
 }
 
@@ -909,7 +932,7 @@ async function main() {
     });
 
     logger.info('Bot configurado, iniciando...');
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, '🤖 Titanium Análise I.A..');
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, '🤖 Titanium Análise iniciada! Enviando análises automáticas a cada 30 minutos.');
     
     // Iniciar análises automáticas
     setInterval(sendRandomPairAnalysis, INTERVALO_ANALISE_AUTOMATICA_MS);
