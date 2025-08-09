@@ -758,11 +758,11 @@ async function sendRandomPairAnalysis() {
     const randomIndex = Math.floor(Math.random() * MONITORED_PAIRS.length);
     const symbol = MONITORED_PAIRS[randomIndex];
     logger.info(`Enviando análise automática para ${symbol}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `🔄 Gerando análise automática para ${symbol}...`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, ` 🤖Titanium Gerando análise para ${symbol}...`);
     await sendStatusReport(symbol, TELEGRAM_CHAT_ID);
   } catch (e) {
     logger.error(`Erro ao enviar análise automática: ${e.message}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise automática: ${e.message}`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise : ${e.message}`);
   }
 }
 
@@ -932,7 +932,7 @@ async function main() {
     });
 
     logger.info('Bot configurado, iniciando...');
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, '🤖 Titanium Análise iniciada! Enviando análises automáticas a cada 30 minutos.');
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, '🤖 Titanium Análises I.A.');
     
     // Iniciar análises automáticas
     setInterval(sendRandomPairAnalysis, INTERVALO_ANALISE_AUTOMATICA_MS);
