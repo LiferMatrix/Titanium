@@ -17,7 +17,8 @@ const config = {
   CCI_LENGTH: 20,
   EMA_SHORT_LENGTH: 5,
   EMA_LONG_LENGTH: 13,
-  EMA_34_LENGTH: 34, // Novo parâmetro para EMA 34
+  EMA_9_LENGTH: 9, // Novo parâmetro para EMA 9
+  EMA_34_LENGTH: 34,
   SUPPORT_RESISTANCE_LENGTH: 20,
   ATR_LENGTH: 14,
   VOLUME_LOOKBACK: 20,
@@ -101,7 +102,6 @@ async function reconnect() {
     await exchangeFutures.loadMarkets();
     state.isConnected = true;
     logger.info('Reconexão bem-sucedida.');
-    //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Conexão com a Binance restabelecida.');
   } catch (e) {
     logger.error(`Falha na reconexão: ${e.message}. Tentando novamente em ${config.RECONNECT_INTERVAL_MS}ms...`);
     setTimeout(reconnect, config.RECONNECT_INTERVAL_MS);
@@ -623,7 +623,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- *RSI (15m)*: ${rsi15m.toFixed(2)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
-                `- *EMA 34 (15m)*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
+                `- *Bullish acima de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
                 `- *LSR*: ${lsrText} ${lsrSymbol}\n` +
                 `- *Fund. Rate*: ${fundingRateText}\n` +
                 `- *🟰Resistência*: $${format(resistance)}\n` +
@@ -640,7 +640,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- *RSI (15m)*: ${rsi15m.toFixed(2)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
-                `- *EMA 34 (15m)*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
+                `- *Bearish abaixo de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
                 `- *LSR*: ${lsrText} ${lsrSymbol}\n` +
                 `- *Fund. Rate*: ${fundingRateText}\n` +
                 `- *🟰Resistência*: $${format(resistance)}\n` +
@@ -724,7 +724,7 @@ async function monitorCCICrossovers() {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const symbolWithSlash = symbol.replace('USDT', '/USDT');
       const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH)));
+      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.EMA_9_LENGTH)));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.RSI_PERIOD + 1));
       const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '3m', undefined, config.VOLUME_LOOKBACK));
       const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
@@ -732,7 +732,7 @@ async function monitorCCICrossovers() {
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
       setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
       setCachedData(`ticker_${symbol}`, tickerRaw);
-      if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH)) {
+      if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.EMA_9_LENGTH)) {
         logger.warn(`Dados insuficientes para ${symbol} (15m)`);
         await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (15m).`);
         return;
@@ -774,6 +774,12 @@ async function monitorCCICrossovers() {
         logger.warn(`EMAs não calculadas para ${symbol}`);
         return;
       }
+      // Calcular EMA de 9 períodos sobre o preço de fechamento (15m)
+      const ema9 = calculateEMA(ohlcv15mRaw.map(c => c[4]), config.EMA_9_LENGTH);
+      if (!ema9 || ema9.length < 1) {
+        logger.warn(`EMA de preço (9 períodos) não calculada para ${symbol}`);
+        return;
+      }
       const { support, resistance } = calculateSupportResistance(ohlcv15mRaw);
       const atr = calculateATR(ohlcv15mRaw);
       if (!atr || atr.length < 1) {
@@ -790,13 +796,15 @@ async function monitorCCICrossovers() {
       const emaLongPrevious = emaLong[emaLong.length - 2];
       const rsi15mCurrent = rsi15m[rsi15m.length - 1];
       const rsi15mPrevious = rsi15m[rsi15m.length - 2];
+      const ema9Current = ema9[ema9.length - 1];
+      const currentClose = ohlcv15mRaw[ohlcv15mRaw.length - 1][4];
       const crossover = emaShortPrevious <= emaLongPrevious && emaShortCurrent > emaLongCurrent;
       const crossunder = emaShortPrevious >= emaLongPrevious && emaShortCurrent < emaLongCurrent;
       const rsiRising = rsi15mCurrent > rsi15mPrevious;
       const rsiFalling = rsi15mCurrent < rsi15mPrevious;
-      if (crossover && rsiRising && isVolumeAnomaly && isMinVolatility) {
+      if (crossover && rsiRising && isVolumeAnomaly && isMinVolatility && currentClose > ema9Current) {
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue);
-      } else if (crossunder && rsiFalling && isVolumeAnomaly && isMinVolatility) {
+      } else if (crossunder && rsiFalling && isVolumeAnomaly && isMinVolatility && currentClose < ema9Current) {
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue);
       }
     }, 5);
