@@ -519,7 +519,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
                   `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹 EMA 34 (15m): ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
+                  `🔹 Bullish acima de: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
                   `🔸 Vol.Delta: ${deltaText}\n` +
@@ -552,7 +552,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
                   `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹 EMA 34 (15m): ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
+                  `🔹 Bearish abaixo de: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
                   `🔸 Vol.Delta: ${deltaText}\n` +
