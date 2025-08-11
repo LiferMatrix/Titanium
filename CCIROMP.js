@@ -538,7 +538,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
              zonas.estruturaBaixa > 0 && 
              previousClose > zonas.estruturaBaixa && 
              currentLow <= zonas.estruturaBaixa && 
-             //(lsr.value === null || lsr.value > 2.6) && 
+             (lsr.value === null || lsr.value > 2.6) && 
              isPriceFalling  
              ) {
     const nivelRompido = zonas.estruturaBaixa;
