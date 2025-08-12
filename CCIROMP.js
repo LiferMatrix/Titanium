@@ -548,7 +548,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
       (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🚨 Suporte/Romp. de 🔻Baixa🔻\n\n` +
+      alertText = `✳️ EXPLOSION🚀Alta🚀/SUPORTE \n\n` +
                   `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
