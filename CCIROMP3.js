@@ -493,7 +493,7 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
     ? `${aggressiveDelta.isBuyPressure ? '💹F.Comprador' : '⭕F.Vendedor'} ${aggressiveDelta.deltaPercent > 60 && lsr.value !== null && lsr.value < 1 ? '💥' : ''}(${aggressiveDelta.deltaPercent}%)`
     : '🔘Neutro';
   const oiText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
-  const volumeAnomalyText = isVolumeAnomaly ? '🟢 Presente' : '🔴 Ausente';
+  const volumeAnomalyText = isVolumeAnomaly ? '✅CONFIRMADO' : '❌Ausente';
   if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
   const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
   const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
