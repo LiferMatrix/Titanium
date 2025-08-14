@@ -355,7 +355,7 @@ async function monitorPair(symbol) {
       await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown', disable_web_page_preview: true });
       lastSignals[symbol] = 'COMPRA';
       logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima, fechamento acima da EMA 9)`);
-    } else if (crossunder && rsi1hValue > 60 && rsiFalling && isVolumeAnomaly && isMinVolatility && currentClose < emaPriceCurrent && lastSignals[symbol] !== 'VENDA') {
+    } else if (crossunder && rsi1hValue > 68 && rsiFalling && isVolumeAnomaly && isMinVolatility && currentClose < emaPriceCurrent && lastSignals[symbol] !== 'VENDA') {
       const message = `🔻 *CCI Cross - Correção💥: ${symbol}*
 - *Preço Atual*: $${priceFormatted}
 - *RSI (15m)*: ${rsi15mValue}
