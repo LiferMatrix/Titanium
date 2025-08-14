@@ -643,7 +643,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
                 `- *⛔Stop*: $${slBuy}`;
     state.lastSignals[symbol] = 'COMPRA';
     logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima)`);
-  } else if (rsi1h > 60 && state.lastSignals[symbol] !== 'VENDA') {
+  } else if (rsi1h > 68 && state.lastSignals[symbol] !== 'VENDA') {
     alertText = `🔻 *CCI Cross - Correção💥: ${symbol}*\n` +
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- *RSI (15m)*: ${rsi15m.toFixed(2)}\n` +
