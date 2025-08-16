@@ -551,8 +551,8 @@ async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, r
              isPriceFalling &&
              isVolumeAnomaly &&
              aggressiveDelta.isBuyPressure &&
-             oi5m.isRising && 
-             oi15m.isRising
+             oi5m.isRising //&& 
+             //oi15m.isRising
              ) {
     const nivelRompido = zonas.estruturaBaixa;
     const foiAlertado = state.ultimoRompimento[symbol].historico.some(r => 
