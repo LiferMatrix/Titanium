@@ -757,17 +757,17 @@ async function monitorCCICrossovers() {
       setCachedData(`ticker_${symbol}`, tickerRaw);
       if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.EMA_9_LENGTH)) {
         logger.warn(`Dados insuficientes para ${symbol} (15m)`);
-        await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (15m).`);
+        //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (15m).`);
         return;
       }
       if (!ohlcv1hRaw || ohlcv1hRaw.length < config.RSI_PERIOD) {
         logger.warn(`Dados insuficientes para ${symbol} (1h)`);
-        await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (1h).`);
+        //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (1h).`);
         return;
       }
       if (!ohlcv3mRaw || ohlcv3mRaw.length < config.VOLUME_LOOKBACK) {
         logger.warn(`Dados insuficientes para ${symbol} (3m)`);
-        await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (3m).`);
+        //await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `⚠️ Dados insuficientes para ${symbol} (3m).`);
         return;
       }
       if (!tickerRaw || tickerRaw.last === undefined) {
@@ -869,7 +869,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRompimentos e CCI Crossovers`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium2 Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRompimentos e CCI Crossovers`, { parse_mode: 'Markdown' }));
     await monitorRompimentoEstrutura();
     await monitorCCICrossovers();
     setInterval(monitorRompimentoEstrutura, config.INTERVALO_ALERTA_3M_MS);
