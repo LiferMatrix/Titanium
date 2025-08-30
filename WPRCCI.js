@@ -648,7 +648,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
   const slSell = (parseFloat(price) + 2.7 * parseFloat(atr)).toFixed(precision);
   let alertText = '';
   if (rsi1h < 55 && state.lastSignals[symbol] !== 'COMPRA' && oi5m.isRising ) {
-    alertText = `💹 *💥💥💥WPR💥💥💥 - Compra💥: ${symbol}*\n` +  //&& oi15m.isRising
+    alertText = `💹 *COMPRA 💥💥💥WPR/CCI💥💥💥: ${symbol}*\n` +  //&& oi15m.isRising
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- *RSI (15m)*: ${rsi15m.toFixed(2)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
@@ -668,7 +668,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
     state.lastSignals[symbol] = 'COMPRA';
     logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima, OI 5m subindo, OI 15m subindo)`);
   } else if (rsi1h > 68 && state.lastSignals[symbol] !== 'VENDA' && !oi5m.isRising ) {
-    alertText = `🔻 *💥💥💥WPR💥💥💥 - Correção💥: ${symbol}*\n` + //&& !oi15m.isRising
+    alertText = `🔻 *CORREÇÃO 💥💥💥WPR/CCI💥💥💥 : ${symbol}*\n` + //&& !oi15m.isRising
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- *RSI (15m)*: ${rsi15m.toFixed(2)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
@@ -851,9 +851,9 @@ async function monitorCCICrossovers() {
       const crossunder = emaShortPrevious >= emaLongPrevious && emaShortCurrent < emaLongCurrent;
       const rsiRising = rsi15mCurrent > rsi15mPrevious;
       const rsiFalling = rsi15mCurrent < rsi15mPrevious;
-      if (crossover && rsiRising && isVolumeAnomaly && currentClose > ema9Current && wpr2h < -90) {
+      if (crossover && rsiRising && isVolumeAnomaly && currentClose > ema9Current && wpr2h < -84) {
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m);
-      } else if (crossunder && rsiFalling && isVolumeAnomaly  && currentClose < ema9Current && wpr2h > -10) {
+      } else if (crossunder && rsiFalling && isVolumeAnomaly  && currentClose < ema9Current && wpr2h > -20) {
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m);
       }
     }, 5);
