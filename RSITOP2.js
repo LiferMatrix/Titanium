@@ -19,6 +19,9 @@ const config = {
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
   RECONNECT_INTERVAL_MS: 5000,
+  MACD_FAST_PERIOD: 12, // Período rápido do MACD
+  MACD_SLOW_PERIOD: 26, // Período lento do MACD
+  MACD_SIGNAL_PERIOD: 9, // Período da linha de sinal
 };
 
 // ================= LOGGER ================= //
@@ -115,12 +118,13 @@ async function withRetry(fn, retries = 5, delayBase = 1000) {
 }
 
 function getCachedData(key) {
-  const cacheEntry = state.dataCache.get(key);
-  if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
-    logger.info(`Usando cache para ${key}`);
-    return cacheEntry.data;
-  }
-  state.dataCache.delete(key);
+  // Cache temporariamente desativado para depuração
+  // const cacheEntry = state.dataCache.get(key);
+  // if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
+  //   logger.info(`Usando cache para ${key}`);
+  //   return cacheEntry.data;
+  // }
+  // state.dataCache.delete(key);
   return null;
 }
 
@@ -159,16 +163,40 @@ function normalizeOHLCV(data) {
     low: Number(c[3]),
     close: Number(c[4]),
     volume: Number(c[5])
-  })).filter(c => !isNaN(c.close) && !isNaN(c.volume));
+  })).filter(c => !isNaN(c.close) && !isNaN(c.volume) && c.close > 0);
 }
 
 function calculateRSI(data, period = config.RSI_PERIOD) {
-  if (!data || data.length < period + 1) return [];
+  if (!data || data.length < period + 1) {
+    logger.warn(`Dados insuficientes para calcular RSI: ${data?.length || 0} candles, necessário ${period + 1}`);
+    return [];
+  }
   const rsi = TechnicalIndicators.RSI.calculate({
     period,
     values: data.map(d => d.close || d[4])
   });
-  return rsi.filter(v => !isNaN(v));
+  return rsi.filter(v => !isNaN(v) && v >= 0 && v <= 100);
+}
+
+function calculateMACD(data) {
+  if (!data || data.length < config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD) {
+    logger.warn(`Dados insuficientes para calcular MACD: ${data?.length || 0} candles, necessário ${config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD}`);
+    return null;
+  }
+  const macd = TechnicalIndicators.MACD.calculate({
+    fastPeriod: config.MACD_FAST_PERIOD,
+    slowPeriod: config.MACD_SLOW_PERIOD,
+    signalPeriod: config.MACD_SIGNAL_PERIOD,
+    values: data.map(d => d.close || d[4])
+  });
+  if (!macd || macd.length === 0) {
+    logger.warn(`MACD não calculado: resultado vazio`);
+    return null;
+  }
+  const lastMACD = macd[macd.length - 1];
+  const position = lastMACD.MACD > lastMACD.signal ? '📈' : '📉';
+  const situation = lastMACD.MACD > 0 ? 'Bullish 🟢' : 'Bearish 🔴';
+  return { macd: lastMACD.MACD, signal: lastMACD.signal, position, situation };
 }
 
 async function fetchLSR(symbol) {
@@ -311,7 +339,7 @@ async function fetchFundingRate(symbol) {
 }
 
 // ================= FUNÇÕES DE ALERTAS ================= //
-async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fundingRate, oi5m, oi15m) {
+async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fundingRate, oi5m, oi15m, macd15m, macd1h) {
   const agora = Date.now();
   if (!state.ultimoRSIAlert[symbol]) state.ultimoRSIAlert[symbol] = { historico: [] };
   if (state.ultimoRSIAlert[symbol]['rsi'] && agora - state.ultimoRSIAlert[symbol]['rsi'] < config.TEMPO_COOLDOWN_MS) return;
@@ -319,8 +347,6 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const symbolWithoutSlash = symbol.replace('/', '');
-  const tradingViewLink = `https://www.tradingview.com/chart?symbol=BINANCE:${symbolWithoutSlash}`;
-  const binanceLink = `https://www.binance.com/en/futures/${symbolWithoutSlash}`;
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   let alertText = '';
@@ -361,19 +387,25 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
   const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
 
-  // Montar texto do alerta
+  // Formatar MACD
+  const macd15mText = macd15m ? `MACD 15m: ${macd15m.position} (${macd15m.situation})` : '🔹 MACD 15m Indisp.';
+  const macd1hText = macd1h ? `MACD 1h: ${macd1h.position} (${macd1h.situation})` : '🔹 MACD 1h Indisp.';
+
+  // Montar texto do alerta com maior precisão para RSI e incluindo MACD
   alertText = `⚡️Binance RSI, [${timestamp.slice(0, 10)}]\n` +
               `🔹: $${symbolWithoutSlash}\n` +
               `🔔: ${alertType}\n` +
-              `RSI 5m: ${rsi5m.toFixed(2)}\n` +
-              `RSI 15m: ${rsi15m.toFixed(2)}\n` +
-              `RSI 1H: ${rsi1h.toFixed(2)}\n` +
-              `RSI 4H: ${rsi4h.toFixed(2)}\n` +
+              `RSI 5m: ${rsi5m.toFixed(4)}\n` +
+              `RSI 15m: ${rsi15m.toFixed(4)}\n` +
+              `RSI 1h: ${rsi1h.toFixed(4)}\n` +
+              `RSI 4h: ${rsi4h.toFixed(4)}\n` +
               `Preço: ${format(price)}\n` +
               `LSR: ${lsrText} ${lsrSymbol}\n` +
               `Funding Rate: ${fundingRateText}\n` +
               `${oi5mText}\n` +
               `${oi15mText}\n` +
+              `${macd15mText}\n` +
+              `${macd1hText}\n` +
               `☑︎ Monitor -🤖 @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
@@ -392,7 +424,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
       state.ultimoRSIAlert[symbol]['rsi'] = agora;
       state.ultimoRSIAlert[symbol].historico.push({ nivel: nivelRompido, timestamp: agora });
       state.ultimoRSIAlert[symbol].historico = state.ultimoRSIAlert[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Alerta RSI enviado para ${symbol}: ${alertType}, RSI 5m=${rsi5m.toFixed(2)}, 15m=${rsi15m.toFixed(2)}, 1h=${rsi1h.toFixed(2)}, 4h=${rsi4h.toFixed(2)}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}`);
+      logger.info(`Alerta RSI enviado para ${symbol}: ${alertType}, RSI 5m=${rsi5m.toFixed(4)}, 15m=${rsi15m.toFixed(4)}, 1h=${rsi1h.toFixed(4)}, 4h=${rsi4h.toFixed(4)}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}, MACD 15m=${macd15mText}, MACD 1h=${macd1hText}`);
     } catch (e) {
       logger.error(`Erro ao enviar alerta RSI para ${symbol}: ${e.message}`);
     }
@@ -409,17 +441,25 @@ async function monitorRSI() {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const symbolWithSlash = symbol.replace('USDT', '/USDT');
       const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv5mRaw = getCachedData(`${cacheKeyPrefix}_5m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '5m', undefined, config.RSI_PERIOD + 1));
-      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, config.RSI_PERIOD + 1));
-      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.RSI_PERIOD + 1));
-      const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, config.RSI_PERIOD + 1));
-      const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
-      setCachedData(`${cacheKeyPrefix}_5m`, ohlcv5mRaw);
-      setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
-      setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
-      setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
-      setCachedData(`ticker_${symbol}`, tickerRaw);
 
+      // Buscar dados (aumentar limite para MACD)
+      let ohlcv5mRaw = getCachedData(`${cacheKeyPrefix}_5m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '5m', undefined, config.RSI_PERIOD + 1));
+      let ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD));
+      let ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD));
+      let ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, config.RSI_PERIOD + 1));
+      const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
+
+      // Fallback para timeframes maiores se necessário
+      if (!ohlcv5mRaw || ohlcv5mRaw.length < config.RSI_PERIOD + 1) {
+        logger.info(`Fallback para 15m para ${symbol} (5m)`);
+        ohlcv5mRaw = await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, config.RSI_PERIOD + 1));
+      }
+      if (!ohlcv15mRaw || ohlcv15mRaw.length < config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD) {
+        logger.info(`Fallback para 1h para ${symbol} (15m)`);
+        ohlcv15mRaw = await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD));
+      }
+
+      // Validar dados
       if (!ohlcv5mRaw || !ohlcv15mRaw || !ohlcv1hRaw || !ohlcv4hRaw || !tickerRaw || tickerRaw.last === undefined) {
         logger.warn(`Dados insuficientes ou preço não disponível para ${symbol}, pulando...`);
         return;
@@ -431,20 +471,68 @@ async function monitorRSI() {
       const ohlcv4h = normalizeOHLCV(ohlcv4hRaw);
       const currentPrice = parseFloat(tickerRaw.last);
 
-      if (isNaN(currentPrice)) {
-        logger.warn(`Preço atual inválido para ${symbol}, pulando...`);
+      // Validar número de candles
+      if (ohlcv5m.length < config.RSI_PERIOD + 1 || ohlcv15m.length < config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD ||
+          ohlcv1h.length < config.MACD_SLOW_PERIOD + config.MACD_SIGNAL_PERIOD || ohlcv4h.length < config.RSI_PERIOD + 1) {
+        logger.warn(`Dados insuficientes para ${symbol}: 5m=${ohlcv5m.length}, 15m=${ohlcv15m.length}, 1h=${ohlcv1h.length}, 4h=${ohlcv4h.length}`);
         return;
       }
+
+      // Verificar sincronização dos candles
+      const now = new Date();
+      const checkTimestamp = (ohlcv, timeframe, maxDiffMinutes) => {
+        if (ohlcv.length > 0) {
+          const lastCandleTime = new Date(ohlcv[ohlcv.length - 1].time);
+          const timeDiff = (now - lastCandleTime) / 1000 / 60;
+          if (timeDiff > maxDiffMinutes) {
+            logger.warn(`Último candle de ${timeframe} para ${symbol} está desatualizado: ${lastCandleTime}`);
+            return false;
+          }
+          return true;
+        }
+        return false;
+      };
+      if (!checkTimestamp(ohlcv5m, '5m', 5) || !checkTimestamp(ohlcv15m, '15m', 15) ||
+          !checkTimestamp(ohlcv1h, '1h', 60) || !checkTimestamp(ohlcv4h, '4h', 240)) {
+        logger.warn(`Candles desatualizados para ${symbol}, pulando...`);
+        return;
+      }
+
+      // Log dos candles para depuração
+      logger.info(`Dados OHLCV para ${symbol}:`);
+      logger.info(`5m: ${JSON.stringify(ohlcv5m.slice(-5))}`);
+      logger.info(`15m: ${JSON.stringify(ohlcv15m.slice(-5))}`);
+      logger.info(`1h: ${JSON.stringify(ohlcv1h.slice(-5))}`);
+      logger.info(`4h: ${JSON.stringify(ohlcv4h.slice(-5))}`);
 
       const rsi5m = calculateRSI(ohlcv5m);
       const rsi15m = calculateRSI(ohlcv15m);
       const rsi1h = calculateRSI(ohlcv1h);
       const rsi4h = calculateRSI(ohlcv4h);
+      const macd15m = calculateMACD(ohlcv15m);
+      const macd1h = calculateMACD(ohlcv1h);
 
+      // Validar RSI
       if (!rsi5m.length || !rsi15m.length || !rsi1h.length || !rsi4h.length) {
         logger.warn(`RSI não calculado para ${symbol}, pulando...`);
         return;
       }
+
+      // Log dos valores de RSI e MACD
+      logger.info(`Indicadores calculados para ${symbol}:`);
+      logger.info(`RSI 5m: ${rsi5m[rsi5m.length - 1]}`);
+      logger.info(`RSI 15m: ${rsi15m[rsi15m.length - 1]}`);
+      logger.info(`RSI 1h: ${rsi1h[rsi1h.length - 1]}`);
+      logger.info(`RSI 4h: ${rsi4h[rsi4h.length - 1]}`);
+      logger.info(`MACD 15m: ${macd15m ? JSON.stringify(macd15m) : 'Indisponível'}`);
+      logger.info(`MACD 1h: ${macd1h ? JSON.stringify(macd1h) : 'Indisponível'}`);
+
+      // Cache dos dados
+      setCachedData(`${cacheKeyPrefix}_5m`, ohlcv5mRaw);
+      setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
+      setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
+      setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
+      setCachedData(`ticker_${symbol}`, tickerRaw);
 
       const lsr = await fetchLSR(symbolWithSlash);
       const oi5m = await fetchOpenInterest(symbolWithSlash, '5m');
@@ -461,7 +549,9 @@ async function monitorRSI() {
         lsr,
         fundingRate,
         oi5m,
-        oi15m
+        oi15m,
+        macd15m,
+        macd1h
       );
     }, 5);
   } catch (e) {
@@ -500,7 +590,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium3 Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium3 Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRSI e MACD Alerts`, { parse_mode: 'Markdown' }));
     await monitorRSI();
     setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
