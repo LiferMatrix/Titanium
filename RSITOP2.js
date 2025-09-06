@@ -333,10 +333,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
 
   // Verificar se todos os RSIs atendem ao critério
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
-    alertType = 'RSI ALTO +70';
+    alertType = '🔴RSI ALTO 📈 +70';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = 'RSI BAIXO 25-';
+    alertType = '🟢RSI BAIXO 📉 25-';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nem todos os timeframes atendem ao critério
@@ -366,7 +366,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
 
   // Montar texto do alerta com maior precisão para RSI
-  alertText = `⚡️RSI,\n` +
+  alertText = `⚡️RSI\n` +
               `🔹: $${symbolWithoutSlash}\n` +
               `Preço: ${format(price)}\n` +
               `🔔: ${alertType}\n` +
