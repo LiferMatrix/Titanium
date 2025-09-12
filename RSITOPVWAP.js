@@ -362,7 +362,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
     alertType = '🛑Realizar Lucro/Parcial';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '✳️Analisar Sobrevenda/Long';
+    alertType = '✳️Analisar Sobrevenda/Compra';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nem todos os timeframes atendem ao critério
@@ -397,7 +397,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const vwapText = vwap1h !== null ? format(vwap1h) : '🔹 Indisp.';
 
   // Montar texto do alerta com maior precisão para RSI
-  alertText = `💠 Ativo encontrado\n` +
+  alertText = `💠 Ativo \n` +
               `🔹: $${symbolWithoutSlash}\n` +
               `Preço: ${format(price)}\n` +
               `${alertType}\n` +
