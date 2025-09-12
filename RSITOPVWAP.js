@@ -398,7 +398,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
 
   // Montar texto do alerta com maior precisão para RSI
   alertText = `💠 Ativo \n` +
-              `🔹: $${symbolWithoutSlash}\n` +
+              `🔹 $${symbolWithoutSlash}\n` +
               `Preço: ${format(price)}\n` +
               `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
