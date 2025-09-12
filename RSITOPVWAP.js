@@ -359,10 +359,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
 
   // Verificar se todos os RSIs atendem ao critério
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
-    alertType = '🔴RSI ALTO 📈 +70';
+    alertType = '🛑Realizar Lucro/Parcial';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '🟢RSI BAIXO 📉 25-';
+    alertType = '✳️Analisar Sobrevenda/Long';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nem todos os timeframes atendem ao critério
@@ -397,10 +397,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const vwapText = vwap1h !== null ? format(vwap1h) : '🔹 Indisp.';
 
   // Montar texto do alerta com maior precisão para RSI
-  alertText = `⚡️RSI\n` +
+  alertText = `💠 Ativo encontrado\n` +
               `🔹: $${symbolWithoutSlash}\n` +
               `Preço: ${format(price)}\n` +
-              `🔔: ${alertType}\n` +
+              `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
               `RSI 15m: ${rsi15m.toFixed(4)}\n` +
               `RSI 1h: ${rsi1h.toFixed(4)}\n` +
@@ -600,7 +600,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 4 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 5 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
     await monitorRSI();
     setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
