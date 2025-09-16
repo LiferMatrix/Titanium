@@ -175,6 +175,32 @@ function calculateRSI(data, period = config.RSI_PERIOD) {
   return rsi.filter(v => !isNaN(v) && v >= 0 && v <= 100);
 }
 
+function calculateSupportResistance(data) {
+  if (!data || data.length < 50) {
+    logger.warn(`Dados insuficientes para calcular suporte/resistência: ${data?.length || 0} candles, necessário 50`);
+    return { support: null, resistance: null };
+  }
+  const lows = data.slice(-50).map(d => d.low);
+  const highs = data.slice(-50).map(d => d.high);
+  const support = Math.min(...lows);
+  const resistance = Math.max(...highs);
+  return { support, resistance };
+}
+
+function calculateVWAP(data) {
+  if (!data || data.length < 50) {
+    logger.warn(`Dados insuficientes para calcular VWAP: ${data?.length || 0} candles, necessário 50`);
+    return null;
+  }
+  const vwap = TechnicalIndicators.VWAP.calculate({
+    high: data.slice(-50).map(d => d.high),
+    low: data.slice(-50).map(d => d.low),
+    close: data.slice(-50).map(d => d.close),
+    volume: data.slice(-50).map(d => d.volume)
+  });
+  return vwap.length > 0 ? vwap[vwap.length - 1] : null;
+}
+
 async function fetchLSR(symbol) {
   const cacheKey = `lsr_${symbol}`;
   const cached = getCachedData(cacheKey);
@@ -315,7 +341,7 @@ async function fetchFundingRate(symbol) {
 }
 
 // ================= FUNÇÕES DE ALERTAS ================= //
-async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fundingRate, oi5m, oi15m) {
+async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, lsr, fundingRate, oi5m, oi15m, support, resistance, vwap1h) {
   const agora = Date.now();
   if (!state.ultimoRSIAlert[symbol]) state.ultimoRSIAlert[symbol] = { historico: [] };
   if (state.ultimoRSIAlert[symbol]['rsi'] && agora - state.ultimoRSIAlert[symbol]['rsi'] < config.TEMPO_COOLDOWN_MS) return;
@@ -333,10 +359,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
 
   // Verificar se todos os RSIs atendem ao critério
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
-    alertType = '🔴RSI ALTO 📈 +70';
+    alertType = '🛑Realizar Lucro/Parcial';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '🟢RSI BAIXO 📉 25-';
+    alertType = '✳️Analisar Sobrevenda/Compra';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nem todos os timeframes atendem ao critério
@@ -365,19 +391,28 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
   const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
   const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
 
+  // Formatar Suporte, Resistência e VWAP
+  const supportText = support !== null ? format(support) : '🔹 Indisp.';
+  const resistanceText = resistance !== null ? format(resistance) : '🔹 Indisp.';
+  const vwapText = vwap1h !== null ? format(vwap1h) : '🔹 Indisp.';
+
   // Montar texto do alerta com maior precisão para RSI
-  alertText = `⚡️RSI\n` +
-              `🔹: $${symbolWithoutSlash}\n` +
+  alertText = `💠 Ativo \n` +
+              `🔹 $${symbolWithoutSlash}\n` +
               `Preço: ${format(price)}\n` +
-              `🔔: ${alertType}\n` +
+              `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
               `RSI 15m: ${rsi15m.toFixed(4)}\n` +
               `RSI 1h: ${rsi1h.toFixed(4)}\n` +
               `RSI 4h: ${rsi4h.toFixed(4)}\n` +
-              `LSR: ${lsrText} ${lsrSymbol}\n` +
+              `RSI 1d: ${rsi1d.toFixed(4)}\n` +
+              `🔹LSR: ${lsrText} ${lsrSymbol}\n` +
               `Funding Rate: ${fundingRateText}\n` +
               `${oi5mText}\n` +
               `${oi15mText}\n` +
+              `🔹Suporte : ${supportText}\n` +
+              `🔹Resistência : ${resistanceText}\n` +
+              `🔹VWAP (1h): ${vwapText}\n` +
               `☑︎ Monitor -🤖 @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
@@ -396,7 +431,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, lsr, fun
       state.ultimoRSIAlert[symbol]['rsi'] = agora;
       state.ultimoRSIAlert[symbol].historico.push({ nivel: nivelRompido, timestamp: agora });
       state.ultimoRSIAlert[symbol].historico = state.ultimoRSIAlert[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Alerta RSI enviado para ${symbol}: ${alertType}, RSI 5m=${rsi5m.toFixed(4)}, 15m=${rsi15m.toFixed(4)}, 1h=${rsi1h.toFixed(4)}, 4h=${rsi4h.toFixed(4)}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}`);
+      logger.info(`Alerta RSI enviado para ${symbol}: ${alertType}, RSI 5m=${rsi5m.toFixed(4)}, 15m=${rsi15m.toFixed(4)}, 1h=${rsi1h.toFixed(4)}, 4h=${rsi4h.toFixed(4)}, 1d=${rsi1d.toFixed(4)}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}, Suporte=${supportText}, Resistência=${resistanceText}, VWAP=${vwapText}`);
     } catch (e) {
       logger.error(`Erro ao enviar alerta RSI para ${symbol}: ${e.message}`);
     }
@@ -417,8 +452,9 @@ async function monitorRSI() {
       // Buscar dados
       let ohlcv5mRaw = getCachedData(`${cacheKeyPrefix}_5m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '5m', undefined, config.RSI_PERIOD + 1));
       let ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, config.RSI_PERIOD + 1));
-      let ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.RSI_PERIOD + 1));
+      let ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, 50)); // Alterado para 50 velas
       let ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, config.RSI_PERIOD + 1));
+      let ohlcv1dRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1d', undefined, config.RSI_PERIOD + 1));
       const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
 
       // Fallback para timeframes maiores se necessário
@@ -432,7 +468,7 @@ async function monitorRSI() {
       }
 
       // Validar dados
-      if (!ohlcv5mRaw || !ohlcv15mRaw || !ohlcv1hRaw || !ohlcv4hRaw || !tickerRaw || tickerRaw.last === undefined) {
+      if (!ohlcv5mRaw || !ohlcv15mRaw || !ohlcv1hRaw || !ohlcv4hRaw || !ohlcv1dRaw || !tickerRaw || tickerRaw.last === undefined) {
         logger.warn(`Dados insuficientes ou preço não disponível para ${symbol}, pulando...`);
         return;
       }
@@ -441,12 +477,14 @@ async function monitorRSI() {
       const ohlcv15m = normalizeOHLCV(ohlcv15mRaw);
       const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
       const ohlcv4h = normalizeOHLCV(ohlcv4hRaw);
+      const ohlcv1d = normalizeOHLCV(ohlcv1dRaw);
       const currentPrice = parseFloat(tickerRaw.last);
 
       // Validar número de candles
       if (ohlcv5m.length < config.RSI_PERIOD + 1 || ohlcv15m.length < config.RSI_PERIOD + 1 ||
-          ohlcv1h.length < config.RSI_PERIOD + 1 || ohlcv4h.length < config.RSI_PERIOD + 1) {
-        logger.warn(`Dados insuficientes para ${symbol}: 5m=${ohlcv5m.length}, 15m=${ohlcv15m.length}, 1h=${ohlcv1h.length}, 4h=${ohlcv4h.length}`);
+          ohlcv1h.length < config.RSI_PERIOD + 1 || ohlcv4h.length < config.RSI_PERIOD + 1 ||
+          ohlcv1d.length < config.RSI_PERIOD + 1) {
+        logger.warn(`Dados insuficientes para ${symbol}: 5m=${ohlcv5m.length}, 15m=${ohlcv15m.length}, 1h=${ohlcv1h.length}, 4h=${ohlcv4h.length}, 1d=${ohlcv1d.length}`);
         return;
       }
 
@@ -465,7 +503,8 @@ async function monitorRSI() {
         return false;
       };
       if (!checkTimestamp(ohlcv5m, '5m', 5) || !checkTimestamp(ohlcv15m, '15m', 15) ||
-          !checkTimestamp(ohlcv1h, '1h', 60) || !checkTimestamp(ohlcv4h, '4h', 240)) {
+          !checkTimestamp(ohlcv1h, '1h', 60) || !checkTimestamp(ohlcv4h, '4h', 240) ||
+          !checkTimestamp(ohlcv1d, '1d', 1440)) {
         logger.warn(`Candles desatualizados para ${symbol}, pulando...`);
         return;
       }
@@ -476,30 +515,41 @@ async function monitorRSI() {
       logger.info(`15m: ${JSON.stringify(ohlcv15m.slice(-5))}`);
       logger.info(`1h: ${JSON.stringify(ohlcv1h.slice(-5))}`);
       logger.info(`4h: ${JSON.stringify(ohlcv4h.slice(-5))}`);
+      logger.info(`1d: ${JSON.stringify(ohlcv1d.slice(-5))}`);
 
       const rsi5m = calculateRSI(ohlcv5m);
       const rsi15m = calculateRSI(ohlcv15m);
       const rsi1h = calculateRSI(ohlcv1h);
       const rsi4h = calculateRSI(ohlcv4h);
+      const rsi1d = calculateRSI(ohlcv1d);
 
       // Validar RSI
-      if (!rsi5m.length || !rsi15m.length || !rsi1h.length || !rsi4h.length) {
+      if (!rsi5m.length || !rsi15m.length || !rsi1h.length || !rsi4h.length || !rsi1d.length) {
         logger.warn(`RSI não calculado para ${symbol}, pulando...`);
         return;
       }
 
-      // Log dos valores de RSI
-      logger.info(`RSI calculado para ${symbol}:`);
+      // Calcular Suporte, Resistência e VWAP
+      const { support, resistance } = calculateSupportResistance(ohlcv1h);
+      const vwap1h = calculateVWAP(ohlcv1h);
+
+      // Log dos valores de RSI, Suporte, Resistência e VWAP
+      logger.info(`Indicadores calculados para ${symbol}:`);
       logger.info(`RSI 5m: ${rsi5m[rsi5m.length - 1]}`);
       logger.info(`RSI 15m: ${rsi15m[rsi15m.length - 1]}`);
       logger.info(`RSI 1h: ${rsi1h[rsi1h.length - 1]}`);
       logger.info(`RSI 4h: ${rsi4h[rsi4h.length - 1]}`);
+      logger.info(`RSI 1d: ${rsi1d[rsi1d.length - 1]}`);
+      logger.info(`Suporte (1h, 50 velas): ${support}`);
+      logger.info(`Resistência (1h, 50 velas): ${resistance}`);
+      logger.info(`VWAP (1h): ${vwap1h}`);
 
       // Cache dos dados
       setCachedData(`${cacheKeyPrefix}_5m`, ohlcv5mRaw);
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
       setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
+      setCachedData(`${cacheKeyPrefix}_1d`, ohlcv1dRaw);
       setCachedData(`ticker_${symbol}`, tickerRaw);
 
       const lsr = await fetchLSR(symbolWithSlash);
@@ -514,10 +564,14 @@ async function monitorRSI() {
         rsi15m[rsi15m.length - 1],
         rsi1h[rsi1h.length - 1],
         rsi4h[rsi4h.length - 1],
+        rsi1d[rsi1d.length - 1],
         lsr,
         fundingRate,
         oi5m,
-        oi15m
+        oi15m,
+        support,
+        resistance,
+        vwap1h
       );
     }, 5);
   } catch (e) {
@@ -556,7 +610,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium3 Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 5 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
     await monitorRSI();
     setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
