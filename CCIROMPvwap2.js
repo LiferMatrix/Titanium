@@ -681,10 +681,6 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
                 `- *VWAP 1h*: ${vwap1hText}\n` +
                 `- *🟰Resistência*: $${format(resistance)}\n` +
                 `- *➖Suporte*: $${format(support)}\n` +
-                `- *TP1*: $${tp1}\n` +
-                `- *TP2*: $${tp2}\n` +
-                `- *TP3*: $${tp3}\n` +
-                `- *TP4*: $${tp4}\n` +
                 `- *⛔Stop*: $${slBuy}\n` +
                 ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz`;
     state.lastSignals[symbol] = 'COMPRA';
@@ -702,10 +698,6 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
                 `- *VWAP 1h*: ${vwap1hText}\n` +
                 `- *🟰Resistência*: $${format(resistance)}\n` +
                 `- *➖Suporte*: $${format(support)}\n` +
-                `- *TP1*: $${tp1Sell}\n` +
-                `- *TP2*: $${tp2Sell}\n` +
-                `- *TP3*: $${tp3Sell}\n` +
-                `- *TP4*: $${tp4Sell}\n` +
                 `- *⛔Stop*: $${slSell}\n` +
                 ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz`;
     state.lastSignals[symbol] = 'VENDA';
