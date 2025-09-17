@@ -354,10 +354,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
 
   // Verificar condições de alerta
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_2 && rsi15m >= config.RSI_HIGH_THRESHOLD_2 && rsi1h >= config.RSI_HIGH_THRESHOLD_2) {
-    alertType = '🛑 Realizar Lucro Total';
+    alertType = '🛑 Realizar Lucro 🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD) {
-    alertType = '✳️ Extrema Sobrevenda';
+    alertType = '✳️ Extrema Sobrevenda ✳️';
     emoji = '🟢🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
     alertType = '🛑 Realizar Lucro/Parcial';
@@ -611,7 +611,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 5 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 6 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
     await monitorRSI();
     setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
