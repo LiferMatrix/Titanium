@@ -10,7 +10,9 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID; // ID do canal
 const INTERVALO_RELATORIO_15M_MS = 15 * 60 * 1000; // 15 minutos
 const INTERVALO_ANALISE_AUTOMATICA_MS = 30 * 60 * 1000; // 30 minutos
+const INTERVALO_MONITORAMENTO_TEMPO_REAL_MS = 5 * 60 * 1000; // 5 minutos
 const API_DELAY_MS = 500; // Delay entre chamadas à API
+const ALERTA_COOLDOWN_S = 3600; // 1 hora de cooldown para alertas repetidos
 
 // Lista de pares monitorados
 const MONITORED_PAIRS = [
@@ -59,7 +61,7 @@ const MONITORED_PAIRS = [
   'PEOPLE/USDT',
   'REZ/USDT',
   'RENDER/USDT',
-  'ATH/USDT',
+  'RLC/USDT',
   'RVN/USDT',
   'STG/USDT',
   'TRB/USDT',
@@ -100,7 +102,7 @@ const MONITORED_PAIRS = [
   'ZRO/USDT',
   'SYS/USDT',
   'TRU/USDT',
-  'RLC/USDT',
+  'ORDI/USDT',
   'APT/USDT',
   'ATA/USDT',
   'AR/USDT',
@@ -125,6 +127,9 @@ const logger = winston.createLogger({
 
 // Declaração explícita no início do script
 const ultimoEstocastico = {};
+const ultimoRSI = {}; // Para rastrear RSI anterior por par
+const ultimaEstrutura = {}; // Para rastrear estrutura anterior por par
+const ultimoAlertaTempo = {}; // Para rastrear o tempo do último alerta por par e tipo
 
 // Validação de variáveis de ambiente
 function validateEnv() {
@@ -543,7 +548,7 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
     }
 
     if (rsi15mVal < 40 || rsi1hVal < 40) {
-      relevance += "📉 RSI em zona de sobrevenda. ";
+      relevance += "📉 RSI em zona de sobrevivenda. ";
       score += 1.5;
     }
 
@@ -553,7 +558,7 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
     }
 
     if ((estocasticoD?.k < 25 && estocasticoD?.k > estocasticoD?.d) || (estocastico4h?.k < 25 && estocastico4h?.k > estocastico4h?.d)) {
-      relevance += "📊 Estocástico em sobrevenda. ";
+      relevance += "📊 Estocástico em sobrevivenda. ";
       score += 1.5;
     }
 
@@ -609,7 +614,7 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
       score += 1;
     }
 
-    if ((estocasticoD?.k > 75 && estocasticoD?.k < estocasticoD?.d) || (estocastico4h?.k > 75 && estocastico4h?.k < estocastico4h?.d)) {
+    if ((estocasticoD?.k >75 && estocasticoD?.k < estocasticoD?.d) || (estocastico4h?.k > 75 && estocastico4h?.k < estocastico4h?.d)) {
       relevance += "📊 Estocástico em sobrecompra. ";
       score += 1.5;
     }
@@ -744,6 +749,165 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
   };
 }
 
+// Função para gerar sugestões humanizadas com base no estado atual
+function generateHumanizedSuggestion(rsi1hVal, rsi15mVal, estocasticoD, estocastico4h, currentPrice, bestBuyZone, bestSellZone, breakoutAbove, breakoutBelow) {
+  let suggestion = "Ei, aqui vai uma dica rápida baseada na análise atual:\n";
+
+  // Sugestões baseadas em RSI
+  if (rsi15mVal < 30 || rsi1hVal < 30) {
+    suggestion += "O RSI está indicando uma possível sobrevenda. Pode ser um bom momento para considerar uma entrada, mas espere por confirmação de volume ou um rompimento positivo. ";
+  } else if (rsi15mVal > 70 || rsi1hVal > 70) {
+    suggestion += "O RSI sugere sobrecompra. Talvez seja hora de pensar em realizar lucros se você estiver em posição longa. Fique atento a sinais de reversão! ";
+  }
+
+  // Sugestões baseadas em Estocástico
+  if (estocasticoD?.k < 20 || estocastico4h?.k < 20) {
+    suggestion += "O Estocástico está em zona de sobrevenda. Aguarde um cruzamento para cima para uma possível oportunidade de compra. ";
+  } else if (estocasticoD?.k > 80 || estocastico4h?.k > 80) {
+    suggestion += "Estocástico em sobrecompra. Pode ser prudente esperar uma correção antes de entrar em novas posições. ";
+  }
+
+  // Sugestões baseadas em zonas de compra/venda
+  if (bestBuyZone && Math.abs(currentPrice - parseFloat(bestBuyZone.level)) / currentPrice < 0.02) {
+    suggestion += `O preço está próximo da melhor zona de compra em ${bestBuyZone.level}. Considere acumular aqui se os indicadores confirmarem! `;
+  } else if (bestSellZone && Math.abs(currentPrice - parseFloat(bestSellZone.level)) / currentPrice < 0.02) {
+    suggestion += `Estamos perto da melhor zona de venda em ${bestSellZone.level}. Pode ser um bom ponto para realizar lucros. `;
+  } else if (bestBuyZone) {
+    suggestion += `Aguarde o preço se aproximar da zona de compra ideal em ${bestBuyZone.level} para uma entrada mais segura. `;
+  } else if (bestSellZone) {
+    suggestion += `Espere o preço atingir a zona de venda em ${bestSellZone.level} para considerar vender e capturar ganhos. `;
+  }
+
+  // Sugestões baseadas em rompimentos
+  if (breakoutAbove.length > 0 && currentPrice > breakoutAbove[0].level * 0.99) {
+    suggestion += "Parece que estamos em um rompimento de alta. Se o volume aumentar, isso pode ser o início de uma tendência positiva – fique de olho! ";
+  } else if (breakoutBelow.length > 0 && currentPrice < breakoutBelow[0].level * 1.01) {
+    suggestion += "Cuidado com o rompimento de baixa. Pode ser hora de proteger suas posições ou esperar por suporte mais abaixo. ";
+  }
+
+  if (suggestion === "Ei, aqui vai uma dica rápida baseada na análise atual:\n") {
+    suggestion += "O mercado está neutro no momento. Monitore os indicadores para sinais claros de movimento. Lembre-se, sempre gerencie seu risco! ";
+  } else {
+    suggestion += "\nLembre-se, isso não é conselho financeiro – faça sua própria pesquisa e gerencie riscos com cuidado!";
+  }
+
+  return suggestion;
+}
+
+// Função para monitorar rompimentos de estrutura e mudanças em indicadores em tempo real
+async function monitorRealTime() {
+  try {
+    for (const symbol of MONITORED_PAIRS) {
+      // Validar par
+      const isValidSymbol = await validateSymbol(symbol);
+      if (!isValidSymbol) {
+        logger.warn(`Par inválido no monitoramento em tempo real: ${symbol}`);
+        continue;
+      }
+
+      // Obter preço atual
+      const ticker = await exchangeSpot.fetchTicker(symbol);
+      const currentPrice = ticker.last;
+      if (!currentPrice) {
+        logger.warn(`Preço atual indisponível para ${symbol}`);
+        continue;
+      }
+
+      // Obter dados OHLCV para indicadores e estrutura
+      const ohlcv15m = await exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 20);
+      const ohlcv4h = await exchangeSpot.fetchOHLCV(symbol, '4h', undefined, 20);
+      const ohlcvDiario = await exchangeSpot.fetchOHLCV(symbol, '1d', undefined, 20);
+      const ohlcv1h = await exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 20);
+      if (!ohlcv15m || !ohlcv4h || !ohlcvDiario || !ohlcv1h) {
+        logger.warn(`Dados OHLCV insuficientes para ${symbol}`);
+        continue;
+      }
+
+      // Calcular indicadores
+      const rsi4h = calculateRSI(ohlcv4h.map(c => ({ close: c[4] })));
+      const rsiDiario = calculateRSI(ohlcvDiario.map(c => ({ close: c[4] })));
+      const rsi1h = calculateRSI(ohlcv1h.map(c => ({ close: c[4] })));
+      const rsi15m = calculateRSI(ohlcv15m.map(c => ({ close: c[4] })));
+      const rsi4hVal = rsi4h && rsi4h.length ? rsi4h[rsi4h.length - 1].toFixed(1) : null;
+      const rsiDiarioVal = rsiDiario && rsiDiario.length ? rsiDiario[rsiDiario.length - 1].toFixed(1) : null;
+      const rsi1hVal = rsi1h && rsi1h.length ? rsi1h[rsi1h.length - 1].toFixed(1) : null;
+      const rsi15mVal = rsi15m && rsi15m.length ? rsi15m[rsi15m.length - 1].toFixed(1) : null;
+      const estocastico4h = calculateStochastic(ohlcv4h.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3, 3);
+      const estocasticoDiario = calculateStochastic(ohlcvDiario.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3,3);
+      const estocasticoD = calculateStochastic(ohlcvDiario.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3, 3);
+      const zonas = detectarQuebraEstrutura(ohlcv15m.map(c => ({ high: c[2], low: c[3], volume: c[5] })));
+      const fibLevels = calculateFibonacciLevels(ohlcvDiario);
+      const wyckoff = analyzeWyckoff(ohlcvDiario, ohlcv4h, ohlcvDiario[ohlcvDiario.length - 1][5], ohlcvDiario[ohlcvDiario.length - 2][5]);
+      const elliott = analyzeElliott(ohlcv4h);
+      const orderBook = await fetchOrderBook(symbol);
+      const lsrData = await fetchLSR(symbol);
+      const cvd15mStatus = calculateCVD(ohlcv15m) > 0 ? "⬆️ Bullish" : "⬇️ Bearish";
+      const obv15mStatus = calculateOBV(ohlcv15m) > 0 ? "⬆️ Bullish" : "⬇️ Bearish";
+
+      // Obter alvos para sugestões
+      const targets = determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, obv15mStatus, estocasticoD, estocastico4h, wyckoff, elliott, orderBook, lsrData, currentPrice);
+
+      // Formatar preço
+      const format = v => currentPrice < 1 ? v.toFixed(8) : currentPrice < 10 ? v.toFixed(6) : currentPrice < 100 ? v.toFixed(4) : v.toFixed(2);
+
+      // Inicializar estado anterior se não existir
+      if (!ultimoRSI[symbol]) ultimoRSI[symbol] = { rsi4h: null, rsiDiario: null };
+      if (!ultimoEstocastico[symbol]) ultimoEstocastico[symbol] = { k4h: null, kDiario: null };
+      if (!ultimaEstrutura[symbol]) ultimaEstrutura[symbol] = { price: null, estruturaAlta: null, estruturaBaixa: null };
+      if (!ultimoAlertaTempo[symbol]) ultimoAlertaTempo[symbol] = {};
+
+      let alertas = [];
+
+      // Verificar rompimento de estrutura
+      if (zonas.estruturaAlta > 0 && ultimaEstrutura[symbol].estruturaAlta && currentPrice > zonas.estruturaAlta && ultimaEstrutura[symbol].price <= ultimaEstrutura[symbol].estruturaAlta) {
+        const alertaKey = `${symbol}_rompimento_alta`;
+        const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
+        if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
+          alertas.push(`🚨 *Rompimento de Alta em ${symbol}* 🚀\nPreço atual (${format(currentPrice)}) ultrapassou a resistência (${format(zonas.estruturaAlta)}).\nEi, isso pode ser o início de um movimento positivo – considere entrar se o volume confirmar!`);
+          ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
+        }
+      }
+      if (zonas.estruturaBaixa > 0 && ultimaEstrutura[symbol].estruturaBaixa && currentPrice < zonas.estruturaBaixa && ultimaEstrutura[symbol].price >= ultimaEstrutura[symbol].estruturaBaixa) {
+        const alertaKey = `${symbol}_rompimento_baixa`;
+        const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
+        if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
+          alertas.push(`🚨 *Rompimento de Baixa em ${symbol}* 📉\nPreço atual (${format(currentPrice)}) caiu abaixo do suporte (${format(zonas.estruturaBaixa)}).\nCuidado, pode ser hora de proteger suas posições ou esperar por um suporte mais baixo.`);
+          ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
+        }
+      }
+
+      
+      // Enviar alertas
+      for (const alerta of alertas) {
+        await bot.api.sendMessage(TELEGRAM_CHAT_ID, alerta, { parse_mode: 'Markdown' });
+        logger.info(`Alerta enviado para ${symbol}: ${alerta}`);
+        await new Promise(resolve => setTimeout(resolve, API_DELAY_MS));
+      }
+
+      // Atualizar estado anterior
+      ultimaEstrutura[symbol] = {
+        price: currentPrice,
+        estruturaAlta: zonas.estruturaAlta,
+        estruturaBaixa: zonas.estruturaBaixa
+      };
+      ultimoRSI[symbol] = {
+        rsi4h: rsi4hVal,
+        rsiDiario: rsiDiarioVal
+      };
+      ultimoEstocastico[symbol] = {
+        k4h: estocastico4h ? estocastico4h.k : null,
+        kDiario: estocasticoDiario ? estocasticoDiario.k : null
+      };
+
+      // Delay entre pares para evitar limites de taxa
+      await new Promise(resolve => setTimeout(resolve, API_DELAY_MS));
+    }
+  } catch (e) {
+    logger.error(`Erro no monitoramento em tempo real: ${e.message}`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro no monitoramento em tempo real: ${e.message}`, { parse_mode: 'Markdown' });
+  }
+}
+
 // Função para validar o par de moedas
 async function validateSymbol(symbol) {
   try {
@@ -779,7 +943,7 @@ async function sendStatusReport(symbol, chatId) {
       return;
     }
 
-    let texto = `🤖 *Análise de ${symbol}*\n\n`;
+    let texto = `🤖 *Análise de ${symbol}*\nEi, vamos dar uma olhada no que está acontecendo com esse ativo!\n\n`;
 
     // Dados OHLCV
     const ohlcv1h = await exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 20);
@@ -875,7 +1039,9 @@ async function sendStatusReport(symbol, chatId) {
       `\n\n🎯 *Alvos de Compra*\n` +
       (targets.buyExplanations.length > 0 ? targets.buyExplanations.map(e => e.split(': ')[0] + ': ' + e.split(': ')[1]).join('\n') : 'Nenhum identificado.') +
       `\n\n🎯 *Alvos de Venda*\n` +
-      (targets.sellExplanations.length > 0 ? targets.sellExplanations.map(e => e.split(': ')[0] + ': ' + e.split(': ')[1]).join('\n') : 'Nenhum identificado.');
+      (targets.sellExplanations.length > 0 ? targets.sellExplanations.map(e => e.split(': ')[0] + ': ' + e.split(': ')[1]).join('\n') : 'Nenhum identificado.') +
+      `\n\n💡 *Sugestão do Momento*\n` +
+      generateHumanizedSuggestion(rsi1hVal, rsi15mVal, estocasticoD, estocastico4h, price, targets.bestBuyZone, targets.bestSellZone, targets.breakoutAbove, targets.breakoutBelow);
 
     await bot.api.sendMessage(chatId, texto, {
       parse_mode: 'Markdown',
@@ -939,8 +1105,12 @@ async function main() {
     
     // Iniciar análises automáticas
     setInterval(sendRandomPairAnalysis, INTERVALO_ANALISE_AUTOMATICA_MS);
+    // Iniciar monitoramento em tempo real
+    setInterval(monitorRealTime, INTERVALO_MONITORAMENTO_TEMPO_REAL_MS);
     // Enviar uma análise inicial imediatamente
     await sendRandomPairAnalysis();
+    // Executar monitoramento em tempo real imediatamente
+    await monitorRealTime();
 
     await bot.start();
   } catch (e) {
