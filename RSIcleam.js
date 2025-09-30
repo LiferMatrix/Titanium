@@ -16,12 +16,12 @@ const config = {
   INTERVALO_ALERTA_RSI_MS: 3 * 60 * 1000, // 3 minutos para verificação de RSI
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Cooldown para alertas
   RSI_PERIOD: 14,
-  RSI_HIGH_THRESHOLD_1: 70, // Alerta de RSI alto (todos os timeframes)
+  RSI_HIGH_THRESHOLD_1: 73, // Alerta de RSI alto (todos os timeframes)
   RSI_HIGH_THRESHOLD_2: 75, // Alerta de RSI extremo (5m, 15m, 1h)
   RSI_HIGH_THRESHOLD_3: 80, // Novo alerta de sobrecompra 15m (5m, 15m)
-  RSI_LOW_THRESHOLD: 25, // Alerta de RSI baixo (todos os timeframes)
+  RSI_LOW_THRESHOLD: 23, // Alerta de RSI baixo (todos os timeframes)
   RSI_EXTREME_LOW_THRESHOLD: 23, // Alerta de RSI extremo baixo (5m, 15m, 1h)
-  RSI_SCALP_LOW_THRESHOLD: 25, // Novo alerta de scalp sobrevenda 15m (5m, 15m)
+  RSI_SCALP_LOW_THRESHOLD: 23, // Novo alerta de scalp sobrevenda 15m (5m, 15m)
   CACHE_TTL: 2 * 60 * 1000, // 2 minutos para cache
   MAX_CACHE_SIZE: 50, // Reduzido para 50 entradas
   MAX_HISTORICO_ALERTAS: 10,
@@ -408,22 +408,22 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
 
   // Verificar condições de alerta
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_3 && rsi15m >= config.RSI_HIGH_THRESHOLD_3) {
-    alertType = '🛑 Scalp 15m/ Realizar 🛑';
+    alertType = '🛑Scalp #15m / Avaliar Realizar Lucro🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_SCALP_LOW_THRESHOLD && rsi15m <= config.RSI_SCALP_LOW_THRESHOLD) {
-    alertType = '✳️ Scalp 15m/ Compra✳️';
+    alertType = '✳️Scalp #15m / Avaliar Compra✳️';
     emoji = '🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_2 && rsi15m >= config.RSI_HIGH_THRESHOLD_2 && rsi1h >= config.RSI_HIGH_THRESHOLD_2) {
-    alertType = '🛑 Realizar Lucro 1H 🛑';
+    alertType = '🛑 Realizar Lucro #1H 🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD) {
-    alertType = '✳️ Extrema Sobrevenda 1H ✳️';
+    alertType = '✳️ Extrema Sobrevenda #1H ✳️';
     emoji = '🟢🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
-    alertType = '🛑 Realizar Lucro/Parcial 4H 🛑';
+    alertType = '🛑 Realizar Lucro/Parcial #4H 🛑';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '✳️ Analisar Sobrevenda/Compra 4H ✳️';
+    alertType = '✳️ Analisar Sobrevenda/Compra #4H ✳️';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nenhuma condição for atendida
