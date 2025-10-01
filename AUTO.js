@@ -954,7 +954,7 @@ async function monitorRealTime() {
     }
   } catch (e) {
     logger.error(`Erro no monitoramento em tempo real: ${e.message}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro no monitoramento em tempo real: ${e.message}`, { parse_mode: 'Markdown' });
+    //await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro no monitoramento em tempo real: ${e.message}`, { parse_mode: 'Markdown' });
   }
 }
 
@@ -979,7 +979,7 @@ async function sendRandomPairAnalysis() {
     await sendStatusReport(symbol, TELEGRAM_CHAT_ID);
   } catch (e) {
     logger.error(`Erro ao enviar análise automática: ${e.message}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise : ${e.message}`);
+    //await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise : ${e.message}`);
   }
 }
 
