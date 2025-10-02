@@ -463,7 +463,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
   const slSell = (parseFloat(price) + 2.8 * parseFloat(atr)).toFixed(precision);
   let alertText = '';
   if (rsi1h < 55 && state.lastSignals[symbol] !== 'COMPRA' && oi5m.isRising ) {
-    alertText = `💹 *Avaliar TENDÊNCIA BULL/ Compra: ${symbol}*\n` +
+    alertText = `💹 *TENDÊNCIA BULL: ${symbol}*\n` +
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
                 `- *Bullish acima de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
@@ -480,7 +480,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
     state.lastSignals[symbol] = 'COMPRA';
     logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima, OI 5m subindo, preço acima do VWAP 15m, acima da EMA 34)`);
   } else if (rsi1h > 68 && state.lastSignals[symbol] !== 'VENDA' && !oi5m.isRising) {
-    alertText = `🔻 *Avaliar TENDÊCIA BEAR/Venda💥: ${symbol}*\n` +
+    alertText = `🔻 *TENDÊCIA BEAR💥: ${symbol}*\n` +
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
                 `- *Bearish abaixo de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
