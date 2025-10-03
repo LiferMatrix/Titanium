@@ -462,7 +462,7 @@ async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate,
   const tp4Sell = (parseFloat(price) - 6 * parseFloat(atr)).toFixed(precision);
   const slSell = (parseFloat(price) + 2.8 * parseFloat(atr)).toFixed(precision);
   let alertText = '';
-  if (rsi1h < 55 && state.lastSignals[symbol] !== 'COMPRA' && oi5m.isRising ) {
+  if (rsi1h < 55 && state.lastSignals[symbol] !== 'COMPRA' && oi5m.isRising) {
     alertText = `💹 *TENDÊNCIA BULL: ${symbol}*\n` +
                 `- *Preço Atual*: $${format(price)}\n` +
                 `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
@@ -520,7 +520,7 @@ async function monitorCCICrossovers() {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const symbolWithSlash = symbol.replace('USDT', '/USDT');
       const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.VWAP_PERIOD)));
+      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH + 1, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.VWAP_PERIOD)));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, Math.max(config.RSI_PERIOD + 1, config.VWAP_PERIOD)));
       const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '3m', undefined, config.VOLUME_LOOKBACK));
       const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
@@ -528,11 +528,13 @@ async function monitorCCICrossovers() {
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
       setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
       setCachedData(`ticker_${symbol}`, tickerRaw);
-      if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.VWAP_PERIOD)) {
+
+      // Validação de dados
+      if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH + 1, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.VWAP_PERIOD)) {
         logger.warn(`Dados insuficientes para ${symbol} (15m)`);
         return;
       }
-      if (!ohlcv1hRaw || ohlcv1hRaw.length < Math.max(config.RSI_PERIOD, config.VWAP_PERIOD)) {
+      if (!ohlcv1hRaw || ohlcv1hRaw.length < Math.max(config.RSI_PERIOD + 1, config.VWAP_PERIOD)) {
         logger.warn(`Dados insuficientes para ${symbol} (1h)`);
         return;
       }
@@ -544,6 +546,7 @@ async function monitorCCICrossovers() {
         logger.warn(`Preço não disponível para ${symbol}`);
         return;
       }
+
       const lsr = await fetchLSR(symbolWithSlash);
       if (lsr.error) {
         logger.warn(`Não foi possível obter LSR para ${symbol}: ${lsr.error}`);
@@ -552,38 +555,45 @@ async function monitorCCICrossovers() {
       const fundingRate = await fetchFundingRate(symbolWithSlash);
       const oi5m = await fetchOpenInterest(symbolWithSlash, '5m');
       const oi15m = await fetchOpenInterest(symbolWithSlash, '15m');
+      
       const cci = calculateCCI(ohlcv15mRaw);
-      if (!cci || cci.length < 2) {
-        logger.warn(`CCI não calculado para ${symbol} (15m)`);
+      if (!cci || cci.length < config.EMA_LONG_LENGTH + 1) {
+        logger.warn(`CCI não calculado ou insuficiente para ${symbol} (15m)`);
         return;
       }
+      
       const rsi15m = calculateRSI(ohlcv15mRaw);
       const rsi1h = calculateRSI(ohlcv1hRaw);
       if (!rsi15m || rsi15m.length < 2 || !rsi1h || rsi1h.length < 1) {
         logger.warn(`RSI não calculado para ${symbol}`);
         return;
       }
+      
       const emaShort = calculateEMA(cci, config.EMA_SHORT_LENGTH);
       const emaLong = calculateEMA(cci, config.EMA_LONG_LENGTH);
-      if (emaShort.length < 2 || emaLong.length < 2) {
-        logger.warn(`EMAs não calculadas para ${symbol}`);
+      if (!emaShort || emaShort.length < 2 || !emaLong || emaLong.length < 2) {
+        logger.warn(`EMAs do CCI não calculadas ou insuficientes para ${symbol}`);
         return;
       }
+      
       const ema34 = calculateEMA(ohlcv15mRaw.map(c => c[4]), config.EMA_34_LENGTH);
       if (!ema34 || ema34.length < 1) {
         logger.warn(`EMA de preço (34 períodos) não calculada para ${symbol}`);
         return;
       }
+      
       const { support, resistance } = calculateSupportResistance(ohlcv15mRaw);
       const atr = calculateATR(ohlcv15mRaw);
       if (!atr || atr.length < 1) {
         logger.warn(`ATR não calculado para ${symbol} (15m)`);
         return;
       }
+      
       const isVolumeAnomaly = calculateVolumeAnomaly(ohlcv3mRaw);
       const price = parseFloat(tickerRaw.last);
       const atrValue = atr[atr.length - 1];
       const isMinVolatility = atrValue / price >= config.MIN_VOLATILITY;
+      
       const emaShortCurrent = emaShort[emaShort.length - 1];
       const emaShortPrevious = emaShort[emaShort.length - 2];
       const emaLongCurrent = emaLong[emaLong.length - 1];
@@ -592,14 +602,24 @@ async function monitorCCICrossovers() {
       const rsi15mPrevious = rsi15m[rsi15m.length - 2];
       const ema34Current = ema34[ema34.length - 1];
       const currentClose = ohlcv15mRaw[ohlcv15mRaw.length - 1][4];
-      const crossover = emaShortPrevious <= emaLongPrevious && emaShortCurrent > emaLongCurrent;
-      const crossunder = emaShortPrevious >= emaLongPrevious && emaShortCurrent < emaLongCurrent;
+
+      // Log para depuração
+      logger.info(`[${symbol}] EMA Short: ${emaShortCurrent.toFixed(2)} (anterior: ${emaShortPrevious.toFixed(2)}), EMA Long: ${emaLongCurrent.toFixed(2)} (anterior: ${emaLongPrevious.toFixed(2)}), Preço: ${currentClose.toFixed(2)}, EMA 34: ${ema34Current.toFixed(2)}`);
+
+      // Verificação de cruzamento com validação de vela fechada
+      const crossover = emaShortPrevious <= emaLongPrevious && emaShortCurrent > emaLongCurrent && ohlcv15mRaw[ohlcv15mRaw.length - 1][0] + 15 * 60 * 1000 <= Date.now();
+      const crossunder = emaShortPrevious >= emaLongPrevious && emaShortCurrent < emaLongCurrent && ohlcv15mRaw[ohlcv15mRaw.length - 1][0] + 15 * 60 * 1000 <= Date.now();
       const rsiRising = rsi15mCurrent > rsi15mPrevious;
       const rsiFalling = rsi15mCurrent < rsi15mPrevious;
+
       if (crossover && rsiRising && isVolumeAnomaly && isMinVolatility && currentClose > ema34Current) {
+        logger.info(`Cruzamento de COMPRA detectado para ${symbol}: EMA Short cruzou acima da EMA Long`);
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m);
       } else if (crossunder && rsiFalling && isVolumeAnomaly && isMinVolatility && currentClose < ema34Current) {
+        logger.info(`Cruzamento de VENDA detectado para ${symbol}: EMA Short cruzou abaixo da EMA Long`);
         await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m);
+      } else {
+        logger.info(`Nenhum cruzamento de EMA detectado para ${symbol}`);
       }
     }, 5);
   } catch (e) {
