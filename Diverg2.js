@@ -508,7 +508,7 @@ async function sendAlertRSIDivergence(symbol, data) {
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
                   `🔸 Vol.Delta: ${deltaText}\n` +
-                  `🔸 Livro/Demanda:  ${onBalanceText}\n` +
+                  `🔸 Livro: ${onBalanceText}\n` +
                   `🔹 ${oi5mText}\n` +
                   `🔹 ${oi15mText}\n` +
                   `🔹 ${volumeText15m}\n` +
@@ -536,7 +536,7 @@ async function sendAlertRSIDivergence(symbol, data) {
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
                   `🔸 Vol.Delta: ${deltaText}\n` +
-                  `🔸 Livro/Demanda:   ${onBalanceText}\n` +
+                  `🔸 Livro: ${onBalanceText}\n` +
                   `🔹 ${oi5mText}\n` +
                   `🔹 ${oi15mText}\n` +
                   `🔹 ${volumeText15m}\n` +
@@ -629,7 +629,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium D 💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Divergence 💹Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_15M_MS);
   } catch (e) {
