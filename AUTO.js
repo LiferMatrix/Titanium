@@ -1103,33 +1103,55 @@ async function sendStatusReport(symbol, chatId) {
 // Configurar comando /info
 bot.command('info', async (ctx) => {
   try {
-    logger.info('Atualização recebida para /info:', {
+    logger.info('Comando /info recebido', {
       update: JSON.stringify(ctx.update, null, 2),
       chatId: ctx.chat?.id,
-      messageText: ctx.message?.text || ctx.channelPost?.text
+      messageText: ctx.message?.text || ctx.channelPost?.text,
+      from: ctx.from,
+      chatType: ctx.chat?.type
     });
 
+    // Obter o texto da mensagem
     const text = ctx.message?.text || ctx.channelPost?.text;
     if (!text) {
+      logger.warn('Nenhuma mensagem válida recebida no comando /info');
       await ctx.reply('⚠️ Nenhuma mensagem válida recebida. Use: /info <par>, ex.: /info BTCUSDT');
       return;
     }
 
-    const args = text.split(' ').slice(1);
-    const symbol = args[0]?.toUpperCase();
+    // Extrair o símbolo
+    const args = text.trim().split(/\s+/).slice(1); // Usar regex para lidar com múltiplos espaços
+    const symbolInput = args[0]?.toUpperCase();
+    logger.info(`Símbolo extraído: ${symbolInput}`);
 
-    if (!symbol) {
-      await ctx.reply('Por favor, forneça um par de moedas. Exemplo: /info BTCUSDT');
+    if (!symbolInput) {
+      logger.warn('Nenhum par de moedas fornecido no comando /info');
+      await ctx.reply('⚠️ Por favor, forneça um par de moedas. Exemplo: /info BTCUSDT');
       return;
     }
 
-    const normalizedSymbol = symbol.includes('/') ? symbol : `${symbol.slice(0, -4)}/${symbol.slice(-4)}`;
+    // Normalizar o símbolo (ex.: BTCUSDT -> BTC/USDT)
+    const normalizedSymbol = symbolInput.includes('/') ? symbolInput : `${symbolInput.slice(0, -4)}/${symbolInput.slice(-4)}`;
+    logger.info(`Símbolo normalizado: ${normalizedSymbol}`);
 
+    // Validar o par
+    const isValidSymbol = await validateSymbol(normalizedSymbol);
+    if (!isValidSymbol) {
+      logger.warn(`Par inválido fornecido: ${normalizedSymbol}`);
+      await ctx.reply(`⚠️ Par inválido: ${normalizedSymbol}. Exemplo: /info BTCUSDT`);
+      return;
+    }
+
+    // Enviar mensagem de carregamento
     await ctx.reply(`🔄 Gerando análise para ${normalizedSymbol}...`);
+    logger.info(`Iniciando geração de relatório para ${normalizedSymbol}`);
+
+    // Gerar e enviar relatório
     await sendStatusReport(normalizedSymbol, ctx.chat.id);
+    logger.info(`Relatório enviado para ${normalizedSymbol}`);
   } catch (e) {
     logger.error(`Erro no comando /info: ${e.message}`, { stack: e.stack });
-    await ctx.reply(`⚠️ Erro ao processar o comando: ${e.message}`);
+    await ctx.reply(`⚠️ Erro ao processar o comando /info: ${e.message}`);
   }
 });
 
@@ -1160,6 +1182,7 @@ async function main() {
     await monitorRealTime();
 
     await bot.start();
+    logger.info('Bot iniciado com sucesso');
   } catch (e) {
     logger.error(`Erro ao iniciar bot: ${e.message}`, { stack: e.stack });
   }
