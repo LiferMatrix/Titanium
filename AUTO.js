@@ -664,7 +664,7 @@ function determineTargets(fibLevels, zonas, rsi1hVal, rsi15mVal, cvd15mStatus, o
       score += 1;
     }
 
-    if ((estocasticoD?.k >75 && estocasticoD?.k < estocasticoD?.d) || (estocastico4h?.k > 75 && estocastico4h?.k < estocastico4h?.d)) {
+    if ((estocasticoD?.k > 75 && estocasticoD?.k < estocasticoD?.d) || (estocastico4h?.k > 75 && estocastico4h?.k < estocastico4h?.d)) {
       relevance += "📊 Estocástico em sobrecompra. ";
       score += 1.5;
     }
@@ -883,7 +883,7 @@ async function monitorRealTime() {
       const rsi1hVal = rsi1h && rsi1h.length ? rsi1h[rsi1h.length - 1].toFixed(1) : null;
       const rsi15mVal = rsi15m && rsi15m.length ? rsi15m[rsi15m.length - 1].toFixed(1) : null;
       const estocastico4h = calculateStochastic(ohlcv4h.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3, 3);
-      const estocasticoDiario = calculateStochastic(ohlcvDiario.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3,3);
+      const estocasticoDiario = calculateStochastic(ohlcvDiario.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3, 3);
       const estocasticoD = calculateStochastic(ohlcvDiario.map(c => ({ high: c[2], low: c[3], close: c[4] })), 5, 3, 3);
       const zonas = detectarQuebraEstrutura(ohlcv15m.map(c => ({ high: c[2], low: c[3], volume: c[5] })));
       const fibLevels = calculateFibonacciLevels(ohlcvDiario);
@@ -926,7 +926,6 @@ async function monitorRealTime() {
         }
       }
 
-      
       // Enviar alertas
       for (const alerta of alertas) {
         await bot.api.sendMessage(TELEGRAM_CHAT_ID, alerta, { parse_mode: 'Markdown' });
@@ -954,7 +953,6 @@ async function monitorRealTime() {
     }
   } catch (e) {
     logger.error(`Erro no monitoramento em tempo real: ${e.message}`);
-    //await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro no monitoramento em tempo real: ${e.message}`, { parse_mode: 'Markdown' });
   }
 }
 
@@ -975,11 +973,10 @@ async function sendRandomPairAnalysis() {
     const randomIndex = Math.floor(Math.random() * MONITORED_PAIRS.length);
     const symbol = MONITORED_PAIRS[randomIndex];
     logger.info(`Enviando análise automática para ${symbol}`);
-    await bot.api.sendMessage(TELEGRAM_CHAT_ID, ` 🤖Titanium Gerando análise para ${symbol}...`);
+    await bot.api.sendMessage(TELEGRAM_CHAT_ID, `🤖 Titanium Gerando análise para ${symbol}...`);
     await sendStatusReport(symbol, TELEGRAM_CHAT_ID);
   } catch (e) {
     logger.error(`Erro ao enviar análise automática: ${e.message}`);
-    //await bot.api.sendMessage(TELEGRAM_CHAT_ID, `⚠️ Erro ao gerar análise : ${e.message}`);
   }
 }
 
@@ -1104,7 +1101,7 @@ async function sendStatusReport(symbol, chatId) {
 }
 
 // Configurar comando /info
-bot.on(['message:text', 'channel_post:text']).command('info', async (ctx) => {
+bot.command('info', async (ctx) => {
   try {
     logger.info('Atualização recebida para /info:', {
       update: JSON.stringify(ctx.update, null, 2),
