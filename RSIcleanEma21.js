@@ -540,7 +540,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
 
   // Montar texto do alerta com maior precisão para RSI
   alertText = `💠 Ativo \n` +
-              `✴️$${symbolWithoutSlash}\n` +
+              `🔘$${symbolWithoutSlash}\n` +
               `💲Preço: ${format(price)}\n` +
               `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
@@ -558,7 +558,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `🟰Resistência: ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
               `➖EMA 21 (15m): ${ema21Text} (${trend})\n` +
-              `☑︎ Titanium Monitor - 🤖 @J4Rviz`;
+              `☑︎ Titanium I.A. - 🤖 @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
@@ -798,7 +798,7 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Clean *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts com Memória de Sobrecompra/Sobrevenda e EMA 21 (15m)`, { parse_mode: 'Markdown' }));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium IA🔘 *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts com Memória de Sobrecompra/Sobrevenda e EMA 21 (15m)`, { parse_mode: 'Markdown' }));
     await monitorRSI();
     setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
