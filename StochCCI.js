@@ -26,6 +26,9 @@ const config = {
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
+  BUY_TOLERANCE_PERCENT: 0.025, // 2.5% abaixo do preço de alerta para entrada de compra
+  ATR_MULTIPLIER_BUY: 1.5, // Multiplicador ATR para entrada máxima de compra
+  ATR_MULTIPLIER_SELL: 1.5, // Multiplicador ATR para entrada mínima de venda
 };
 
 // Logger
@@ -413,6 +416,12 @@ async function sendAlertStochasticCross(symbol, data) {
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const zonas = detectarQuebraEstrutura(ohlcv15m, atr);
 
+  // Calcular preços de entrada com tolerância baseada em ATR
+  const buyEntryLow = price * (1 - config.BUY_TOLERANCE_PERCENT); // 2.5% abaixo do preço atual
+  const buyEntryMax = price + (atr * config.ATR_MULTIPLIER_BUY); // Entrada máxima com ATR
+  const sellEntryHigh = price * (1 + config.BUY_TOLERANCE_PERCENT); // 2.5% acima do preço atual
+  const sellEntryMin = price - (atr * config.ATR_MULTIPLIER_SELL); // Entrada mínima com ATR
+
   const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
   const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
   let lsrSymbol = '🔘Consol.';
@@ -472,9 +481,10 @@ async function sendAlertStochasticCross(symbol, data) {
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔔💹*Avaliar Compra *\n\n` +
+      alertText = `🔔💹*Avaliar Compra*\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço: ${format(price)}\n` +
+                  `💲 Preço Atual: ${format(price)}\n` +
+                  `🔘 Entrada: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -488,16 +498,17 @@ async function sendAlertStochasticCross(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
+      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, Entrada Máxima=${format(buyEntryMax)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
     }
   } else if (isSellSignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔔♦️*Avaliar Correção *\n\n` +
+      alertText = `🔔♦️*Avaliar Correção*\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço: ${format(price)}\n` +
+                  `💲 Preço Atual: ${format(price)}\n` +
+                  `🔘 Entrada: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -511,7 +522,7 @@ async function sendAlertStochasticCross(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
+      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, Entrada Mínima=${format(sellEntryMin)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, OI 5m=${oi5m.percentChange}%, OI 15m=${oi15m.percentChange}%, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
     }
   }
 
@@ -608,7 +619,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖  Titanium Stoch/CCI💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Start...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
   } catch (e) {
