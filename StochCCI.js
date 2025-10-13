@@ -472,7 +472,7 @@ async function sendAlertStochasticCross(symbol, data) {
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔔💹*Avaliar Compra /Reversão *\n\n` +
+      alertText = `🔔💹*Avaliar Compra *\n\n` +
                   `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
