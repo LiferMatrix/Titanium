@@ -19,10 +19,10 @@ const config = {
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 80, // Limite mínimo para venda (4h e Diário)
   LSR_BUY_MAX: 2.8, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 3.5, // Limite mínimo de LSR para venda
+  LSR_SELL_MIN: 3.2, // Limite mínimo de LSR para venda
   CCI_PERIOD: 14, // Período para CCI (15m)
-  CCI_BUY_MIN: 200, // Limite mínimo de CCI para compra
-  CCI_SELL_MAX: -100, // Limite máximo de CCI para venda
+  CCI_BUY_MIN: 190, // Limite mínimo de CCI para compra
+  CCI_SELL_MAX: -85, // Limite máximo de CCI para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
