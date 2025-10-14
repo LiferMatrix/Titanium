@@ -474,16 +474,16 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
 
   // Verificar condições de alerta
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_2 && rsi15m >= config.RSI_HIGH_THRESHOLD_2 && rsi1h >= config.RSI_HIGH_THRESHOLD_2) {
-    alertType = '🛑#1H ALTO🛑';
+    alertType = '🛑#1H Realizar Lucro/Parcial🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD) {
-    alertType = '✳️#1H BAIXO✳️';
+    alertType = '✳️#1H Avaliar Compra✳️';
     emoji = '🟢🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
-    alertType = '🛑#4H ALTO🛑';
+    alertType = '🛑#4H Realizar Lucro Total/Parcial🛑';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '✳️#4H BAIXO✳️';
+    alertType = '✳️#4H Avaliar Compra/Swing Trade✳️';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nenhuma condição for atendida
