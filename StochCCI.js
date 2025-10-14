@@ -18,8 +18,8 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 80, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.8, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 3.2, // Limite mínimo de LSR para venda
+  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
+  LSR_SELL_MIN: 2.9, // Limite mínimo de LSR para venda
   CCI_PERIOD: 14, // Período para CCI (15m)
   CCI_BUY_MIN: 190, // Limite mínimo de CCI para compra
   CCI_SELL_MAX: -85, // Limite máximo de CCI para venda
@@ -466,7 +466,7 @@ async function sendAlertStochasticCross(symbol, data) {
                       cci15m > config.CCI_BUY_MIN &&
                       ema34_3m > ema89_3m;
   
-  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, OI 5m e 15m caindo, LSR > 2.7, CCI 15m < -100, EMA 34 < EMA 89 (3m)
+  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, OI 5m e 15m caindo, LSR > 2.5, CCI 15m < -100, EMA 34 < EMA 89 (3m)
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d && 
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
@@ -506,7 +506,7 @@ async function sendAlertStochasticCross(symbol, data) {
     );
     if (!foiAlertado) {
       alertText = `🔔♦️*Avaliar Correção*\n\n` +
-                  `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
+                  `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔘 Entrada: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -516,8 +516,8 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹 ${vwap1hText}\n` +
                   `🔹 Stoch Diário : ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
                   `🔹 Stoch 4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                  `🔹 Suporte: ${format(zonas.suporte)}\n` +
-                  `🔹 Resistência: ${format(zonas.resistencia)}\n` +
+                  `🟰 Suporte: ${format(zonas.suporte)}\n` +
+                  `🟰 Resistência: ${format(zonas.resistencia)}\n` +
                   ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
