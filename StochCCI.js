@@ -482,7 +482,7 @@ async function sendAlertStochasticCross(symbol, data) {
     );
     if (!foiAlertado) {
       alertText = `🔔💹*Avaliar Compra*\n\n` +
-                  `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
+                  `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔘 Entrada: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
