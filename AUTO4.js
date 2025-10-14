@@ -822,32 +822,17 @@ async function monitorRealTime() {
       let alertas = [];
       const format = v => currentPrice < 1 ? v.toFixed(8) : currentPrice < 10 ? v.toFixed(6) : currentPrice < 100 ? v.toFixed(4) : v.toFixed(2);
 
-      // Alerta para rompimento de alta
-      if (zonas.estruturaAlta > 0 && ultimaEstrutura[symbol].estruturaAlta && currentPrice > zonas.estruturaAlta && ultimaEstrutura[symbol].price <= ultimaEstrutura[symbol].estruturaAlta) {
-        const alertaKey = `${symbol}_rompimento_alta`;
-        const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
-        if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
-          alertas.push(`🚨 *Rompimento Alta ${symbol}* 🚀\nPreço: ${format(currentPrice)} > Resistência: ${format(zonas.estruturaAlta)}\nStop Loss: ${targets.stopLossBuy}\n💡 Entre com volume forte!`);
-          ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
-        }
-      }
-
-      // Alerta para rompimento de baixa
-      if (zonas.estruturaBaixa > 0 && ultimaEstrutura[symbol].estruturaBaixa && currentPrice < zonas.estruturaBaixa && ultimaEstrutura[symbol].price >= ultimaEstrutura[symbol].estruturaBaixa) {
-        const alertaKey = `${symbol}_rompimento_baixa`;
-        const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
-        if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
-          alertas.push(`🚨 *Rompimento Baixa ${symbol}* 📉\nPreço: ${format(currentPrice)} < Suporte: ${format(zonas.estruturaBaixa)}\nStop Loss: ${targets.stopLossSell}\n💡 Proteja posições!`);
-          ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
-        }
-      }
+      const rsi1hEmoji = rsi1hVal > 60 ? "🔴" : rsi1hVal < 40 ? "🟢" : "";
+      const k4hEmoji = getStochasticEmoji(estocastico4h ? estocastico4h.k : null);
+      const kDEmoji = getStochasticEmoji(estocasticoD ? estocasticoD.k : null);
+      const lsrEmoji = lsrData.account.value > 2.5 ? "🔴" : lsrData.account.value < 1.3 ? "🟢" : "";
 
       // Alerta para proximidade de zona de compra
       if (targets.bestBuyZone && Math.abs(currentPrice - targets.bestBuyZone.level) / targets.bestBuyZone.level < 0.01) {
         const alertaKey = `${symbol}_proximo_compra`;
         const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
         if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
-          alertas.push(`🟢 *${symbol} Próximo da Zona de Compra* 🟢\nPreço: ${format(currentPrice)}\nZona: ${targets.bestBuyZone.level} (${targets.bestBuyZone.label})\nStop Loss: ${targets.stopLossBuy}\n💡 Entre com volume forte!`);
+          alertas.push(`🟢 *${symbol} Próximo da Zona de Compra* 🟢\nPreço: ${format(currentPrice)}\nZona: ${targets.bestBuyZone.level} (${targets.bestBuyZone.label})\nSuporte: ${format(zonas.estruturaBaixa)}\nResistência: ${format(zonas.estruturaAlta)}\nRSI 1h: ${rsi1hVal}${rsi1hEmoji}\nStoch 4h: ${estocastico4h ? estocastico4h.k.toFixed(1) : '--'}${k4hEmoji}\nStoch D: ${estocasticoD ? estocasticoD.k.toFixed(1) : '--'}${kDEmoji}\nLSR 15m: ${lsrData.account.value?.toFixed(2) || '--'}${lsrEmoji}\nStop Loss: ${targets.stopLossBuy}\n💡 Entre com volume forte!`);
           ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
         }
       }
@@ -857,7 +842,7 @@ async function monitorRealTime() {
         const alertaKey = `${symbol}_proximo_venda`;
         const ultimoAlerta = ultimoAlertaTempo[symbol][alertaKey] || 0;
         if ((Date.now() / 1000) - ultimoAlerta > ALERTA_COOLDOWN_S) {
-          alertas.push(`🔴 *${symbol} Próximo da Zona de Venda* 🔴\nPreço: ${format(currentPrice)}\nZona: ${targets.bestSellZone.level} (${targets.bestSellZone.label})\nStop Loss: ${targets.stopLossSell}\n💡 Proteja lucros!`);
+          alertas.push(`🔴 *${symbol} Próximo da Zona de Venda* 🔴\nPreço: ${format(currentPrice)}\nZona: ${targets.bestSellZone.level} (${targets.bestSellZone.label})\nSuporte: ${format(zonas.estruturaBaixa)}\nResistência: ${format(zonas.estruturaAlta)}\nRSI 1h: ${rsi1hVal}${rsi1hEmoji}\nStoch 4h: ${estocastico4h ? estocastico4h.k.toFixed(1) : '--'}${k4hEmoji}\nStoch D: ${estocasticoD ? estocasticoD.k.toFixed(1) : '--'}${kDEmoji}\nLSR 15m: ${lsrData.account.value?.toFixed(2) || '--'}${lsrEmoji}\nStop Loss: ${targets.stopLossSell}\n💡 Proteja lucros!`);
           ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
         }
       }
