@@ -477,13 +477,13 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
     alertType = '🛑#1H Realizar Lucro/Parcial🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD) {
-    alertType = '✳️#1H Zona de Suporte Avaliar Compra✳️';
+    alertType = '✳️#1H Zona de Suporte/Avaliar Compra✳️';
     emoji = '🟢🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
     alertType = '🛑#4H Realizar Lucro Total/Parcial🛑';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '✳️#4H Zona de Suporte/Swing Trade Compra✳️';
+    alertType = '✳️#4H Zona de Suporte/Swing Compra✳️';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nenhuma condição for atendida
@@ -527,8 +527,8 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
   const volume3mText = volume3m ? `${volume3m.status} (${volume3m.percentChange}%)` : '🔹 Indisp.';
 
   // Montar texto do alerta com maior precisão para RSI e volume anormal
-  alertText = `💠 RSI ACTIVE MTF \n` +
-              `🔘$${symbolWithoutSlash}\n` +
+  alertText = `💠 RSI Indicator \n` +
+              `🔘Ativo: $${symbolWithoutSlash}\n` +
               `💲Preço: ${format(price)}\n` +
               `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
@@ -540,13 +540,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `🔹 Stoch 4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
               `💱LSR: ${lsrText} ${lsrSymbol}\n` +
               `Funding Rate: ${fundingRateText}\n` +
-              `${oi5mText}\n` +
-              `${oi15mText}\n` +
-              `📊 Vol: ${volume3mText}\n` +
               `🟰Suporte : ${supportText}\n` +
               `🟰Resistência : ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
-              `☑︎ 🤖 Titanium Monitor - @J4Rviz`;
+              `☑︎ 🤖 Titanium  - @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
