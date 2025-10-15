@@ -392,13 +392,13 @@ function getStochasticEmoji(value) {
 
 function getCCIEmoji(value) {
   if (!value) return "";
-  return value > 200 ? "🔴" : value > 100 ? "🟠" : value > 0 ? "🟡" : value > -100 ? "🟢" : "🔵";
+  return value > 200 ? "✅" : value > 100 ? "🟠" : value > 0 ? "🟡" : value > -100 ? "✅" : "🔵";
 }
 
 function getVWAPEmoji(price, vwap) {
   if (!vwap || isNaN(price)) return "";
   const diff = Math.abs(price - vwap) / vwap;
-  return diff < 0.01 ? "🟡" : price > vwap ? "🔴" : "🟢";
+  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "🟢";
 }
 
 function getSetaDirecao(current, previous) {
@@ -484,10 +484,10 @@ async function sendAlertStochasticCross(symbol, data) {
       alertText = `🔔💹*Avaliar Compra*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🔘 Entrada: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
-                  `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
-                  `🔹 Fund. R: ${fundingRateText}\n` +
+                  `🔘Entr: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
+                  `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
+                  `🔹LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
+                  `🔹Fund. R: ${fundingRateText}\n` +
                   `🔹 ${cci15mText}\n` +
                   `🔹 ${vwap1hText}\n` +
                   `🔹 Stoch Diário %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
@@ -508,7 +508,7 @@ async function sendAlertStochasticCross(symbol, data) {
       alertText = `🔔♦️*Avaliar Correção*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🔘 Entrada: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
+                  `🔘 Entr: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
