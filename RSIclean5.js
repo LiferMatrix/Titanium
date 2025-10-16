@@ -395,7 +395,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
   const direcaoD = getSetaDirecao(stoch1d ? stoch1d.k : null, stoch1dPrevious ? stoch1dPrevious.k : null);
 
   // Montar texto do alerta SEM volume e SEM OI
-  alertText = `💠RSI/Tendência \n` +
+  alertText = `☑︎ RSI/Tendência Confirmada \n` +
               `🔘Ativo: $${symbolWithoutSlash}\n` +
               `💲Preço: ${format(price)}\n` +
               `${alertType}\n` +
@@ -411,7 +411,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `🟰Suporte : ${supportText}\n` +
               `🟰Resistência : ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
-              `☑︎ 🤖 Titanium - @J4Rviz`;
+              `🤖 Gerencie seu Risco - @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
