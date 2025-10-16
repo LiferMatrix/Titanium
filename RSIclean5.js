@@ -398,7 +398,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
   alertText = `💠RSI/Tendência \n` +
               `🔘Ativo: $${symbolWithoutSlash}\n` +
               `💲Preço: ${format(price)}\n` +
-              `${alertType} ${emoji}\n` +
+              `${alertType}\n` +
               `RSI 5m: ${rsi5m.toFixed(4)}\n` +
               `RSI 15m: ${rsi15m.toFixed(4)}\n` +
               `RSI 1h: ${rsi1h.toFixed(4)}\n` +
@@ -684,13 +684,13 @@ async function monitorRSI() {
 
       if (bullCross && (state.ultimoRSIAlert[symbol].visitedOversold || isOversoldCondition)) {
         if ((rsi5m <= config.RSI_SCALP_LOW_THRESHOLD && rsi15m <= config.RSI_SCALP_LOW_THRESHOLD)) {
-          alertType = '✳️#15m / Avaliar Compra✳️';
+          alertType = '❇️#15m / Avaliar Compra❇️';
           emoji = '🟢';
         } else if ((rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD)) {
-          alertType = '✳️#1H Avaliar Compra✳️';
+          alertType = '❇️#1H Avaliar Compra❇️';
           emoji = '🟢🟢';
         } else if ((rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD)) {
-          alertType = '✳️#4H Avaliar Compra✳️';
+          alertType = '❇️#4H Avaliar Compra❇️';
           emoji = '🟢';
         }
         alertAposCross = true;
@@ -699,25 +699,20 @@ async function monitorRSI() {
 
       if (bearCross && (state.ultimoRSIAlert[symbol].visitedOverbought || isOverboughtCondition)) {
         if ((rsi5m >= config.RSI_HIGH_THRESHOLD_3 && rsi15m >= config.RSI_HIGH_THRESHOLD_3)) {
-          alertType = '🛑#15m /Realizar Lucro🛑';
-          emoji = '🔴🔴';
+          alertType = '🔻#15m /Realizar Lucro🔻';
+          emoji = '🔻🔻';
         } else if ((rsi5m >= config.RSI_HIGH_THRESHOLD_2 && rsi15m >= config.RSI_HIGH_THRESHOLD_2 && rsi1h >= config.RSI_HIGH_THRESHOLD_2)) {
-          alertType = '🛑#1H Realizar Lucro🛑';
-          emoji = '🔴🔴';
+          alertType = '🔻#1H Realizar Lucro🔻';
+          emoji = '🔻🔻';
         } else if ((rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1)) {
-          alertType = '🛑#4H Realizar Lucro🛑';
-          emoji = '🔴';
+          alertType = '🔻#4H Realizar Lucro🔻';
+          emoji = '🔻';
         }
         alertAposCross = true;
         state.ultimoRSIAlert[symbol].visitedOverbought = false;
       }
 
-      // Debug forçado para BTCUSDT se bullCross (comente em prod)
-      if (symbol === 'BTCUSDT' && bullCross) {
-        alertType = '🧪 TESTE Bull Cross BTC';
-        emoji = '🟢';
-      }
-
+      
       if (alertType || alertAposCross) {
         await sendAlertRSI(
           symbolWithSlash,
