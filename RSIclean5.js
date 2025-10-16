@@ -684,13 +684,13 @@ async function monitorRSI() {
 
       if (bullCross && (state.ultimoRSIAlert[symbol].visitedOversold || isOversoldCondition)) {
         if ((rsi5m <= config.RSI_SCALP_LOW_THRESHOLD && rsi15m <= config.RSI_SCALP_LOW_THRESHOLD)) {
-          alertType = '❇️#15m / Avaliar Compra❇️';
+          alertType = '🟢 COMPRA: #15m / Avaliar Compra🟢';
           emoji = '🟢';
         } else if ((rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD)) {
-          alertType = '❇️#1H Avaliar Compra❇️';
+          alertType = '🟢 COMPRA: #1H Avaliar Compra🟢';
           emoji = '🟢🟢';
         } else if ((rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD)) {
-          alertType = '❇️#4H Avaliar Compra❇️';
+          alertType = '🟢 COMPRA: #4H Avaliar Compra🟢';
           emoji = '🟢';
         }
         alertAposCross = true;
@@ -699,13 +699,13 @@ async function monitorRSI() {
 
       if (bearCross && (state.ultimoRSIAlert[symbol].visitedOverbought || isOverboughtCondition)) {
         if ((rsi5m >= config.RSI_HIGH_THRESHOLD_3 && rsi15m >= config.RSI_HIGH_THRESHOLD_3)) {
-          alertType = '🔻#15m /Realizar Lucro🔻';
+          alertType = '🔴 VENDA: #15m /Realizar Lucro🔴';
           emoji = '🔻🔻';
         } else if ((rsi5m >= config.RSI_HIGH_THRESHOLD_2 && rsi15m >= config.RSI_HIGH_THRESHOLD_2 && rsi1h >= config.RSI_HIGH_THRESHOLD_2)) {
-          alertType = '🔻#1H Realizar Lucro🔻';
+          alertType = '🔴 VENDA: #1H Realizar Lucro🔴';
           emoji = '🔻🔻';
         } else if ((rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1)) {
-          alertType = '🔻#4H Realizar Lucro🔻';
+          alertType = '🔴 VENDA: #4H Realizar Lucro🔴';
           emoji = '🔻';
         }
         alertAposCross = true;
