@@ -807,7 +807,7 @@ async function monitorRealTime() {
           const alvo1 = formatPrice(buyZoneLevel + 2 * atr, currentPrice);
           const alvo2 = formatPrice(buyZoneLevel + 4 * atr, currentPrice);
           const alvo3 = formatPrice(buyZoneLevel + 6 * atr, currentPrice);
-          alertas.push(`🟢 *${symbol} FVG/ Zona de Compra* \n💲Preço: ${formatPrice(currentPrice, currentPrice)}\n🔹Zona Compra: ${targets.bestBuyZone.level} (${targets.bestBuyZone.label})\nAnálise Atual: ${targets.bestBuyZone.explanation}\n⛔Stop Loss: ${formatPrice(targets.stopLossBuy, currentPrice)}\n🔹Estrutura Alta: ${formatPrice(zonas.estruturaAlta, currentPrice)}\n🔻Estrutura Baixa: ${formatPrice(zonas.estruturaBaixa, currentPrice)}\n🎯Alvos: ${alvo1}, ${alvo2}, ${alvo3}\n 🤖 Entre com a confirmação volume forte, na retração!`);
+          alertas.push(`🟢 *${symbol} FVG/ Zona de Compra* \n💲Preço: ${formatPrice(currentPrice, currentPrice)}\n🔹Zona Compra: ${targets.bestBuyZone.level} (${targets.bestBuyZone.label})\nAnálise Atual: ${targets.bestBuyZone.explanation}\n⛔Stop Loss: ${formatPrice(targets.stopLossBuy, currentPrice)}\n🔹Estrutura Alta: ${formatPrice(zonas.estruturaAlta, currentPrice)}\n🔻Estrutura Baixa: ${formatPrice(zonas.estruturaBaixa, currentPrice)}\n🎯Alvos: ${alvo1}, ${alvo2}, ${alvo3}\n 🤖 Aguarde a confirmação de um FVG 15m ou entrada de volume!`);
           ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
         }
       }
@@ -821,7 +821,7 @@ async function monitorRealTime() {
           const alvo1 = formatPrice(sellZoneLevel - 2 * atr, currentPrice);
           const alvo2 = formatPrice(sellZoneLevel - 4 * atr, currentPrice);
           const alvo3 = formatPrice(sellZoneLevel - 6 * atr, currentPrice);
-          alertas.push(`🔴 *${symbol} FVG/ Zona de Venda* \n💲Preço: ${formatPrice(currentPrice, currentPrice)}\n🔹Zona Venda: ${targets.bestSellZone.level} (${targets.bestSellZone.label})\nAnálise Atual: ${targets.bestSellZone.explanation}\n⛔Stop Loss: ${formatPrice(targets.stopLossSell, currentPrice)}\n🔹Estrutura Alta: ${formatPrice(zonas.estruturaAlta, currentPrice)}\n🔻Estrutura Baixa: ${formatPrice(zonas.estruturaBaixa, currentPrice)}\n🎯Alvos: ${alvo1}, ${alvo2}, ${alvo3}\n 🤖 Proteja seus lucros!`);
+          alertas.push(`🔴 *${symbol} FVG/ Zona de Venda* \n💲Preço: ${formatPrice(currentPrice, currentPrice)}\n🔹Zona Venda: ${targets.bestSellZone.level} (${targets.bestSellZone.label})\nAnálise Atual: ${targets.bestSellZone.explanation}\n⛔Stop Loss: ${formatPrice(targets.stopLossSell, currentPrice)}\n🔹Estrutura Alta: ${formatPrice(zonas.estruturaAlta, currentPrice)}\n🔻Estrutura Baixa: ${formatPrice(zonas.estruturaBaixa, currentPrice)}\n🎯Alvos: ${alvo1}, ${alvo2}, ${alvo3}\n 🤖 Observar a formação de FVG e mudança de tendência, Proteja seus lucros!`);
           ultimoAlertaTempo[symbol][alertaKey] = Date.now() / 1000;
         }
       }
