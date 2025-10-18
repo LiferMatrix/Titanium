@@ -351,10 +351,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
 
   // Verificar condições de alerta apenas para 5m e 15m
   if (rsi5m >= config.RSI_HIGH_THRESHOLD_3 && rsi15m >= config.RSI_HIGH_THRESHOLD_3) {
-    alertType = '🛑💥 #15m Exaustão 💥🛑';
+    alertType = '🛑💥 #Distribuição/Realizar Lucros 💥🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_SCALP_LOW_THRESHOLD && rsi15m <= config.RSI_SCALP_LOW_THRESHOLD) {
-    alertType = '✳️💲 #15m Suporte 💲✳️';
+    alertType = '✳️💲 #Acumulação/Compra 💲✳️';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nenhuma condição for atendida
@@ -403,11 +403,11 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `🔹 Stoch Diário %K: ${stoch1d ? stoch1d.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
               `🔹 Stoch 4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
               `💱LSR: ${lsrText} ${lsrSymbol}\n` +
-              `Funding Rate: ${fundingRateText}\n` +
+              `Fund. Rate: ${fundingRateText}\n` +
               `🟰Suporte : ${supportText}\n` +
               `🟰Resistência : ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
-              `☑︎ 🤖 Titanium Monitor - @J4Rviz`;
+              `☑︎ 🤖 Titanium  - @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
