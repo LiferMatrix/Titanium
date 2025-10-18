@@ -13,11 +13,15 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,ENJUSDT").split(","),
-  INTERVALO_ALERTA_EMA_MS: 3 * 60 * 1000, // 3 minutos para verificação de EMA
+  INTERVALO_ALERTA_RSI_MS: 3 * 60 * 1000, // 3 minutos para verificação de RSI
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Cooldown para alertas
   RSI_PERIOD: 14,
-  RSI_BUY_THRESHOLD: 60, // RSI 15m para compra
-  RSI_SELL_THRESHOLD: 75, // RSI 15m para venda
+  RSI_HIGH_THRESHOLD_1: 73, // Alerta de RSI alto (todos os timeframes)
+  RSI_HIGH_THRESHOLD_2: 75, // Alerta de RSI extremo (5m, 15m, 1h)
+  RSI_HIGH_THRESHOLD_3: 80, // Novo alerta de sobrecompra 15m (5m, 15m)
+  RSI_LOW_THRESHOLD: 23, // Alerta de RSI baixo (todos os timeframes)
+  RSI_EXTREME_LOW_THRESHOLD: 23, // Alerta de RSI extremo baixo (5m, 15m, 1h)
+  RSI_SCALP_LOW_THRESHOLD: 23, // Novo alerta de scalp sobrevenda 15m (5m, 15m)
   CACHE_TTL: 2 * 60 * 1000, // 2 minutos para cache
   MAX_CACHE_SIZE: 50, // Reduzido para 50 entradas
   MAX_HISTORICO_ALERTAS: 10,
@@ -55,7 +59,7 @@ const logger = winston.createLogger({
 
 // ================= ESTADO GLOBAL E CACHE ================= //
 const state = {
-  ultimoEMAAlert: {},
+  ultimoRSIAlert: {},
   dataCache: new Map(),
   isConnected: false,
 };
@@ -222,18 +226,6 @@ function calculateRSI(data, period = config.RSI_PERIOD) {
   return rsi.filter(v => !isNaN(v) && v >= 0 && v <= 100);
 }
 
-function calculateEMA(data, period) {
-  if (!data || data.length < period) {
-    logger.warn(`Dados insuficientes para calcular EMA${period}: ${data?.length || 0} candles, necessário ${period}`);
-    return [];
-  }
-  const ema = TechnicalIndicators.EMA.calculate({
-    period,
-    values: data.map(d => d.close)
-  });
-  return ema.filter(v => !isNaN(v));
-}
-
 function calculateStochastic(data, kPeriod = 5, kSlowing = 3, dPeriod = 3) {
   if (!data || data.length < kPeriod + kSlowing + dPeriod) {
     logger.warn(`Dados insuficientes para calcular Estocástico: ${data?.length || 0} candles, necessário ${kPeriod + kSlowing + dPeriod}`);
@@ -252,7 +244,7 @@ function calculateStochastic(data, kPeriod = 5, kSlowing = 3, dPeriod = 3) {
     logger.warn(`Estocástico inválido: ${validStoch.length} valores válidos`);
     return null;
   }
-  return validStoch[validStoch.length - 1];
+  return validStoch[validStoch.length - 1]; // Retorna o último valor válido
 }
 
 function calculateSupportResistance(data) {
@@ -279,22 +271,6 @@ function calculateVWAP(data) {
     volume: data.slice(-50).map(d => d.volume)
   });
   return vwap.length > 0 ? vwap[vwap.length - 1] : null;
-}
-
-function calculateATR(data, period = 14) {
-  if (!data || data.length < period + 1) {
-    logger.warn(`Dados insuficientes para calcular ATR: ${data?.length || 0} candles, necessário ${period + 1}`);
-    return null;
-  }
-  const tr = data.slice(1).map((c, i) => {
-    const prev = data[i];
-    const highLow = c.high - c.low;
-    const highPrevClose = Math.abs(c.high - prev.close);
-    const lowPrevClose = Math.abs(c.low - prev.close);
-    return Math.max(highLow, highPrevClose, lowPrevClose);
-  });
-  const atr = TechnicalIndicators.SMA.calculate({ period, values: tr });
-  return atr.length > 0 ? atr[atr.length - 1] : null;
 }
 
 async function fetchLSR(symbol) {
@@ -359,46 +335,30 @@ function getSetaDirecao(current, previous) {
   return current > previous ? "⬆️" : current < previous ? "⬇️" : "➡️";
 }
 
-async function sendAlertEMA(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, lsr, fundingRate, support, resistance, vwap1h, stoch4h, stoch1d, stoch4hPrevious, stoch1dPrevious, ema34Current, ema89Current, isBuy) {
+async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, lsr, fundingRate, support, resistance, vwap1h, stoch4h, stoch1d, stoch4hPrevious, stoch1dPrevious) {
   const agora = Date.now();
-  if (!state.ultimoEMAAlert[symbol]) state.ultimoEMAAlert[symbol] = { historico: [] };
-  if (state.ultimoEMAAlert[symbol]['ema'] && agora - state.ultimoEMAAlert[symbol]['ema'] < config.TEMPO_COOLDOWN_MS) return;
+  if (!state.ultimoRSIAlert[symbol]) state.ultimoRSIAlert[symbol] = { historico: [] };
+  if (state.ultimoRSIAlert[symbol]['rsi'] && agora - state.ultimoRSIAlert[symbol]['rsi'] < config.TEMPO_COOLDOWN_MS) return;
 
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const symbolWithoutSlash = symbol.replace('/', '');
+  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-  let alertType = isBuy ? '✳️COMPRA✳️' : '🛑VENDA🛑';
-  let emoji = isBuy ? '🟢' : '🔴🔴';
+  let alertText = '';
+  let alertType = '';
+  let emoji = '';
 
-  // Buscar dados OHLCV de 3m para calcular ATR
-  const cacheKeyPrefix = `ohlcv_${symbolWithoutSlash}`;
-  const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 100));
-  const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
-
-  // Calcular ATR
-  const atr = calculateATR(ohlcv3m, 14);
-  const atrText = atr !== null ? format(atr) : '🔹 Indisp.';
-
-  // Calcular alvos e stop loss
-  let target1, target2, target3, stopLoss;
-  if (isBuy) {
-    target1 = atr !== null ? price + atr * 1 : null;
-    target2 = atr !== null ? price + atr * 2 : null;
-    target3 = atr !== null ? price + atr * 3 : null;
-    stopLoss = price * (1 - 0.028); // Stop loss de 2.8% abaixo do preço
+  // Verificar condições de alerta apenas para 5m e 15m
+  if (rsi5m >= config.RSI_HIGH_THRESHOLD_3 && rsi15m >= config.RSI_HIGH_THRESHOLD_3) {
+    alertType = '🛑💥 #15m Exaustão 💥🛑';
+    emoji = '🔴🔴';
+  } else if (rsi5m <= config.RSI_SCALP_LOW_THRESHOLD && rsi15m <= config.RSI_SCALP_LOW_THRESHOLD) {
+    alertType = '✳️💲 #15m Suporte 💲✳️';
+    emoji = '🟢';
   } else {
-    target1 = atr !== null ? price - atr * 1 : null;
-    target2 = atr !== null ? price - atr * 2 : null;
-    target3 = atr !== null ? price - atr * 3 : null;
-    stopLoss = price * (1 + 0.028); // Stop loss de 2.8% acima do preço
+    return; // Sem alerta se nenhuma condição for atendida
   }
-
-  // Formatar alvos e stop loss
-  const target1Text = target1 !== null ? format(target1) : '🔹 Indisp.';
-  const target2Text = target2 !== null ? format(target2) : '🔹 Indisp.';
-  const target3Text = target3 !== null ? format(target3) : '🔹 Indisp.';
-  const stopLossText = format(stopLoss);
 
   // Formatar Funding Rate
   let fundingRateText = '🔹 Indisp.';
@@ -430,27 +390,28 @@ async function sendAlertEMA(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
   const direcao4h = getSetaDirecao(stoch4h ? stoch4h.k : null, stoch4hPrevious ? stoch4hPrevious.k : null);
   const direcaoD = getSetaDirecao(stoch1d ? stoch1d.k : null, stoch1dPrevious ? stoch1dPrevious.k : null);
 
-  // Montar texto do alerta com alvos e stop loss
-  const alertText = `💠 Operação/Ativo : \n` +
-                    `🔘$${symbolWithoutSlash}\n` +
-                    `💲Preço: ${format(price)}\n` +
-                    `${alertType}\n` +
-                    `🎯 Alvo 1: ${target1Text}\n` +
-                    `🎯 Alvo 2: ${target2Text}\n` +
-                    `🎯 Alvo 3: ${target3Text}\n` +
-                    `🛑 Stop(2.8%): ${stopLossText}\n` +
-                    `🔹Stoch #1D %K: ${stoch1d ? stoch1d.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-                    `🔹Stoch #4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                    `💱LSR: ${lsrText} ${lsrSymbol}\n` +
-                    `Fund. Rate: ${fundingRateText}\n` +
-                    `🟰Suporte: ${supportText}\n` +
-                    `🟰Resistência: ${resistanceText}\n` +
-                    `➖VWAP (1h): ${vwapText}\n` +
-                    `☑︎ 🤖 Titanium - @J4Rviz`;
+  // Montar texto do alerta com maior precisão para RSI
+  alertText = `💠 Ativo \n` +
+              `🔘$${symbolWithoutSlash}\n` +
+              `💲Preço: ${format(price)}\n` +
+              `${alertType}\n` +
+              `RSI 5m: ${rsi5m.toFixed(4)}\n` +
+              `RSI 15m: ${rsi15m.toFixed(4)}\n` +
+              `RSI 1h: ${rsi1h.toFixed(4)}\n` +
+              `RSI 4h: ${rsi4h.toFixed(4)}\n` +
+              `RSI 1d: ${rsi1d.toFixed(4)}\n` +
+              `🔹 Stoch Diário %K: ${stoch1d ? stoch1d.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
+              `🔹 Stoch 4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
+              `💱LSR: ${lsrText} ${lsrSymbol}\n` +
+              `Funding Rate: ${fundingRateText}\n` +
+              `🟰Suporte : ${supportText}\n` +
+              `🟰Resistência : ${resistanceText}\n` +
+              `➖VWAP (1h): ${vwapText}\n` +
+              `☑︎ 🤖 Titanium Monitor - @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
-  const foiAlertado = state.ultimoEMAAlert[symbol].historico.some(r =>
+  const foiAlertado = state.ultimoRSIAlert[symbol].historico.some(r =>
     r.nivel === nivelRompido &&
     (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
   );
@@ -461,18 +422,18 @@ async function sendAlertEMA(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
         parse_mode: 'Markdown',
         disable_web_page_preview: true
       }));
-      state.ultimoEMAAlert[symbol]['ema'] = agora;
-      state.ultimoEMAAlert[symbol].historico.push({ nivel: nivelRompido, timestamp: agora });
-      state.ultimoEMAAlert[symbol].historico = state.ultimoEMAAlert[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Alerta EMA enviado para ${symbol}: ${alertType}, EMA34=${format(ema34Current)}, EMA89=${format(ema89Current)}, RSI 5m=${rsi5m.toFixed(4)}, 15m=${rsi15m.toFixed(4)}, 1h=${rsi1h.toFixed(4)}, 4h=${rsi4h.toFixed(4)}, 1d=${rsi1d.toFixed(4)}, Stoch 4h=%K:${stoch4h ? stoch4h.k.toFixed(2) : 'N/A'}, Stoch 1d=%K:${stoch1d ? stoch1d.k.toFixed(2) : 'N/A'}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}, Suporte=${supportText}, Resistência=${resistanceText}, VWAP=${vwapText}, ATR=${atrText}, Alvo1=${target1Text}, Alvo2=${target2Text}, Alvo3=${target3Text}, StopLoss=${stopLossText}`);
+      state.ultimoRSIAlert[symbol]['rsi'] = agora;
+      state.ultimoRSIAlert[symbol].historico.push({ nivel: nivelRompido, timestamp: agora });
+      state.ultimoRSIAlert[symbol].historico = state.ultimoRSIAlert[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
+      logger.info(`Alerta RSI enviado para ${symbol}: ${alertType}, RSI 5m=${rsi5m.toFixed(4)}, 15m=${rsi15m.toFixed(4)}, 1h=${rsi1h.toFixed(4)}, 4h=${rsi4h.toFixed(4)}, 1d=${rsi1d.toFixed(4)}, Stoch 4h=%K:${stoch4h ? stoch4h.k.toFixed(2) : 'N/A'}, Stoch 1d=%K:${stoch1d ? stoch1d.k.toFixed(2) : 'N/A'}, Preço=${format(price)}, LSR=${lsrText}, Funding=${fundingRateText}, Suporte=${supportText}, Resistência=${resistanceText}, VWAP=${vwapText}`);
     } catch (e) {
-      logger.error(`Erro ao enviar alerta EMA para ${symbol}: ${e.message}`);
+      logger.error(`Erro ao enviar alerta RSI para ${symbol}: ${e.message}`);
     }
   }
 }
 
 // ================= MONITORAMENTO ================= //
-async function monitorEMA() {
+async function monitorRSI() {
   try {
     if (!state.isConnected) {
       await checkConnection();
@@ -483,12 +444,11 @@ async function monitorEMA() {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
 
       // Buscar dados
-      let ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '3m', undefined, 100));
       let ohlcv5mRaw = getCachedData(`${cacheKeyPrefix}_5m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '5m', undefined, config.RSI_PERIOD + 1));
       let ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, config.RSI_PERIOD + 1));
       let ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, 50));
-      let ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, config.RSI_PERIOD + 10));
-      let ohlcv1dRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1d', undefined, config.RSI_PERIOD + 10));
+      let ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, config.RSI_PERIOD + 10)); // Mais candles para Estocástico
+      let ohlcv1dRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1d', undefined, config.RSI_PERIOD + 10)); // Mais candles para Estocástico
       const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
 
       // Fallback para timeframes maiores se necessário
@@ -502,12 +462,11 @@ async function monitorEMA() {
       }
 
       // Validar dados
-      if (!ohlcv3mRaw || !ohlcv5mRaw || !ohlcv15mRaw || !ohlcv1hRaw || !ohlcv4hRaw || !ohlcv1dRaw || !tickerRaw || tickerRaw.last === undefined) {
+      if (!ohlcv5mRaw || !ohlcv15mRaw || !ohlcv1hRaw || !ohlcv4hRaw || !ohlcv1dRaw || !tickerRaw || tickerRaw.last === undefined) {
         logger.warn(`Dados insuficientes ou preço não disponível para ${symbol}, pulando...`);
         return;
       }
 
-      const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
       const ohlcv5m = normalizeOHLCV(ohlcv5mRaw);
       const ohlcv15m = normalizeOHLCV(ohlcv15mRaw);
       const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
@@ -516,10 +475,10 @@ async function monitorEMA() {
       const currentPrice = parseFloat(tickerRaw.last);
 
       // Validar número de candles
-      if (ohlcv3m.length < 89 + 1 || ohlcv5m.length < config.RSI_PERIOD + 1 || ohlcv15m.length < config.RSI_PERIOD + 1 ||
+      if (ohlcv5m.length < config.RSI_PERIOD + 1 || ohlcv15m.length < config.RSI_PERIOD + 1 ||
           ohlcv1h.length < config.RSI_PERIOD + 1 || ohlcv4h.length < config.RSI_PERIOD + 1 ||
           ohlcv1d.length < config.RSI_PERIOD + 1) {
-        logger.warn(`Dados insuficientes para ${symbol}: 3m=${ohlcv3m.length}, 5m=${ohlcv5m.length}, 15m=${ohlcv15m.length}, 1h=${ohlcv1h.length}, 4h=${ohlcv4h.length}, 1d=${ohlcv1d.length}`);
+        logger.warn(`Dados insuficientes para ${symbol}: 5m=${ohlcv5m.length}, 15m=${ohlcv15m.length}, 1h=${ohlcv1h.length}, 4h=${ohlcv4h.length}, 1d=${ohlcv1d.length}`);
         return;
       }
 
@@ -537,7 +496,7 @@ async function monitorEMA() {
         }
         return false;
       };
-      if (!checkTimestamp(ohlcv3m, '3m', 3) || !checkTimestamp(ohlcv5m, '5m', 5) || !checkTimestamp(ohlcv15m, '15m', 15) ||
+      if (!checkTimestamp(ohlcv5m, '5m', 5) || !checkTimestamp(ohlcv15m, '15m', 15) ||
           !checkTimestamp(ohlcv1h, '1h', 60) || !checkTimestamp(ohlcv4h, '4h', 240) ||
           !checkTimestamp(ohlcv1d, '1d', 1440)) {
         logger.warn(`Candles desatualizados para ${symbol}, pulando...`);
@@ -546,7 +505,6 @@ async function monitorEMA() {
 
       // Log dos candles para depuração
       logger.info(`Dados OHLCV para ${symbol}:`);
-      logger.info(`3m: ${JSON.stringify(ohlcv3m.slice(-5))}`);
       logger.info(`5m: ${JSON.stringify(ohlcv5m.slice(-5))}`);
       logger.info(`15m: ${JSON.stringify(ohlcv15m.slice(-5))}`);
       logger.info(`1h: ${JSON.stringify(ohlcv1h.slice(-5))}`);
@@ -564,20 +522,6 @@ async function monitorEMA() {
         logger.warn(`RSI não calculado para ${symbol}, pulando...`);
         return;
       }
-
-      // Calcular EMA 34 e 89 no 3m
-      const ema34 = calculateEMA(ohlcv3m, 34);
-      const ema89 = calculateEMA(ohlcv3m, 89);
-
-      if (ema34.length < 2 || ema89.length < 2) {
-        logger.warn(`EMA não calculado adequadamente para ${symbol} (3m), pulando...`);
-        return;
-      }
-
-      const currentEMA34 = ema34[ema34.length - 1];
-      const prevEMA34 = ema34[ema34.length - 2];
-      const currentEMA89 = ema89[ema89.length - 1];
-      const prevEMA89 = ema89[ema89.length - 2];
 
       // Calcular Estocástico (5,3,3) para 4h e 1d
       const stochData4h = TechnicalIndicators.Stochastic.calculate({
@@ -606,15 +550,13 @@ async function monitorEMA() {
       const { support, resistance } = calculateSupportResistance(ohlcv1h);
       const vwap1h = calculateVWAP(ohlcv1h);
 
-      // Log dos valores de RSI, EMA, Estocástico, Suporte, Resistência e VWAP
+      // Log dos valores de RSI, Estocástico, Suporte, Resistência e VWAP
       logger.info(`Indicadores calculados para ${symbol}:`);
       logger.info(`RSI 5m: ${rsi5m[rsi5m.length - 1]}`);
       logger.info(`RSI 15m: ${rsi15m[rsi15m.length - 1]}`);
       logger.info(`RSI 1h: ${rsi1h[rsi1h.length - 1]}`);
       logger.info(`RSI 4h: ${rsi4h[rsi4h.length - 1]}`);
       logger.info(`RSI 1d: ${rsi1d[rsi1d.length - 1]}`);
-      logger.info(`EMA 34 (3m): ${currentEMA34}`);
-      logger.info(`EMA 89 (3m): ${currentEMA89}`);
       logger.info(`Stoch 4h: %K=${stoch4h ? stoch4h.k.toFixed(2) : 'N/A'}, %D=${stoch4h ? stoch4h.d.toFixed(2) : 'N/A'}`);
       logger.info(`Stoch 1d: %K=${stoch1d ? stoch1d.k.toFixed(2) : 'N/A'}, %D=${stoch1d ? stoch1d.d.toFixed(2) : 'N/A'}`);
       logger.info(`Suporte (1h, 50 velas): ${support}`);
@@ -622,7 +564,6 @@ async function monitorEMA() {
       logger.info(`VWAP (1h): ${vwap1h}`);
 
       // Cache dos dados
-      setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
       setCachedData(`${cacheKeyPrefix}_5m`, ohlcv5mRaw);
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
@@ -633,36 +574,27 @@ async function monitorEMA() {
       const lsr = await fetchLSR(symbolWithSlash);
       const fundingRate = await fetchFundingRate(symbolWithSlash);
 
-      // Verificar cruzamento EMA com condições de RSI
-      let emaCrossoverBuy = (prevEMA34 <= prevEMA89 && currentEMA34 > currentEMA89 && rsi15m[rsi15m.length - 1] < config.RSI_BUY_THRESHOLD);
-      let emaCrossoverSell = (prevEMA34 >= prevEMA89 && currentEMA34 < currentEMA89 && rsi15m[rsi15m.length - 1] > config.RSI_SELL_THRESHOLD);
-
-      if (emaCrossoverBuy || emaCrossoverSell) {
-        await sendAlertEMA(
-          symbolWithSlash,
-          currentPrice,
-          rsi5m[rsi5m.length - 1],
-          rsi15m[rsi15m.length - 1],
-          rsi1h[rsi1h.length - 1],
-          rsi4h[rsi4h.length - 1],
-          rsi1d[rsi1d.length - 1],
-          lsr,
-          fundingRate,
-          support,
-          resistance,
-          vwap1h,
-          stoch4h,
-          stoch1d,
-          stoch4hPrevious,
-          stoch1dPrevious,
-          currentEMA34,
-          currentEMA89,
-          emaCrossoverBuy
-        );
-      }
+      await sendAlertRSI(
+        symbolWithSlash,
+        currentPrice,
+        rsi5m[rsi5m.length - 1],
+        rsi15m[rsi15m.length - 1],
+        rsi1h[rsi1h.length - 1],
+        rsi4h[rsi4h.length - 1],
+        rsi1d[rsi1d.length - 1],
+        lsr,
+        fundingRate,
+        support,
+        resistance,
+        vwap1h,
+        stoch4h,
+        stoch1d,
+        stoch4hPrevious,
+        stoch1dPrevious
+      );
     }, 5);
   } catch (e) {
-    logger.error(`Erro ao processar condições de EMA: ${e.message}`);
+    logger.error(`Erro ao processar condições de RSI: ${e.message}`);
     state.isConnected = false;
     await reconnect();
   }
@@ -698,9 +630,9 @@ async function main() {
     await checkConnection();
     const pairCount = config.PARES_MONITORADOS.length;
     const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Clean2 *\nMonitorando ${pairCount} pares: ${pairsList}\nEMA Alerts`, { parse_mode: 'Markdown' }));
-    await monitorEMA();
-    setInterval(monitorEMA, config.INTERVALO_ALERTA_EMA_MS);
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium Clean *\nMonitorando ${pairCount} pares: ${pairsList}\nRSI Alerts`, { parse_mode: 'Markdown' }));
+    await monitorRSI();
+    setInterval(monitorRSI, config.INTERVALO_ALERTA_RSI_MS);
     setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
     setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000);
     setInterval(cleanupCache, config.CACHE_TTL);
