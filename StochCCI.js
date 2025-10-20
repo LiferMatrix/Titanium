@@ -17,9 +17,9 @@ const config = {
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
-  STOCHASTIC_SELL_MIN: 80, // Limite mínimo para venda (4h e Diário)
+  STOCHASTIC_SELL_MIN: 75, // Limite mínimo para venda (4h e Diário)
   LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.9, // Limite mínimo de LSR para venda
+  LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CCI_PERIOD: 14, // Período para CCI (15m)
   CCI_BUY_MIN: 190, // Limite mínimo de CCI para compra
   CCI_SELL_MAX: -85, // Limite máximo de CCI para venda
@@ -456,7 +456,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
 
   let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 75 (4h e Diário), RSI 1h < 60, OI 5m e 15m subindo, LSR < 2.7, CCI 15m > 200, EMA 34 > EMA 89 (3m)
+  // Condições para compra: %K > %D (4h), %K <= 75 (4h e Diário), RSI 1h < 60,LSR < 2.5, CCI 15m > 200, EMA 34 > EMA 89 (3m)
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d && 
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX && 
@@ -466,13 +466,13 @@ async function sendAlertStochasticCross(symbol, data) {
                       cci15m > config.CCI_BUY_MIN &&
                       ema34_3m > ema89_3m;
   
-  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, OI 5m e 15m caindo, LSR > 2.5, CCI 15m < -100, EMA 34 < EMA 89 (3m)
+  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, CCI 15m < -100, EMA 34 < EMA 89 (3m)
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d && 
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
-                       rsi1h > 68 && 
-                       (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
+                       rsi1h > 60 && 
+                       //(lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        cci15m < config.CCI_SELL_MAX &&
                        ema34_3m < ema89_3m;
 
