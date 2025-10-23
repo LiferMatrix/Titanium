@@ -369,8 +369,7 @@ const coinNames = {
     'ADAUSDT': 'Cardano',
     'ETHUSDT': 'Ethereum',
     'BNBUSDT': 'Binance Coin',
-    'XRPUSDT': 'XRP',
-    // Adicione mais pares conforme necessário
+    'XRPUSDT': 'XRP'
 };
 
 // Função genérica para análise de qualquer par
@@ -430,60 +429,37 @@ async function analyzePair(symbol) {
         // Construir resumo com base em RSI e MACD
         const isOverbought = [rsiWeekly, rsiFourHour, rsiOneHour, rsiFifteenMin].some(rsi => rsi && rsi.status === 'sobrecomprado');
         const isOversold = [rsiWeekly, rsiFourHour, rsiOneHour, rsiFifteenMin].some(rsi => rsi && rsi.status === 'sobrevendido');
-        const sentiment = isOverbought ? 'sugere cautela (sobrecompra)' : isOversold ? 'indica possível oportunidade (sobrevenda)' : 'sugere cautela';
+        const sentiment = isOverbought ? 'requer cautela (sobrecompra)' : isOversold ? 'indica oportunidade (sobrevenda)' : 'sugere equilíbrio';
 
-        // Construir a análise
-        let analysis = `🚨 *Análise em Tempo Real: ${symbol} (${coinName})*\n\n`;
-        analysis += `Preço Atual: *${currentPrice}*\n\n`;
-        analysis += `✅ *Análise Resumida*\n`;
-        analysis += `O ativo ${isWeeklyBullish ? 'mantém tendência de alta no longo prazo' : 'está em consolidação/baixa no longo prazo'}, `;
-        analysis += `mas ${isFourHourBullish ? 'mostra força no médio prazo' : 'está em correção/baixa no médio prazo'}. `;
-        analysis += `O sentimento de mercado ${sentiment}.\n\n`;
-
-        analysis += `🔍 *Analisei que...?*\n\n`;
-        analysis += `📅 *1. Longo prazo (semanal):*\n`;
-        analysis += `- ${isWeeklyBullish ? 'Mantém tendência de alta' : 'Consolidação ou tendência de baixa'}, com ${maWeekly ? 'momentum estável' : 'perda de momentum'}.\n`;
-        analysis += `- RSI: ${rsiWeekly ? `${rsiWeekly.value} (${rsiWeekly.status}${rsiWeekly.timeframeUsed !== '1w' ? `, usado ${rsiWeekly.timeframeUsed}` : ''})` : 'indisponível'}.\n`;
-        analysis += `- MACD: ${macdWeekly ? `${macdWeekly.status === 'bullish' ? 'Alta (cruzamento positivo)' : 'Baixa (cruzamento negativo)'}, histograma ${macdWeekly.histogram}${macdWeekly.timeframeUsed !== '1w' ? `, usado ${macdWeekly.timeframeUsed}` : ''}` : 'indisponível'}.\n`;
-        analysis += `- Preço próximo a ${weeklySR?.support ? `suporte em $${weeklySR.support}` : 'níveis indefinidos'}.\n\n`;
-
-        analysis += `🕓 *2. Médio prazo (4h):*\n`;
-        analysis += `- ${isFourHourBullish ? 'Tendência de alta' : 'Tendência de baixa ou consolidação'}.\n`;
-        analysis += `- RSI: ${rsiFourHour ? `${rsiFourHour.value} (${rsiFourHour.status}${rsiFourHour.timeframeUsed !== '4h' ? `, usado ${rsiFourHour.timeframeUsed}` : ''})` : 'indisponível'}.\n`;
-        analysis += `- MACD: ${macdFourHour ? `${macdFourHour.status === 'bullish' ? 'Alta (cruzamento positivo)' : 'Baixa (cruzamento negativo)'}, histograma ${macdFourHour.histogram}${macdFourHour.timeframeUsed !== '4h' ? `, usado ${macdFourHour.timeframeUsed}` : ''}` : 'indisponível'}.\n`;
-        analysis += `- Preço está próximo a ${fourHourSR?.support ? `suporte em $${fourHourSR.support}` : 'níveis indefinidos'}.\n\n`;
-
-        analysis += `🕐 *3. Curto prazo (1h):*\n`;
-        analysis += `- ${isOneHourBullish ? 'Tentativa de recuperação' : 'Pausa na queda ou movimento lateral'}.\n`;
-        analysis += `- RSI: ${rsiOneHour ? `${rsiOneHour.value} (${rsiOneHour.status}${rsiOneHour.timeframeUsed !== '1h' ? `, usado ${rsiOneHour.timeframeUsed}` : ''})` : 'indisponível'}.\n`;
-        analysis += `- MACD: ${macdOneHour ? `${macdOneHour.status === 'bullish' ? 'Alta (cruzamento positivo)' : 'Baixa (cruzamento negativo)'}, histograma ${macdOneHour.histogram}${macdOneHour.timeframeUsed !== '1h' ? `, usado ${macdOneHour.timeframeUsed}` : ''}` : 'indisponível'}.\n`;
-        analysis += `- Força compradora ${isOneHourBullish ? 'presente, mas incerta' : 'insuficiente'}.\n\n`;
-
-        analysis += `🕒 *4. Muito curto (15min):*\n`;
-        analysis += `- ${isFifteenMinBullish ? 'Movimento de alta ou lateral' : 'Movimento lateral ou de queda'}, indicando indecisão.\n`;
-        analysis += `- RSI: ${rsiFifteenMin ? `${rsiFifteenMin.value} (${rsiFifteenMin.status}${rsiFifteenMin.timeframeUsed !== '15m' ? `, usado ${rsiFifteenMin.timeframeUsed}` : ''})` : 'indisponível'}.\n`;
-        analysis += `- MACD: ${macdFifteenMin ? `${macdFifteenMin.status === 'bullish' ? 'Alta (cruzamento positivo)' : 'Baixa (cruzamento negativo)'}, histograma ${macdFifteenMin.histogram}${macdFifteenMin.timeframeUsed !== '15m' ? `, usado ${macdFifteenMin.timeframeUsed}` : ''}` : 'indisponível'}.\n`;
-        analysis += `- Pode testar ${fifteenMinSR?.resistance ? `resistência em $${fifteenMinSR.resistance}` : 'níveis indefinidos'}.\n\n`;
-
-        analysis += `📊 *Níveis Importantes*\n\n`;
-        analysis += `🔺 *Resistências (onde pode parar de subir):*\n`;
-        analysis += `- 🔸$${oneHourSR?.resistance || 'indefinido'} (curto prazo)\n`;
-        analysis += `- 🔸$${weeklySR?.resistance || 'indefinido'} (longo prazo)\n\n`;
-        analysis += `🔻 *Suportes (onde pode parar de cair):*\n`;
-        analysis += `- 🔹$${oneHourSR?.support || 'indefinido'} (curto prazo)\n`;
-        analysis += `- 🔹$${fourHourSR?.support || 'indefinido'} (médio prazo)\n\n`;
-
-        analysis += `⏳ *Cenário Provável para 1-2 Dias*\n`;
-        analysis += `O preço pode tentar um repique até $${oneHourSR?.resistance || 'níveis superiores'}. `;
-        analysis += `Se não romper, pode buscar o suporte em $${fourHourSR?.support || 'níveis inferiores'}.\n\n`;
-
-        analysis += `⛔ *Quando essa análise perde validade?*\n`;
-        analysis += `- Se fechar abaixo de $${oneHourSR?.support || 'suporte de curto prazo'} em 4h → enfraquece cenário atual.\n`;
-        analysis += `- Se fechar abaixo de $${weeklySR?.support || 'suporte de longo prazo'} na semanal → indica possível reversão maior.\n\n`;
+        // Construir a análise com tom humanizado, elegante e resumido
+        let analysis = `🤖 *Titanium: Análise ${symbol} (${coinName})*\n\n`;
+        analysis += `**Data**: *${now}* (Horário de Brasília)\n\n`;
+        analysis += `**Preço Atual**: *${currentPrice}*\n\n`;
+        analysis += `---\n`;
+        analysis += `#### 📈 Resumo do Mercado\n`;
+        analysis += `${coinName} mostra ${isWeeklyBullish ? "força de longo prazo (acumulação, Wyckoff)" : "consolidação ou redistribuição"} e ${isFourHourBullish ? "momentum de alta no médio prazo" : "correção no médio prazo"}. Sentimento: ${sentiment}.\n\n`;
+        analysis += `---\n`;
+        analysis += `#### 🔍 Análise Técnica\n`;
+        analysis += `- **Longo Prazo (Semanal)**: ${isWeeklyBullish ? "Tendência de alta (onda 3, Elliott)" : "Consolidação (fase B/C, Wyckoff)"}. RSI: ${rsiWeekly?.value || 'indisponível'} (${rsiWeekly?.status || 'neutro'}). MACD: ${macdWeekly?.status === 'bullish' ? 'alta' : 'baixa'}.\n`;
+        analysis += `- **Médio Prazo (4h)**: ${isFourHourBullish ? "Alta (sign of strength)" : "Correção ou lateral"}. Suporte: *$${fourHourSR?.support || 'indefinido'}*. Resistência: *$${fourHourSR?.resistance || 'indefinido'}*.\n`;
+        analysis += `- **Curto Prazo (1h)**: ${isOneHourBullish ? "Recuperação inicial" : "Indecisão"}. RSI: ${rsiOneHour?.value || 'indisponível'} (${rsiOneHour?.status || 'neutro'}).\n`;
+        analysis += `- **Intraday (15min)**: ${isFifteenMinBullish ? "Alta ou lateral" : "Queda ou lateral"}. MACD: ${macdFifteenMin?.status === 'bullish' ? 'alta' : 'baixa'}.\n\n`;
+        analysis += `---\n`;
+        analysis += `#### 📊 Níveis Críticos\n`;
+        analysis += `- *Resistências*: $${oneHourSR?.resistance || 'indefinido'} (curto prazo), $${weeklySR?.resistance || 'indefinido'} (longo prazo).\n`;
+        analysis += `- *Suportes*: $${oneHourSR?.support || 'indefinido'} (curto prazo), $${fourHourSR?.support || 'indefinido'} (médio prazo).\n\n`;
+        analysis += `---\n`;
+        analysis += `#### ⏳ Cenário Provável\n`;
+        analysis += `Preço pode testar *$${oneHourSR?.resistance || 'níveis superiores'}*. Sem rompimento, busca suporte em *$${fourHourSR?.support || 'níveis inferiores'}*. Rompimento de *$${weeklySR?.resistance || 'indefinido'}* sugere onda 3 (Elliott); quebra de *$${weeklySR?.support || 'indefinido'}* indica correção (onda A/B).\n\n`;
+        analysis += `---\n`;
+        analysis += `#### ⛔ Invalidação\n`;
+        analysis += `- Queda abaixo de *$${oneHourSR?.support || 'suporte de curto prazo'}* (4h) enfraquece o cenário.\n`;
+        analysis += `- Quebra de *$${weeklySR?.support || 'suporte de longo prazo'}* (semanal) sugere redistribuição (Wyckoff).\n\n`;
+        analysis += `**✅ Nota**: Monitore volume e rompimentos. Gerencie o risco com disciplina.\n\n`;
         analysis += `⏰ *${now}*`;
 
         await sendTelegramMessage(analysis);
-        console.log(`📊 Análise de ${symbol} (${coinName}) enviada às ${now}`);
+        console.log(`📊 Análise  ${symbol} (${coinName}) enviada às ${now}`);
     } catch (error) {
         console.error(`❌ Erro na análise de ${symbol}:`, error.message);
         const message = `⚠️ *Erro na Análise de ${symbol} (${coinName})*\nNão foi possível gerar a análise.\nMotivo: ${error.message}\n⏰ *${now}*`;
@@ -536,7 +512,6 @@ async function checkListingsDelistings() {
     }
     
     const newSymbols = currentSymbols.filter(symbol => !initialSymbols.has(symbol));
-    const delistedSymbols = Array.from(initialSymbols).filter(symbol => !currentSymbols.includes(symbol));
     
     if (newSymbols.length > 0) {
         newSymbols.forEach(async (symbol) => {
@@ -551,59 +526,16 @@ async function checkListingsDelistings() {
         console.log(`🆕 ${newSymbols.length} NOVA(S) LISTAGEM(ÕES)!`);
     }
     
-    if (delistedSymbols.length > 0) {
-        delistedSymbols.forEach(async (symbol) => {
-            const now = new Date().toLocaleString('pt-BR', { 
-                timeZone: 'America/Sao_Paulo',
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
-            const message = `☠️ *DESLISTAGEM ⚠️ Binance Futures:*\n\n\`${symbol}\`\n\n⏰ *${now}*`;
-            await sendTelegramMessage(message);
-        });
-        console.log(`💀 ${delistedSymbols.length} DESLISTAGEM(ÕES)!`);
-    }
-    
     initialSymbols = new Set(currentSymbols);
     allUsdtSymbols = currentSymbols;
 }
 
-// Configura comando /info no Telegram
-if (telegramBot) {
-    telegramBot.onText(/\/info (.+)/, async (msg, match) => {
-        const chatId = msg.chat.id;
-        if (chatId.toString() !== TELEGRAM_CHAT_ID) {
-            await telegramBot.sendMessage(chatId, '❌ Acesso não autorizado. Este bot está configurado para um chat específico.');
-            return;
-        }
-
-        let symbol = match[1].toUpperCase();
-        if (!symbol.endsWith('USDT')) {
-            symbol += 'USDT';
-        }
-
-        console.log(`📩 Recebido comando /info ${symbol} no Telegram`);
-        await analyzePair(symbol);
-    });
-
-    telegramBot.onText(/\/info/, async (msg) => {
-        const chatId = msg.chat.id;
-        if (chatId.toString() !== TELEGRAM_CHAT_ID) {
-            await telegramBot.sendMessage(chatId, '❌ Acesso não autorizado. Este bot está configurado para um chat específico.');
-            return;
-        }
-
-        await telegramBot.sendMessage(chatId, 'ℹ️ Uso: /info <par>\nExemplo: /info ADAUSDT');
-    });
-}
-
 // Inicia monitoramento
 async function startMonitoring() {
-    console.log('🔍 Iniciando MONITORAMENTO DE LISTAGENS/DESLISTAGENS + ANÁLISE HORÁRIA BTCUSDT + COMANDO /info!');
+    console.log('🔍 Iniciando MONITORAMENTO DE LISTAGENS/DESLISTAGENS + ANÁLISE HORÁRIA BTCUSDT!');
     console.log('📊 APIs usadas: futuresCandles, futures24hrPriceChange, futuresPrices, ccxt.fetchOHLCV');
     console.log('📈 Indicadores: SMA, RSI, MACD');
     console.log('📅 Análise horária de BTCUSDT: ATIVADA');
-    console.log('📩 Comando /info: ATIVADO para análise sob demanda');
     
     await checkListingsDelistings();
     setInterval(checkListingsDelistings, 30000);
