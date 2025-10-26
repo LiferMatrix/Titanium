@@ -2,6 +2,7 @@ require('dotenv').config();
 const Binance = require('node-binance-api');
 const TelegramBot = require('node-telegram-bot-api');
 const ccxt = require('ccxt');
+const axios = require('axios');
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
 const fs = require('fs').promises;
@@ -72,10 +73,12 @@ if (config.TELEGRAM_BOT_TOKEN && config.TELEGRAM_CHAT_ID) {
 let allUsdtSymbols = [];
 let initialSymbols = new Set();
 
-// Cache para suporte/resistência, RSI e MACD com expiração (1 hora)
+// Cache para suporte/resistência, RSI, MACD, LSR e Volume com expiração (1 hora)
 const srCache = new Map();
 const rsiCache = new Map();
 const macdCache = new Map();
+const lsrCache = new Map();
+const volumeCache = new Map(); // Novo cache para volume
 
 // Função para limpar cache expirado
 function clearExpiredCache() {
@@ -88,6 +91,28 @@ function clearExpiredCache() {
   }
   for (const [key, { timestamp }] of srCache) {
     if (now - timestamp > config.CACHE_EXPIRY) srCache.delete(key);
+  }
+  for (const [key, { timestamp }] of lsrCache) {
+    if (now - timestamp > config.CACHE_EXPIRY) lsrCache.delete(key);
+  }
+  for (const [key, { timestamp }] of volumeCache) {
+    if (now - timestamp > config.CACHE_EXPIRY) volumeCache.delete(key);
+  }
+}
+
+// Função para tentar novamente chamadas à API
+async function retryApiCall(fn, retries = 5, delay = 3000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i < retries - 1) {
+        logger.info(`⚠️ Tentativa ${i + 1} falhou, tentando novamente em ${delay}ms: ${error.message} (code: ${error.code || 'N/A'})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
   }
 }
 
@@ -115,20 +140,18 @@ async function cleanupOldLogs() {
   }
 }
 
-// Função para tentar novamente chamadas à API
-async function retryApiCall(fn, retries = 3, delay = 1000) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (i < retries - 1) {
-        logger.info(`⚠️ Tentativa ${i + 1} falhou, tentando novamente em ${delay}ms: ${error.message}`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        throw error;
-      }
-    }
-  }
+// Função para normalizar dados OHLCV
+function normalizeOHLCV(data) {
+  return data
+    .map(c => ({
+      time: c[0],
+      open: Number(c[1]),
+      high: Number(c[2]),
+      low: Number(c[3]),
+      close: Number(c[4]),
+      volume: Number(c[5])
+    }))
+    .filter(c => !isNaN(c.volume) && c.volume > 0);
 }
 
 // 🔥 SUPORTE/RESISTÊNCIA com Níveis Pivot
@@ -524,17 +547,39 @@ async function getMACD(symbol, timeframe) {
   }
 }
 
-// Função para análise de volume anormal
+// 🔥 Função para análise de volume anormal - Alinhada com o script de exemplo
 async function getVolumeAnalysis(symbol, timeframe = '15m', limit = 50) {
+  const cacheKey = `${symbol}_${timeframe}_volume`;
+  if (volumeCache.has(cacheKey) && Date.now() - volumeCache.get(cacheKey).timestamp < config.CACHE_EXPIRY) {
+    logger.info(`✅ Volume ${symbol} (${timeframe}) obtido do cache`);
+    return volumeCache.get(cacheKey).data;
+  }
+
   try {
-    const klines = await retryApiCall(() => binance.futuresCandles(symbol, timeframe, { limit }));
-    const volumes = klines.map(k => parseFloat(k[5])).filter(v => !isNaN(v) && v > 0);
-    if (volumes.length < 20) {
-      logger.warn(`⚠️ Dados insuficientes para volume ${symbol} (${timeframe}): ${volumes.length}/20 velas`);
+    // Tenta obter klines via ccxt (primário)
+    let ohlcv = await retryApiCall(() => binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, limit));
+    let method = 'ccxt';
+
+    // Fallback para node-binance-api se ccxt falhar
+    if (!ohlcv || ohlcv.length < 10) {
+      logger.warn(`⚠️ Dados insuficientes via ccxt para volume ${symbol} (${timeframe}): ${ohlcv?.length || 0}/${limit} velas, tentando node-binance-api`);
+      ohlcv = await retryApiCall(() => binance.futuresCandles(symbol, timeframe, { limit }));
+      method = 'node-binance-api';
+    }
+
+    // Normaliza os dados
+    const normalizedOHLCV = normalizeOHLCV(ohlcv);
+    const volumes = normalizedOHLCV.map(c => c.volume);
+    
+    // Requer pelo menos 10 velas (flexibilizado do original)
+    if (volumes.length < 10) {
+      logger.warn(`⚠️ Dados insuficientes para volume ${symbol} (${timeframe}): ${volumes.length}/10 velas`);
       return null;
     }
 
-    const avgVolume = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / (volumes.length - 1);
+    // Calcula média dos volumes (excluindo o último candle)
+    const lookbackVolumes = volumes.slice(-11, -1); // Últimos 10 candles
+    const avgVolume = lookbackVolumes.reduce((sum, v) => sum + v, 0) / lookbackVolumes.length;
     const latestVolume = volumes[volumes.length - 1];
     const volumeRatio = latestVolume / avgVolume;
 
@@ -545,10 +590,83 @@ async function getVolumeAnalysis(symbol, timeframe = '15m', limit = 50) {
       status: volumeRatio > 2 ? 'anormalmente alto' : volumeRatio > 1.5 ? 'elevado' : 'normal'
     };
 
-    logger.info(`✅ Volume ${symbol} (${timeframe}): ${result.volume} (média ${result.avgVolume}, ratio ${result.ratio}, ${result.status})`);
+    volumeCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    logger.info(`✅ Volume ${symbol} (${timeframe}): ${result.volume} (média ${result.avgVolume}, ratio ${result.ratio}, ${result.status}) (${method})`);
     return result;
   } catch (error) {
-    logger.error(`❌ Erro ao calcular volume ${symbol} (${timeframe}): ${error.message}`);
+    logger.error(`❌ Erro ao calcular volume ${symbol} (${timeframe}): ${error.message} (code: ${error.code || error.response?.status || 'N/A'})`);
+    return null;
+  }
+}
+
+// Função para obter Long/Short Ratio (15m)
+async function getLongShortRatio(symbol, timeframe = '15m') {
+  const cacheKey = `${symbol}_${timeframe}_lsr`;
+  if (lsrCache.has(cacheKey) && Date.now() - lsrCache.get(cacheKey).timestamp < config.CACHE_EXPIRY) {
+    logger.info(`✅ LSR ${symbol} (${timeframe}) obtido do cache`);
+    return lsrCache.get(cacheKey).data;
+  }
+
+  try {
+    const res = await retryApiCall(() =>
+      axios.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio', {
+        params: {
+          symbol: symbol.replace('/', ''),
+          period: timeframe,
+          limit: 2
+        }
+      }), 5, 3000);
+
+    if (!res.data || res.data.length < 2) {
+      logger.warn(`⚠️ Dados insuficientes para LSR ${symbol} (${timeframe}): ${res.data?.length || 0} registros`);
+      return null;
+    }
+
+    const currentLSR = parseFloat(res.data[0].longShortRatio);
+    const longRatio = parseFloat(res.data[0].longAccount);
+    const shortRatio = parseFloat(res.data[0].shortAccount);
+
+    if (isNaN(currentLSR) || isNaN(longRatio) || isNaN(shortRatio) || shortRatio === 0) {
+      logger.warn(`⚠️ Dados inválidos para LSR ${symbol} (${timeframe}): LSR=${currentLSR}, long=${longRatio}, short=${shortRatio}`);
+      return null;
+    }
+
+    const result = {
+      longRatio: (longRatio * 100).toFixed(2),
+      shortRatio: (shortRatio * 100).toFixed(2),
+      lsr: currentLSR.toFixed(2),
+      status: currentLSR > 1.5 ? 'predomínio de compradores' : currentLSR < 0.67 ? 'predomínio de vendedores' : 'equilíbrio',
+      method: 'axios-public'
+    };
+
+    lsrCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    logger.info(`✅ LSR ${symbol} (${timeframe}): Long ${result.longRatio}%, Short ${result.shortRatio}%, Ratio ${result.lsr}, ${result.status} (axios-public)`);
+    return result;
+  } catch (error) {
+    logger.error(`❌ Erro ao calcular LSR ${symbol} (${timeframe}) via axios: ${error.message} (code: ${error.response?.status || 'N/A'})`);
+    return null;
+  }
+}
+
+// Função para obter Funding Rate
+async function getFundingRate(symbol) {
+  try {
+    const fundingData = await retryApiCall(() => binanceCCXT.fetchFundingRate(symbol));
+    if (!fundingData || !fundingData.fundingRate) {
+      logger.warn(`⚠️ Dados de funding rate indisponíveis para ${symbol}`);
+      return null;
+    }
+
+    const fundingRate = parseFloat(fundingData.fundingRate) * 100;
+    const result = {
+      rate: fundingRate.toFixed(4),
+      status: fundingRate > 0.01 ? 'compradores pagando vendedores' : fundingRate < -0.01 ? 'vendedores pagando compradores' : 'equilíbrio'
+    };
+
+    logger.info(`✅ Funding Rate ${symbol}: ${result.rate}% (${result.status})`);
+    return result;
+  } catch (error) {
+    logger.error(`❌ Erro ao calcular Funding Rate ${symbol}: ${error.message}`);
     return null;
   }
 }
@@ -636,6 +754,12 @@ async function analyzePair(symbol) {
     // Calcular volume anormal
     const volume15Min = await getVolumeAnalysis(symbol, '15m');
 
+    // Calcular Long/Short Ratio (15m)
+    const lsr15Min = await getLongShortRatio(symbol, '15m');
+
+    // Calcular Funding Rate
+    const fundingRate = await getFundingRate(symbol);
+
     // Determinar tendências com base nas médias móveis
     const currentPriceFloat = parseFloat(prices[symbol]);
     const isWeeklyBullish = maWeekly && currentPriceFloat > parseFloat(maWeekly);
@@ -660,7 +784,8 @@ async function analyzePair(symbol) {
     analysis += `- **Longo Prazo (Semanal)**: ${trendEmoji(isWeeklyBullish)} ${isWeeklyBullish ? "Tendência de alta (onda 3, Elliott)" : "Consolidação (fase B/C, Wyckoff)"}. RSI: ${rsiWeekly?.value || 'indisponível'} (${rsiWeekly?.status || 'neutro'}, divergência ${rsiWeekly?.divergence || 'nenhuma'}). MACD: ${macdWeekly?.status === 'bullish' ? 'alta' : 'baixa'} (cruzamento ${macdWeekly?.crossover || 'nenhum'}).\n`;
     analysis += `- **Médio Prazo (4h)**: ${trendEmoji(isFourHourBullish)} ${isFourHourBullish ? "Alta (sign of strength)" : "Correção ou lateral"}. Ponto Pivot: *$${fourHourSR?.pivot || 'indefinido'}*. Suporte: *$${fourHourSR?.support1 || 'indefinido'}*. Resistência: *$${fourHourSR?.resistance1 || 'indefinido'}*.\n`;
     analysis += `- **Curto Prazo (1h)**: ${trendEmoji(isOneHourBullish)} ${isOneHourBullish ? "Recuperação inicial" : "Indecisão"}. RSI: ${rsiOneHour?.value || 'indisponível'} (${rsiOneHour?.status || 'neutro'}, divergência ${rsiOneHour?.divergence || 'nenhuma'}).\n`;
-    analysis += `- **Intraday (15min)**: ${trendEmoji(isFifteenMinBullish)} ${isFifteenMinBullish ? "Alta ou lateral" : "Queda ou lateral"}. MACD: ${macdFifteenMin?.status === 'bullish' ? 'alta' : 'baixa'} (cruzamento ${macdFifteenMin?.crossover || 'nenhum'}). Volume: ${volume15Min?.status || 'indisponível'} (ratio ${volume15Min?.ratio || '-'}).\n\n`;
+    analysis += `- **Intraday (15min)**: ${trendEmoji(isFifteenMinBullish)} ${isFifteenMinBullish ? "Alta ou lateral" : "Queda ou lateral"}. MACD: ${macdFifteenMin?.status === 'bullish' ? 'alta' : 'baixa'} (cruzamento ${macdFifteenMin?.crossover || 'nenhum'}). Volume: ${volume15Min?.status || 'indisponível'} (ratio ${volume15Min?.ratio || '-'}). LSR: ${lsr15Min?.status || 'indisponível'} (${lsr15Min?.lsr || '-'}).\n`;
+    analysis += `- **Funding Rate**: ${fundingRate?.rate || 'indisponível'}% (${fundingRate?.status || 'neutro'}).\n\n`;
     analysis += `---\n`;
     analysis += `#### 📊 Níveis Críticos\n`;
     analysis += `- *Ponto Pivot (4h)*: $${fourHourSR?.pivot || 'indefinido'}\n`;
@@ -668,12 +793,12 @@ async function analyzePair(symbol) {
     analysis += `- *Suportes*: $${oneHourSR?.support1 || 'indefinido'} (curto prazo), $${fourHourSR?.support1 || 'indefinido'} (médio prazo), $${fourHourSR?.support2 || 'indefinido'} (S2, 4h).\n\n`;
     analysis += `---\n`;
     analysis += `#### ⏳ Cenário Provável\n`;
-    analysis += `Preço pode testar *$${oneHourSR?.resistance1 || 'níveis superiores'}*. Sem rompimento, busca suporte em *$${fourHourSR?.support1 || 'níveis inferiores'}*. Rompimento de *$${weeklySR?.resistance1 || 'indefinido'}* sugere onda 3 (Elliott); quebra de *$${weeklySR?.support1 || 'indefinido'}* indica correção (onda A/B).\n\n`;
+    analysis += `O Preço pode testar *$${oneHourSR?.resistance1 || 'níveis superiores'}*. Sem rompimento, busca suporte em *$${fourHourSR?.support1 || 'níveis inferiores'}*. Rompimento de *$${weeklySR?.resistance1 || 'indefinido'}* sugere onda 3 (Elliott); quebra de *$${weeklySR?.support1 || 'indefinido'}* indica correção (onda A/B).\n\n`;
     analysis += `---\n`;
     analysis += `#### ⛔ Invalidação\n`;
     analysis += `- Queda abaixo de *$${oneHourSR?.support1 || 'suporte de curto prazo'}* (4h) enfraquece o cenário.\n`;
     analysis += `- Quebra de *$${weeklySR?.support1 || 'suporte de longo prazo'}* (semanal) sugere redistribuição (Wyckoff).\n\n`;
-    analysis += `**✅ Nota**: Monitore volume e rompimentos. Gerencie o risco com disciplina.\n\n`;
+    analysis += `**✅ Nota**: Monitore volume, LSR e funding rate para confirmar rompimentos. Gerencie o risco com disciplina.\n\n`;
     analysis += `⏰ *${now}*`;
 
     await sendTelegramMessage(analysis);
@@ -751,8 +876,8 @@ async function checkListingsDelistings() {
 // Inicia monitoramento
 async function startMonitoring() {
   logger.info('🔍 Iniciando MONITORAMENTO DE LISTAGENS/DESLISTAGENS + ANÁLISE HORÁRIA BTCUSDT!');
-  logger.info('📊 APIs usadas: futuresCandles, futures24hrPriceChange, futuresPrices, ccxt.fetchOHLCV');
-  logger.info('📈 Indicadores: SMA, RSI, MACD, Volume');
+  logger.info('📊 APIs usadas: futuresCandles, futures24hrPriceChange, futuresPrices, ccxt.fetchOHLCV, futuresLongShortRatio, ccxt.fetchFundingRate');
+  logger.info('📈 Indicadores: SMA, RSI, MACD, Volume, LSR, Funding Rate');
   logger.info('📅 Análise horária de BTCUSDT: ATIVADA');
 
   try {
