@@ -178,7 +178,7 @@ async function limitConcurrency(items, fn, limit = 5) {
 
 // ================= INDICADORES ================= //
 function normalizeOHLCV(data) {
-  return data.map(c => ({
+  const normalized = data.map(c => ({
     time: c[0],
     open: Number(c[1]),
     high: Number(c[2]),
@@ -186,10 +186,17 @@ function normalizeOHLCV(data) {
     close: Number(c[4]),
     volume: Number(c[5])
   })).filter(c => !isNaN(c.close) && !isNaN(c.volume));
+  if (normalized.length < data.length) {
+    logger.warn(`Filtrados ${data.length - normalized.length} candles inválidos durante normalização. Candles válidos: ${normalized.length}`);
+  }
+  return normalized;
 }
 
 function calculateRSI(data) {
-  if (!data || data.length < config.RSI_PERIOD + 1) return [];
+  if (!data || data.length < config.RSI_PERIOD + 1) {
+    logger.warn(`Dados insuficientes para RSI: ${data?.length || 0} candles, necessário ${config.RSI_PERIOD + 1}`);
+    return [];
+  }
   const rsi = TechnicalIndicators.RSI.calculate({
     period: config.RSI_PERIOD,
     values: data.map(d => d.close || d[4])
@@ -198,11 +205,17 @@ function calculateRSI(data) {
 }
 
 function calculateStochastic(data) {
-  if (!data || data.length < config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2) return null;
+  if (!data || data.length < config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2) {
+    logger.warn(`Dados insuficientes para Estocástico: ${data?.length || 0} candles, necessário ${config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2}`);
+    return null;
+  }
   const highs = data.map(c => c.high || c[2]).filter(h => !isNaN(h));
   const lows = data.map(c => c.low || c[3]).filter(l => !isNaN(l));
   const closes = data.map(c => c.close || c[4]).filter(cl => !isNaN(cl));
-  if (highs.length < config.STOCHASTIC_PERIOD_K || lows.length < config.STOCHASTIC_PERIOD_K || closes.length < config.STOCHASTIC_PERIOD_K) return null;
+  if (highs.length < config.STOCHASTIC_PERIOD_K || lows.length < config.STOCHASTIC_PERIOD_K || closes.length < config.STOCHASTIC_PERIOD_K) {
+    logger.warn(`Dados insuficientes após filtragem para Estocástico: highs=${highs.length}, lows=${lows.length}, closes=${closes.length}`);
+    return null;
+  }
   const result = TechnicalIndicators.Stochastic.calculate({
     high: highs,
     low: lows,
@@ -215,6 +228,10 @@ function calculateStochastic(data) {
 }
 
 function calculateATR(data) {
+  if (!data || data.length < 14) {
+    logger.warn(`Dados insuficientes para ATR: ${data?.length || 0} candles, necessário 14`);
+    return [];
+  }
   const atr = TechnicalIndicators.ATR.calculate({
     period: 14,
     high: data.map(c => c.high || c[2]),
@@ -225,7 +242,10 @@ function calculateATR(data) {
 }
 
 function calculateCCI(data) {
-  if (!data || data.length < config.CCI_PERIOD) return [];
+  if (!data || data.length < config.CCI_PERIOD) {
+    logger.warn(`Dados insuficientes para CCI: ${data?.length || 0} candles, necessário ${config.CCI_PERIOD}`);
+    return [];
+  }
   const cci = TechnicalIndicators.CCI.calculate({
     period: config.CCI_PERIOD,
     high: data.map(c => c.high || c[2]).filter(h => !isNaN(h)),
@@ -236,16 +256,25 @@ function calculateCCI(data) {
 }
 
 function calculateEMA(data, period) {
-  if (!data || data.length < period) return [];
+  if (!data || data.length < period) {
+    logger.warn(`Dados insuficientes para EMA${period}: ${data?.length || 0} candles, necessário ${period}`);
+    return [];
+  }
   const ema = TechnicalIndicators.EMA.calculate({
     period,
     values: data.map(d => d.close || d[4])
   });
+  if (ema.length === 0) {
+    logger.warn(`EMA${period} retornou array vazio, verifique valores de fechamento: ${JSON.stringify(data.map(d => d.close).slice(-5))}`);
+  }
   return ema.filter(v => !isNaN(v));
 }
 
 function calculateVWAP(data) {
-  if (!data || data.length < 1) return null;
+  if (!data || data.length < 1) {
+    logger.warn(`Dados insuficientes para VWAP: ${data?.length || 0} candles`);
+    return null;
+  }
   let totalVolume = 0;
   let volumePriceSum = 0;
   data.forEach(candle => {
@@ -260,12 +289,16 @@ function calculateVWAP(data) {
 }
 
 function detectarQuebraEstrutura(ohlcv, atr) {
-  if (!ohlcv || ohlcv.length < 2 || !atr) return { suporte: 0, resistencia: 0 };
+  if (!ohlcv || ohlcv.length < 2 || !atr) {
+    logger.warn(`Dados insuficientes para detectar quebra de estrutura: ohlcv=${ohlcv?.length || 0}, atr=${atr}`);
+    return { suporte: 0, resistencia: 0 };
+  }
   const lookbackPeriod = 50;
   const previousCandles = ohlcv.slice(0, -1).slice(-lookbackPeriod);
   const highs = previousCandles.map(c => c.high || c[2]).filter(h => !isNaN(h));
   const lows = previousCandles.map(c => c.low || c[3]).filter(l => !isNaN(l));
   if (highs.length === 0 || lows.length === 0) {
+    logger.warn(`Nenhum dado válido para quebra de estrutura: highs=${highs.length}, lows=${lows.length}`);
     return { suporte: 0, resistencia: 0 };
   }
   const maxHigh = Math.max(...highs);
@@ -314,6 +347,7 @@ async function fetchFundingRate(symbol) {
       setCachedData(cacheKey, result);
       return result;
     }
+    logger.warn(`Dados insuficientes de Funding Rate para ${symbol}: ${fundingData?.length || 0} registros`);
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   } catch (e) {
     logger.warn(`Erro ao buscar Funding Rate para ${symbol}: ${e.message}`);
@@ -385,6 +419,9 @@ async function sendAlertStochasticCross(symbol, data) {
   // Calcular EMA 55 no timeframe de 1h
   const ema55_1hValues = calculateEMA(ohlcv1h, 55);
   const ema55_1h = ema55_1hValues.length > 0 ? ema55_1hValues[ema55_1hValues.length - 1] : null;
+  if (!ema55_1h) {
+    logger.warn(`EMA 55 1h indisponível para ${symbol}. Candles em ohlcv1h: ${ohlcv1h.length}, Valores de fechamento: ${JSON.stringify(ohlcv1h.slice(-5).map(c => c.close))}`);
+  }
   let ema55Text = '';
   let ema55Emoji = '';
 
@@ -399,7 +436,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
 
   let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 190, EMA 34 > EMA 89 (3m)
+  // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 190, EMA 34 > EMA 89 (3m), preço > EMA 55 (1h)
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d && 
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX && 
@@ -407,18 +444,18 @@ async function sendAlertStochasticCross(symbol, data) {
                       rsi1h < 60 && 
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       cci15m > config.CCI_BUY_MIN &&
-                      ema34_3m > ema89_3m;
-                      
+                      ema34_3m > ema89_3m &&
+                      ema55_1h !== null && price > ema55_1h;
 
-  // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, CCI 15m < -85, EMA 34 < EMA 89 (3m)
+  // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, CCI 15m < -85, EMA 34 < EMA 89 (3m), preço < EMA 55 (1h)
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d && 
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 60 && 
                        cci15m < config.CCI_SELL_MAX &&
-                       ema34_3m < ema89_3m;
-                       
+                       ema34_3m < ema89_3m &&
+                       ema55_1h !== null && price < ema55_1h;
 
   // Configurar texto da EMA 55 com emoji
   if (ema55_1h !== null) {
@@ -428,9 +465,7 @@ async function sendAlertStochasticCross(symbol, data) {
     } else if (price < ema55_1h) {
       ema55Text = `🔹 #1h (${format(ema55_1h)}), Bearish 🔴`;
       ema55Emoji = '✅';
-    } else {
-      ema55Text = `🔹 Preço na EMA 55 1h (${format(ema55_1h)}), tendência neutra ⚪`;
-      ema55Emoji = '⚪';
+    
     }
   } else {
     ema55Text = `🔹 EMA 55 1h: Indisponível`;
@@ -508,7 +543,7 @@ async function checkConditions() {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 50));
       const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h', undefined, config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D));
-      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, config.RSI_PERIOD + 1));
+      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 60)); // Aumentado para 60 candles para suportar EMA 55
       const ohlcvDiarioRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1d', undefined, 20));
       const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 90));
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
@@ -518,7 +553,7 @@ async function checkConditions() {
       setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
 
       if (!ohlcv15mRaw || !ohlcv4hRaw || !ohlcv1hRaw || !ohlcvDiarioRaw || !ohlcv3mRaw) {
-        logger.warn(`Dados OHLCV insuficientes para ${symbol}, pulando...`);
+        logger.warn(`Dados OHLCV insuficientes para ${symbol}: 15m=${ohlcv15mRaw?.length || 0}, 4h=${ohlcv4hRaw?.length || 0}, 1h=${ohlcv1hRaw?.length || 0}, 1d=${ohlcvDiarioRaw?.length || 0}, 3m=${ohlcv3mRaw?.length || 0}`);
         return;
       }
 
@@ -527,6 +562,13 @@ async function checkConditions() {
       const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
       const ohlcvDiario = normalizeOHLCV(ohlcvDiarioRaw);
       const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
+      logger.info(`Dados normalizados para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}, 3m=${ohlcv3m.length}`);
+
+      if (!ohlcv15m.length || !ohlcv4h.length || !ohlcv1h.length || !ohlcvDiario.length || !ohlcv3m.length) {
+        logger.warn(`Dados normalizados insuficientes para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}, 3m=${ohlcv3m.length}`);
+        return;
+      }
+
       const closes15m = ohlcv15m.map(c => c.close).filter(c => !isNaN(c));
       const currentPrice = closes15m[closes15m.length - 1];
 
@@ -547,7 +589,7 @@ async function checkConditions() {
       const vwap1h = calculateVWAP(ohlcv1h);
 
       if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || !ema34_3mValues.length || !ema89_3mValues.length || !cci15mValues.length) {
-        logger.warn(`Indicadores insuficientes para ${symbol}, pulando...`);
+        logger.warn(`Indicadores insuficientes para ${symbol}: RSI=${rsi1hValues.length}, Stoch4h=${estocastico4h}, StochD=${estocasticoD}, ATR=${atrValues.length}, EMA34=${ema34_3mValues.length}, EMA89=${ema89_3mValues.length}, CCI=${cci15mValues.length}`);
         return;
       }
 
