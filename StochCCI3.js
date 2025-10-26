@@ -399,7 +399,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
 
   let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 75 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 200, EMA 34 > EMA 89 (3m), preço > EMA 55 (1h)
+  // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 190, EMA 34 > EMA 89 (3m)
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d && 
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX && 
@@ -408,8 +408,9 @@ async function sendAlertStochasticCross(symbol, data) {
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       cci15m > config.CCI_BUY_MIN &&
                       ema34_3m > ema89_3m;
+                      
 
-  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, CCI 15m < -100, EMA 34 < EMA 89 (3m), preço < EMA 55 (1h)
+  // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, CCI 15m < -85, EMA 34 < EMA 89 (3m)
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d && 
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
@@ -420,12 +421,20 @@ async function sendAlertStochasticCross(symbol, data) {
                        
 
   // Configurar texto da EMA 55 com emoji
-  if (isBuySignal && ema55_1h !== null) {
-    ema55Text = `🔹(${format(ema55_1h)}), Bullish 1h 🟢`;
-    ema55Emoji = '✅';
-  } else if (isSellSignal && ema55_1h !== null) {
-    ema55Text = `🔹(${format(ema55_1h)}), Bearish 1h 🔴`;
-    ema55Emoji = '✅';
+  if (ema55_1h !== null) {
+    if (price > ema55_1h) {
+      ema55Text = `🔹 Preço com fechamento acima da EMA 55 1h (${format(ema55_1h)}), o ativo está extremamente Bullish 🟢`;
+      ema55Emoji = '✅';
+    } else if (price < ema55_1h) {
+      ema55Text = `🔹 Preço com fechamento abaixo da EMA 55 1h (${format(ema55_1h)}), o ativo está em tendência de Bearish 🔴`;
+      ema55Emoji = '✅';
+    } else {
+      ema55Text = `🔹 Preço na EMA 55 1h (${format(ema55_1h)}), tendência neutra ⚪`;
+      ema55Emoji = '⚪';
+    }
+  } else {
+    ema55Text = `🔹 EMA 55 1h: Indisponível`;
+    ema55Emoji = '';
   }
 
   if (isBuySignal) {
