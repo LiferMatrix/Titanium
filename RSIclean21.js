@@ -500,10 +500,10 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `RSI 1h: ${rsi1h.toFixed(4)}\n` +
               `RSI 4h: ${rsi4h.toFixed(4)}\n` +
               `RSI 1d: ${rsi1d.toFixed(4)}\n` +
-              `🔹 Stoch Diário %K: ${stoch1d ? stoch1d.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-              `🔹 Stoch 4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
+              `🔹 Stoch #1D %K: ${stoch1d ? stoch1d.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
+              `🔹 Stoch #4H %K: ${stoch4h ? stoch4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
               `💱LSR: ${lsrText} ${lsrSymbol}\n` +
-              `Funding Rate: ${fundingRateText}\n` +
+              `Fund. Rate: ${fundingRateText}\n` +
               `🟰Suporte : ${supportText}\n` +
               `🟰Resistência : ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
