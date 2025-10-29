@@ -15,8 +15,8 @@ const config = {
   INTERVALO_ALERTA_3M_MS: 5 * 60 * 1000, // 5 minutos
   TEMPO_COOLDOWN_MS: 30 * 60 * 1000, // 30 minutos
   RSI_PERIOD: 14,
-  LSR_BUY_MAX: 1.8, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
+  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
+  LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
@@ -366,9 +366,9 @@ async function sendAlertEMATrend(symbol, data) {
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🟢🔘*Bull *\n\n` +
-                  `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço: ${format(price)}\n` +
+      alertText = `🟢✅*Bull ⤴️ *\n\n` +
+                  `🔹#Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
+                  `💲 $Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 ${stoch4hText}\n` +
                   `🔹 ${stoch1dText}\n` +
@@ -385,9 +385,9 @@ async function sendAlertEMATrend(symbol, data) {
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `🔴🔘*Bear *\n\n` +
-                  `🔹Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço: ${format(price)}\n` +
+      alertText = `🔴📍*Bear ⤵️ *\n\n` +
+                  `🔹#Ativo: *${symbol}* [- TradingView](${tradingViewLink})\n` +
+                  `💲 $Preço: ${format(price)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 ${stoch4hText}\n` +
                   `🔹 ${stoch1dText}\n` +
@@ -475,7 +475,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 💹Start...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 💹EMA...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_3M_MS);
   } catch (e) {
