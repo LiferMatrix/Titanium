@@ -178,7 +178,7 @@ async function limitConcurrency(items, fn, limit = 5) {
 
 // ================= INDICADORES ================= //
 function normalizeOHLCV(data) {
-  return data.map(c => ({
+  const normalized = data.map(c => ({
     time: c[0],
     open: Number(c[1]),
     high: Number(c[2]),
@@ -186,10 +186,17 @@ function normalizeOHLCV(data) {
     close: Number(c[4]),
     volume: Number(c[5])
   })).filter(c => !isNaN(c.close) && !isNaN(c.volume));
+  if (normalized.length < data.length) {
+    logger.warn(`Filtrados ${data.length - normalized.length} candles inválidos durante normalização. Candles válidos: ${normalized.length}`);
+  }
+  return normalized;
 }
 
 function calculateRSI(data) {
-  if (!data || data.length < config.RSI_PERIOD + 1) return [];
+  if (!data || data.length < config.RSI_PERIOD + 1) {
+    logger.warn(`Dados insuficientes para RSI: ${data?.length || 0} candles, necessário ${config.RSI_PERIOD + 1}`);
+    return [];
+  }
   const rsi = TechnicalIndicators.RSI.calculate({
     period: config.RSI_PERIOD,
     values: data.map(d => d.close || d[4])
@@ -198,11 +205,17 @@ function calculateRSI(data) {
 }
 
 function calculateStochastic(data) {
-  if (!data || data.length < config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2) return null;
+  if (!data || data.length < config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2) {
+    logger.warn(`Dados insuficientes para Estocástico: ${data?.length || 0} candles, necessário ${config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2}`);
+    return null;
+  }
   const highs = data.map(c => c.high || c[2]).filter(h => !isNaN(h));
   const lows = data.map(c => c.low || c[3]).filter(l => !isNaN(l));
   const closes = data.map(c => c.close || c[4]).filter(cl => !isNaN(cl));
-  if (highs.length < config.STOCHASTIC_PERIOD_K || lows.length < config.STOCHASTIC_PERIOD_K || closes.length < config.STOCHASTIC_PERIOD_K) return null;
+  if (highs.length < config.STOCHASTIC_PERIOD_K || lows.length < config.STOCHASTIC_PERIOD_K || closes.length < config.STOCHASTIC_PERIOD_K) {
+    logger.warn(`Dados insuficientes após filtragem para Estocástico: highs=${highs.length}, lows=${lows.length}, closes=${closes.length}`);
+    return null;
+  }
   const result = TechnicalIndicators.Stochastic.calculate({
     high: highs,
     low: lows,
@@ -215,6 +228,10 @@ function calculateStochastic(data) {
 }
 
 function calculateATR(data) {
+  if (!data || data.length < 14) {
+    logger.warn(`Dados insuficientes para ATR: ${data?.length || 0} candles, necessário 14`);
+    return [];
+  }
   const atr = TechnicalIndicators.ATR.calculate({
     period: 14,
     high: data.map(c => c.high || c[2]),
@@ -225,7 +242,10 @@ function calculateATR(data) {
 }
 
 function calculateCCI(data) {
-  if (!data || data.length < config.CCI_PERIOD) return [];
+  if (!data || data.length < config.CCI_PERIOD) {
+    logger.warn(`Dados insuficientes para CCI: ${data?.length || 0} candles, necessário ${config.CCI_PERIOD}`);
+    return [];
+  }
   const cci = TechnicalIndicators.CCI.calculate({
     period: config.CCI_PERIOD,
     high: data.map(c => c.high || c[2]).filter(h => !isNaN(h)),
@@ -236,16 +256,25 @@ function calculateCCI(data) {
 }
 
 function calculateEMA(data, period) {
-  if (!data || data.length < period) return [];
+  if (!data || data.length < period) {
+    logger.warn(`Dados insuficientes para EMA${period}: ${data?.length || 0} candles, necessário ${period}`);
+    return [];
+  }
   const ema = TechnicalIndicators.EMA.calculate({
     period,
     values: data.map(d => d.close || d[4])
   });
+  if (ema.length === 0) {
+    logger.warn(`EMA${period} retornou array vazio, verifique valores de fechamento: ${JSON.stringify(data.map(d => d.close).slice(-5))}`);
+  }
   return ema.filter(v => !isNaN(v));
 }
 
 function calculateVWAP(data) {
-  if (!data || data.length < 1) return null;
+  if (!data || data.length < 1) {
+    logger.warn(`Dados insuficientes para VWAP: ${data?.length || 0} candles`);
+    return null;
+  }
   let totalVolume = 0;
   let volumePriceSum = 0;
   data.forEach(candle => {
@@ -260,12 +289,16 @@ function calculateVWAP(data) {
 }
 
 function detectarQuebraEstrutura(ohlcv, atr) {
-  if (!ohlcv || ohlcv.length < 2 || !atr) return { suporte: 0, resistencia: 0 };
+  if (!ohlcv || ohlcv.length < 2 || !atr) {
+    logger.warn(`Dados insuficientes para detectar quebra de estrutura: ohlcv=${ohlcv?.length || 0}, atr=${atr}`);
+    return { suporte: 0, resistencia: 0 };
+  }
   const lookbackPeriod = 50;
   const previousCandles = ohlcv.slice(0, -1).slice(-lookbackPeriod);
   const highs = previousCandles.map(c => c.high || c[2]).filter(h => !isNaN(h));
   const lows = previousCandles.map(c => c.low || c[3]).filter(l => !isNaN(l));
   if (highs.length === 0 || lows.length === 0) {
+    logger.warn(`Nenhum dado válido para quebra de estrutura: highs=${highs.length}, lows=${lows.length}`);
     return { suporte: 0, resistencia: 0 };
   }
   const maxHigh = Math.max(...highs);
@@ -314,6 +347,7 @@ async function fetchFundingRate(symbol) {
       setCachedData(cacheKey, result);
       return result;
     }
+    logger.warn(`Dados insuficientes de Funding Rate para ${symbol}: ${fundingData?.length || 0} registros`);
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   } catch (e) {
     logger.warn(`Erro ao buscar Funding Rate para ${symbol}: ${e.message}`);
@@ -344,7 +378,7 @@ function getSetaDirecao(current, previous) {
 }
 
 async function sendAlertStochasticCross(symbol, data) {
-  const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, ohlcv3m, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema34_3m, ema89_3m, cci15m, vwap1h } = data;
+  const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, ohlcv3m, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema13_3m, ema34_3m, cci15m, vwap1h } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
   if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
@@ -382,6 +416,15 @@ async function sendAlertStochasticCross(symbol, data) {
   const cci15mText = cci15m ? `${getCCIEmoji(cci15m)} CCI 15m: ${cci15m.toFixed(2)}` : '🔹 CCI Indisp.';
   const vwap1hText = vwap1h ? `${getVWAPEmoji(price, vwap1h)} VWAP 1h: ${format(vwap1h)}` : '🔹 VWAP Indisp.';
 
+  // Calcular EMA 55 no timeframe de 3m
+  const ema55_3mValues = calculateEMA(ohlcv3m, 55);
+  const ema55_3m = ema55_3mValues.length > 0 ? ema55_3mValues[ema55_3mValues.length - 1] : null;
+  if (!ema55_3m) {
+    logger.warn(`EMA 55 3m indisponível para ${symbol}. Candles em ohlcv3m: ${ohlcv3m.length}, Valores de fechamento: ${JSON.stringify(ohlcv3m.slice(-5).map(c => c.close))}`);
+  }
+  let ema55Text = '';
+  let ema55Emoji = '';
+
   if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
   const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
   const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
@@ -393,7 +436,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
 
   let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 75 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 200, EMA 34 > EMA 89 (3m)
+  // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, CCI 15m > 190, EMA 13 > EMA 34 (3m), preço > EMA 55 (3m)
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d && 
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX && 
@@ -401,16 +444,33 @@ async function sendAlertStochasticCross(symbol, data) {
                       rsi1h < 60 && 
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       cci15m > config.CCI_BUY_MIN &&
-                      ema34_3m > ema89_3m;
-  
-  // Condições para venda: %K < %D (4h), %K >= 20 (4h e Diário), RSI 1h > 68, CCI 15m < -100, EMA 34 < EMA 89 (3m)
+                      ema13_3m > ema34_3m &&
+                      ema55_3m !== null && price > ema55_3m;
+
+  // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, CCI 15m < -85, EMA 13 < EMA 34 (3m), preço < EMA 55 (3m)
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d && 
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 60 && 
                        cci15m < config.CCI_SELL_MAX &&
-                       ema34_3m < ema89_3m;
+                       ema13_3m < ema34_3m &&
+                       ema55_3m !== null && price < ema55_3m;
+
+  // Configurar texto da EMA 55 com emoji
+  if (ema55_3m !== null) {
+    if (price > ema55_3m) {
+      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bullish 🟢`;
+      ema55Emoji = '✅';
+    } else if (price < ema55_3m) {
+      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bearish 🔴`;
+      ema55Emoji = '✅';
+    
+    }
+  } else {
+    ema55Text = `🔹 EMA 55 3m: Indisponível`;
+    ema55Emoji = '';
+  }
 
   if (isBuySignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
@@ -425,16 +485,17 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
                   `🔹 ${cci15mText}\n` +
-                  `🔹 ${vwap1hText}\n` +
+                  `🔹 ${vwap1hText} ${ema55Emoji}\n` +
                   `🔹 Stoch #1D %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
                   `🔹 Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
                   `🔹 Suporte: ${format(zonas.suporte)}\n` +
                   `🔹 Resistência: ${format(zonas.resistencia)}\n` +
+                  `${ema55Text}\n` +
                   ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, Entrada Máxima=${format(buyEntryMax)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
+      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, Entrada Máxima=${format(buyEntryMax)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}`);
     }
   } else if (isSellSignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
@@ -449,16 +510,17 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
                   `🔹 ${cci15mText}\n` +
-                  `🔹 ${vwap1hText}\n` +
+                  `🔹 ${vwap1hText} ${ema55Emoji}\n` +
                   `🔹 Stoch #1D : ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
                   `🔹 Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
                   `🟰 Suporte: ${format(zonas.suporte)}\n` +
                   `🟰 Resistência: ${format(zonas.resistencia)}\n` +
+                  `${ema55Text}\n` +
                   ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, Entrada Mínima=${format(sellEntryMin)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}`);
+      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, Entrada Mínima=${format(sellEntryMin)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, CCI 15m=${cci15m.toFixed(2)}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}`);
     }
   }
 
@@ -481,7 +543,7 @@ async function checkConditions() {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 50));
       const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h', undefined, config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D));
-      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, config.RSI_PERIOD + 1));
+      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 60)); // Aumentado para 60 candles para suportar EMA 55
       const ohlcvDiarioRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1d', undefined, 20));
       const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 90));
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
@@ -491,7 +553,7 @@ async function checkConditions() {
       setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
 
       if (!ohlcv15mRaw || !ohlcv4hRaw || !ohlcv1hRaw || !ohlcvDiarioRaw || !ohlcv3mRaw) {
-        logger.warn(`Dados OHLCV insuficientes para ${symbol}, pulando...`);
+        logger.warn(`Dados OHLCV insuficientes para ${symbol}: 15m=${ohlcv15mRaw?.length || 0}, 4h=${ohlcv4hRaw?.length || 0}, 1h=${ohlcv1hRaw?.length || 0}, 1d=${ohlcvDiarioRaw?.length || 0}, 3m=${ohlcv3mRaw?.length || 0}`);
         return;
       }
 
@@ -500,6 +562,13 @@ async function checkConditions() {
       const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
       const ohlcvDiario = normalizeOHLCV(ohlcvDiarioRaw);
       const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
+      logger.info(`Dados normalizados para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}, 3m=${ohlcv3m.length}`);
+
+      if (!ohlcv15m.length || !ohlcv4h.length || !ohlcv1h.length || !ohlcvDiario.length || !ohlcv3m.length) {
+        logger.warn(`Dados normalizados insuficientes para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}, 3m=${ohlcv3m.length}`);
+        return;
+      }
+
       const closes15m = ohlcv15m.map(c => c.close).filter(c => !isNaN(c));
       const currentPrice = closes15m[closes15m.length - 1];
 
@@ -515,12 +584,12 @@ async function checkConditions() {
       const lsr = await fetchLSR(symbol);
       const fundingRate = await fetchFundingRate(symbol);
       const atrValues = calculateATR(ohlcv15m);
+      const ema13_3mValues = calculateEMA(ohlcv3m, 13);
       const ema34_3mValues = calculateEMA(ohlcv3m, 34);
-      const ema89_3mValues = calculateEMA(ohlcv3m, 89);
       const vwap1h = calculateVWAP(ohlcv1h);
 
-      if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || !ema34_3mValues.length || !ema89_3mValues.length || !cci15mValues.length) {
-        logger.warn(`Indicadores insuficientes para ${symbol}, pulando...`);
+      if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || !ema13_3mValues.length || !ema34_3mValues.length || !cci15mValues.length) {
+        logger.warn(`Indicadores insuficientes para ${symbol}: RSI=${rsi1hValues.length}, Stoch4h=${estocastico4h}, StochD=${estocasticoD}, ATR=${atrValues.length}, EMA13=${ema13_3mValues.length}, EMA34=${ema34_3mValues.length}, CCI=${cci15mValues.length}`);
         return;
       }
 
@@ -537,8 +606,8 @@ async function checkConditions() {
         estocastico4h,
         estocasticoD,
         atr: atrValues[atrValues.length - 1],
+        ema13_3m: ema13_3mValues[ema13_3mValues.length - 1],
         ema34_3m: ema34_3mValues[ema34_3mValues.length - 1],
-        ema89_3m: ema89_3mValues[ema89_3mValues.length - 1],
         cci15m: cci15mValues[cci15mValues.length - 1],
         vwap1h
       });
@@ -553,7 +622,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Start21...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 133455...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
