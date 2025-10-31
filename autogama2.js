@@ -4,6 +4,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const { Bot } = require('grammy');
 const ccxt = require('ccxt');
+const fs = require('fs');
 
 // Configurações
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -30,21 +31,38 @@ if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
     console.log('⚠️ Configurações do Telegram não encontradas. Mensagens só no console.');
 }
 
+// Arquivo de log
+const logFile = 'app.log';
+
+// Função para logar mensagens (console + arquivo)
+function logMessage(message) {
+    const timestamp = new Date().toLocaleString('pt-BR');
+    const logEntry = `[${timestamp}] ${message}`;
+    console.log(logEntry);
+    fs.appendFileSync(logFile, logEntry + '\n', 'utf8');
+}
+
+// Limpeza automática de logs a cada 2 dias
+setInterval(() => {
+    fs.writeFileSync(logFile, '', 'utf8');
+    logMessage('🧹 Logs limpos automaticamente.');
+}, 2 * 24 * 60 * 60 * 1000); // 2 dias em milissegundos
+
 // Armazena símbolos iniciais
 let initialSymbols = new Set();
 
 // Função para enviar mensagem no Telegram
 async function sendTelegramMessage(message) {
     if (!telegramBot) {
-        console.log(message);
+        logMessage(message);
         return;
     }
     try {
         await telegramBot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
-        console.log('📱 Alerta enviado!');
+        logMessage('📱 Alerta enviado!');
     } catch (error) {
-        console.error('❌ Erro Telegram:', error.message);
-        console.log(message);
+        logMessage('❌ Erro Telegram: ' + error.message);
+        logMessage(message);
     }
 }
 
@@ -57,7 +75,7 @@ async function fetchAllUsdtSymbols() {
             .map(s => s.symbol)
             .sort();
     } catch (error) {
-        console.error('❌ Erro ao buscar símbolos:', error.message);
+        logMessage('❌ Erro ao buscar símbolos: ' + error.message);
         return [];
     }
 }
@@ -68,7 +86,7 @@ async function checkListings() {
 
     if (initialSymbols.size === 0) {
         currentSymbols.forEach(s => initialSymbols.add(s));
-        console.log(`📊 ${initialSymbols.size} pares USDT carregados inicialmente.`);
+        logMessage(`📊 ${initialSymbols.size} pares USDT carregados inicialmente.`);
         return;
     }
 
@@ -84,29 +102,29 @@ async function checkListings() {
             const message = `⚠️ *NOVA LISTAGEM NA BINANCE FUTURES!*\n\n\`${symbol}\`\n\n⏰ *${now}*`;
             await sendTelegramMessage(message);
         }
-        console.log(`🆕 ${newSymbols.length} nova(s) listagem(ens) detectada(s)!`);
+        logMessage(`🆕 ${newSymbols.length} nova(s) listagem(ens) detectada(s)!`);
     }
 
     // Atualiza conjunto inicial
     initialSymbols = new Set(currentSymbols);
 }
 
-// Inicia monitoramento
+// Inicia monitoramento de listagens
 async function startMonitoring() {
-    console.log('🔍 Monitorando NOVAS LISTAGENS na Binance Futures...');
+    logMessage('🔍 Monitorando NOVAS LISTAGENS na Binance Futures...');
     await checkListings();
     setInterval(checkListings, 30000); // Verifica a cada 30 segundos
 }
 
 // Encerramento gracioso
 process.on('SIGINT', () => {
-    console.log('\n👋 Monitor encerrado.');
+    logMessage('\n👋 Monitor encerrado.');
     process.exit(0);
 });
 
 // Validações
-if (!TELEGRAM_BOT_TOKEN) console.log('⚠️ TELEGRAM_BOT_TOKEN não encontrado');
-if (!TELEGRAM_CHAT_ID) console.log('⚠️ TELEGRAM_CHAT_ID não encontrado');
+if (!TELEGRAM_BOT_TOKEN) logMessage('⚠️ TELEGRAM_BOT_TOKEN não encontrado');
+if (!TELEGRAM_CHAT_ID) logMessage('⚠️ TELEGRAM_CHAT_ID não encontrado');
 
 startMonitoring();
 
@@ -123,18 +141,18 @@ async function fetchLSR(symbol) {
       timeout: 10000 // 10 segundos
     });
     if (!res.data || res.data.length < 1) {
-      console.error(`Dados insuficientes de LSR para ${symbol}: ${res.data?.length || 0} registros`);
+      logMessage(`Dados insuficientes de LSR para ${symbol}: ${res.data?.length || 0} registros`);
       return 'Indisponível';
     }
     const currentLSR = parseFloat(res.data[0].longShortRatio).toFixed(2);
     if (isNaN(currentLSR) || currentLSR < 0) {
-      console.error(`LSR inválido para ${symbol}`);
+      logMessage(`LSR inválido para ${symbol}`);
       return 'Indisponível';
     }
-    console.log(`LSR obtido para ${symbol}: ${currentLSR}`);
+    logMessage(`LSR obtido para ${symbol}: ${currentLSR}`);
     return currentLSR;
   } catch (e) {
-    console.error(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
+    logMessage(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
     return 'Indisponível';
   }
 }
@@ -145,7 +163,7 @@ async function getRSI(symbol, timeframe, period = 14) {
     const ohlcv = await binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, period + 1);
     const closes = ohlcv.map(c => parseFloat(c[4])).filter(v => !isNaN(v) && v > 0);
     if (closes.length < period + 1) {
-      console.log(`⚠️ Dados insuficientes para RSI ${symbol} (${timeframe}): ${closes.length}/${period + 1} velas`);
+      logMessage(`⚠️ Dados insuficientes para RSI ${symbol} (${timeframe}): ${closes.length}/${period + 1} velas`);
       return 'Indisponível';
     }
 
@@ -161,48 +179,209 @@ async function getRSI(symbol, timeframe, period = 14) {
     const rsi = rs === Infinity ? 100 : 100 - (100 / (1 + rs));
 
     const result = rsi.toFixed(2);
-    console.log(`✅ RSI ${symbol} (${timeframe}): ${result}`);
+    logMessage(`✅ RSI ${symbol} (${timeframe}): ${result}`);
     return result;
   } catch (error) {
-    console.log(`❌ Erro ao calcular RSI ${symbol} (${timeframe}): ${error.message}`);
+    logMessage(`❌ Erro ao calcular RSI ${symbol} (${timeframe}): ${error.message}`);
     return 'Indisponível';
   }
 }
 
-// Exemplo de dados recebidos (você pode substituir por API real futuramente)
-const dadosBTC = {
-  symbol: 'BTCUSDT.P',
-  spotPrice: 107733.42,
-  callWall: 108000,
-  putWall: 108000,
-  gammaFlip: 111500,
-  cci: {
-    '15m': 95.21,
-    '1h': -48.55,
-    '4h': -146.55,
-    '1d': -71.99
-  },
-  expiry: '31/10/2025',
-  optionsCount: { futures: 194, odte: 38 },
-  timestamp: '30/10/2025, 20:04:19'
+// Função para calcular CCI
+async function getCCI(symbol, timeframe, period = 20) {
+  try {
+    const ohlcv = await binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, period + 1);
+    const tps = ohlcv.map(c => (parseFloat(c[2]) + parseFloat(c[3]) + parseFloat(c[4])) / 3).filter(v => !isNaN(v) && v > 0);
+    if (tps.length < period) {
+      logMessage(`⚠️ Dados insuficientes para CCI ${symbol} (${timeframe}): ${tps.length}/${period} velas`);
+      return 'Indisponível';
+    }
+
+    const sma = tps.slice(-period).reduce((a, b) => a + b, 0) / period;
+    const md = tps.slice(-period).reduce((sum, tp) => sum + Math.abs(tp - sma), 0) / period;
+    const currentTp = tps[tps.length - 1];
+    const cci = md === 0 ? 0 : (currentTp - sma) / (0.015 * md);
+
+    const result = cci.toFixed(2);
+    logMessage(`✅ CCI ${symbol} (${timeframe}): ${result}`);
+    return result;
+  } catch (error) {
+    logMessage(`❌ Erro ao calcular CCI ${symbol} (${timeframe}): ${error.message}`);
+    return 'Indisponível';
+  }
+}
+
+// Função para fetch preço spot (mark price para futures)
+async function fetchSpotPrice(symbol) {
+  try {
+    const ticker = await binanceCCXT.fetchTicker(symbol);
+    const price = ticker.last;
+    if (isNaN(price) || price <= 0) {
+      logMessage(`Preço inválido para ${symbol}`);
+      return 0;
+    }
+    logMessage(`Preço obtido para ${symbol}: ${price}`);
+    return price;
+  } catch (e) {
+    logMessage(`Erro ao buscar preço para ${symbol}: ${e.message}`);
+    return 0;
+  }
+}
+
+// Função para calcular EMA
+function calculateEMA(prices, period) {
+  if (prices.length < period) return [];
+  const ema = [];
+  const multiplier = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+  }
+  ema.push(sum / period);
+  for (let i = period; i < prices.length; i++) {
+    const value = (prices[i] * multiplier) + (ema[ema.length - 1] * (1 - multiplier));
+    ema.push(value);
+  }
+  return ema;
+}
+
+// Função para detectar cruzamento de EMAs
+async function getEMACrossover(symbol, timeframe = '3m', shortPeriod = 13, longPeriod = 34) {
+  try {
+    const limit = longPeriod * 2 + 1; // Buffer suficiente para calcular EMAs e verificar cruzamento
+    const ohlcv = await binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, limit);
+    const closes = ohlcv.map(c => parseFloat(c[4])).filter(v => !isNaN(v) && v > 0);
+    if (closes.length < longPeriod + 1) {
+      logMessage(`⚠️ Dados insuficientes para EMA crossover ${symbol} (${timeframe}): ${closes.length} velas`);
+      return { buyCross: false, sellCross: false };
+    }
+
+    const emaShort = calculateEMA(closes, shortPeriod);
+    const emaLong = calculateEMA(closes, longPeriod);
+
+    if (emaShort.length < 2 || emaLong.length < 2) {
+      return { buyCross: false, sellCross: false };
+    }
+
+    const prevShort = emaShort[emaShort.length - 2];
+    const currShort = emaShort[emaShort.length - 1];
+    const prevLong = emaLong[emaLong.length - 2];
+    const currLong = emaLong[emaLong.length - 1];
+
+    const buyCross = (prevShort <= prevLong) && (currShort > currLong);
+    const sellCross = (prevShort >= prevLong) && (currShort < currLong);
+
+    logMessage(`✅ EMA Crossover ${symbol} (${timeframe}): Buy=${buyCross}, Sell=${sellCross}`);
+    return { buyCross, sellCross };
+  } catch (error) {
+    logMessage(`❌ Erro ao calcular EMA crossover ${symbol} (${timeframe}): ${error.message}`);
+    return { buyCross: false, sellCross: false };
+  }
+}
+
+// Função para obter EMA 55 e preço de fechamento no timeframe de 3m
+async function getEMA55AndClose(symbol, timeframe = '3m', period = 55) {
+  try {
+    const limit = period + 2; // Garante EMA e pelo menos 2 velas
+    const ohlcv = await binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, limit);
+    const closes = ohlcv.map(c => parseFloat(c[4])).filter(v => !isNaN(v) && v > 0);
+    
+    if (closes.length < period + 1) {
+      logMessage(`⚠️ Dados insuficientes para EMA 55 ${symbol} (${timeframe}): ${closes.length} velas`);
+      return { ema55: null, currentClose: null };
+    }
+
+    const ema = calculateEMA(closes, period);
+    const ema55 = ema[ema.length - 1];
+    const currentClose = closes[closes.length - 1];
+
+    logMessage(`✅ EMA 55 (${timeframe}): ${ema55.toFixed(2)}, Fechamento: ${currentClose.toFixed(2)}`);
+    return { ema55, currentClose };
+  } catch (error) {
+    logMessage(`❌ Erro ao calcular EMA 55 ${symbol} (${timeframe}): ${error.message}`);
+    return { ema55: null, currentClose: null };
+  }
+}
+
+// Função para obter vencimento mais próximo
+async function getNearestExpiry(baseSymbol) {
+  try {
+    const res = await axios.get('https://eapi.binance.com/eapi/v1/exchangeInfo');
+    const expiries = res.data.optionSymbols
+      .filter(s => s.underlying === baseSymbol && new Date(s.expiryDate) > new Date())
+      .map(s => s.expiryDate)
+      .sort();
+    return expiries[0] || null;
+  } catch (e) {
+    logMessage('❌ Erro ao buscar vencimento para ' + baseSymbol + ': ' + e.message);
+    return null;
+  }
+}
+
+// Função para obter Open Interest de opções
+async function getOptionOI(baseSymbol, expiry) {
+  try {
+    const res = await axios.get('https://eapi.binance.com/eapi/v1/openInterest', {
+      params: { underlyingAsset: baseSymbol, expiration: expiry.toString().slice(2,8) } // Formato YYMMDD
+    });
+    return res.data.data || [];
+  } catch (e) {
+    logMessage('❌ Erro ao buscar OI para ' + baseSymbol + ': ' + e.message);
+    return [];
+  }
+}
+
+// Função para fetch walls dinâmicos
+async function fetchOptionWalls(baseSymbol) {
+  const expiry = await getNearestExpiry(baseSymbol);
+  if (!expiry) return { putWall: 108000, callWall: 108000, expiry: 'Indisponível' };
+
+  const oiData = await getOptionOI(baseSymbol, expiry);
+  if (oiData.length === 0) return { putWall: 108000, callWall: 108000, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
+
+  let maxPutOI = 0, maxCallOI = 0, putWall = 108000, callWall = 108000;
+  oiData.forEach(item => {
+    const strike = parseFloat(item.strikePrice);
+    const oi = parseFloat(item.openInterest);
+    if (item.side === 'PUT' && oi > maxPutOI) {
+      maxPutOI = oi;
+      putWall = strike;
+    } else if (item.side === 'CALL' && oi > maxCallOI) {
+      maxCallOI = oi;
+      callWall = strike;
+    }
+  });
+
+  logMessage(`Walls para ${baseSymbol}: Put ${putWall}, Call ${callWall}`);
+  return { putWall, callWall, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
+}
+
+// Dados base por símbolo (gammaFlip hardcoded, ajuste se necessário)
+const symbolsData = {
+  'BTCUSDT': { base: 'BTC', symbolDisplay: 'BTCUSDT.P', gammaFlip: 111500 },
+  'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P', gammaFlip: 4500 } // Ajuste gammaFlip para ETH se souber o valor
 };
 
 // ================= FUNÇÕES ================= //
 
 // Função para detectar melhor compra
 function detectarCompra(d) {
-  return d.spotPrice <= d.putWall * 1.002 && d.cci['15m'] > 0;
+  const cci15m = parseFloat(d.cci['15m']);
+  const aboveEma55 = d.ema55Data?.currentClose > d.ema55Data?.ema55;
+  return d.spotPrice > 0 && d.spotPrice <= d.putWall * 1.002 && !isNaN(cci15m) && cci15m > 0 && d.emaCross.buyCross && aboveEma55;
 }
 
 // Função para detectar melhor venda
 function detectarVenda(d) {
-  return d.spotPrice >= d.callWall * 0.998 && d.cci['15m'] < 0;
+  const cci15m = parseFloat(d.cci['15m']);
+  const belowEma55 = d.ema55Data?.currentClose < d.ema55Data?.ema55;
+  return d.spotPrice > 0 && d.spotPrice >= d.callWall * 0.998 && !isNaN(cci15m) && cci15m < 0 && d.emaCross.sellCross && belowEma55;
 }
 
 // Mensagem formatada de compra
 function mensagemCompra(d) {
   return `
-📈 *ALERTA DE MELHOR COMPRA – ${d.symbol}*
+📈 *ALERTA DE MELHOR COMPRA – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -226,17 +405,17 @@ RSI 4h: ${d.rsi4h}
 • CCI 15m virando positivo
 • Abaixo do GammaFlip → alta volatilidade
 
-✅ *Sinal técnico:* Oportunidade de compra antecipada  
+✅ *Sinal técnico:* Oportunidade de Compra   
 🎯 *Possível alvo:* ${d.gammaFlip}
 
-#${d.symbol} #Compra #GammaFlip #CCI #Futuras
+#${d.symbolDisplay} #Compra #GammaFlip #Futures
 `;
 }
 
 // Mensagem formatada de venda
 function mensagemVenda(d) {
   return `
-📉 *ALERTA DE MELHOR VENDA – ${d.symbol}*
+📉 *ALERTA DE MELHOR VENDA – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
@@ -260,10 +439,10 @@ RSI 4h: ${d.rsi4h}
 • CCI 15m negativo → momentum vendedor
 • Abaixo do GammaFlip → tendência de baixa
 
-🚨 *Sinal técnico:* Oportunidade de venda no topo  
+🚨 *Sinal técnico:* Oportunidade de Realizar Lucros  
 🎯 *Possível alvo:* ${d.putWall}
 
-#${d.symbol} #Venda #GammaFlip #CCI #Futuras
+#${d.symbolDisplay} #Venda #GammaFlip #Futures
 `;
 }
 
@@ -271,36 +450,72 @@ RSI 4h: ${d.rsi4h}
 async function enviarAlerta(mensagem) {
   try {
     await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
-    console.log('✅ Alerta enviado com sucesso!');
+    logMessage('✅ Alerta enviado com sucesso!');
   } catch (err) {
-    console.error('❌ Erro ao enviar alerta:', err.message);
+    logMessage('❌ Erro ao enviar alerta: ' + err.message);
   }
 }
 
 // ================= EXECUÇÃO ================= //
-(async () => {
-  const symbol = 'BTCUSDT'; // Símbolo correto para API Binance (sem .P)
-  
-  // Buscar LSR 15m
-  dadosBTC.lsr15m = await fetchLSR(symbol);
-  
-  // Buscar RSI 1h e 4h
-  dadosBTC.rsi1h = await getRSI(symbol, '1h');
-  dadosBTC.rsi4h = await getRSI(symbol, '4h');
-  
-  // Atualizar timestamp para atual
-  dadosBTC.timestamp = new Date().toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit'
-  });
-  
-  if (detectarCompra(dadosBTC)) {
-    const msg = mensagemCompra(dadosBTC);
-    await enviarAlerta(msg);
-  } else if (detectarVenda(dadosBTC)) {
-    const msg = mensagemVenda(dadosBTC);
-    await enviarAlerta(msg);
-  } else {
-    console.log('ℹ️ Nenhuma condição de alerta detectada no momento.');
+const symbols = ['BTCUSDT', 'ETHUSDT']; // Símbolos a monitorar
+let alerted = {}; // Flags por símbolo: { 'BTCUSDT': { buy: false, sell: false }, ... }
+symbols.forEach(s => alerted[s] = { buy: false, sell: false });
+
+async function checkAlerts() {
+  for (const symbol of symbols) {
+    const baseData = symbolsData[symbol];
+    const data = { ...baseData };
+
+    // Fetch walls dinâmicos
+    const walls = await fetchOptionWalls(baseData.base);
+    data.putWall = walls.putWall;
+    data.callWall = walls.callWall;
+    data.expiry = walls.expiry;
+
+    // Buscar dados dinâmicos
+    data.spotPrice = await fetchSpotPrice(symbol);
+    data.cci = {
+      '15m': await getCCI(symbol, '15m'),
+      '1h': await getCCI(symbol, '1h'),
+      '4h': await getCCI(symbol, '4h'),
+      '1d': await getCCI(symbol, '1d')
+    };
+    data.lsr15m = await fetchLSR(symbol);
+    data.rsi1h = await getRSI(symbol, '1h');
+    data.rsi4h = await getRSI(symbol, '4h');
+    data.emaCross = await getEMACrossover(symbol);
+    data.ema55Data = await getEMA55AndClose(symbol);
+    data.timestamp = new Date().toLocaleString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    if (detectarCompra(data)) {
+      if (!alerted[symbol].buy) {
+        const msg = mensagemCompra(data);
+        await enviarAlerta(msg);
+        alerted[symbol].buy = true;
+      }
+    } else {
+      alerted[symbol].buy = false;
+    }
+
+    if (detectarVenda(data)) {
+      if (!alerted[symbol].sell) {
+        const msg = mensagemVenda(data);
+        await enviarAlerta(msg);
+        alerted[symbol].sell = true;
+      }
+    } else {
+      alerted[symbol].sell = false;
+    }
+
+    if (!detectarCompra(data) && !detectarVenda(data)) {
+      logMessage(`ℹ️ Nenhuma condição de alerta detectada para ${symbol} no momento.`);
+    }
   }
-})();
+}
+
+// Inicia verificação inicial e agendamento
+checkAlerts();
+setInterval(checkAlerts, 5 * 60 * 1000); // Verifica a cada 5 minutos para maior dinamismo
