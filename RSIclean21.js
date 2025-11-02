@@ -16,10 +16,10 @@ const config = {
   INTERVALO_ALERTA_RSI_MS: 3 * 60 * 1000, // 3 minutos para verificação de RSI
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Cooldown para alertas
   RSI_PERIOD: 14,
-  RSI_HIGH_THRESHOLD_1: 73, // Alerta de RSI alto (todos os timeframes)
-  RSI_HIGH_THRESHOLD_2: 75, // Alerta de RSI extremo (5m, 15m, 1h)
-  RSI_LOW_THRESHOLD: 23, // Alerta de RSI baixo (todos os timeframes)
-  RSI_EXTREME_LOW_THRESHOLD: 23, // Alerta de RSI extremo baixo (5m, 15m, 1h)
+  RSI_HIGH_THRESHOLD_1: 76, // Alerta de RSI alto (todos os timeframes)
+  RSI_HIGH_THRESHOLD_2: 76, // Alerta de RSI extremo (5m, 15m, 1h)
+  RSI_LOW_THRESHOLD: 22, // Alerta de RSI baixo (todos os timeframes)
+  RSI_EXTREME_LOW_THRESHOLD: 22, // Alerta de RSI extremo baixo (5m, 15m, 1h)
   CACHE_TTL: 2 * 60 * 1000, // 2 minutos para cache
   MAX_CACHE_SIZE: 50, // Reduzido para 50 entradas
   MAX_HISTORICO_ALERTAS: 10,
@@ -444,13 +444,13 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
     alertType = '🛑#1H Realizar Lucro/Parcial🛑';
     emoji = '🔴🔴';
   } else if (rsi5m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi15m <= config.RSI_EXTREME_LOW_THRESHOLD && rsi1h <= config.RSI_EXTREME_LOW_THRESHOLD) {
-    alertType = '✳️#1H Zona de Suporte/Avaliar Compra✳️';
+    alertType = '✳️#1H Zona de Suporte✳️';
     emoji = '🟢🟢';
   } else if (rsi5m >= config.RSI_HIGH_THRESHOLD_1 && rsi15m >= config.RSI_HIGH_THRESHOLD_1 && rsi1h >= config.RSI_HIGH_THRESHOLD_1 && rsi4h >= config.RSI_HIGH_THRESHOLD_1) {
     alertType = '🛑#4H Realizar Lucro Total/Parcial🛑';
     emoji = '🔴';
   } else if (rsi5m <= config.RSI_LOW_THRESHOLD && rsi15m <= config.RSI_LOW_THRESHOLD && rsi1h <= config.RSI_LOW_THRESHOLD && rsi4h <= config.RSI_LOW_THRESHOLD) {
-    alertType = '✳️#4H Zona de Suporte/Swing Compra✳️';
+    alertType = '✳️#4H Zona de Suporte✳️';
     emoji = '🟢';
   } else {
     return; // Sem alerta se nenhuma condição for atendida
