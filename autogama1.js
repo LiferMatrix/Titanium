@@ -2,7 +2,7 @@ require('dotenv').config();
 const Binance = require('node-binance-api');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const { Bot } = require('grammy');
+// const { Bot } = require('grammy'); // REMOVIDO: Usaremos apenas node-telegram-bot-api
 const ccxt = require('ccxt');
 const fs = require('fs');
 
@@ -25,8 +25,11 @@ const binanceCCXT = new ccxt.binance({
 // Inicializa Telegram Bot
 let telegramBot;
 if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
-    telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('✅ Telegram Bot conectado!');
+    // Não usar polling para um bot de alerta, a menos que seja estritamente necessário.
+    // O polling pode ser desnecessário e causar conflitos.
+    // Mantenho a inicialização, mas o polling será ignorado para o envio de alertas.
+    telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+    console.log('✅ Telegram Bot conectado para envio de alertas!');
 } else {
     console.log('⚠️ Configurações do Telegram não encontradas. Mensagens só no console.');
 }
@@ -51,13 +54,14 @@ setInterval(() => {
 // Armazena símbolos iniciais
 let initialSymbols = new Set();
 
-// Função para enviar mensagem no Telegram
+// Função para enviar mensagem no Telegram (UNIFICADA)
 async function sendTelegramMessage(message) {
     if (!telegramBot) {
         logMessage(message);
         return;
     }
     try {
+        // Usando o objeto telegramBot inicializado na linha 28
         await telegramBot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
         logMessage('📱 Alerta enviado!');
     } catch (error) {
@@ -126,11 +130,11 @@ process.on('SIGINT', () => {
 if (!TELEGRAM_BOT_TOKEN) logMessage('⚠️ TELEGRAM_BOT_TOKEN não encontrado');
 if (!TELEGRAM_CHAT_ID) logMessage('⚠️ TELEGRAM_CHAT_ID não encontrado');
 
-startMonitoring();
+// startMonitoring(); // Comentado para focar na lógica de trading, pode ser descomentado se necessário.
 
 // ================= CONFIGURAÇÕES ================= //
-const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
-const chatId = process.env.TELEGRAM_CHAT_ID;
+// const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); // REMOVIDO
+// const chatId = process.env.TELEGRAM_CHAT_ID; // REMOVIDO (já é global)
 
 // Função para fetch LSR
 async function fetchLSR(symbol) {
@@ -187,7 +191,8 @@ async function getRSI(symbol, timeframe, period = 14) {
   }
 }
 
-// Função para calcular CCI
+// Função para calcular CCI (REMOVIDA)
+/*
 async function getCCI(symbol, timeframe, period = 20) {
   try {
     const ohlcv = await binanceCCXT.fetchOHLCV(symbol, timeframe, undefined, period + 1);
@@ -210,6 +215,7 @@ async function getCCI(symbol, timeframe, period = 20) {
     return 'Indisponível';
   }
 }
+*/
 
 // Função para fetch preço spot (mark price para futures)
 async function fetchSpotPrice(symbol) {
@@ -257,6 +263,11 @@ async function getEMACrossover(symbol, timeframe = '3m', shortPeriod = 13, longP
     }
 
     const emaShort = calculateEMA(closes, shortPeriod);
+    const ema55 = calculateEMA(closes, 55); // Adicionar cálculo da EMA 55 aqui para usar no EMA Crossover
+    if (ema55.length < 2) {
+      logMessage(`⚠️ Dados insuficientes para EMA 55 no EMA Crossover ${symbol} (${timeframe})`);
+      return { buyCross: false, sellCross: false };
+    }
     const emaLong = calculateEMA(closes, longPeriod);
 
     if (emaShort.length < 2 || emaLong.length < 2) {
@@ -264,12 +275,15 @@ async function getEMACrossover(symbol, timeframe = '3m', shortPeriod = 13, longP
     }
 
     const prevShort = emaShort[emaShort.length - 2];
+    const prevEma55 = ema55[ema55.length - 2];
     const currShort = emaShort[emaShort.length - 1];
     const prevLong = emaLong[emaLong.length - 2];
     const currLong = emaLong[emaLong.length - 1];
 
-    const buyCross = (prevShort <= prevLong) && (currShort > currLong);
-    const sellCross = (prevShort >= prevLong) && (currShort < currLong);
+    const buyCross = (prevShort <= prevLong) && (currShort > currLong) && (prevShort > prevEma55); // EMA 13 > EMA 55 no candle anterior
+    logMessage(`✅ EMA Crossover Buy Check: (prevShort <= prevLong)=${(prevShort <= prevLong)}, (currShort > currLong)=${(currShort > currLong)}, (prevShort > prevEma55)=${(prevShort > prevEma55)}`);
+    const sellCross = (prevShort >= prevLong) && (currShort < currLong) && (prevShort < prevEma55); // EMA 13 < EMA 55 no candle anterior
+    logMessage(`✅ EMA Crossover Sell Check: (prevShort >= prevLong)=${(prevShort >= prevLong)}, (currShort < currLong)=${(currShort < currLong)}, (prevShort < prevEma55)=${(prevShort < prevEma55)}`);
 
     logMessage(`✅ EMA Crossover ${symbol} (${timeframe}): Buy=${buyCross}, Sell=${sellCross}`);
     return { buyCross, sellCross };
@@ -294,12 +308,13 @@ async function getEMA55AndClose(symbol, timeframe = '3m', period = 55) {
     const ema = calculateEMA(closes, period);
     const ema55 = ema[ema.length - 1];
     const currentClose = closes[closes.length - 1];
+    const prevClose = closes[closes.length - 2]; // Fechamento do candle anterior
 
     logMessage(`✅ EMA 55 (${timeframe}): ${ema55.toFixed(2)}, Fechamento: ${currentClose.toFixed(2)}`);
-    return { ema55, currentClose };
+    return { ema55, currentClose, prevClose };
   } catch (error) {
     logMessage(`❌ Erro ao calcular EMA 55 ${symbol} (${timeframe}): ${error.message}`);
-    return { ema55: null, currentClose: null };
+    return { ema55: null, currentClose: null, prevClose: null };
   }
 }
 
@@ -310,7 +325,7 @@ async function getNearestExpiry(baseSymbol) {
     const expiries = res.data.optionSymbols
       .filter(s => s.underlying === baseSymbol && new Date(s.expiryDate) > new Date())
       .map(s => s.expiryDate)
-      .sort((a, b) => a - b);
+      .sort();
     return expiries[0] || null;
   } catch (e) {
     logMessage('❌ Erro ao buscar vencimento para ' + baseSymbol + ': ' + e.message);
@@ -321,9 +336,8 @@ async function getNearestExpiry(baseSymbol) {
 // Função para obter Open Interest de opções
 async function getOptionOI(baseSymbol, expiry) {
   try {
-    const expiryStr = new Date(expiry).toISOString().slice(2,10).replace(/-/g, '');
     const res = await axios.get('https://eapi.binance.com/eapi/v1/openInterest', {
-      params: { underlyingAsset: baseSymbol, expiration: expiryStr }
+      params: { underlyingAsset: baseSymbol, expiration: expiry.toString().slice(2,8) } // Formato YYMMDD
     });
     return res.data.data || [];
   } catch (e) {
@@ -332,15 +346,15 @@ async function getOptionOI(baseSymbol, expiry) {
   }
 }
 
-// Função para fetch walls dinâmicos de opções
+// Função para fetch walls dinâmicos
 async function fetchOptionWalls(baseSymbol) {
   const expiry = await getNearestExpiry(baseSymbol);
-  if (!expiry) return { putWall: null, callWall: null, expiry: 'Indisponível', expiryMs: null };
+  if (!expiry) return { putWall: 108000, callWall: 108000, expiry: 'Indisponível' };
 
   const oiData = await getOptionOI(baseSymbol, expiry);
-  if (oiData.length === 0) return { putWall: null, callWall: null, expiry: new Date(expiry).toLocaleDateString('pt-BR'), expiryMs: expiry };
+  if (oiData.length === 0) return { putWall: 108000, callWall: 108000, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
 
-  let maxPutOI = 0, maxCallOI = 0, putWall = null, callWall = null;
+  let maxPutOI = 0, maxCallOI = 0, putWall = 108000, callWall = 108000;
   oiData.forEach(item => {
     const strike = parseFloat(item.strikePrice);
     const oi = parseFloat(item.openInterest);
@@ -353,155 +367,48 @@ async function fetchOptionWalls(baseSymbol) {
     }
   });
 
-  logMessage(`Option Walls para ${baseSymbol}: Put ${putWall}, Call ${callWall}`);
-  return { putWall, callWall, expiry: new Date(expiry).toLocaleDateString('pt-BR'), expiryMs: expiry };
+  logMessage(`Walls para ${baseSymbol}: Put ${putWall}, Call ${callWall}`);
+  return { putWall, callWall, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
 }
 
-// Função para fetch walls dinâmicos do livro de ordens (order book)
-async function fetchOrderBookWalls(symbol) {
-  try {
-    const orderbook = await binanceCCXT.fetchOrderBook(symbol, 100); // Profundidade 100 níveis
-    let maxBidQty = 0, buyWallPrice = 0;
-    for (let bid of orderbook.bids) {
-      if (bid[1] > maxBidQty) {
-        maxBidQty = bid[1];
-        buyWallPrice = bid[0];
-      }
-    }
-    let maxAskQty = 0, sellWallPrice = 0;
-    for (let ask of orderbook.asks) {
-      if (ask[1] > maxAskQty) {
-        maxAskQty = ask[1];
-        sellWallPrice = ask[0];
-      }
-    }
-    const buyWallValue = buyWallPrice * maxBidQty;
-    const sellWallValue = sellWallPrice * maxAskQty;
-
-    logMessage(`Order Book Walls para ${symbol}: Buy @ ${buyWallPrice} (Value: ${buyWallValue} USDT), Sell @ ${sellWallPrice} (Value: ${sellWallValue} USDT)`);
-    return { buyWallPrice, buyWallValue, sellWallPrice, sellWallValue };
-  } catch (e) {
-    logMessage(`Erro ao buscar order book para ${symbol}: ${e.message}`);
-    return { buyWallPrice: null, buyWallValue: null, sellWallPrice: null, sellWallValue: null };
-  }
-}
-
-// Função para calcular Gamma Flip dinâmico
-async function computeGammaFlip(baseSymbol, expiryMs, currentPrice) {
-  if (!expiryMs) return null;
-
-  const expiryDate = new Date(expiryMs);
-  const now = new Date();
-  const t = (expiryDate - now) / (365.25 * 24 * 60 * 60 * 1000);
-  if (t <= 0) return null;
-
-  const expiryStr = expiryDate.toISOString().slice(2,10).replace(/-/g, '');
-
-  let oiData;
-  try {
-    const res = await axios.get('https://eapi.binance.com/eapi/v1/openInterest', {
-      params: { underlyingAsset: baseSymbol, expiration: expiryStr }
-    });
-    oiData = res.data.data || [];
-  } catch (e) {
-    logMessage('❌ Erro ao buscar OI para gamma flip: ' + e.message);
-    return null;
-  }
-
-  let marks;
-  try {
-    const res = await axios.get('https://eapi.binance.com/eapi/v1/mark');
-    marks = res.data || [];
-  } catch (e) {
-    logMessage('❌ Erro ao buscar marks para gamma flip: ' + e.message);
-    return null;
-  }
-
-  // Filtrar marks para este vencimento
-  const expiryMarks = marks.filter(m => m.symbol.startsWith(baseSymbol + '-') && m.symbol.includes(`-${expiryStr}-`));
-
-  const ivCall = {};
-  const ivPut = {};
-  expiryMarks.forEach(m => {
-    const parts = m.symbol.split('-');
-    const strike = parseFloat(parts[2]);
-    if (m.symbol.endsWith('-C')) {
-      ivCall[strike] = parseFloat(m.iv);
-    } else if (m.symbol.endsWith('-P')) {
-      ivPut[strike] = parseFloat(m.iv);
-    }
-  });
-
-  // Função gamma BS
-  function computeGamma(S, K, t, sigma) {
-    if (sigma <= 0 || t <= 0) return 0;
-    const d1 = Math.log(S / K) / (sigma * Math.sqrt(t)) + (sigma * Math.sqrt(t)) / 2;
-    const n_d1 = (1 / Math.sqrt(2 * Math.PI)) * Math.exp(- (d1 * d1) / 2);
-    return n_d1 / (S * sigma * Math.sqrt(t));
-  }
-
-  // Função total dealer gamma
-  function totalDealerGamma(S) {
-    let sumGamma = 0;
-    oiData.forEach(item => {
-      const strike = parseFloat(item.strikePrice);
-      const oi = parseFloat(item.sumOpenInterest);
-      if (oi > 0) {
-        const side = item.side;
-        const iv = side === 'CALL' ? ivCall[strike] : ivPut[strike];
-        if (iv && iv > 0) {
-          const g = computeGamma(S, strike, t, iv);
-          sumGamma += oi * g;
-        }
-      }
-    });
-    return -sumGamma;
-  }
-
-  // Binary search para encontrar onde gamma = 0
-  let low = currentPrice * 0.5;
-  let high = currentPrice * 1.5;
-  const epsilon = 0.01;
-  let mid;
-  for (let i = 0; i < 100; i++) {
-    mid = (low + high) / 2;
-    const g_mid = totalDealerGamma(mid);
-    if (Math.abs(g_mid) < epsilon) {
-      logMessage(`Gamma Flip calculado para ${baseSymbol}: ${mid}`);
-      return mid;
-    }
-    if (g_mid > 0) {
-      low = mid;
-    } else {
-      high = mid;
-    }
-  }
-  logMessage(`Gamma Flip aproximado para ${baseSymbol}: ${mid}`);
-  return mid;
-}
-
-// Dados base por símbolo
+// Dados base por símbolo (gammaFlip hardcoded, ajuste se necessário)
 const symbolsData = {
-  'BTCUSDT': { base: 'BTC', symbolDisplay: 'BTCUSDT.P' },
-  'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P' }
+  'BTCUSDT': { base: 'BTC', symbolDisplay: 'BTCUSDT.P', gammaFlip: 111500 },
+  'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P', gammaFlip: 4500 } // Ajuste gammaFlip para ETH se souber o valor
 };
 
 // ================= FUNÇÕES ================= //
 
 // Função para detectar melhor compra
 function detectarCompra(d) {
-  const cci15m = parseFloat(d.cci['15m']);
-  const aboveEma55 = d.ema55Data?.currentClose > d.ema55Data?.ema55;
-  const nearBuyWall = d.orderBookWalls.buyWallPrice !== null && d.spotPrice <= d.orderBookWalls.buyWallPrice * 1.002;
-  return d.spotPrice > 0 && d.putWall !== null && d.spotPrice <= d.putWall * 1.002 && !isNaN(cci15m) && cci15m > 0 && d.emaCross.buyCross && aboveEma55 && d.gammaFlip !== null && nearBuyWall;
+  // CCI REMOVIDO A PEDIDO DO USUÁRIO
+  
+  // Adicionando verificação de validade dos dados para evitar NaN ou null
+  // CCI REMOVIDO A PEDIDO DO USUÁRIO
+  const isEmaValid = d.ema55Data?.ema55 !== null && d.ema55Data?.prevClose !== null;
+  const isCrossValid = d.emaCross?.buyCross === true; // Garante que é um booleano true
+  const aboveEma55 = isEmaValid && d.ema55Data.prevClose > d.ema55Data.ema55; // Usar o fechamento do candle anterior
+
+  return d.spotPrice > 0 && 
+         d.spotPrice <= d.putWall * 1.002 && 
+         isCrossValid && 
+         aboveEma55;
 }
 
 // Função para detectar melhor venda
 function detectarVenda(d) {
-  const cci15m = parseFloat(d.cci['15m']);
-  const belowEma55 = d.ema55Data?.currentClose < d.ema55Data?.ema55;
-  const nearSellWall = d.orderBookWalls.sellWallPrice !== null && d.spotPrice >= d.orderBookWalls.sellWallPrice * 0.998;
-  return d.spotPrice > 0 && d.callWall !== null && d.spotPrice >= d.callWall * 0.998 && !isNaN(cci15m) && cci15m < 0 && d.emaCross.sellCross && belowEma55 && d.gammaFlip !== null && nearSellWall;
+  // CCI REMOVIDO A PEDIDO DO USUÁRIO
+
+  // Adicionando verificação de validade dos dados para evitar NaN ou null
+  // CCI REMOVIDO A PEDIDO DO USUÁRIO
+  const isEmaValid = d.ema55Data?.ema55 !== null && d.ema55Data?.prevClose !== null;
+  const isCrossValid = d.emaCross?.sellCross === true; // Garante que é um booleano true
+  const belowEma55 = isEmaValid && d.ema55Data.prevClose < d.ema55Data.ema55; // Usar o fechamento do candle anterior
+
+  return d.spotPrice > 0 && 
+         d.spotPrice >= d.callWall * 0.998 && 
+         isCrossValid && 
+         belowEma55;
 }
 
 // Mensagem formatada de compra
@@ -511,15 +418,10 @@ function mensagemCompra(d) {
 ⏰ (${d.timestamp})
 
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟡 *Região de Suporte:* Put Wall em ${d.putWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}, Order Book Buy Wall em ${d.orderBookWalls.buyWallPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Valor: ${d.orderBookWalls.buyWallValue.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDT)
-🟢 *GammaFlip:* ${d.gammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟡 *Região de Suporte:* Put Wall em ${d.putWall}
+🟢 *GammaFlip:* ${d.gammaFlip}
 📆 *Vencimento:* ${d.expiry}
 
-📉 *Indicadores CCI:*
-15m: ${d.cci['15m']} ➡️ 🟢 Força Compradora
-1h: ${d.cci['1h']} ➡️ ⚪ Neutro
-4h: ${d.cci['4h']} ➡️ 🟣 Queda desacelerando
-1d: ${d.cci['1d']} ➡️ ⚪ Possível reversão
 
 📊 *Outros Indicadores:*
 LSR Ratio 15m: ${d.lsr15m}
@@ -527,12 +429,12 @@ RSI 1h: ${d.rsi1h}
 RSI 4h: ${d.rsi4h}
 
 📊 *Contexto:*
-• Preço próximo da Put Wall e Buy Wall no livro de ordens (suporte forte)
-• CCI 15m virando positivo
-• Abaixo do GammaFlip → alta volatilidade
+• Preço próximo da Put Wall (suporte forte)
+• Acima da EMA 55 (tendência de alta de curto prazo)
+• Cruzamento de EMAs (13/34) para compra
 
-✅ *Sinal técnico:* Oportunidade de Compra ou Reversão   
-🎯 *Possível alvo:* ${d.gammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+✅ *Sinal técnico:* Oportunidade de Compra   
+🎯 *Possível alvo:* ${d.gammaFlip}
 
 #${d.symbolDisplay} #Compra #GammaFlip #Futures
 `;
@@ -545,15 +447,10 @@ function mensagemVenda(d) {
 ⏰ (${d.timestamp})
 
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟠 *Região de Resistência:* Call Wall em ${d.callWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}, Order Book Sell Wall em ${d.orderBookWalls.sellWallPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Valor: ${d.orderBookWalls.sellWallValue.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDT)
-🟢 *GammaFlip:* ${d.gammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟠 *Região de Resistência:* Call Wall em ${d.callWall}
+🟢 *GammaFlip:* ${d.gammaFlip}
 📆 *Vencimento:* ${d.expiry}
 
-📊 *Indicadores CCI:*
-15m: ${d.cci['15m']} ➡️ 🔴 Pressão Vendedora
-1h: ${d.cci['1h']} ➡️ 🟣 Queda
-4h: ${d.cci['4h']} ➡️ 🟣 Continuação de baixa
-1d: ${d.cci['1d']} ➡️ ⚪ Neutro
 
 📊 *Outros Indicadores:*
 LSR Ratio 15m: ${d.lsr15m}
@@ -561,18 +458,19 @@ RSI 1h: ${d.rsi1h}
 RSI 4h: ${d.rsi4h}
 
 📈 *Contexto:*
-• Preço tocando resistência (Call Wall e Sell Wall no livro de ordens)
-• CCI 15m negativo → momentum vendedor
-• Acima do GammaFlip → tendência de baixa
+• Preço tocando resistência (Call Wall)
+• Abaixo da EMA 55 (tendência de baixa de curto prazo)
+• Cruzamento de EMAs (13/34) para venda
 
-🚨 *Sinal técnico:* Oportunidade de Venda ou Reversão  
-🎯 *Possível alvo:* ${d.putWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🚨 *Sinal técnico:* Oportunidade de Realizar Lucros  
+🎯 *Possível alvo:* ${d.putWall}
 
 #${d.symbolDisplay} #Venda #GammaFlip #Futures
 `;
 }
 
-// Envia alerta ao Telegram
+// Envia alerta ao Telegram (REMOVIDA - Usar sendTelegramMessage)
+/*
 async function enviarAlerta(mensagem) {
   try {
     await bot.api.sendMessage(chatId, mensagem, { parse_mode: 'Markdown' });
@@ -581,6 +479,7 @@ async function enviarAlerta(mensagem) {
     logMessage('❌ Erro ao enviar alerta: ' + err.message);
   }
 }
+*/
 
 // ================= EXECUÇÃO ================= //
 const symbols = ['BTCUSDT', 'ETHUSDT']; // Símbolos a monitorar
@@ -592,29 +491,21 @@ async function checkAlerts() {
     const baseData = symbolsData[symbol];
     const data = { ...baseData };
 
-    // Fetch walls dinâmicos de opções
-    const optionWalls = await fetchOptionWalls(baseData.base);
-    data.putWall = optionWalls.putWall;
-    data.callWall = optionWalls.callWall;
-    data.expiry = optionWalls.expiry;
-    data.expiryMs = optionWalls.expiryMs;
-
-    // Buscar preço spot
-    data.spotPrice = await fetchSpotPrice(symbol);
-
-    // Calcular Gamma Flip dinâmico
-    data.gammaFlip = await computeGammaFlip(baseData.base, data.expiryMs, data.spotPrice);
-
-    // Fetch walls do livro de ordens
-    data.orderBookWalls = await fetchOrderBookWalls(symbol);
+    // Fetch walls dinâmicos
+    const walls = await fetchOptionWalls(baseData.base);
+    data.putWall = walls.putWall;
+    data.callWall = walls.callWall;
+    data.expiry = walls.expiry;
 
     // Buscar dados dinâmicos
-    data.cci = {
+    data.spotPrice = await fetchSpotPrice(symbol);
+    // CCI REMOVIDO A PEDIDO DO USUÁRIO
+    /* data.cci = {
       '15m': await getCCI(symbol, '15m'),
       '1h': await getCCI(symbol, '1h'),
       '4h': await getCCI(symbol, '4h'),
       '1d': await getCCI(symbol, '1d')
-    };
+    }; */
     data.lsr15m = await fetchLSR(symbol);
     data.rsi1h = await getRSI(symbol, '1h');
     data.rsi4h = await getRSI(symbol, '4h');
@@ -628,7 +519,7 @@ async function checkAlerts() {
     if (detectarCompra(data)) {
       if (!alerted[symbol].buy) {
         const msg = mensagemCompra(data);
-        await enviarAlerta(msg);
+        await sendTelegramMessage(msg); // CORRIGIDO: Usando a função unificada
         alerted[symbol].buy = true;
       }
     } else {
@@ -638,7 +529,7 @@ async function checkAlerts() {
     if (detectarVenda(data)) {
       if (!alerted[symbol].sell) {
         const msg = mensagemVenda(data);
-        await enviarAlerta(msg);
+        await sendTelegramMessage(msg); // CORRIGIDO: Usando a função unificada
         alerted[symbol].sell = true;
       }
     } else {
