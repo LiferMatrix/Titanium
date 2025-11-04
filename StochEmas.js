@@ -7,14 +7,13 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
-
 // ================= CONFIGURAÇÃO ================= //
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 15 * 60 * 1000, // 15 minutos
-  TEMPO_COOLDOWN_MS: 30 * 60 * 1000, // 30 minutos
+  TEMPO_COOLDOWN_MS: 60 * 60 * 1000, // 1 hora
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -32,8 +31,9 @@ const config = {
   LOG_MAX_SIZE: '100m', // Tamanho máximo de cada arquivo de log
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
+  VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
+  VOLUME_MULTIPLIER: 1.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
 };
-
 // Logger
 const logger = winston.createLogger({
   level: 'info',
@@ -60,14 +60,12 @@ const logger = winston.createLogger({
     new winston.transports.Console()
   ]
 });
-
 // Estado global
 const state = {
   ultimoAlertaPorAtivo: {},
   ultimoEstocastico: {},
   dataCache: new Map()
 };
-
 // Validação de variáveis de ambiente
 function validateEnv() {
   const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'COINS'];
@@ -79,7 +77,6 @@ function validateEnv() {
   }
 }
 validateEnv();
-
 // Inicialização do Telegram e Exchanges
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 const exchangeSpot = new ccxt.binance({
@@ -96,7 +93,6 @@ const exchangeFutures = new ccxt.binance({
   timeout: 30000,
   options: { defaultType: 'future' }
 });
-
 // ================= LIMPEZA DE ARQUIVOS ANTIGOS ================= //
 async function cleanupOldLogs() {
   try {
@@ -104,7 +100,6 @@ async function cleanupOldLogs() {
     const files = await fs.readdir(logDir).catch(() => []);
     const now = Date.now();
     const maxAgeMs = config.LOG_CLEANUP_INTERVAL_MS; // 2 dias em milissegundos
-
     for (const file of files) {
       const filePath = path.join(logDir, file);
       const stats = await fs.stat(filePath).catch(() => null);
@@ -120,7 +115,6 @@ async function cleanupOldLogs() {
     logger.error(`Erro ao limpar logs antigos: ${e.message}`);
   }
 }
-
 // ================= UTILITÁRIOS ================= //
 async function withRetry(fn, retries = 5, delayBase = 1000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -137,7 +131,6 @@ async function withRetry(fn, retries = 5, delayBase = 1000) {
     }
   }
 }
-
 function getCachedData(key) {
   const cacheEntry = state.dataCache.get(key);
   if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
@@ -147,7 +140,6 @@ function getCachedData(key) {
   state.dataCache.delete(key);
   return null;
 }
-
 function setCachedData(key, data) {
   if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
     const oldestKey = state.dataCache.keys().next().value;
@@ -162,7 +154,6 @@ function setCachedData(key, data) {
     }
   }, config.CACHE_TTL + 1000);
 }
-
 async function limitConcurrency(items, fn, limit = 5) {
   const results = [];
   for (let i = 0; i < items.length; i += limit) {
@@ -172,7 +163,6 @@ async function limitConcurrency(items, fn, limit = 5) {
   }
   return results;
 }
-
 // ================= INDICADORES ================= //
 function normalizeOHLCV(data) {
   const normalized = data.map(c => ({
@@ -188,7 +178,6 @@ function normalizeOHLCV(data) {
   }
   return normalized;
 }
-
 function calculateRSI(data) {
   if (!data || data.length < config.RSI_PERIOD + 1) {
     logger.warn(`Dados insuficientes para RSI: ${data?.length || 0} candles, necessário ${config.RSI_PERIOD + 1}`);
@@ -200,7 +189,6 @@ function calculateRSI(data) {
   });
   return rsi.filter(v => !isNaN(v));
 }
-
 function calculateStochastic(data) {
   if (!data || data.length < config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2) {
     logger.warn(`Dados insuficientes para Estocástico: ${data?.length || 0} candles, necessário ${config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D - 2}`);
@@ -223,7 +211,6 @@ function calculateStochastic(data) {
   });
   return result.length ? { k: parseFloat(result[result.length - 1].k.toFixed(2)), d: parseFloat(result[result.length - 1].d.toFixed(2)) } : null;
 }
-
 function calculateATR(data) {
   if (!data || data.length < 14) {
     logger.warn(`Dados insuficientes para ATR: ${data?.length || 0} candles, necessário 14`);
@@ -237,7 +224,6 @@ function calculateATR(data) {
   });
   return atr.filter(v => !isNaN(v));
 }
-
 function calculateEMA(data, period) {
   if (!data || data.length < period) {
     logger.warn(`Dados insuficientes para EMA${period}: ${data?.length || 0} candles, necessário ${period}`);
@@ -252,7 +238,6 @@ function calculateEMA(data, period) {
   }
   return ema.filter(v => !isNaN(v));
 }
-
 function calculateVWAP(data) {
   if (!data || data.length < 1) {
     logger.warn(`Dados insuficientes para VWAP: ${data?.length || 0} candles`);
@@ -270,7 +255,20 @@ function calculateVWAP(data) {
   });
   return totalVolume > 0 ? volumePriceSum / totalVolume : null;
 }
-
+function isAbnormalVolume(ohlcv) {
+  if (!ohlcv || ohlcv.length < config.VOLUME_LOOKBACK + 1) {
+    logger.warn(`Dados insuficientes para volume anormal: ${ohlcv?.length || 0} candles, necessário ${config.VOLUME_LOOKBACK + 1}`);
+    return false;
+  }
+  const volumes = ohlcv.slice(-config.VOLUME_LOOKBACK - 1, -1).map(c => c.volume).filter(v => !isNaN(v));
+  if (volumes.length < config.VOLUME_LOOKBACK) {
+    logger.warn(`Volumes insuficientes para cálculo médio: ${volumes.length}`);
+    return false;
+  }
+  const avgVolume = volumes.reduce((sum, v) => sum + v, 0) / volumes.length;
+  const currentVolume = ohlcv[ohlcv.length - 1].volume;
+  return currentVolume > avgVolume * config.VOLUME_MULTIPLIER;
+}
 function detectarQuebraEstrutura(ohlcv, atr) {
   if (!ohlcv || ohlcv.length < 2 || !atr) {
     logger.warn(`Dados insuficientes para detectar quebra de estrutura: ohlcv=${ohlcv?.length || 0}, atr=${atr}`);
@@ -291,7 +289,6 @@ function detectarQuebraEstrutura(ohlcv, atr) {
     resistencia: maxHigh + 0.5 * atr
   };
 }
-
 async function fetchLSR(symbol) {
   const cacheKey = `lsr_${symbol}`;
   const cached = getCachedData(cacheKey);
@@ -315,7 +312,6 @@ async function fetchLSR(symbol) {
     return getCachedData(cacheKey) || { value: null, isRising: false, percentChange: '0.00' };
   }
 }
-
 async function fetchFundingRate(symbol) {
   const cacheKey = `funding_${symbol}`;
   const cached = getCachedData(cacheKey);
@@ -337,34 +333,28 @@ async function fetchFundingRate(symbol) {
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   }
 }
-
 // ================= FUNÇÕES DE ALERTAS ================= //
 function getStochasticEmoji(value) {
   if (!value && value !== 0) return "";
   return value < 10 ? "🔵" : value < 25 ? "🟢" : value <= 55 ? "🟡" : value <= 70 ? "🟠" : value <= 80 ? "🔴" : "💥";
 }
-
 function getVWAPEmoji(price, vwap) {
   if (!vwap || isNaN(price)) return "";
   const diff = Math.abs(price - vwap) / vwap;
   return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "🟢";
 }
-
 function getSetaDirecao(current, previous) {
   if (current === undefined || previous === undefined) return "➡️";
   return current > previous ? "⬆️" : current < previous ? "⬇️" : "➡️";
 }
-
 async function sendAlertStochasticCross(symbol, data) {
   const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema13_15m, ema34_15m, ema55_15m, ema13_15m_prev, ema34_15m_prev, vwap1h } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
   if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
-
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const zonas = detectarQuebraEstrutura(ohlcv15m, atr);
-
   // Calcular preços de entrada com tolerância baseada em ATR
   const buyEntryLow = price * (1 - config.BUY_TOLERANCE_PERCENT); // 2.5% abaixo do preço atual
   const buyEntryMax = price + (atr * config.ATR_MULTIPLIER_BUY); // Entrada máxima com ATR
@@ -372,7 +362,6 @@ async function sendAlertStochasticCross(symbol, data) {
   const buyStopLoss = price - (atr * config.ATR_MULTIPLIER_BUY); // Stop Loss para Compra
   const sellStopLoss = price + (atr * config.ATR_MULTIPLIER_SELL); // Stop Loss para Venda
   const sellEntryMin = price - (atr * config.ATR_MULTIPLIER_SELL); // Entrada mínima com ATR
-
   const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
   const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
   let lsrSymbol = '🔘Consol.';
@@ -390,12 +379,10 @@ async function sendAlertStochasticCross(symbol, data) {
     else if (fundingRate.current >= 0.0002) fundingRateEmoji = '🔴';
     else fundingRateEmoji = '🟢';
   }
-  const fundingRateText = fundingRate.current !== null 
-    ? `${fundingRateEmoji} ${(fundingRate.current * 100).toFixed(5)}%  ${fundingRate.isRising ? '⬆️' : '⬇️'}`
+  const fundingRateText = fundingRate.current !== null
+    ? `${fundingRateEmoji} ${(fundingRate.current * 100).toFixed(5)}% ${fundingRate.isRising ? '⬆️' : '⬇️'}`
     : '🔹 Indisp.';
-
   const vwap1hText = vwap1h ? `${getVWAPEmoji(price, vwap1h)} VWAP 1h: ${format(vwap1h)}` : '🔹 VWAP Indisp.';
-
   if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
   const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
   const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
@@ -405,25 +392,24 @@ async function sendAlertStochasticCross(symbol, data) {
   const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-
   let alertText = '';
   // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, EMA 13 > EMA 34 (15m), preço > EMA 55 (15m) - EMA 13 e 34 no candle fechado anterior
   const isBuySignal = estocastico4h && estocasticoD &&
-                      estocastico4h.k > estocastico4h.d && 
-                      estocastico4h.k <= config.STOCHASTIC_BUY_MAX && 
+                      estocastico4h.k > estocastico4h.d &&
+                      estocastico4h.k <= config.STOCHASTIC_BUY_MAX &&
                       estocasticoD.k <= config.STOCHASTIC_BUY_MAX &&
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       ema13_15m_prev > ema34_15m_prev &&
-                      ema55_15m !== null && price > ema55_15m;
-
+                      ema55_15m !== null && price > ema55_15m &&
+                      data.isAbnormalVol;
   // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, EMA 13 < EMA 34 (15m), preço < EMA 55 (15m) - EMA 13 e 34 no candle fechado anterior
   const isSellSignal = estocastico4h && estocasticoD &&
-                       estocastico4h.k < estocastico4h.d && 
-                       estocastico4h.k >= config.STOCHASTIC_SELL_MIN && 
+                       estocastico4h.k < estocastico4h.d &&
+                       estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        ema13_15m_prev < ema34_15m_prev &&
-                       ema55_15m !== null && price < ema55_15m;
-
+                       ema55_15m !== null && price < ema55_15m &&
+                       data.isAbnormalVol;
   // Configurar texto da EMA 55 com emoji
   let ema55Text = '';
   let ema55Emoji = '';
@@ -439,13 +425,12 @@ async function sendAlertStochasticCross(symbol, data) {
     ema55Text = `🔹 EMA 55 15m: Indisponível`;
     ema55Emoji = '';
   }
-
   if (isBuySignal) {
-    const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
+    const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `💹*Bull Compra*\n\n` +
+      alertText = `💹*Bull Vol⤴️ Compra*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔘Entr.: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
@@ -459,18 +444,18 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹 Suporte: ${format(zonas.suporte)}\n` +
                   `🔹 Resistência: ${format(zonas.resistencia)}\n` +
                   `${ema55Text}\n` +
-                  ` ☑︎ Ema 13/34>55 -🤖 @J4Rviz\n`;
+                  ` ☑︎Emas 13/34<55 +Vol 🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
       logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, Entrada Máxima=${format(buyEntryMax)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 15m=${ema55_15m ? format(ema55_15m) : 'N/A'}`);
     }
   } else if (isSellSignal) {
-    const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r => 
+    const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
-      alertText = `♦️*Bear Correção*\n\n` +
+      alertText = `♦️*Bear Correção⤵️*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🔘 Entr.: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
@@ -484,14 +469,13 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🟰 Suporte: ${format(zonas.suporte)}\n` +
                   `🟰 Resistência: ${format(zonas.resistencia)}\n` +
                   `${ema55Text}\n` +
-                  ` ☑︎ Ema 13/34<55 -🤖 @J4Rviz\n`;
+                  ` ☑︎Emas 13/34<55 +Vol 🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
       logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, Entrada Mínima=${format(sellEntryMin)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 15m=${ema55_15m ? format(ema55_15m) : 'N/A'}`);
     }
   }
-
   if (alertText) {
     try {
       await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, alertText, {
@@ -504,44 +488,40 @@ async function sendAlertStochasticCross(symbol, data) {
     }
   }
 }
-
 async function checkConditions() {
   try {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
+      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, config.VOLUME_LOOKBACK + 1));
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 90));
       const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h', undefined, config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 60)); // Aumentado para 60 candles para suportar EMA 55 se necessário
       const ohlcvDiarioRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1d', undefined, 20));
+      setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
       setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
       setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
       setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
       setCachedData(`${cacheKeyPrefix}_1d`, ohlcvDiarioRaw);
-
-      if (!ohlcv15mRaw || !ohlcv4hRaw || !ohlcv1hRaw || !ohlcvDiarioRaw) {
-        logger.warn(`Dados OHLCV insuficientes para ${symbol}: 15m=${ohlcv15mRaw?.length || 0}, 4h=${ohlcv4hRaw?.length || 0}, 1h=${ohlcv1hRaw?.length || 0}, 1d=${ohlcvDiarioRaw?.length || 0}`);
+      if (!ohlcv3mRaw || !ohlcv15mRaw || !ohlcv4hRaw || !ohlcv1hRaw || !ohlcvDiarioRaw) {
+        logger.warn(`Dados OHLCV insuficientes para ${symbol}: 3m=${ohlcv3mRaw?.length || 0}, 15m=${ohlcv15mRaw?.length || 0}, 4h=${ohlcv4hRaw?.length || 0}, 1h=${ohlcv1hRaw?.length || 0}, 1d=${ohlcvDiarioRaw?.length || 0}`);
         return;
       }
-
+      const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
       const ohlcv15m = normalizeOHLCV(ohlcv15mRaw);
       const ohlcv4h = normalizeOHLCV(ohlcv4hRaw);
       const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
       const ohlcvDiario = normalizeOHLCV(ohlcvDiarioRaw);
-      logger.info(`Dados normalizados para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}`);
-
-      if (!ohlcv15m.length || !ohlcv4h.length || !ohlcv1h.length || !ohlcvDiario.length) {
-        logger.warn(`Dados normalizados insuficientes para ${symbol}: 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}`);
+      logger.info(`Dados normalizados para ${symbol}: 3m=${ohlcv3m.length}, 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}`);
+      if (!ohlcv3m.length || !ohlcv15m.length || !ohlcv4h.length || !ohlcv1h.length || !ohlcvDiario.length) {
+        logger.warn(`Dados normalizados insuficientes para ${symbol}: 3m=${ohlcv3m.length}, 15m=${ohlcv15m.length}, 4h=${ohlcv4h.length}, 1h=${ohlcv1h.length}, 1d=${ohlcvDiario.length}`);
         return;
       }
-
       const closes15m = ohlcv15m.map(c => c.close).filter(c => !isNaN(c));
       const currentPrice = closes15m[closes15m.length - 1];
-
       if (isNaN(currentPrice)) {
         logger.warn(`Preço atual inválido para ${symbol}, pulando...`);
         return;
       }
-
       const rsi1hValues = calculateRSI(ohlcv1h);
       const estocastico4h = calculateStochastic(ohlcv4h);
       const estocasticoD = calculateStochastic(ohlcvDiario);
@@ -552,12 +532,11 @@ async function checkConditions() {
       const ema34_15mValues = calculateEMA(ohlcv15m, 34);
       const ema55_15mValues = calculateEMA(ohlcv15m, 55);
       const vwap1h = calculateVWAP(ohlcv1h);
-
+      const isAbnormalVol = isAbnormalVolume(ohlcv3m);
       if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || ema13_15mValues.length < 2 || ema34_15mValues.length < 2 || !ema55_15mValues.length) {
         logger.warn(`Indicadores insuficientes para ${symbol}: RSI=${rsi1hValues.length}, Stoch4h=${estocastico4h}, StochD=${estocasticoD}, ATR=${atrValues.length}, EMA13(15m)=${ema13_15mValues.length}, EMA34(15m)=${ema34_15mValues.length}, EMA55(15m)=${ema55_15mValues.length}`);
         return;
       }
-
       await sendAlertStochasticCross(symbol, {
         ohlcv15m,
         ohlcv4h,
@@ -575,20 +554,20 @@ async function checkConditions() {
         ema55_15m: ema55_15mValues[ema55_15mValues.length - 1],
         ema13_15m_prev: ema13_15mValues[ema13_15mValues.length - 2],
         ema34_15m_prev: ema34_15mValues[ema34_15mValues.length - 2],
-        vwap1h
+        vwap1h,
+        isAbnormalVol
       });
     }, 5);
   } catch (e) {
     logger.error(`Erro ao processar condições: ${e.message}`);
   }
 }
-
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 133455...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 133455VOL...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
@@ -597,5 +576,4 @@ async function main() {
     logger.error(`Erro ao iniciar bot: ${e.message}`);
   }
 }
-
 main().catch(e => logger.error(`Erro fatal: ${e.message}`));
