@@ -180,6 +180,10 @@ process.on('SIGINT', async () => {
 if (!TELEGRAM_BOT_TOKEN) logMessage('⚠️ TELEGRAM_BOT_TOKEN não encontrado');
 if (!TELEGRAM_CHAT_ID) logMessage('⚠️ TELEGRAM_CHAT_ID não encontrado');
 // ================= CONFIGURAÇÕES ================= //
+// Cache para Option Walls por símbolo (15 minutos)
+const wallsCache = new Map();
+// Cache para Futures Order Book Walls (1 minuto)
+const futuresWallsCache = new Map();
 // Função para fetch LSR
 async function fetchLSR(symbol) {
   try {
@@ -326,42 +330,85 @@ async function getEMAsAndCrossover(symbol, timeframe = '3m', shortPeriod = 13, l
     return { buyCross: false, sellCross: false, ema55: null, currentClose: null, prevClose: null };
   }
 }
-// Função para obter vencimento mais próximo
+// Função para obter vencimento mais próximo (com validação robusta)
 async function getNearestExpiry(baseSymbol) {
   try {
     const res = await retryAsync(() => axios.get('https://eapi.binance.com/eapi/v1/exchangeInfo'));
-    const expiries = res.data.optionSymbols
-      .filter(s => s.underlying === baseSymbol && new Date(s.expiryDate) > new Date())
-      .map(s => s.expiryDate)
-      .sort();
-    return expiries[0] || null;
+    if (!res.data?.optionSymbols || !Array.isArray(res.data.optionSymbols)) {
+      await logMessage(`Dados inválidos de exchangeInfo para ${baseSymbol}`);
+      return null;
+    }
+
+    const now = Date.now();
+    const validExpiries = res.data.optionSymbols
+      .filter(s => 
+        s.underlying === baseSymbol && 
+        s.expiryDate && 
+        !isNaN(s.expiryDate) &&
+        new Date(parseInt(s.expiryDate)) > now
+      )
+      .map(s => parseInt(s.expiryDate))
+      .sort((a, b) => a - b);
+
+    return validExpiries[0] || null;
   } catch (e) {
-    await logMessage('❌ Erro ao buscar vencimento para ' + baseSymbol + ': ' + e.message);
+    await logMessage(`Erro ao buscar vencimento para ${baseSymbol}: ${e.message}`);
     return null;
   }
 }
 // Função para obter Open Interest de opções
 async function getOptionOI(baseSymbol, expiry) {
+  if (!expiry) return [];
   try {
+    const expiryStr = expiry.toString();
+    const formattedExpiry = expiryStr.slice(2, 8); // YYMMDD
+
     const res = await retryAsync(() => axios.get('https://eapi.binance.com/eapi/v1/openInterest', {
-      params: { underlyingAsset: baseSymbol, expiration: expiry.toString().slice(2,8) } // Formato YYMMDD
+      params: { underlyingAsset: baseSymbol, expiration: formattedExpiry },
+      timeout: 10000
     }));
-    return res.data.data || [];
+
+    return Array.isArray(res.data?.data) ? res.data.data : [];
   } catch (e) {
-    await logMessage('❌ Erro ao buscar OI para ' + baseSymbol + ': ' + e.message);
+    await logMessage(`Erro ao buscar OI para ${baseSymbol} (exp: ${expiry}): ${e.message}`);
     return [];
   }
 }
-// Função para fetch walls dinâmicos
+// Função para fetch walls com CACHE POR SÍMBOLO
 async function fetchOptionWalls(baseSymbol) {
+  const cacheKey = baseSymbol;
+  const now = Date.now();
+  const cacheTTL = 15 * 60 * 1000; // 15 minutos
+
+  // Verifica cache
+  if (wallsCache.has(cacheKey)) {
+    const cached = wallsCache.get(cacheKey);
+    if (now - cached.timestamp < cacheTTL) {
+      await logMessage(`Cache HIT para walls de ${baseSymbol}`);
+      return cached.data;
+    }
+  }
+
   const expiry = await getNearestExpiry(baseSymbol);
-  if (!expiry) return { putWall: 108000, callWall: 108000, expiry: 'Indisponível' };
+  if (!expiry) {
+    const fallback = { putWall: 0, callWall: 0, expiry: 'Indisponível' };
+    wallsCache.set(cacheKey, { data: fallback, timestamp: now });
+    return fallback;
+  }
+
   const oiData = await getOptionOI(baseSymbol, expiry);
-  if (oiData.length === 0) return { putWall: 108000, callWall: 108000, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
-  let maxPutOI = 0, maxCallOI = 0, putWall = 108000, callWall = 108000;
+  if (oiData.length === 0) {
+    const fallback = { putWall: 0, callWall: 0, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
+    wallsCache.set(cacheKey, { data: fallback, timestamp: now });
+    return fallback;
+  }
+
+  let maxPutOI = 0, maxCallOI = 0, putWall = 0, callWall = 0;
   oiData.forEach(item => {
     const strike = parseFloat(item.strikePrice);
     const oi = parseFloat(item.openInterest);
+    if (isNaN(strike) || isNaN(oi)) return;
+
     if (item.side === 'PUT' && oi > maxPutOI) {
       maxPutOI = oi;
       putWall = strike;
@@ -370,13 +417,75 @@ async function fetchOptionWalls(baseSymbol) {
       callWall = strike;
     }
   });
-  await logMessage(`Walls para ${baseSymbol}: Put ${putWall}, Call ${callWall}`);
-  return { putWall, callWall, expiry: new Date(expiry).toLocaleDateString('pt-BR') };
+
+  const result = {
+    putWall: putWall || 0,
+    callWall: callWall || 0,
+    expiry: new Date(expiry).toLocaleDateString('pt-BR')
+  };
+
+  await logMessage(`Walls para ${baseSymbol}: Put ${result.putWall}, Call ${result.callWall}`);
+  wallsCache.set(cacheKey, { data: result, timestamp: now });
+  return result;
+}
+// Função para fetch Futures Order Book Walls (dinâmico)
+async function fetchFuturesWalls(symbol) {
+  const cacheKey = symbol;
+  const now = Date.now();
+  const cacheTTL = 1 * 60 * 1000; // 1 minuto para dinamismo
+
+  if (futuresWallsCache.has(cacheKey)) {
+    const cached = futuresWallsCache.get(cacheKey);
+    if (now - cached.timestamp < cacheTTL) {
+      await logMessage(`Cache HIT para futures walls de ${symbol}`);
+      return cached.data;
+    }
+  }
+
+  try {
+    const orderBook = await retryAsync(() => binanceCCXT.fetchOrderBook(symbol, 100)); // Top 100 bids/asks
+    if (!orderBook || !orderBook.bids || !orderBook.asks) {
+      await logMessage(`Order book inválido para ${symbol}`);
+      return { putWall: 0, callWall: 0 };
+    }
+
+    // Encontra o nível com maior volume de compra (Put Wall = Bid Wall)
+    let maxBidVol = 0, putWall = 0;
+    orderBook.bids.forEach(([price, volume]) => {
+      const vol = parseFloat(volume);
+      if (vol > maxBidVol) {
+        maxBidVol = vol;
+        putWall = parseFloat(price);
+      }
+    });
+
+    // Encontra o nível com maior volume de venda (Call Wall = Ask Wall)
+    let maxAskVol = 0, callWall = 0;
+    orderBook.asks.forEach(([price, volume]) => {
+      const vol = parseFloat(volume);
+      if (vol > maxAskVol) {
+        maxAskVol = vol;
+        callWall = parseFloat(price);
+      }
+    });
+
+    const result = {
+      putWall: putWall || 0,
+      callWall: callWall || 0
+    };
+
+    await logMessage(`Futures Walls para ${symbol}: Put (Bid) ${result.putWall} (vol: ${maxBidVol}), Call (Ask) ${result.callWall} (vol: ${maxAskVol})`);
+    futuresWallsCache.set(cacheKey, { data: result, timestamp: now });
+    return result;
+  } catch (e) {
+    await logMessage(`Erro ao buscar futures walls para ${symbol}: ${e.message}`);
+    return { putWall: 0, callWall: 0 };
+  }
 }
 // Dados base por símbolo
 const symbolsData = {
-  'BTCUSDT': { base: 'BTC', symbolDisplay: 'BTCUSDT.P', gammaFlip: 111500 },
-  'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P', gammaFlip: 4500 }
+  'BTCUSDT': { base: 'BTC', symbolDisplay: 'BTCUSDT.P' },
+  'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P' }
 };
 // ================= FUNÇÕES ================= //
 // Função para detectar melhor compra
@@ -406,11 +515,15 @@ function mensagemCompra(d) {
   const multiplier = 2; // Ajustável: multiplicador para target/stop baseado em ATR
   const target = (d.spotPrice + (d.atr * multiplier)).toFixed(2);
   const stop = (d.spotPrice - (d.atr * multiplier)).toFixed(2);
+  const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
   return `
 📈 *ALERTA DE MELHOR COMPRA – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟡 *Região de Suporte:* Put Wall em ${d.putWall}
+🟠 *Call Wall (Futuras):* ${d.futuresCallWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟡 *Put Wall (Futuras):* ${d.futuresPutWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟢 *GammaFlip (Futuras):* ${futuresGammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟢 *GammaFlip:* ${d.gammaFlip}
 📆 *Vencimento:* ${d.expiry}
 📊 *Outros Indicadores:*
@@ -433,11 +546,15 @@ function mensagemVenda(d) {
   const multiplier = 2; // Ajustável: multiplicador para target/stop baseado em ATR
   const target = (d.spotPrice - (d.atr * multiplier)).toFixed(2);
   const stop = (d.spotPrice + (d.atr * multiplier)).toFixed(2);
+  const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
   return `
 📉 *ALERTA DE MELHOR VENDA – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟠 *Região de Resistência:* Call Wall em ${d.callWall}
+🟠 *Call Wall (Futuras):* ${d.futuresCallWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟡 *Put Wall (Futuras):* ${d.futuresPutWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+🟢 *GammaFlip (Futuras):* ${futuresGammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟢 *GammaFlip:* ${d.gammaFlip}
 📆 *Vencimento:* ${d.expiry}
 📊 *Outros Indicadores:*
@@ -464,11 +581,16 @@ async function checkAlerts() {
   const promises = symbols.map(async (symbol) => {
     const baseData = symbolsData[symbol];
     const data = { ...baseData };
-    // Fetch walls dinâmicos
+    // Fetch walls dinâmicos (opções)
     const walls = await fetchOptionWalls(baseData.base);
     data.putWall = walls.putWall;
     data.callWall = walls.callWall;
     data.expiry = walls.expiry;
+    data.gammaFlip = Math.round((data.putWall + data.callWall) / 2);
+    // Fetch futures walls dinâmicos
+    const futuresWalls = await fetchFuturesWalls(symbol);
+    data.futuresPutWall = futuresWalls.putWall;
+    data.futuresCallWall = futuresWalls.callWall;
     // Buscar dados dinâmicos em paralelo
     const [spotPrice, lsr15m, rsi1h, rsi4h, atr, emaData] = await Promise.all([
       fetchSpotPrice(symbol),
@@ -523,6 +645,6 @@ async function checkAlerts() {
 (async () => {
   await loadAlerted();
   await checkAlerts();
-  setInterval(checkAlerts, 5 * 60 * 1000); // Verifica a cada 5 minutos
+  setInterval(checkAlerts, 3 * 60 * 1000); // Verifica a cada 3 minutos
   await startMonitoring(); // Opcional, descomente se quiser monitoramento de listagens
 })();
