@@ -433,8 +433,8 @@ async function sendAlertStochasticCross(symbol, data) {
       alertText = `💹*Bull Vol⤴️ Compra*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🔘Entr.: ${format(buyEntryLow)}...${format(buyEntryMax)}\n` +
-                  `🛑 Stop: ${format(buyStopLoss)}\n` +
+                  `🤖📈Análise de Compra / Retração: ${format(zonas.suporte)}...${format(buyEntryLow)}\n` +
+                  `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
@@ -444,7 +444,7 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹 Suporte: ${format(zonas.suporte)}\n` +
                   `🔹 Resistência: ${format(zonas.resistencia)}\n` +
                   `${ema55Text}\n` +
-                  ` ☑︎Emas 13/34<55 +Vol 🤖 @J4Rviz\n`;
+                  ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -458,8 +458,8 @@ async function sendAlertStochasticCross(symbol, data) {
       alertText = `♦️*Bear Correção⤵️*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🔘 Entr.: ${format(sellEntryHigh)}...${format(sellEntryMin)}\n` +
-                  `🛑 Stop: ${format(sellStopLoss)}\n` +
+                  `🤖📉Análise de Venda / Exaustão: ${format(zonas.resistencia)}...${format(sellEntryHigh)}\n` +
+                  `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -469,7 +469,7 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🟰 Suporte: ${format(zonas.suporte)}\n` +
                   `🟰 Resistência: ${format(zonas.resistencia)}\n` +
                   `${ema55Text}\n` +
-                  ` ☑︎Emas 13/34<55 +Vol 🤖 @J4Rviz\n`;
+                  ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
