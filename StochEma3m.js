@@ -34,6 +34,7 @@ const config = {
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
   VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 1.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
+  LEVERAGE: 10, // Alavancagem fixa para cálculo de lucro potencial
 };
 // Logger
 const logger = winston.createLogger({
@@ -357,23 +358,30 @@ function getSetaDirecao(current, previous) {
   return current > previous ? "⬆️" : current < previous ? "⬇️" : "➡️";
 }
 async function sendAlertStochasticCross(symbol, data) {
-  const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema13_15m, ema34_15m, ema55_15m, ema13_15m_prev, ema34_15m_prev, vwap1h, volumeInfo = { isBullishVolume: false, isBearishVolume: false } } = data;
+  const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema13_3m, ema34_3m, ema55_3m, ema13_3m_prev, ema34_3m_prev, vwap1h, volumeInfo = { isBullishVolume: false, isBearishVolume: false } } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
   if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const zonas = detectarQuebraEstrutura(ohlcv15m, atr);
-  // Calcular preços de entrada com tolerância baseada em ATR
   // Calcular preços de entrada, Stop Loss (SL) e Take Profit (TP)
   const buyEntryLow = price * (1 - config.BUY_TOLERANCE_PERCENT); // 2.5% abaixo do preço atual
   const sellEntryHigh = price * (1 + config.BUY_TOLERANCE_PERCENT); // 2.5% acima do preço atual
-  // SL primário é a estrutura (suporte/resistência)
   const buyStopLoss = zonas.suporte; // SL para Compra é o Suporte
   const sellStopLoss = zonas.resistencia; // SL para Venda é a Resistência
-  // TP baseado em ATR (R:R 1:2)
   const buyTakeProfit = price + (atr * config.ATR_MULTIPLIER_TP);
   const sellTakeProfit = price - (atr * config.ATR_MULTIPLIER_TP);
+  // Calcular R:R assertivo baseado em ATR
+  const riscoBuy = price - buyStopLoss;
+  const recompensaBuy = buyTakeProfit - price;
+  const rrBuy = riscoBuy > 0 ? (recompensaBuy / riscoBuy).toFixed(2) : 'Indefinido';
+  const riscoSell = sellStopLoss - price;
+  const recompensaSell = price - sellTakeProfit;
+  const rrSell = riscoSell > 0 ? (recompensaSell / riscoSell).toFixed(2) : 'Indefinido';
+  // Calcular porcentagem de lucro potencial com alavancagem 10x
+  const profitPercentBuy = riscoBuy > 0 ? ((recompensaBuy / price) * config.LEVERAGE * 100).toFixed(2) : 'Indefinido';
+  const profitPercentSell = riscoSell > 0 ? ((recompensaSell / price) * config.LEVERAGE * 100).toFixed(2) : 'Indefinido';
   const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
   const rsi1hEmoji = rsi1h > 60 ? "🔴" : rsi1h < 40 ? "🟢" : "🟡";
   let lsrSymbol = '🔘Consol.';
@@ -405,39 +413,39 @@ async function sendAlertStochasticCross(symbol, data) {
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
   let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 65 (4h e Diário), RSI 1h < 60, LSR < 2.5, EMA 13 > EMA 34 (15m), preço > EMA 55 (15m), Volume de Compra Anormal
+  // Condições para compra: %K > %D (4h), %K <= 65 (4h e Diário), RSI 1h < 60, LSR < 2.5, EMA 13 > EMA 34 (3m), preço > EMA 55 (3m), Volume de Compra Anormal
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d &&
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX &&
                       estocasticoD.k <= config.STOCHASTIC_BUY_MAX &&
                       rsi1h < 60 && // RSI 1H obrigatório
                       (lsr.value !== null && lsr.value < config.LSR_BUY_MAX) && // LSR obrigatório
-                      ema13_15m_prev > ema34_15m_prev &&
-                      ema55_15m !== null && price > ema55_15m &&
+                      ema13_3m_prev > ema34_3m_prev &&
+                      ema55_3m !== null && price > ema55_3m &&
                       volumeInfo.isBullishVolume; // Volume de Compra Anormal
-  // Condições para venda: %K < %D (4h), %K >= 80 (4h e Diário), RSI 1h > 40, EMA 13 < EMA 34 (15m), preço < EMA 55 (15m), Volume de Venda Anormal
+  // Condições para venda: %K < %D (4h), %K >= 80 (4h e Diário), RSI 1h > 40, EMA 13 < EMA 34 (3m), preço < EMA 55 (3m), Volume de Venda Anormal
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d &&
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 40 && // RSI 1H obrigatório
                        (lsr.value !== null && lsr.value > config.LSR_SELL_MIN) && // LSR obrigatório
-                       ema13_15m_prev < ema34_15m_prev &&
-                       ema55_15m !== null && price < ema55_15m &&
+                       ema13_3m_prev < ema34_3m_prev &&
+                       ema55_3m !== null && price < ema55_3m &&
                        volumeInfo.isBearishVolume; // Volume de Venda Anormal
   // Configurar texto da EMA 55 com emoji
   let ema55Text = '';
   let ema55Emoji = '';
-  if (ema55_15m !== null) {
-    if (price > ema55_15m) {
-      ema55Text = `🔹 #15m (${format(ema55_15m)}), Bullish 🟢`;
+  if (ema55_3m !== null) {
+    if (price > ema55_3m) {
+      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bullish 🟢`;
       ema55Emoji = '✅';
-    } else if (price < ema55_15m) {
-      ema55Text = `🔹 #15m (${format(ema55_15m)}), Bearish 🔴`;
+    } else if (price < ema55_3m) {
+      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bearish 🔴`;
       ema55Emoji = '✅';
     }
   } else {
-    ema55Text = `🔹 EMA 55 15m: Indisponível`;
+    ema55Text = `🔹 EMA 55 3m: Indisponível`;
     ema55Emoji = '';
   }
   if (isBuySignal) {
@@ -449,8 +457,10 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🤖📈Análise de Compra / Retração: ${format(buyEntryLow)}\n` +
-                  `🛑 Stop (SL): ${format(buyStopLoss)} (Estrutura)\n` +
-                  `🎯 Alvo (TP): ${format(buyTakeProfit)} (2x ATR)\n` +
+                  `🛑 Stop: ${format(buyStopLoss)} (Estrutura)\n` +
+                  `🎯 Alvo: ${format(buyTakeProfit)} (2x ATR)\n` +
+                  `🔹 Risco/Retorno: 1:${rrBuy} (Lucro Potencial ATR)\n` +
+                  `🔹 Lucro Estimado a (10x): +${profitPercentBuy}%\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
@@ -464,7 +474,7 @@ async function sendAlertStochasticCross(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, SL=${format(buyStopLoss)}, TP=${format(buyTakeProfit)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 15m=${ema55_15m ? format(ema55_15m) : 'N/A'}`);
+      logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, SL=${format(buyStopLoss)}, TP=${format(buyTakeProfit)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}`);
     }
   } else if (isSellSignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
@@ -475,8 +485,10 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🤖📉Análise de Venda / Exaustão: ${format(sellEntryHigh)}\n` +
-                  `🛑 Stop (SL): ${format(sellStopLoss)} (Estrutura)\n` +
-                  `🎯 Alvo (TP): ${format(sellTakeProfit)} (2x ATR)\n` +
+                  `🛑 Stop: ${format(sellStopLoss)} (Estrutura)\n` +
+                  `🎯 Alvo: ${format(sellTakeProfit)} (2x ATR)\n` +
+                  `🔹 Risco/Retorno: 1:${rrSell} (Lucro Potencial ATR)\n` +
+                  `🔹 Lucro Estimado a (10x): +${profitPercentSell}%\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -490,7 +502,7 @@ async function sendAlertStochasticCross(symbol, data) {
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, SL=${format(sellStopLoss)}, TP=${format(sellTakeProfit)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 15m=${ema55_15m ? format(ema55_15m) : 'N/A'}`);
+      logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, SL=${format(sellStopLoss)}, TP=${format(sellTakeProfit)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}`);
     }
   }
   if (alertText) {
@@ -509,7 +521,7 @@ async function checkConditions() {
   try {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, config.VOLUME_LOOKBACK + 1));
+      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 100));
       const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 90));
       const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h', undefined, config.STOCHASTIC_PERIOD_K + config.STOCHASTIC_SMOOTH_K + config.STOCHASTIC_PERIOD_D));
       const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 60)); // Aumentado para 60 candles para suportar EMA 55 se necessário
@@ -545,13 +557,13 @@ async function checkConditions() {
       const lsr = await fetchLSR(symbol);
       const fundingRate = await fetchFundingRate(symbol);
       const atrValues = calculateATR(ohlcv15m);
-      const ema13_15mValues = calculateEMA(ohlcv15m, 13);
-      const ema34_15mValues = calculateEMA(ohlcv15m, 34);
-      const ema55_15mValues = calculateEMA(ohlcv15m, 55);
+      const ema13_3mValues = calculateEMA(ohlcv3m, 13);
+      const ema34_3mValues = calculateEMA(ohlcv3m, 34);
+      const ema55_3mValues = calculateEMA(ohlcv3m, 55);
       const vwap1h = calculateVWAP(ohlcv1h);
       const isAbnormalVol = isAbnormalVolume(ohlcv3m);
-      if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || ema13_15mValues.length < 2 || ema34_15mValues.length < 2 || !ema55_15mValues.length) {
-        logger.warn(`Indicadores insuficientes para ${symbol}: RSI=${rsi1hValues.length}, Stoch4h=${estocastico4h}, StochD=${estocasticoD}, ATR=${atrValues.length}, EMA13(15m)=${ema13_15mValues.length}, EMA34(15m)=${ema34_15mValues.length}, EMA55(15m)=${ema55_15mValues.length}`);
+      if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length || ema13_3mValues.length < 2 || ema34_3mValues.length < 2 || !ema55_3mValues.length) {
+        logger.warn(`Indicadores insuficientes para ${symbol}: RSI=${rsi1hValues.length}, Stoch4h=${estocastico4h}, StochD=${estocasticoD}, ATR=${atrValues.length}, EMA13(3m)=${ema13_3mValues.length}, EMA34(3m)=${ema34_3mValues.length}, EMA55(3m)=${ema55_3mValues.length}`);
         return;
       }
       await sendAlertStochasticCross(symbol, {
@@ -566,11 +578,11 @@ async function checkConditions() {
         estocastico4h,
         estocasticoD,
         atr: atrValues[atrValues.length - 1],
-        ema13_15m: ema13_15mValues[ema13_15mValues.length - 1],
-        ema34_15m: ema34_15mValues[ema34_15mValues.length - 1],
-        ema55_15m: ema55_15mValues[ema55_15mValues.length - 1],
-        ema13_15m_prev: ema13_15mValues[ema13_15mValues.length - 2],
-        ema34_15m_prev: ema34_15mValues[ema34_15mValues.length - 2],
+        ema13_3m: ema13_3mValues[ema13_3mValues.length - 1],
+        ema34_3m: ema34_3mValues[ema34_3mValues.length - 1],
+        ema55_3m: ema55_3mValues[ema55_3mValues.length - 1],
+        ema13_3m_prev: ema13_3mValues[ema13_3mValues.length - 2],
+        ema34_3m_prev: ema34_3mValues[ema34_3mValues.length - 2],
         vwap1h,
         isAbnormalVol
       });
