@@ -18,8 +18,8 @@ const config = {
   RSI_PERIOD: 14,
   RSI_HIGH_THRESHOLD_1: 76, // Alerta de RSI alto (todos os timeframes)
   RSI_HIGH_THRESHOLD_2: 76, // Alerta de RSI extremo (5m, 15m, 1h)
-  RSI_LOW_THRESHOLD: 20, // Alerta de RSI baixo (todos os timeframes)
-  RSI_EXTREME_LOW_THRESHOLD: 20, // Alerta de RSI extremo baixo (5m, 15m, 1h)
+  RSI_LOW_THRESHOLD: 21, // Alerta de RSI baixo (todos os timeframes)
+  RSI_EXTREME_LOW_THRESHOLD: 21, // Alerta de RSI extremo baixo (5m, 15m, 1h)
   CACHE_TTL: 2 * 60 * 1000, // 2 minutos para cache
   MAX_CACHE_SIZE: 50, // Reduzido para 50 entradas
   MAX_HISTORICO_ALERTAS: 10,
