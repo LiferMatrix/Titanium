@@ -263,6 +263,42 @@ async function getATR(symbol, timeframe = '1h', period = 14) {
     return 0;
   }
 }
+// Função para calcular VWAP
+async function getVWAP(symbol, timeframe = '1h') {
+  try {
+    const limit = 100; // Um limite razoável para o cálculo do VWAP do dia/período
+    const ohlcv = await fetchOHLCVWithCache(symbol, timeframe, limit);
+    if (ohlcv.length === 0) {
+      await logMessage(`⚠️ Dados insuficientes para VWAP ${symbol} (${timeframe})`);
+      return 'Indisponível';
+    }
+    let totalTypicalPriceVolume = 0;
+    let totalVolume = 0;
+    for (const candle of ohlcv) {
+      const high = parseFloat(candle[2]);
+      const low = parseFloat(candle[3]);
+      const close = parseFloat(candle[4]);
+      const volume = parseFloat(candle[5]);
+      if (isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume) || volume === 0) continue;
+      // Preço Típico = (High + Low + Close) / 3
+      const typicalPrice = (high + low + close) / 3;
+      totalTypicalPriceVolume += typicalPrice * volume;
+      totalVolume += volume;
+    }
+    if (totalVolume === 0) {
+      await logMessage(`⚠️ Volume total zero para VWAP ${symbol} (${timeframe})`);
+      return 'Indisponível';
+    }
+    const vwap = totalTypicalPriceVolume / totalVolume;
+    const result = vwap.toFixed(2);
+    await logMessage(`✅ VWAP ${symbol} (${timeframe}): ${result}`);
+    return result;
+  } catch (error) {
+    await logMessage(`❌ Erro ao calcular VWAP ${symbol} (${timeframe}): ${error.message}`);
+    return 'Indisponível';
+  }
+}
+
 // Função para fetch preço spot (mark price para futures)
 async function fetchSpotPrice(symbol) {
   try {
@@ -517,27 +553,26 @@ function mensagemCompra(d) {
   const stop = (d.spotPrice - (d.atr * multiplier)).toFixed(2);
   const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
   return `
-📈 *ALERTA DE MELHOR COMPRA – ${d.symbolDisplay}*
+📈 *Avaliar Compra / Reversão – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟡 *Região de Suporte:* Put Wall em ${d.putWall}
 🟠 *Call Wall (Futuras):* ${d.futuresCallWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟡 *Put Wall (Futuras):* ${d.futuresPutWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟢 *GammaFlip (Futuras):* ${futuresGammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟢 *GammaFlip:* ${d.gammaFlip}
-📆 *Vencimento:* ${d.expiry}
-📊 *Outros Indicadores:*
+
+📊 *Indicadores:*
 LSR Ratio 15m: ${d.lsr15m}
 RSI 1h: ${d.rsi1h}
 RSI 4h: ${d.rsi4h}
+➖VWAP 1h: ${d.vwap1h}
 ATR 1h: ${d.atr.toFixed(2)}
 📊 *Contexto:*
 • Preço próximo da Put Wall (suporte forte)
 • Acima da EMA 55 (tendência de alta de curto prazo)
 • Cruzamento de EMAs (13/34) para compra
 ✅ *Sinal técnico:* Oportunidade de Compra
-🎯 *Alvo sugerido:* ${target}
-🛑 *Stop Loss sugerido:* ${stop}
+🎯 *ALVO SUGERIDO:* ${target}
+🛑 *Stop de Proteção:* ${stop}
 #${d.symbolDisplay} #Compra #GammaFlip #Futures
 `;
 }
@@ -548,28 +583,27 @@ function mensagemVenda(d) {
   const stop = (d.spotPrice + (d.atr * multiplier)).toFixed(2);
   const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
   return `
-📉 *ALERTA DE MELHOR VENDA – ${d.symbolDisplay}*
+📉 ♦️*Realizar Lucros/Correção♦️ – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})
 💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟠 *Região de Resistência:* Call Wall em ${d.callWall}
 🟠 *Call Wall (Futuras):* ${d.futuresCallWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟡 *Put Wall (Futuras):* ${d.futuresPutWall.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 🟢 *GammaFlip (Futuras):* ${futuresGammaFlip.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-🟢 *GammaFlip:* ${d.gammaFlip}
-📆 *Vencimento:* ${d.expiry}
-📊 *Outros Indicadores:*
-LSR Ratio 15m: ${d.lsr15m}
+
+📊 *Indicadores:*
+LSR: ${d.lsr15m}
 RSI 1h: ${d.rsi1h}
 RSI 4h: ${d.rsi4h}
+➖VWAP 1h: ${d.vwap1h}
 ATR 1h: ${d.atr.toFixed(2)}
-📈 *Contexto:*
+📈 *Contexto Atual:*
 • Preço tocando resistência (Call Wall)
 • Abaixo da EMA 55 (tendência de baixa de curto prazo)
 • Cruzamento de EMAs (13/34) para venda
-🚨 *Sinal técnico:* Oportunidade de Realizar Lucros
-🎯 *Alvo sugerido:* ${target}
-🛑 *Stop Loss sugerido:* ${stop}
-#${d.symbolDisplay} #Venda #GammaFlip #Futures
+🚨 *Sinal técnico:* Oportunidade de Realizar Lucros ou Short
+🎯 *ALVO SUGERIDO: 📍* ${target}
+🛑 *Stop de Proteção:* ${stop}
+#${d.symbolDisplay} #Venda #GammaFlip #Futures 
 `;
 }
 // ================= EXECUÇÃO ================= //
@@ -592,12 +626,13 @@ async function checkAlerts() {
     data.futuresPutWall = futuresWalls.putWall;
     data.futuresCallWall = futuresWalls.callWall;
     // Buscar dados dinâmicos em paralelo
-    const [spotPrice, lsr15m, rsi1h, rsi4h, atr, emaData] = await Promise.all([
+    const [spotPrice, lsr15m, rsi1h, rsi4h, atr, vwap1h, emaData] = await Promise.all([
       fetchSpotPrice(symbol),
       fetchLSR(symbol),
       getRSI(symbol, '1h'),
       getRSI(symbol, '4h'),
       getATR(symbol, '1h'),
+	      getVWAP(symbol, '1h'),
       getEMAsAndCrossover(symbol)
     ]);
     data.spotPrice = spotPrice;
@@ -605,6 +640,7 @@ async function checkAlerts() {
     data.rsi1h = rsi1h;
     data.rsi4h = rsi4h;
     data.atr = atr;
+	    data.vwap1h = vwap1h;
     data.buyCross = emaData.buyCross;
     data.sellCross = emaData.sellCross;
     data.ema55 = emaData.ema55;
