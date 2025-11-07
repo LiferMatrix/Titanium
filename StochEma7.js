@@ -1,3 +1,11 @@
+require('dotenv').config();
+const ccxt = require('ccxt');
+const TechnicalIndicators = require('technicalindicators');
+const { Bot } = require('grammy');
+const winston = require('winston');
+const DailyRotateFile = require('winston-daily-rotate-file');
+const axios = require('axios');
+const fs = require('fs').promises;
 const path = require('path');
 // ================= CONFIGURAÇÃO ================= //
 const config = {
@@ -458,7 +466,7 @@ async function sendAlertStochasticCross(symbol, data) {
       const rewardDistance = target - entry;
       const ratio = rewardDistance / riskDistance;
       const riskPct = (riskDistance / entry) * 100;
-      const rewardPct = (rewardPct / entry) * 100;
+      const rewardPct = (rewardDistance / entry) * 100;
       const risk10x = riskPct * 10;
       const reward10x = rewardPct * 10;
       const targetPct = ((target - entry) / entry * 100).toFixed(2);
