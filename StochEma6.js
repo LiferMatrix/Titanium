@@ -352,7 +352,7 @@ function getSetaDirecao(current, previous) {
 function classificarRR(ratio) {
   if (ratio >= 4.0) return "🏆1-#EXCELENTE";
   if (ratio >= 3.0) return "🔥2-#ÓTIMO";
-  if (ratio >= 2.5) return "✅3-#MUITO BOM";
+  if (ratio >= 2.5) return "✅3-#MUITO #BOM";
   if (ratio >= 2.0) return "👍4-#BOM";
   if (ratio >= 1.5) return "🤔5-#REGULAR";
   return "⚠️6-#RUIM";
