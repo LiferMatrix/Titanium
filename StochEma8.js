@@ -1,11 +1,3 @@
-require('dotenv').config();
-const ccxt = require('ccxt');
-const TechnicalIndicators = require('technicalindicators');
-const { Bot } = require('grammy');
-const winston = require('winston');
-const DailyRotateFile = require('winston-daily-rotate-file');
-const axios = require('axios');
-const fs = require('fs').promises;
 const path = require('path');
 // ================= CONFIGURAÇÃO ================= //
 const config = {
@@ -18,9 +10,9 @@ const config = {
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
-  STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
-  STOCHASTIC_SELL_MIN: 75, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
+  STOCHASTIC_BUY_MAX: 76, // Limite máximo para compra (4h e Diário)
+  STOCHASTIC_SELL_MIN: 77, // Limite mínimo para venda (4h e Diário)
+  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
@@ -638,7 +630,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 2 ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
