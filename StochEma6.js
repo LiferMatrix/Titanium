@@ -484,7 +484,6 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🎯 Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
                   `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹% Movimento de: ${rewardPct.toFixed(2)}%\n` +
                   `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
                   `${ema55Text}\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -529,7 +528,6 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
                   `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹% Movimento de: ${rewardPct.toFixed(2)}%\n` +
                   `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
                   `${ema55Text}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
