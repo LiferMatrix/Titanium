@@ -485,7 +485,6 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
                   `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
-                  `${ema55Text}\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
@@ -529,7 +528,6 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
                   `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
-                  `${ema55Text}\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 #LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -636,7 +634,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 133455VOL...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
