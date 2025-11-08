@@ -82,6 +82,27 @@ async function getLSR(symbol) {
   });
 }
 
+// Busca variação de volume 1h
+async function getVolumeVariation(symbol) {
+  return await safeRequest(async () => {
+    const res = await axios.get('https://fapi.binance.com/futures/data/takerlongshortRatio', {
+      params: { symbol, period: '1h', limit: 2 },
+      timeout: 8000
+    });
+    if (res.data.length < 2) return 'N/A';
+    const [curr, prev] = res.data;
+    const prevTotal = parseFloat(prev.buyVol) + parseFloat(prev.sellVol);
+    const currTotal = parseFloat(curr.buyVol) + parseFloat(curr.sellVol);
+    if (prevTotal === 0) return 'N/A';
+    const change = (currTotal - prevTotal) / prevTotal * 100;
+    const percent = change.toFixed(2);
+    const arrow = change >= 0 ? '⤴️' : '⤵️';
+    const sign = change >= 0 ? '+' : '';
+    const type = parseFloat(curr.buySellRatio) > 1 ? 'Vol Comprador 1H' : 'Vol Vendedor 1H';
+    return `${type} ${arrow} ${sign}${percent}%`;
+  }) || 'N/A';
+}
+
 // Função principal
 async function sendTopLSR() {
   const now = Date.now();
@@ -108,20 +129,32 @@ async function sendTopLSR() {
     return;
   }
 
-  const topHigh = data.slice(0, 5);
-  const topLow = data.slice(-5).reverse();
+  let topHigh = data.slice(0, 5);
+  let topLow = data.slice(-5).reverse();
+
+  // Busca volume para top high
+  topHigh = await Promise.all(topHigh.map(async (item) => {
+    const volStr = await getVolumeVariation(item.symbol);
+    return { ...item, volStr };
+  }));
+
+  // Busca volume para top low
+  topLow = await Promise.all(topLow.map(async (item) => {
+    const volStr = await getVolumeVariation(item.symbol);
+    return { ...item, volStr };
+  }));
 
   let msg = `🤖 #TOP #LONG vs #SHORT ♻️\n`;
   msg += `📈 *Top 5 – LSR Alto*\n`;
   topHigh.forEach((item, i) => {
     const emoji = i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : `${i + 1}️⃣ `;
-    msg += `${emoji} ${item.symbol} → ${item.lsr}\n`;
+    msg += `${emoji} ${item.symbol} LSR: ${item.lsr} / ${item.volStr}\n`;
   });
   msg += `━━━━━━━━━━━━━━━\n`;
   msg += `📉 *Top 5 – LSR Baixo*\n`;
   topLow.forEach((item, i) => {
     const emoji = i === 0 ? '🔥 ' : '🔻 ';
-    msg += `${i + 1}️⃣ ${emoji} ${item.symbol} → ${item.lsr}\n`;
+    msg += `${i + 1}️⃣ ${emoji} ${item.symbol} LSR: ${item.lsr} / ${item.volStr}\n`;
   });
 
   await safeRequest(async () => {
