@@ -7,12 +7,13 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
+const CronJob = require('cron').CronJob;
 // ================= CONFIGURAÇÃO ================= //
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
-  INTERVALO_ALERTA_4H_MS: 15 * 60 * 1000, // 15 minutos
+  INTERVALO_ALERTA_4H_MS: 5 * 60 * 1000, // 15 minutos
   TEMPO_COOLDOWN_MS: 60 * 60 * 1000, // 1 hora
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
@@ -20,7 +21,7 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 76, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 77, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
@@ -454,11 +455,14 @@ async function sendAlertStochasticCross(symbol, data) {
     ema55Text = `🔹 EMA 55 3m: Indisponível`;
     ema55Emoji = '';
   }
+  const dataHora = new Date(agora).toLocaleString('pt-BR');
   if (isBuySignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
+      const direcao = 'buy';
+      const count = state.ultimoAlertaPorAtivo[symbol].historico.filter(r => r.direcao === direcao).length + 1;
       const entry = buyEntryLow;
       const stop = zonas.suporte;
       const target = targetBuy;
@@ -474,7 +478,8 @@ async function sendAlertStochasticCross(symbol, data) {
       const targetLong2Pct = ((targetBuyLong2 - entry) / entry * 100).toFixed(2);
       const targetLong3Pct = ((targetBuyLong3 - entry) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = `💹*Compra Programada*\n\n` +
+      alertText = `💹*Compra Programada*\n` +
+                  `${count}º Alerta - ${dataHora}\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🤖📈Análise Entrada/Retração: ${format(buyEntryLow)}...${format(price)}\n` +
@@ -484,7 +489,7 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🎯 Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
                   `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
+                  `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
@@ -504,6 +509,8 @@ async function sendAlertStochasticCross(symbol, data) {
       r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
     );
     if (!foiAlertado) {
+      const direcao = 'sell';
+      const count = state.ultimoAlertaPorAtivo[symbol].historico.filter(r => r.direcao === direcao).length + 1;
       const entry = sellEntryHigh;
       const stop = zonas.resistencia;
       const target = targetSell;
@@ -518,16 +525,17 @@ async function sendAlertStochasticCross(symbol, data) {
       const targetShort1Pct = ((entry - targetSellShort1) / entry * 100).toFixed(2);
       const targetShort2Pct = ((entry - targetSellShort2) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = `🔴*Correção Programada*\n\n` +
+      alertText = `🔴*Correção Programada*\n` +
+                  `${count}º Alerta - ${dataHora}\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🤖📉Análise de Venda / Correção: ${format(price)}...${format(sellEntryHigh)}\n` +
-                  `🎯 Alvo 1 : ${format(target)} (${targetPct}%)\n` +
+                  `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
+                  `🎯 Alvo 1 / Scalp: ${format(target)} (${targetPct}%)\n` +
                   `🎯 Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
                   `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
                   `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹 Operação a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
+                  `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 #LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
@@ -633,16 +641,27 @@ async function checkConditions() {
     logger.error(`Erro ao processar condições: ${e.message}`);
   }
 }
+function resetCounters() {
+  Object.keys(state.ultimoAlertaPorAtivo).forEach(symbol => {
+    if (state.ultimoAlertaPorAtivo[symbol]) {
+      state.ultimoAlertaPorAtivo[symbol].historico = [];
+    }
+  });
+  logger.info('Contadores de alertas resetados às 21:00');
+}
 async function main() {
   logger.info('Iniciando simple trading bot');
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 2 ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium in action ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
     logger.info(`Limpeza de logs agendada a cada ${config.LOG_CLEANUP_INTERVAL_MS / (24 * 60 * 60 * 1000)} dias`);
+    const resetJob = new CronJob('0 0 21 * * *', resetCounters, null, true, 'America/Sao_Paulo');
+    resetJob.start();
+    logger.info('Agendado reset diário de contadores às 21:00 (America/Sao_Paulo)');
   } catch (e) {
     logger.error(`Erro ao iniciar bot: ${e.message}`);
   }
