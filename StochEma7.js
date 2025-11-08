@@ -484,7 +484,7 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🎯 Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
                   `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹Alvo 1 a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
+                  `💰Alvo 1 a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
                   `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹Fund. R: ${fundingRateText}\n` +
@@ -522,12 +522,12 @@ async function sendAlertStochasticCross(symbol, data) {
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
                   `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
-                  `🎯 Alvo 1 : ${format(target)} (${targetPct}%)\n` +
+                  `🎯 Alvo 1 / Scalp: ${format(target)} (${targetPct}%)\n` +
                   `🎯 Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
                   `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
                   `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
                   `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `🔹Alvo 1 a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
+                  `💰Alvo 1 a #10x Lucro Estimado: ${reward10x.toFixed(2)}%\n` +
                   `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
                   `🔹 #LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
                   `🔹 Fund. R: ${fundingRateText}\n` +
