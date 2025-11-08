@@ -521,7 +521,7 @@ async function sendAlertStochasticCross(symbol, data) {
       alertText = `🔴*Correção Programada*\n\n` +
                   `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
                   `💲 Preço Atual: ${format(price)}\n` +
-                  `🤖📉Análise de Correção / Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
+                  `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
                   `🎯 Alvo 1 : ${format(target)} (${targetPct}%)\n` +
                   `🎯 Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
                   `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
