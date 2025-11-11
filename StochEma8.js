@@ -34,7 +34,7 @@ const config = {
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
   VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
-  VOLUME_MULTIPLIER: 2.3, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
+  VOLUME_MULTIPLIER: 2.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
 };
 // Logger
 const logger = winston.createLogger({
