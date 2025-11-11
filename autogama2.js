@@ -1012,6 +1012,6 @@ async function checkAlerts() {
   await sendTelegramMessage('Titanium BTC/ETH Whales🐋 Detect Futures');
   await loadAlerted();
   await checkAlerts();
-  setInterval(checkAlerts, 5 * 60 * 1000); // Verifica a cada 5 minutos
+  setInterval(checkAlerts, 3 * 60 * 1000); // Verifica a cada 5 minutos
   await startMonitoring(); // Opcional, descomente se quiser monitoramento de listagens
 })();
