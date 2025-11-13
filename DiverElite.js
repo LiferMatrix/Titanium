@@ -339,12 +339,26 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const format = v => isNaN(v) ? 'N/A' : (v < 1 ? v.toFixed(8) : v < 10 ? v.toFixed(6) : v < 100 ? v.toFixed(4) : v.toFixed(2));
   const link = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=${timeframe.toUpperCase()}`;
 
+  const ohlcv50Raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, timeframe, undefined, 50));
+  const ohlcv50 = normalizeOHLCV(ohlcv50Raw);
+  const highs = ohlcv50.map(c => c.high);
+  const lows = ohlcv50.map(c => c.low);
+  const resistance = Math.max(...highs);
+  const support = Math.min(...lows);
+
+  const dataHora = new Date().toLocaleString('pt-BR');
+
+  const lsrEmoji = lsr.value < 1 ? ' 🟢' : '';
+  
   const msg = `${tipo} - ${timeframe.toUpperCase()}\n\n` +
+              `${dataHora}\n\n` +
               `Ativo: *#${symbol}* [- TV](${link})\n` +
               `Preço: ${format(price)}\n` +
               `RSI ${timeframe}: ${rsiValue.toFixed(2)}\n` +
               `RSI 1H: ${rsi1hValue.toFixed(2)}\n` +
-              `LSR: ${lsr.value.toFixed(2)}\n` +
+              `#LSR: ${lsr.value.toFixed(2)}${lsrEmoji}\n` +
+              `#Suporte: ${format(support)}\n` +
+              `#Resistência: ${format(resistance)}\n` +
               `Monitor @J4Rviz`;
 
   historico.push({ direcao, timestamp: agora });
