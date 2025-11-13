@@ -5,6 +5,7 @@ const { Bot } = require('grammy');
 const winston = require('winston');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 
 // ================= CONFIGURAÇÃO ================= //
 const config = {
@@ -83,6 +84,13 @@ const exchangeSpot = new ccxt.binance({
   enableRateLimit: true,
   timeout: 30000,
   options: { defaultType: 'spot' }
+});
+const exchangeFutures = new ccxt.binance({
+  apiKey: process.env.BINANCE_API_KEY,
+  secret: process.env.BINANCE_SECRET_KEY,
+  enableRateLimit: true,
+  timeout: 30000,
+  options: { defaultType: 'future', defaultSubType: 'linear' }
 });
 
 // ================= UTILITÁRIOS ================= //
@@ -191,9 +199,32 @@ async function fetchLSR(symbol) {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
 
-  const lsr = { value: Math.random() * 3 + 0.5, percentChange: 0 };
-  setCachedData(cacheKey, lsr);
-  return lsr;
+  try {
+    const symbolWithoutSlash = symbol.replace('/', '');
+    const res = await withRetry(() => axios.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio', {
+      params: { symbol: symbolWithoutSlash, period: '5m', limit: 2 },
+      timeout: 10000
+    }));
+    const data = res.data;
+    if (!data || data.length < 2) {
+      logger.warn(`Dados insuficientes de LSR para ${symbol}: ${data?.length || 0} registros`);
+      return { value: null, percentChange: '0.00' };
+    }
+    const currentLSR = parseFloat(data[0].longShortRatio);
+    const previousLSR = parseFloat(data[1].longShortRatio);
+    if (isNaN(currentLSR) || isNaN(previousLSR)) {
+      logger.warn(`LSR inválido para ${symbol}`);
+      return { value: null, percentChange: '0.00' };
+    }
+    const percentChange = previousLSR !== 0 ? ((currentLSR - previousLSR) / previousLSR * 100).toFixed(2) : '0.00';
+    const result = { value: currentLSR, percentChange };
+    setCachedData(cacheKey, result);
+    logger.info(`LSR obtido para ${symbol}: ${currentLSR}, variação: ${percentChange}%`);
+    return result;
+  } catch (e) {
+    logger.error(`Erro ao fetch LSR para ${symbol}: ${e.message}`);
+    return { value: 1.0, percentChange: '0.00' };
+  }
 }
 
 function normalizeOHLCV(data) {
