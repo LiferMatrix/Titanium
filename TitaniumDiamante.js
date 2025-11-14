@@ -20,7 +20,7 @@ const config = {
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
-  STOCHASTIC_SELL_MIN: 77, // Limite mínimo para venda (4h e Diário)
+  STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
   LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
@@ -36,8 +36,8 @@ const config = {
   VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 2.4, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
   MIN_ATR_PERCENT: 0.5, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
-  ADX_PERIOD: 14,
-  ADX_MIN_TREND: 25, // Mínimo ADX para considerar tendência forte nos alertas
+  ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, // Mínimo ADX para considerar tendência forte nos alertas
 };
 // Logger
 const logger = winston.createLogger({
@@ -374,38 +374,95 @@ function classificarRR(ratio) {
   if (ratio >= 1.5) return "🤔5-#REGULAR";
   return "⚠️6-#RUIM";
 }
+function calculateTargetsAndZones(data) {
+  const { ohlcv15m, ohlcv4h, ohlcvDiario, ohlcvSemanal, price, atr } = data;
+  const zonas = detectarQuebraEstrutura(ohlcv15m, atr);
+  const buyEntryLow = price - (atr * config.ATR_MULTIPLIER_BUY);
+  const buyEntryMax = price + (atr * config.ATR_MULTIPLIER_BUY);
+  const sellEntryHigh = price + (atr * config.ATR_MULTIPLIER_SELL);
+  const sellEntryMin = price - (atr * config.ATR_MULTIPLIER_SELL);
+  const estrutura4h = detectarQuebraEstrutura(ohlcv4h, atr);
+  const estruturaDiario = detectarQuebraEstrutura(ohlcvDiario, atr);
+  const estruturaSemanal = detectarQuebraEstrutura(ohlcvSemanal, atr);
+  const targetBuyLong1 = estrutura4h.resistencia + (atr * config.TARGET_MULTIPLIER * 1.5);
+  const targetBuyLong2 = estruturaDiario.resistencia + (atr * config.TARGET_MULTIPLIER * 2.0);
+  const targetBuyLong3 = estruturaSemanal.resistencia + (atr * config.TARGET_MULTIPLIER * 2.5);
+  const targetSellShort1 = estrutura4h.suporte - (atr * config.TARGET_MULTIPLIER * 1.5);
+  const targetSellShort2 = estruturaDiario.suporte - (atr * config.TARGET_MULTIPLIER * 2.0);
+  const targetBuy = zonas.resistencia + (atr * config.TARGET_MULTIPLIER);
+  const targetSell = zonas.suporte - (atr * config.TARGET_MULTIPLIER);
+  return {
+    zonas,
+    buyEntryLow,
+    buyEntryMax,
+    sellEntryHigh,
+    sellEntryMin,
+    targetBuyLong1,
+    targetBuyLong2,
+    targetBuyLong3,
+    targetSellShort1,
+    targetSellShort2,
+    targetBuy,
+    targetSell
+  };
+}
+function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m) {
+  const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
+  return `💹*Compra Programada*\n` +
+         `${count}º Alerta - ${dataHora}\n\n` +
+         `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `💲 Preço Atual: ${format(price)}\n` +
+         `🤖📈Análise Entrada/Retração: ${format(buyEntryLow)}...${format(price)}\n` +
+         `🎯 Alvo 1 / Scalp: ${format(targetBuy)} (${targetPct}%)\n` +
+         `🎯 Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
+         `🎯 Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
+         `🎯 Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
+         `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
+         `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
+         `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
+         `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
+         `#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
+         `Fund. R: ${fundingRateText}\n` +
+         `${vwap1hText} ${ema55Emoji}\n` +
+         `Stoch #1D %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
+         `Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraca'}\n` +
+         `Suporte: ${format(zonas.suporte)}\n` +
+         `Resistência: ${format(zonas.resistencia)}\n` +
+         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+}
+function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m) {
+  const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
+  return `🔴*Correção Programada*\n` +
+         `${count}º Alerta - ${dataHora}\n\n` +
+         `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `💲 Preço Atual: ${format(price)}\n` +
+         `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
+         `🎯 Alvo 1 / Scalp: ${format(targetSell)} (${targetPct}%)\n` +
+         `🎯 Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
+         `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
+         `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
+         `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
+         `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
+         `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
+         `#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
+         `Fund. R: ${fundingRateText}\n` +
+         `${vwap1hText} ${ema55Emoji}\n` +
+         `Stoch #1D : ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
+         `🔘 Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraco'}\n` +
+         `Suporte: ${format(zonas.suporte)}\n` +
+         `Resistência: ${format(zonas.resistencia)}\n` +
+         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+}
 async function sendAlertStochasticCross(symbol, data) {
-  const { ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, ohlcvSemanal, price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, atr, ema13_3m, ema34_3m, ema55_3m, ema13_3m_prev, ema34_3m_prev, vwap1h, adx15m } = data;
+  const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx15m } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
   if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
-  const zonas = detectarQuebraEstrutura(ohlcv15m, atr);
-  // Calcular preços de entrada com tolerância baseada em ATR
-  const buyEntryLow = price - (atr * config.ATR_MULTIPLIER_BUY); // Zona de retração baseada em ATR
-  const buyEntryMax = price + (atr * config.ATR_MULTIPLIER_BUY); // Entrada máxima com ATR
-  const sellEntryHigh = price + (atr * config.ATR_MULTIPLIER_SELL); // Zona de exaustão baseada em ATR
-  const buyStopLoss = price - (atr * config.ATR_MULTIPLIER_BUY); // Stop Loss para Compra
-  const sellStopLoss = price + (atr * config.ATR_MULTIPLIER_SELL); // Stop Loss para Venda
-  const sellEntryMin = price - (atr * config.ATR_MULTIPLIER_SELL); // Entrada mínima com ATR
-  // === ALVOS LONGOS BASEADOS EM ESTRUTURA DE 4H E DIÁRIO ===
-  const estrutura4h = detectarQuebraEstrutura(ohlcv4h, atr);
-  const estruturaDiario = detectarQuebraEstrutura(ohlcvDiario, atr);
-  const estruturaSemanal = detectarQuebraEstrutura(ohlcvSemanal, atr);
-  // Alvo Longo 1 - 4h
-  const targetBuyLong1 = estrutura4h.resistencia + (atr * config.TARGET_MULTIPLIER * 1.5);
-  // Alvo Longo 2 - Diário
-  const targetBuyLong2 = estruturaDiario.resistencia + (atr * config.TARGET_MULTIPLIER * 2.0);
-  // Alvo Longo 3 - Semanal
-  const targetBuyLong3 = estruturaSemanal.resistencia + (atr * config.TARGET_MULTIPLIER * 2.5);
-  // Alvo Curto 1 - 4h
-  const targetSellShort1 = estrutura4h.suporte - (atr * config.TARGET_MULTIPLIER * 1.5);
-  // Alvo Curto 2 - Diário/Semanal
-  const targetSellShort2 = estruturaDiario.suporte - (atr * config.TARGET_MULTIPLIER * 2.0);
-  // Alvo Curto (mantidos)
-  const targetBuy = zonas.resistencia + (atr * config.TARGET_MULTIPLIER);
-  const targetSell = zonas.suporte - (atr * config.TARGET_MULTIPLIER);
+  const { zonas, buyEntryLow, buyEntryMax, sellEntryHigh, sellEntryMin, targetBuyLong1, targetBuyLong2, targetBuyLong3, targetSellShort1, targetSellShort2, targetBuy, targetSell } = calculateTargetsAndZones(data);
   const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
   const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
   let lsrSymbol = '🔘Consol.';
@@ -429,53 +486,61 @@ async function sendAlertStochasticCross(symbol, data) {
   const vwap1hText = vwap1h ? `${getVWAPEmoji(price, vwap1h)} VWAP 1h: ${format(vwap1h)}` : '🔹 VWAP Indisp.';
   if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
   const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
+  const dAnteriorD = state.ultimoEstocastico[symbol].dD || estocasticoD?.d || 0;
   const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
+  const dAnterior4h = state.ultimoEstocastico[symbol].d4h || estocastico4h?.d || 0;
   state.ultimoEstocastico[symbol].kD = estocasticoD?.k;
+  state.ultimoEstocastico[symbol].dD = estocasticoD?.d;
   state.ultimoEstocastico[symbol].k4h = estocastico4h?.k;
+  state.ultimoEstocastico[symbol].d4h = estocastico4h?.d;
   const direcaoD = getSetaDirecao(estocasticoD?.k, kAnteriorD);
   const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-  let alertText = '';
-  // Condições para compra: %K > %D (4h), %K <= 70 (4h e Diário), RSI 1h < 60, LSR < 2.5, EMA 13 > EMA 34 (3m), preço > EMA 55 (3m) - EMA 13 e 34 no candle fechado anterior
+  let ema55Emoji = '';
+  if (ema55_3m !== null) {
+    if (price > ema55_3m) {
+      ema55Emoji = '✅';
+    } else if (price < ema55_3m) {
+      ema55Emoji = '✅';
+    }
+  }
+  const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
+  const crossedUp4h = (kAnterior4h <= dAnterior4h) && (estocastico4h.k > estocastico4h.d);
+  const crossedUpD = (kAnteriorD <= dAnteriorD) && (estocasticoD.k > estocasticoD.d);
+  const crossedDown4h = (kAnterior4h >= dAnterior4h) && (estocastico4h.k < estocastico4h.d);
+  const crossedDownD = (kAnteriorD >= dAnteriorD) && (estocasticoD.k < estocasticoD.d);
+  // Condições para compra
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d &&
+                      crossedUp4h &&
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX &&
+                      estocasticoD.k > estocasticoD.d &&
+                      crossedUpD &&
                       estocasticoD.k <= config.STOCHASTIC_BUY_MAX &&
                       rsi1h < 60 &&
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       ema13_3m_prev > ema34_3m_prev &&
                       ema55_3m !== null && price > ema55_3m &&
-                      data.isAbnormalVol &&
-                      (atr / price > config.MIN_ATR_PERCENT / 100) &&
-                      adx15m > config.ADX_MIN_TREND;
-  // Condições para venda: %K < %D (4h), %K >= 75 (4h e Diário), RSI 1h > 60, EMA 13 < EMA 34 (3m), preço < EMA 55 (3m) - EMA 13 e 34 no candle fechado anterior
+                      isAbnormalVol && 
+                      (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
+                      isStrongTrend;
+  // Condições para venda
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d &&
+                       crossedDown4h &&
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
+                       estocasticoD.k < estocasticoD.d &&
+                       crossedDownD &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 60 &&
                        ema13_3m_prev < ema34_3m_prev &&
                        ema55_3m !== null && price < ema55_3m &&
-                       data.isAbnormalVol &&
-                       (atr / price > config.MIN_ATR_PERCENT / 100) &&
-                       adx15m > config.ADX_MIN_TREND;
-  // Configurar texto da EMA 55 com emoji
-  let ema55Text = '';
-  let ema55Emoji = '';
-  if (ema55_3m !== null) {
-    if (price > ema55_3m) {
-      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bullish 🟢`;
-      ema55Emoji = '✅';
-    } else if (price < ema55_3m) {
-      ema55Text = `🔹 #3m (${format(ema55_3m)}), Bearish 🔴`;
-      ema55Emoji = '✅';
-    }
-  } else {
-    ema55Text = `🔹 EMA 55 3m: Indisponível`;
-    ema55Emoji = '';
-  }
+                       isAbnormalVol &&
+                       (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
+                       isStrongTrend;
   const dataHora = new Date(agora).toLocaleString('pt-BR');
+  let alertText = '';
   if (isBuySignal) {
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
       r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
@@ -489,37 +554,14 @@ async function sendAlertStochasticCross(symbol, data) {
       const riskDistance = entry - stop;
       const rewardDistance = target - entry;
       const ratio = rewardDistance / riskDistance;
-      const riskPct = (riskDistance / entry) * 100;
       const rewardPct = (rewardDistance / entry) * 100;
-      const risk10x = riskPct * 10;
       const reward10x = rewardPct * 10;
       const targetPct = ((target - entry) / entry * 100).toFixed(2);
       const targetLong1Pct = ((targetBuyLong1 - entry) / entry * 100).toFixed(2);
       const targetLong2Pct = ((targetBuyLong2 - entry) / entry * 100).toFixed(2);
       const targetLong3Pct = ((targetBuyLong3 - entry) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = `💹*Compra Programada*\n` +
-                  `${count}º Alerta - ${dataHora}\n\n` +
-                  `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço Atual: ${format(price)}\n` +
-                  `🤖📈Análise Entrada/Retração: ${format(buyEntryLow)}...${format(price)}\n` +
-                  `🎯 Alvo 1 / Scalp: ${format(target)} (${targetPct}%)\n` +
-                  `🎯 Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
-                  `🎯 Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
-                  `🎯 Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
-                  `🛑 Stop abaixo de: ${format(zonas.suporte)}\n` +
-                  `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
-                  `🔹RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹#LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
-                  `🔹Fund. R: ${fundingRateText}\n` +
-                  `🔹 ${vwap1hText} ${ema55Emoji}\n` +
-                  `🔹 Stoch #1D %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-                  `🔹 Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                  `🔹 ADX 15m: ${adx15m.toFixed(2)}\n` +
-                  `🔹 Suporte: ${format(zonas.suporte)}\n` +
-                  `🔹 Resistência: ${format(zonas.resistencia)}\n` +
-                  ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+      alertText = buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m);
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -538,35 +580,13 @@ async function sendAlertStochasticCross(symbol, data) {
       const riskDistance = stop - entry;
       const rewardDistance = entry - target;
       const ratio = rewardDistance / riskDistance;
-      const riskPct = (riskDistance / entry) * 100;
       const rewardPct = (rewardDistance / entry) * 100;
-      const risk10x = riskPct * 10;
       const reward10x = rewardPct * 10;
       const targetPct = ((entry - target) / entry * 100).toFixed(2);
       const targetShort1Pct = ((entry - targetSellShort1) / entry * 100).toFixed(2);
       const targetShort2Pct = ((entry - targetSellShort2) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = `🔴*Correção Programada*\n` +
-                  `${count}º Alerta - ${dataHora}\n\n` +
-                  `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço Atual: ${format(price)}\n` +
-                  `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
-                  `🎯 Alvo 1 / Scalp: ${format(target)} (${targetPct}%)\n` +
-                  `🎯 Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
-                  `🎯 Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
-                  `🛑 Stop acima de: ${format(zonas.resistencia)}\n` +
-                  `${classificacao} Risco/Retorno: ${ratio.toFixed(2)}:1\n` +
-                  `💰Alvo 1 a #10x Lucro Aprox.: ${reward10x.toFixed(2)}%\n` +
-                  `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹 #LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
-                  `🔹 Fund. R: ${fundingRateText}\n` +
-                  `🔹 ${vwap1hText} ${ema55Emoji}\n` +
-                  `🔹 Stoch #1D : ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-                  `🔹 Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                  `🔹 ADX 15m: ${adx15m.toFixed(2)}\n` +
-                  `🟰 Suporte: ${format(zonas.suporte)}\n` +
-                  `🟰 Resistência: ${format(zonas.resistencia)}\n` +
-                  ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+      alertText = buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m);
       state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
@@ -678,7 +698,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium in action ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Diamante ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
