@@ -21,7 +21,7 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.0, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 1.8, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
@@ -34,7 +34,7 @@ const config = {
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
   VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
-  VOLUME_MULTIPLIER: 2.4, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
+  VOLUME_MULTIPLIER: 2.3, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
   MIN_ATR_PERCENT: 0.5, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, // Mínimo ADX para considerar tendência forte nos alertas
@@ -429,7 +429,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraca'}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz 2\n`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m) {
   const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
@@ -453,7 +453,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `🔘 Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraco'}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
+         ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz 2\n`;
 }
 async function sendAlertStochasticCross(symbol, data) {
   const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx15m } = data;
