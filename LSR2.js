@@ -155,12 +155,13 @@ async function loadInitialSymbols() {
   try {
     const data = await fs.readFile(symbolsFile, 'utf8');
     const parsed = JSON.parse(data);
-    if (Array.isArray(parsed)) {
+    if (Array.isArray(parsed) && parsed.length > 0) { // Adicionado check para length > 0
       initialSymbols = new Set(parsed);
-      isFirstRun = false; // Já existe arquivo → não é primeira execução
+      isFirstRun = false;
       await logMessage(`Carregados ${initialSymbols.size} pares USDT do histórico.`);
     } else {
       isFirstRun = true;
+      await logMessage('Arquivo initialSymbols.json vazio ou inválido. Tratando como primeira execução.');
     }
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -168,6 +169,7 @@ async function loadInitialSymbols() {
       await logMessage('Arquivo initialSymbols.json não encontrado. Primeira execução.');
     } else {
       console.error('❌ Erro ao carregar symbols: ' + error.message);
+      isFirstRun = true; // Seguro: trata como first run se erro
     }
   }
 }
@@ -184,6 +186,7 @@ async function saveInitialSymbols() {
 // Verifica novas listagens
 async function checkListings() {
   const currentSymbols = await getUsdtSymbols();
+  await logMessage(`Símbolos atuais encontrados: ${currentSymbols.length}`);
 
   // === PRIMEIRA EXECUÇÃO: apenas salva e sai ===
   if (isFirstRun) {
@@ -206,10 +209,10 @@ async function checkListings() {
       const message = `⚠️ *NOVA LISTAGEM NA BINANCE FUTURES!*\n\n\`${symbol}\`\n\n⏰ *${now}*`;
       await safeRequest(async () => {
         await bot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
-        await logMessage('📱 Alerta de listagem enviado!');
+        await logMessage(`📱 Alerta de listagem enviado para ${symbol}!`);
       });
     }
-    await logMessage(`🆕 ${newSymbols.length} nova(s) listagem(ens) detectada(s)!`);
+    await logMessage(`🆕 ${newSymbols.length} nova(s) listagem(ens) detectada(s): ${newSymbols.join(', ')}`);
   } else {
     await logMessage('Nenhuma nova listagem detectada.');
   }
