@@ -685,7 +685,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium in action ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium2 in action ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
