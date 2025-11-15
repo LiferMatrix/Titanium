@@ -21,8 +21,8 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 1.8, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.6, // Limite mínimo de LSR para venda
+  LSR_BUY_MAX: 2.0, // Limite máximo de LSR para compra
+  LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
   CACHE_TTL: 10 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
@@ -520,6 +520,7 @@ async function sendAlertStochasticCross(symbol, data) {
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 60 &&
+                      (lsr.value === null || lsr.value < config.LSR_SELL_MIN) &&
                        ema13_3m_prev < ema34_3m_prev &&
                        ema55_3m !== null && price < ema55_3m &&
                        isAbnormalVol &&
