@@ -687,31 +687,29 @@ async function getAIPredictive(symbol, data) {
     const probShort = Math.min(99.9, scoreShort + Math.random() * 10);
     // ENVIA PRÉ-ALERTA LONG - Limite reduzido para 70%
     if (probLong > 70) {
-      const stage = probLong > 85 ? 'ALERTA QUENTE' : 'Posição';
+      const stage = probLong > 85 ? 'ALERTA QUENTE' : '';
       const msg = `
-${stage} 🤖IA [${symbol}] ❇️Compra
+${stage} 🤖IA [${symbol}] ❇️🐋 Comprando
 💰 *Preço Atual:* ${data.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 Perspectiva⏳: ${probLong.toFixed(1)}% em ${timeEst.toFixed(0)}min
-Put Wall alvo: ${data.putWall.toFixed(2)} USDT
 Fund.: ${data.fundingRate.toFixed(4)}% → ${fundingProj.toFixed(4)}%
-Vol. +${volChange.toFixed(0)}% (Boost Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioBuy.toFixed(1)}x mais ✅COMPRAS
+Vol. +${volChange.toFixed(0)}% (Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioBuy.toFixed(1)}x mais ✅COMPRAS
 ${data.rsi1h.bullish_divergence ? '✅Divergência BULLISH' : '✅RSI subindo'}
-${stage === 'ALERTA' ? 'ENTRE COM 50-70% AGORA' : '✅PREPARAR COMPRA'}
+${stage === 'ALERTA' ? 'Avaliar Reversão' : '✅Compras'}
       `.trim();
       await sendTelegramMessage(msg);
     }
     // ENVIA PRÉ-ALERTA SHORT - Limite reduzido para 70%
     if (probShort > 70) {
-      const stage = probShort > 85 ? 'ALERTA SHORT' : 'Posição';
+      const stage = probShort > 85 ? 'ALERTA SHORT' : '';
       const msg = `
-${stage} 🤖IA [${symbol}] 🔴VENDA
+${stage} 🤖IA [${symbol}] 🔴🐋 Vendendo
 💰 *Preço Atual:* ${data.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 Perspectiva⏳: ${probShort.toFixed(1)}% em ${timeEst.toFixed(0)}min
-Call Wall alvo: ${data.callWall.toFixed(2)} USDT
 Fund.: ${data.fundingRate.toFixed(4)}% → ${fundingProj.toFixed(4)}%
-Vol.: +${volChange.toFixed(0)}% (Boost Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioSell.toFixed(1)}x mais 🔴VENDAS
+Vol.: +${volChange.toFixed(0)}% (Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioSell.toFixed(1)}x mais 🔴VENDAS
 ${data.rsi1h.bearish_divergence ? '📍Divergência BEARISH' : '📍RSI caindo'}
-${stage.includes('QUENTE') ? 'ENTRE COM 50-70% SHORT AGORA' : 'PREPARAR VENDA'}
+${stage.includes('QUENTE') ? 'Grandes Vendas' : 'Realizando Lucro'}
       `.trim();
       await sendTelegramMessage(msg);
     }
@@ -867,8 +865,8 @@ async function detectGammaSqueeze(symbol, data) {
       const gammaFlip = Math.round((putWall + callWall + futuresPut + futuresCall) / 4);
       const direction = spot > gammaFlip ? 'BULLISH' : 'BEARISH';
       const action = direction === 'BULLISH' 
-        ? 'COMPRAR AGORA – GAMMA SQUEEZE BULLISH!' 
-        : 'REALIZAR LUCROS / SHORT – GAMMA SQUEEZE BEARISH!';
+        ? 'Grandes Compras – GAMMA SQUEEZE BULLISH!' 
+        : 'Grandes Vendas – GAMMA SQUEEZE BEARISH!';
 
       const msg = `
 🚨 *GAMMA SQUEEZE IMINENTE* 🚨
@@ -878,7 +876,7 @@ ${action}
 🟠 Call Wall (Opções): $${callWall}
 🟢 Gamma Flip Médio: $${gammaFlip}
 📈 Spread Walls: ${wallSpread.toFixed(2)}% | Futures: ${futuresSpread.toFixed(2)}%
-⏰ *ENTRE AGORA – MOVIMENTO EXPLOSIVO EM MINUTOS*
+⏰ *Atenção – Possível Volatilidade*
 #GammaSqueeze #${symbol} #${direction === 'BULLISH' ? 'Compra' : 'Venda'}
       `.trim();
 
