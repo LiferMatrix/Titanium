@@ -410,7 +410,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
   const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
   return ` ✨🟢*Compra Premium*🟢✨\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `✨Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `💎Ativo: $${symbol} [- TV](${tradingViewLink})\n` +
          `💲 Preço Atual: ${format(price)}\n` +
          `🤖📈Análise Entrada/Retração: ${format(buyEntryLow)}...${format(price)}\n` +
          `🎯 Alvo 1 / Scalp: ${format(targetBuy)} (${targetPct}%)\n` +
@@ -426,7 +426,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `${vwap1hText} ${ema55Emoji}\n` +
          `Stoch #1D %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-         `Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraca'}\n` +
+         `Reação: ${isStrongTrend ? '💥(ADX ' + adx15m.toFixed(1) + ')' : '❄️'}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
          ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
@@ -435,7 +435,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
   const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
   return ` ✨🔴*Correção Premium*🔴✨\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `✨Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `💎Ativo: $${symbol} [- TV](${tradingViewLink})\n` +
          `💲 Preço Atual: ${format(price)}\n` +
          `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
          `🎯 Alvo 1 / Scalp: ${format(targetSell)} (${targetPct}%)\n` +
@@ -450,7 +450,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `${vwap1hText} ${ema55Emoji}\n` +
          `Stoch #1D : ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch #4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-         `🔘 Reação: ${isStrongTrend ? 'Forte (ADX ' + adx15m.toFixed(1) + ')' : 'Fraco'}\n` +
+         `Reação: ${isStrongTrend ? '💥(ADX ' + adx15m.toFixed(1) + ')' : '❄️'}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
          ` ☑︎ Gerencie seu Risco-🤖 @J4Rviz\n`;
@@ -698,7 +698,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Diamante✨ ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Diamante 💎✨ ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
