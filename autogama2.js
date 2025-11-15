@@ -5,7 +5,6 @@ const axios = require('axios');
 const ccxt = require('ccxt');
 const fs = require('fs/promises'); // Usar versão promises para async
 const path = require('path');
-
 // Configurações
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -30,7 +29,6 @@ if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) {
 }
 // Arquivos de log e persistência
 const logFile = 'app.log';
-const symbolsFile = 'initialSymbols.json';
 const alertedFile = 'alerted.json';
 // Função para logar mensagens (console + arquivo async)
 async function logMessage(message) {
@@ -52,14 +50,14 @@ setInterval(async () => {
         console.error('❌ Erro na limpeza de logs: ' + error.message);
     }
 }, 2 * 24 * 60 * 60 * 1000); // 2 dias em milissegundos
-// Função de retry com backoff
-async function retryAsync(fn, retries = 3, delay = 1000) {
+// Função de retry com backoff exponencial e mais tentativas
+async function retryAsync(fn, retries = 5, delay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (error) {
             if (i === retries - 1) throw error;
-            await new Promise(res => setTimeout(res, delay * (i + 1)));
+            await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
         }
     }
 }
@@ -74,23 +72,6 @@ async function fetchOHLCVWithCache(symbol, timeframe, limit) {
     ohlcvCache.set(key, ohlcv);
     setTimeout(() => ohlcvCache.delete(key), 60 * 1000); // Cache TTL 1min
     return ohlcv;
-}
-// Armazena símbolos iniciais (persistente)
-let initialSymbols = new Set();
-async function loadInitialSymbols() {
-    try {
-        const data = await fs.readFile(symbolsFile, 'utf8');
-        initialSymbols = new Set(JSON.parse(data));
-    } catch (error) {
-        if (error.code !== 'ENOENT') console.error('❌ Erro ao carregar symbols: ' + error.message);
-    }
-}
-async function saveInitialSymbols() {
-    try {
-        await fs.writeFile(symbolsFile, JSON.stringify(Array.from(initialSymbols)), 'utf8');
-    } catch (error) {
-        console.error('❌ Erro ao salvar symbols: ' + error.message);
-    }
 }
 // Alerted flags (persistente)
 let alerted = {};
@@ -114,7 +95,7 @@ async function alertCriticalError(message, error, context = {}) {
     const timestamp = new Date().toLocaleString('pt-BR');
     const contextStr = Object.keys(context).length > 0 ? `\nContexto: ${JSON.stringify(context)}` : '';
     const fullMessage = `🚨 ERRO CRÍTICO [${timestamp}]: ${message}${contextStr}\nStack: ${error.stack}`;
-    
+  
     // 1. Loga o erro completo no arquivo e console
     console.error(fullMessage);
     try {
@@ -122,7 +103,6 @@ async function alertCriticalError(message, error, context = {}) {
     } catch (e) {
         console.error('❌ Erro ao append log (crítico): ' + e.message);
     }
-
     // 2. Envia alerta imediato e formatado para o Telegram
     if (telegramBot) {
         const telegramMsg = `🚨 *ERRO CRÍTICO* [${timestamp}]\n\n${message}\n\nDetalhes: ${error.message}`;
@@ -147,55 +127,8 @@ async function sendTelegramMessage(message) {
         await alertCriticalError('Falha ao enviar mensagem no Telegram', error, { originalMessage: message.substring(0, 100) + '...' });
     }
 }
-// Busca símbolos USDT ativos
-async function fetchAllUsdtSymbols() {
-    try {
-        const exchangeInfo = await retryAsync(() => binance.futuresExchangeInfo());
-        return exchangeInfo.symbols
-            .filter(s => s.status === 'TRADING' && s.symbol.endsWith('USDT'))
-            .map(s => s.symbol)
-            .sort();
-    } catch (error) {
-        await alertCriticalError('Falha ao buscar símbolos da Binance Futures', error);
-        return [];
-    }
-}
-// Verifica novas listagens
-async function checkListings() {
-    const currentSymbols = await fetchAllUsdtSymbols();
-    if (initialSymbols.size === 0) {
-        currentSymbols.forEach(s => initialSymbols.add(s));
-        await saveInitialSymbols();
-        await logMessage(`📊 ${initialSymbols.size} pares USDT carregados inicialmente.`);
-        return;
-    }
-    const newSymbols = currentSymbols.filter(s => !initialSymbols.has(s));
-    if (newSymbols.length > 0) {
-        for (const symbol of newSymbols) {
-            const now = new Date().toLocaleString('pt-BR', {
-                timeZone: 'America/Sao_Paulo',
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
-            const message = `⚠️ *NOVA LISTAGEM NA BINANCE FUTURES!*\n\n\`${symbol}\`\n\n⏰ *${now}*`;
-            await sendTelegramMessage(message);
-        }
-        await logMessage(`🆕 ${newSymbols.length} nova(s) listagem(ens) detectada(s)!`);
-    }
-    // Atualiza conjunto inicial
-    initialSymbols = new Set(currentSymbols);
-    await saveInitialSymbols();
-}
-// Inicia monitoramento de listagens
-async function startMonitoring() {
-    await loadInitialSymbols();
-    await logMessage('🔍 Monitorando NOVAS LISTAGENS na Binance Futures...');
-    await checkListings();
-    setInterval(checkListings, 30000); // Verifica a cada 30 segundos
-}
 // Encerramento gracioso
 process.on('SIGINT', async () => {
-    await saveInitialSymbols();
     await saveAlerted();
     await logMessage('\n👋 Monitor encerrado.');
     process.exit(0);
@@ -208,7 +141,7 @@ if (!TELEGRAM_CHAT_ID) logMessage('⚠️ TELEGRAM_CHAT_ID não encontrado');
 const wallsCache = new Map();
 // Cache para Futures Order Book Walls (1 minuto)
 const futuresWallsCache = new Map();
-// Função para fetch LSR
+// Função para fetch LSR com tratamento mais robusto
 async function fetchLSR(symbol) {
   try {
     const symbolWithoutSlash = symbol.includes('/') ? symbol.replace('/', '') : symbol;
@@ -220,15 +153,16 @@ async function fetchLSR(symbol) {
       await logMessage(`Dados insuficientes de LSR para ${symbol}: ${res.data?.length || 0} registros`);
       return 'Indisponível';
     }
-    const currentLSR = parseFloat(res.data[0].longShortRatio).toFixed(2);
+    const currentLSR = parseFloat(res.data[0].longShortRatio);
     if (isNaN(currentLSR) || currentLSR < 0) {
       await logMessage(`LSR inválido para ${symbol}`);
       return 'Indisponível';
     }
-    await logMessage(`LSR obtido para ${symbol}: ${currentLSR}`);
-    return currentLSR;
+    const fixedLSR = currentLSR.toFixed(2);
+    await logMessage(`LSR obtido para ${symbol}: ${fixedLSR}`);
+    return fixedLSR;
   } catch (e) {
-    await alertCriticalError(`Erro ao buscar LSR para ${symbol}`, e, { symbol });
+    await logMessage(`Erro ao buscar LSR para ${symbol}: ${e.message}. Retornando 'Indisponível'.`);
     return 'Indisponível';
   }
 }
@@ -278,10 +212,8 @@ async function getRSI(symbol, timeframe, period = 14) {
     // Remove os nulos do início se houver
     const validRsiValues = rsiValues.filter(v => v !== null);
     const validCloses = recentCloses.slice(lookback - validRsiValues.length);
-
     let bullishDivergence = false;
     let bearishDivergence = false;
-
     // Busca por 2 vales (lows) para divergência bullish
     for (let i = 0; i < validCloses.length - 1; i++) {
         for (let j = i + 1; j < validCloses.length; j++) {
@@ -293,7 +225,6 @@ async function getRSI(symbol, timeframe, period = 14) {
         }
         if (bullishDivergence) break;
     }
-
     // Busca por 2 picos (highs) para divergência bearish
     for (let i = 0; i < validCloses.length - 1; i++) {
         for (let j = i + 1; j < validCloses.length; j++) {
@@ -305,7 +236,7 @@ async function getRSI(symbol, timeframe, period = 14) {
         }
         if (bearishDivergence) break;
     }
-    
+  
     // Loga o resultado da divergência
     await logMessage(`Divergência ${symbol} (${timeframe}): Bullish=${bullishDivergence}, Bearish=${bearishDivergence}`);
     const result = { rsi: rsiCurrent.toFixed(2), delta, bullish_divergence: bullishDivergence, bearish_divergence: bearishDivergence };
@@ -678,7 +609,7 @@ async function getVolumeSpike(symbol) {
     if (volumes.length < 10) return false;
     const avgVol = volumes.slice(0, -1).reduce((a, b) => a + b, 0) / 9;
     const currentVol = volumes[volumes.length - 1];
-    const spike = currentVol > avgVol * 2.0; // Spike >200% da média
+    const spike = currentVol > avgVol * 1.5; // Reduzido de 2.0 para 1.5 para mais sensibilidade à volatilidade
     await logMessage(`Volume Spike para ${symbol}: Current ${currentVol.toFixed(2)}, Avg ${avgVol.toFixed(2)}, Spike: ${spike}`);
     return spike;
   } catch (e) {
@@ -709,85 +640,81 @@ async function getMACD(symbol, timeframe = '3m') {
     return { buyCross: false, sellCross: false };
   }
 }
-// ===== IA PREDITIVA 10.1 PRO DUAL – COMPRA E VENDA ANTES (COLA AGORA) =====
+// ===== IA PREDITIVA 11.0 PRO DUAL – MELHORADA COM MAIS SENSIBILIDADE À VOLATILIDADE =====
 async function getAIPredictive(symbol, data) {
   try {
+    await logMessage(`Iniciando IA preditiva aprimorada para ${symbol}`);
     const ohlcv3m = await fetchOHLCVWithCache(symbol, '3m', 20);
     const closes = ohlcv3m.map(c => parseFloat(c[4]));
     const volumes = ohlcv3m.map(c => parseFloat(c[5]));
     const priceDelta = (closes[closes.length - 1] - closes[closes.length - 2]) / closes[closes.length - 2] * 100;
     const volAvg = volumes.slice(-10, -1).reduce((a, b) => a + b, 0) / 9;
     const volChange = (volumes[volumes.length - 1] - volAvg) / volAvg * 100;
-
-    // DISTÂNCIA ÀS WALLS
+    // DISTÂNCIA ÀS WALLS (mais sensível)
     const distPut = Math.abs((data.spotPrice - data.putWall) / data.spotPrice * 100);
     const distCall = Math.abs((data.spotPrice - data.callWall) / data.spotPrice * 100);
-
     const rsiDeltaRate = parseFloat(data.rsi1h.delta) / 3;
     const fundingProj = data.fundingRate * 1.08; // leve piora em 40min
     const whaleRatioBuy = data.whales.buys / (data.whales.sells || 1);
     const whaleRatioSell = data.whales.sells / (data.whales.buys || 1);
-
-    // SCORE LONG (0–100)
-    const scoreLong = (
-      (distPut < 0.6 ? 28 : 0) +
-      (volChange > 160 ? 22 : 0) +
-      (rsiDeltaRate > 0.12 ? 16 : 0) +
+    // Fator de volatilidade dinâmico baseado em ATR e volChange
+    const volatilityFactor = (data.atr / data.spotPrice * 100) + (volChange / 100); // % de ATR + % vol change
+    const volBoost = volatilityFactor > 0.5 ? 1.2 : 1.0; // Boost de 20% se vol alta
+    // SCORE LONG (0–100) - Aumentado sensibilidade
+    const scoreLong = volBoost * (
+      (distPut < 1.0 ? 28 : 0) +  // Aumentado de 0.6 para 1.0
+      (volChange > 100 ? 22 : 0) +  // Reduzido de 160 para 100
+      (rsiDeltaRate > 0.08 ? 16 : 0) +  // Reduzido de 0.12 para 0.08
       (data.rsi1h.bullish_divergence ? 18 : 0) +
-      (whaleRatioBuy > 1.8 ? 12 : 0) +
-      (priceDelta > 0.06 ? 10 : 0) +
-      (fundingProj < -0.022 ? 8 : 0) +
+      (whaleRatioBuy > 1.2 ? 12 : 0) +  // Reduzido de 1.8 para 1.2
+      (priceDelta > 0.04 ? 10 : 0) +  // Reduzido de 0.06 para 0.04
+      (fundingProj < -0.015 ? 8 : 0) +  // Reduzido de -0.022 para -0.015
       (data.macd.buyCross ? 15 : 0)
     );
-
-    // SCORE SHORT (0–100)
-    const scoreShort = (
-      (distCall < 0.6 ? 28 : 0) +
-      (volChange > 160 ? 22 : 0) +
-      (rsiDeltaRate < -0.12 ? 16 : 0) +
+    // SCORE SHORT (0–100) - Aumentado sensibilidade
+    const scoreShort = volBoost * (
+      (distCall < 1.0 ? 28 : 0) +
+      (volChange > 100 ? 22 : 0) +
+      (rsiDeltaRate < -0.08 ? 16 : 0) +
       (data.rsi1h.bearish_divergence ? 18 : 0) +
-      (whaleRatioSell > 1.8 ? 12 : 0) +
-      (priceDelta < -0.06 ? 10 : 0) +
-      (fundingProj > 0.028 ? 8 : 0) +
+      (whaleRatioSell > 1.2 ? 12 : 0) +
+      (priceDelta < -0.04 ? 10 : 0) +
+      (fundingProj > 0.02 ? 8 : 0) +
       (data.macd.sellCross ? 15 : 0)
     );
-
-    const timeEst = 22 + Math.random() * 22; // 22–44min
-    const probLong = Math.min(99.9, scoreLong + Math.random() * 8);
-    const probShort = Math.min(99.9, scoreShort + Math.random() * 8);
-
-    // ENVIA PRÉ-ALERTA LONG
-    if (probLong > 78) {
-      const stage = probLong > 92 ? 'ALERTA QUENTE' : 'Posição';
+    const timeEst = 15 + Math.random() * 30; // Reduzido para 15–45min para mais dinamismo
+    const probLong = Math.min(99.9, scoreLong + Math.random() * 10);  // Aumentado random para mais variação
+    const probShort = Math.min(99.9, scoreShort + Math.random() * 10);
+    // ENVIA PRÉ-ALERTA LONG - Limite reduzido para 70%
+    if (probLong > 70) {
+      const stage = probLong > 85 ? 'ALERTA QUENTE' : 'Posição';
       const msg = `
 ${stage} 🤖IA [${symbol}] ❇️Compra
-💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+💰 *Preço Atual:* ${data.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 Perspectiva⏳: ${probLong.toFixed(1)}% em ${timeEst.toFixed(0)}min
 Put Wall alvo: ${data.putWall.toFixed(2)} USDT
 Fund.: ${data.fundingRate.toFixed(4)}% → ${fundingProj.toFixed(4)}%
-Vol. +${volChange.toFixed(0)}% 🐋Baleias ${whaleRatioBuy.toFixed(1)}x mais ✅COMPRAS
+Vol. +${volChange.toFixed(0)}% (Boost Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioBuy.toFixed(1)}x mais ✅COMPRAS
 ${data.rsi1h.bullish_divergence ? '✅Divergência BULLISH' : '✅RSI subindo'}
-${stage === 'ALERTA QUENTE' ? 'ENTRE COM 50-70% AGORA' : '✅PREPARAR COMPRA'}
+${stage === 'ALERTA' ? 'ENTRE COM 50-70% AGORA' : '✅PREPARAR COMPRA'}
       `.trim();
       await sendTelegramMessage(msg);
     }
-
-    // ENVIA PRÉ-ALERTA SHORT
-    if (probShort > 78) {
-      const stage = probShort > 92 ? 'ALERTA QUENTE SHORT' : 'Posição';
+    // ENVIA PRÉ-ALERTA SHORT - Limite reduzido para 70%
+    if (probShort > 70) {
+      const stage = probShort > 85 ? 'ALERTA SHORT' : 'Posição';
       const msg = `
 ${stage} 🤖IA [${symbol}] 🔴VENDA
-💰 *Preço Atual:* ${d.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+💰 *Preço Atual:* ${data.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
 Perspectiva⏳: ${probShort.toFixed(1)}% em ${timeEst.toFixed(0)}min
 Call Wall alvo: ${data.callWall.toFixed(2)} USDT
 Fund.: ${data.fundingRate.toFixed(4)}% → ${fundingProj.toFixed(4)}%
-Vol.: +${volChange.toFixed(0)}% 🐋Baleias ${whaleRatioSell.toFixed(1)}x mais 🔴VENDAS
+Vol.: +${volChange.toFixed(0)}% (Boost Vol: x${volBoost.toFixed(1)}) 🐋Baleias ${whaleRatioSell.toFixed(1)}x mais 🔴VENDAS
 ${data.rsi1h.bearish_divergence ? '📍Divergência BEARISH' : '📍RSI caindo'}
 ${stage.includes('QUENTE') ? 'ENTRE COM 50-70% SHORT AGORA' : 'PREPARAR VENDA'}
       `.trim();
       await sendTelegramMessage(msg);
     }
-
     return { probLong, probShort, timeEst };
   } catch (e) {
     await alertCriticalError(`Erro IA preditiva dual para ${symbol}`, e, { symbol });
@@ -800,16 +727,17 @@ const symbolsData = {
   'ETHUSDT': { base: 'ETH', symbolDisplay: 'ETHUSDT.P' }
 };
 // ================= FUNÇÕES ================= //
-// Função para detectar melhor compra
+// Função para detectar melhor compra - Mais sensível à volatilidade
 function detectarCompra(d) {
+  const volatilityFactor = d.atr / d.spotPrice * 100; // % de volatilidade via ATR
+  const tolerance = (d.atr * 0.8) / d.spotPrice || 0.002; // Aumentado sensibilidade (de 0.5 para 0.8, default 0.2%)
   const isEmaValid = d.ema55 !== null && d.prevClose !== null;
   const isCrossValid = d.buyCross === true;
   const aboveEma55 = isEmaValid && d.prevClose > d.ema55;
-  const rsiBuy = parseFloat(d.rsi1h.rsi) > 30 && parseFloat(d.rsi1h.delta) > 2 && parseFloat(d.rsi4h.rsi) < 50 && d.rsi1h.bullish_divergence;
-  const whaleBuy = d.whales.buys > d.whales.sells * 1.5;
-  const tolerance = (d.atr * 0.5) / d.spotPrice || 0.001; // Dinâmico com ATR, default 0.1%
-  const fundingBuy = d.fundingRate < -0.01; // Funding negativo extremo (shorts pagando longs)
-  const volumeSpike = d.volumeSpike === true;
+  const rsiBuy = parseFloat(d.rsi1h.rsi) > 25 && parseFloat(d.rsi1h.delta) > 1 && parseFloat(d.rsi4h.rsi) < 55 && (d.rsi1h.bullish_divergence || volatilityFactor > 0.5); // Relaxado e OR com vol
+  const whaleBuy = d.whales.buys > d.whales.sells * 1.2; // Reduzido de 1.5 para 1.2
+  const fundingBuy = d.fundingRate < -0.005; // Reduzido de -0.01 para -0.005
+  const volumeSpike = d.volumeSpike === true || volatilityFactor > 0.7; // OR com vol alta
   const macdBuy = d.macd.buyCross === true;
   return d.spotPrice > 0 &&
          d.spotPrice <= d.putWall * (1 + tolerance) &&
@@ -822,16 +750,17 @@ function detectarCompra(d) {
          macdBuy &&
          d.atr > 0;
 }
-// Função para detectar melhor venda
+// Função para detectar melhor venda - Mais sensível à volatilidade
 function detectarVenda(d) {
+  const volatilityFactor = d.atr / d.spotPrice * 100;
+  const tolerance = (d.atr * 0.8) / d.spotPrice || 0.002;
   const isEmaValid = d.ema55 !== null && d.prevClose !== null;
   const isCrossValid = d.sellCross === true;
   const belowEma55 = isEmaValid && d.prevClose < d.ema55;
-  const rsiSell = parseFloat(d.rsi1h.rsi) < 70 && parseFloat(d.rsi1h.delta) < -2 && parseFloat(d.rsi4h.rsi) > 50 && d.rsi1h.bearish_divergence;
-  const whaleSell = d.whales.sells > d.whales.buys * 1.5;
-  const tolerance = (d.atr * 0.5) / d.spotPrice || 0.001;
-  const fundingSell = d.fundingRate > 0.01; // Funding positivo extremo (longs pagando shorts)
-  const volumeSpike = d.volumeSpike === true;
+  const rsiSell = parseFloat(d.rsi1h.rsi) < 75 && parseFloat(d.rsi1h.delta) < -1 && parseFloat(d.rsi4h.rsi) > 45 && (d.rsi1h.bearish_divergence || volatilityFactor > 0.5);
+  const whaleSell = d.whales.sells > d.whales.buys * 1.2;
+  const fundingSell = d.fundingRate > 0.005;
+  const volumeSpike = d.volumeSpike === true || volatilityFactor > 0.7;
   const macdSell = d.macd.sellCross === true;
   return d.spotPrice > 0 &&
          d.spotPrice >= d.callWall * (1 - tolerance) &&
@@ -850,12 +779,10 @@ function mensagemCompra(d) {
   const target = (d.spotPrice + (d.atr * multiplier)).toFixed(2);
   const stop = (d.spotPrice - (d.atr * multiplier)).toFixed(2);
   const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
-  
   // Enriquecimento com IA Score e Walls
   const iaScore = d.iaScore.probLong > 0 ? `\n🧠 *IA Score:* ${d.iaScore.probLong.toFixed(1)}% (Est. ${d.iaScore.timeEst.toFixed(0)}min)` : '';
   const wallTarget = d.callWall > 0 ? d.callWall.toLocaleString('en-US', { minimumFractionDigits: 2 }) : 'N/A';
   const wallStop = d.putWall > 0 ? d.putWall.toLocaleString('en-US', { minimumFractionDigits: 2 }) : 'N/A';
-
   return `
 📈 *Avaliar Compra / Reversão – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})${iaScore}
@@ -887,12 +814,10 @@ function mensagemVenda(d) {
   const target = (d.spotPrice - (d.atr * multiplier)).toFixed(2);
   const stop = (d.spotPrice + (d.atr * multiplier)).toFixed(2);
   const futuresGammaFlip = Math.round((d.futuresPutWall + d.futuresCallWall) / 2);
-
   // Enriquecimento com IA Score e Walls
   const iaScore = d.iaScore.probShort > 0 ? `\n🧠 *IA Score:* ${d.iaScore.probShort.toFixed(1)}% (Est. ${d.iaScore.timeEst.toFixed(0)}min)` : '';
   const wallTarget = d.putWall > 0 ? d.putWall.toLocaleString('en-US', { minimumFractionDigits: 2 }) : 'N/A';
   const wallStop = d.callWall > 0 ? d.callWall.toLocaleString('en-US', { minimumFractionDigits: 2 }) : 'N/A';
-
   return `
 📉 ♦️*Realizar Lucros/Correção♦️ – ${d.symbolDisplay}*
 ⏰ (${d.timestamp})${iaScore}
@@ -917,6 +842,52 @@ Funding Rate: ${d.fundingRate.toFixed(4)}%
 🛑 *STOP ALTERNATIVO (Wall):* ${wallStop}
 #${d.symbolDisplay} #Venda #GammaFlip #Futures
 `.trim();
+}
+// ===== ALERTA DE GAMMA SQUEEZE IMINENTE (EXCLUSIVO GROK) =====
+async function detectGammaSqueeze(symbol, data) {
+  try {
+    const spot = data.spotPrice;
+    const putWall = data.putWall;
+    const callWall = data.callWall;
+    const futuresPut = data.futuresPutWall;
+    const futuresCall = data.futuresCallWall;
+
+    // Só ativa se todas as walls estiverem válidas
+    if (!spot || !putWall || !callWall || !futuresPut || !futuresCall) return;
+
+    // Distância entre walls (em % do preço)
+    const wallSpread = Math.abs(callWall - putWall) / spot * 100;
+    const futuresSpread = Math.abs(futuresCall - futuresPut) / spot * 100;
+
+    // Preço está "preso" entre as walls?
+    const inGammaZone = spot > Math.min(putWall, futuresPut) && spot < Math.max(callWall, futuresCall);
+    const wallsClosing = wallSpread < 2.0 && futuresSpread < 2.0; // <2% de spread = squeeze iminente
+
+    if (inGammaZone && wallsClosing) {
+      const gammaFlip = Math.round((putWall + callWall + futuresPut + futuresCall) / 4);
+      const direction = spot > gammaFlip ? 'BULLISH' : 'BEARISH';
+      const action = direction === 'BULLISH' 
+        ? 'COMPRAR AGORA – GAMMA SQUEEZE BULLISH!' 
+        : 'REALIZAR LUCROS / SHORT – GAMMA SQUEEZE BEARISH!';
+
+      const msg = `
+🚨 *GAMMA SQUEEZE IMINENTE* 🚨
+${action}
+📊 ${symbol} | Preço: $${spot.toFixed(2)}
+🟡 Put Wall (Opções): $${putWall}
+🟠 Call Wall (Opções): $${callWall}
+🟢 Gamma Flip Médio: $${gammaFlip}
+📈 Spread Walls: ${wallSpread.toFixed(2)}% | Futures: ${futuresSpread.toFixed(2)}%
+⏰ *ENTRE AGORA – MOVIMENTO EXPLOSIVO EM MINUTOS*
+#GammaSqueeze #${symbol} #${direction === 'BULLISH' ? 'Compra' : 'Venda'}
+      `.trim();
+
+      await sendTelegramMessage(msg);
+      await logMessage(`GAMMA SQUEEZE DETECTADO: ${direction} para ${symbol}`);
+    }
+  } catch (e) {
+    await logMessage(`Erro no Gamma Squeeze para ${symbol}: ${e.message}`);
+  }
 }
 // ================= EXECUÇÃO ================= //
 const symbols = ['BTCUSDT', 'ETHUSDT']; // Símbolos a monitorar
@@ -978,12 +949,14 @@ async function checkAlerts() {
     // IA Preditiva antes do alerta final
     const iaScore = await getAIPredictive(symbol, data);
     data.iaScore = iaScore; // Adiciona o score da IA ao objeto de dados
+    // === ALERTA DE GAMMA SQUEEZE ===
+    await detectGammaSqueeze(symbol, data);
     if (detectarCompra(data)) {
       if (!alerted[symbol].buy) {
         const msg = mensagemCompra(data);
         await sendTelegramMessage(msg);
         alerted[symbol].buy = true;
-        alerted[symbol].cooldown = now + 15 * 60 * 1000; // 15min cooldown
+        alerted[symbol].cooldown = now + 5 * 60 * 1000; // Reduzido para 5min cooldown
         await saveAlerted();
       }
     } else {
@@ -994,7 +967,7 @@ async function checkAlerts() {
         const msg = mensagemVenda(data);
         await sendTelegramMessage(msg);
         alerted[symbol].sell = true;
-        alerted[symbol].cooldown = now + 15 * 60 * 1000; // 15min cooldown
+        alerted[symbol].cooldown = now + 5 * 60 * 1000; // Reduzido para 5min cooldown
         await saveAlerted();
       }
     } else {
@@ -1012,6 +985,5 @@ async function checkAlerts() {
   await sendTelegramMessage('Titanium BTC/ETH Whales🐋 Detect Futures');
   await loadAlerted();
   await checkAlerts();
-  setInterval(checkAlerts, 3 * 60 * 1000); // Verifica a cada 5 minutos
-  await startMonitoring(); // Opcional, descomente se quiser monitoramento de listagens
+  setInterval(checkAlerts, 2 * 60 * 1000); // Verifica a cada 2 minutos para mais frequência
 })();
