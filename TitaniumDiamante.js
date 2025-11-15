@@ -14,7 +14,7 @@ const config = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 5 * 60 * 1000, // 15 minutos
-  TEMPO_COOLDOWN_MS: 2 * 60 * 60 * 1000, // 2 horas (cooldown entre qualquer alerta)
+  TEMPO_COOLDOWN_MS: 60 * 60 * 1000, // 1 hora
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -408,9 +408,9 @@ function calculateTargetsAndZones(data) {
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m) {
   const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
-  return `💹*Compra Programada*\n` +
+  return ` ✨🟢*Compra Premium*🟢✨\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `✨Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
          `💲 Preço Atual: ${format(price)}\n` +
          `🤖📈Análise Entrada/Retração: ${format(buyEntryLow)}...${format(price)}\n` +
          `🎯 Alvo 1 / Scalp: ${format(targetBuy)} (${targetPct}%)\n` +
@@ -433,9 +433,9 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx15m) {
   const isStrongTrend = adx15m !== null && adx15m > config.ADX_MIN_TREND;
-  return `🔴*Correção Programada*\n` +
+  return ` ✨🔴*Correção Premium*🔴✨\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `🔹Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
+         `✨Ativo: $${symbol} [- TradingView](${tradingViewLink})\n` +
          `💲 Preço Atual: ${format(price)}\n` +
          `🤖📉Análise de Correção/Retração: ${format(price)}...${format(sellEntryHigh)}\n` +
          `🎯 Alvo 1 / Scalp: ${format(targetSell)} (${targetPct}%)\n` +
@@ -698,7 +698,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Diamante ...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Diamante✨ ...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
