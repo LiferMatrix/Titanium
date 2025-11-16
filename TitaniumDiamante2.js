@@ -35,7 +35,7 @@ const config = {
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
   VOLUME_LOOKBACK: 20, // Período de lookback para calcular volume médio (candles de 3m)
-  VOLUME_MULTIPLIER: 2.1, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
+  VOLUME_MULTIPLIER: 1.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
   MIN_ATR_PERCENT: 0.5, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 20, // Mínimo ADX para considerar tendência forte nos alertas
