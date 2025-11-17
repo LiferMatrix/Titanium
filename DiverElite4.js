@@ -300,14 +300,14 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const { isBullish, isBearish } = divergence;
   let direcao = '', tipo = '';
   let lsrOk = false, rsiOk = false, volOk = false;
-  const adxStrong = (adx15m ?? 0) > 25 && (adx1h ?? 0) > 25;
+  const adxStrong = (adx15m ?? 0) > 22 && (adx1h ?? 0) > 22;
   if (isBullish) {
     lsrOk = lsr.value <= 2.5;
     rsiOk = rsi1hValue < 40;
     volOk = volumeData.totalVolume > 2 * volumeData.avgVolume && volumeData.buyVolume > volumeData.sellVolume;
     if (lsrOk && rsiOk && volOk) { 
       direcao = 'buy'; 
-      tipo = adxStrong ? '✅REVERSÃO ' : '✅COMPRA'; 
+      tipo = adxStrong ? '✅REVERSÃO ' : '✅Divergência Bullish'; 
     }
   } else if (isBearish) {
     lsrOk = lsr.value > 2.6;
@@ -315,7 +315,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     volOk = volumeData.totalVolume > 2 * volumeData.avgVolume && volumeData.sellVolume > volumeData.buyVolume;
     if (lsrOk && rsiOk && volOk) { 
       direcao = 'sell'; 
-      tipo = adxStrong ? '♦️CORREÇÃO' : '♦️REALIZAR LUCROS'; 
+      tipo = adxStrong ? '♦️CORREÇÃO' : '♦️Divergência Bearish'; 
     }
   }
   if (!direcao) return;
