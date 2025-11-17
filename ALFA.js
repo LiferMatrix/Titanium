@@ -307,7 +307,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     volOk = volumeData.totalVolume > 2 * volumeData.avgVolume && volumeData.buyVolume > volumeData.sellVolume;
     if (lsrOk && rsiOk && volOk) { 
       direcao = 'buy'; 
-      tipo = adxStrong ? 'COMPRA':'💹Análise Bullish'; 
+      tipo = adxStrong ? '🟢COMPRA':'💹🤖IA Análise Bullish'; 
     }
   } else if (isBearish) {
     lsrOk = lsr.value > 2.6;
@@ -315,7 +315,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     volOk = volumeData.totalVolume > 2 * volumeData.avgVolume && volumeData.sellVolume > volumeData.buyVolume;
     if (lsrOk && rsiOk && volOk) { 
       direcao = 'sell'; 
-      tipo = adxStrong ? 'VENDA':'♦️Análise Bearish'; 
+      tipo = adxStrong ? '🔴VENDA':'♦️🤖IA Análise Bearish'; 
     }
   }
   if (!direcao) return;
