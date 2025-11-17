@@ -300,10 +300,10 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const { isBullish, isBearish } = divergence;
   let direcao = '', tipo = '';
   let lsrOk = false, rsiOk = false, volOk = false;
-  const adxStrong = (adx15m ?? 0) > 22 && (adx1h ?? 0) > 22;
+  const adxStrong = (adx15m ?? 0) > 23 && (adx1h ?? 0) > 23;
   if (isBullish) {
     lsrOk = lsr.value <= 2.5;
-    rsiOk = rsi1hValue < 40;
+    rsiOk = rsi1hValue < 55;
     volOk = volumeData.totalVolume > 2 * volumeData.avgVolume && volumeData.buyVolume > volumeData.sellVolume;
     if (lsrOk && rsiOk && volOk) { 
       direcao = 'buy'; 
@@ -342,8 +342,8 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
               `Preço Atual: ${format(price)}\n` +
               `RSI ${timeframe}: ${rsiValue.toFixed(2)}\n` +
               `RSI 1H: ${rsi1hValue.toFixed(2)}\n` +
-              `ADX 15m: ${isNaN(adx15mValue) ? adx15mValue : adx15mValue.toFixed(2)} ${emoji15m}\n` +
-              `ADX 1h: ${isNaN(adx1hValue) ? adx1hValue : adx1hValue.toFixed(2)} ${emoji1h}\n` +
+              `Force 15m: ${isNaN(adx15mValue) ? adx15mValue : adx15mValue.toFixed(2)} ${emoji15m}\n` +
+              `Force 1h: ${isNaN(adx1hValue) ? adx1hValue : adx1hValue.toFixed(2)} ${emoji1h}\n` +
               `#LSR: ${lsr.value.toFixed(2)}${lsrEmoji}\n` +
               `#Suporte: ${format(support)}\n` +
               `#Resistência: ${format(resistance)}\n`;
@@ -359,16 +359,18 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     let stop, targets;
     if (direcao === 'buy') {
       stop = price - atr * 1;
-      targets = [price + atr * 1, price + atr * 2, price + atr * 3, price + atr * 4];
+      targets = [price + atr * 1, price + atr * 2, price + atr * 3, price + atr * 4, resistance];
     } else {
       stop = price + atr * 1;
-      targets = [price - atr * 1, price - atr * 2, price - atr * 3, price - atr * 4];
+      targets = [price - atr * 1, price - atr * 2, price - atr * 3, price - atr * 4, support];
     }
     msg += `\n⛔Stop: ${format(stop)}\n` +
            `Alvo 1: ${format(targets[0])}\n` +
            `Alvo 2: ${format(targets[1])}\n` +
            `Alvo 3: ${format(targets[2])}\n` +
-           `Alvo 4: ${format(targets[3])}\n`;
+           `Alvo 4: ${format(targets[3])}\n` +
+           `Alvo 5: ${format(targets[4])}\n`;
+           
   }
   msg += `🤖IA Titanium ALFA🌟 by @J4Rviz`;
   historico.push({ direcao, timestamp: agora });
@@ -437,7 +439,7 @@ async function main() {
   logger.info('Iniciando Titanium D...');
   try {
     // Envia mensagem de start
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA 5 start'));
     logger.info('Mensagem de start enviada');
     // Primeira verificação de conexão
     await checkConnection();
