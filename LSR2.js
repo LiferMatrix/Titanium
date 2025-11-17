@@ -172,9 +172,9 @@ async function sendTopLSR() {
 
   msg += `━━━━━━━━━━━━━━━\n`;
 
-  msg += `💡*LSR #ALTO*: mais pessoas em posições LONG(Compra) →  O mercado tende a #Liquidar os #Comprados.\n`;
+  msg += `💡*LSR #ALTO*: mais pessoas em posições de LONG(Compra) →  O mercado tende a #Liquidar os #Comprados.\n`;
   msg += `---------\n`;
-  msg += `💡*LSR #BAIXO*: mais pessoas em posições SHORT(Venda) → O mercado tende a #Liquidar os #Vendidos.\n`;
+  msg += `💡*LSR #BAIXO*: mais pessoas em posições de SHORT(Venda) → O mercado tende a #Liquidar os #Vendidos.\n`;
 
   // =======================================================================
 
