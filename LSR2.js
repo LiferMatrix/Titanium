@@ -154,26 +154,27 @@ async function sendTopLSR() {
   }));
 
   // ===================== MENSAGEM SEGURA (SEM ERROS) =====================
-  let msg = `🤖 *#TOP #LONG vs #SHORT* ♻️\n`;
+  let msg = `🤖 *#TOP5 #LSR* ♻️\n`;
 
-  msg += `\n📈 *Top 5 – LSR Alto*\n`;
+  msg += `\n📈 *LSR mais Altos*🔴\n`;
   topHigh.forEach((item, i) => {
-    const emoji = i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : `${i + 1}️⃣ `;
-    msg += `${emoji}${item.symbol} — LSR: *${item.lsr}* / ${item.volStr}\n`;
+    const emoji = i === 0 ? '' : i === 1 ? ' ' : i === 2 ? ' ' : `${i + 1}️⃣ `;
+    msg += `${i + 1}️⃣ ${item.symbol} — LSR: *${item.lsr}* / ${item.volStr}\n`;
   });
 
   msg += `━━━━━━━━━━━━━━━\n`;
 
-  msg += `📉 *Top 5 – LSR Baixo*\n`;
+  msg += `📉 *LSR mais Baixos*🟢\n`;
   topLow.forEach((item, i) => {
-    const emoji = i === 0 ? '🔥 ' : '🔻 ';
-    msg += `${i + 1}️⃣ ${emoji}${item.symbol} — LSR: *${item.lsr}* / ${item.volStr}\n`;
+    const emoji = i === 0 ? ' ' : ' ';
+    msg += `${i + 1}️⃣ ${item.symbol} — LSR: *${item.lsr}* / ${item.volStr}\n`;
   });
 
   msg += `━━━━━━━━━━━━━━━\n`;
 
-  msg += `💡*LSR #ALTO*: mais pessoas em posições LONG(Compra) →  O mercado tende a #Liquidar os #Comprados  .\n`;
-  msg += `💡*LSR #BAIXO*: mais posições SHORT(Venda) →  O mercado tende a Liquidar os  O mercado tende a #Liquidar os #Vendidos .\n`;
+  msg += `💡*LSR #ALTO*: mais pessoas em posições LONG(Compra) →  O mercado tende a #Liquidar os #Comprados.\n`;
+  msg += `---------\n`;
+  msg += `💡*LSR #BAIXO*: mais pessoas em posições SHORT(Venda) → O mercado tende a #Liquidar os #Vendidos.\n`;
 
   // =======================================================================
 
