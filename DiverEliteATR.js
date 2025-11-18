@@ -345,7 +345,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
     }
   } else if (isBearish) {
-    lsrOk = lsr.value > 2.6;
+    lsrOk = lsr.value > 2.8;
     rsiOk = rsi1hValue > 55;
     volOk = volumeData.totalVolume > 2.3 * volumeData.avgVolume && volumeData.sellVolume > volumeData.buyVolume;
     if (lsrOk && rsiOk && volOk) {
@@ -419,7 +419,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     }
   }
 
-  msg += `\n🤖IA Titanium ALFA🌟 by @J4Rviz`;
+  msg += `\n🤖Titanium ALFA🌟 by @J4Rviz`;
 
   historico.push({ direcao, timestamp: agora });
   if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
