@@ -504,7 +504,7 @@ async function main()
   {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA🌟 start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium #ALFA🌟 start'));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
