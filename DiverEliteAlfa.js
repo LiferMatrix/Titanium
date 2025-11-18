@@ -409,7 +409,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             `#VWAP 1H: ${vwap1h !== null ? format(vwap1h) : 'N/A'} ${vwapEmoji}\n` +
             `#Suporte: ${format(support)}\n` +
             `#Resistência: ${format(resistance)}\n` +
-            `#Volume Z-Score: ${currentZ.toFixed(2)}\n`; // Adicionado para log
+            `#Vol.: ${currentZ.toFixed(2)}\n`; // Adicionado para log
   if (adxStrong) {
     const inputATR = {
       period: 14,
