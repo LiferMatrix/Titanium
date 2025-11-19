@@ -3,35 +3,29 @@ const ccxt = require('ccxt');
 const TechnicalIndicators = require('technicalindicators');
 const { Bot } = require('grammy');
 const winston = require('winston');
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
-
 // ================= CONFIGURAÇÃO ================= //
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
-  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,ENJUSDT").split(","),
-  INTERVALO_ALERTA_3M_MS: 180000, // 3 minutos para rompimento
-  INTERVALO_CCI_MS: 5 * 60 * 1000, // 5 minutos para CCI
-  TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Cooldown para rompimentos
+  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT,DOGEUSDT,PEPEUSDT,XRPUSDT,TONUSDT,AVAXUSDT").split(","),
+  INTERVALO_VERIFICACAO_MS: 1 * 60 * 1000,
+  TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Reduzido pra mais trades
   RSI_PERIOD: 14,
-  CCI_LENGTH: 20,
-  EMA_SHORT_LENGTH: 5,
-  EMA_LONG_LENGTH: 13,
-  EMA_9_LENGTH: 9,
-  EMA_34_LENGTH: 34,
-  SUPPORT_RESISTANCE_LENGTH: 20,
-  ATR_LENGTH: 14,
-  VOLUME_LOOKBACK: 20,
-  VOLUME_MULTIPLIER: 2,
-  MIN_VOLATILITY: 0.001,
-  CACHE_TTL: 5 * 60 * 1000, // 5 minutos
+  CACHE_TTL: 10 * 60 * 1000,
   MAX_CACHE_SIZE: 100,
   MAX_HISTORICO_ALERTAS: 10,
-  RECONNECT_INTERVAL_MS: 5000,
-  VWAP_PERIOD: 20, // Período para cálculo do VWAP
+  TIMEFRAMES_MONITORADOS: ['15m', '30m', '1h', '4h'],
+  LOG_FILE: 'simple_trading_bot.log',
+  LOG_RETENTION_DAYS: 2,
+  RECONNECT_INTERVAL_MS: 10 * 1000,
+  VOLUME_LOOKBACK: 13, // Aumentado para média mais robusta
+  VOLUME_Z_THRESHOLD: 2.0, // Limiar de z-score para detecção de pico
+  VOLUME_MULTIPLIER: 2.3, // Multiplicador mínimo sobre a média (ajustado)
 };
-
-// ================= LOGGER ================= //
+// Logger
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
@@ -39,34 +33,47 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   transports: [
-    new winston.transports.File({ filename: 'trading_bot_error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'trading_bot_combined.log' }),
+    new winston.transports.File({ filename: config.LOG_FILE }),
     new winston.transports.Console()
-  ],
+  ]
 });
-
-// ================= ESTADO GLOBAL E CACHE ================= //
+// Limpeza de logs antigos
+function cleanOldLogs() {
+  const logPath = path.resolve(config.LOG_FILE);
+  if (fs.existsSync(logPath)) {
+    const stats = fs.statSync(logPath);
+    const fileAgeDays = (Date.now() - stats.mtimeMs) / (1000 * 60 * 60 * 24);
+    if (fileAgeDays > config.LOG_RETENTION_DAYS) {
+      try {
+        fs.unlinkSync(logPath);
+        logger.info(`Log antigo removido: ${config.LOG_FILE}`);
+      } catch (err) {
+        logger.error(`Erro ao remover log: ${err.message}`);
+      }
+    }
+  }
+}
+cleanOldLogs();
+setInterval(cleanOldLogs, 24 * 60 * 60 * 1000);
+// Estado global
 const state = {
-  ultimoRompimento: {},
-  ultimoEstocastico: {},
-  lastSignals: {},
+  ultimoAlertaPorAtivo: {},
   dataCache: new Map(),
-  isConnected: false,
+  isOnline: false,
+  reconnectTimer: null
 };
-
-// ================= VALIDAÇÃO DE VARIÁVEIS DE AMBIENTE ================= //
+// Validação de env
 function validateEnv() {
   const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'COINS'];
   for (const key of required) {
     if (!process.env[key]) {
-      logger.error(`Missing environment variable: ${key}`);
+      logger.error(`Falta variável de ambiente: ${key}`);
       process.exit(1);
     }
   }
 }
 validateEnv();
-
-// ================= INICIALIZAÇÃO ================= //
+// Inicialização
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 const exchangeSpot = new ccxt.binance({
   apiKey: process.env.BINANCE_API_KEY,
@@ -82,87 +89,129 @@ const exchangeFutures = new ccxt.binance({
   timeout: 30000,
   options: { defaultType: 'future', defaultSubType: 'linear' }
 });
-
-// ================= RECONEXÃO ================= //
-async function checkConnection() {
-  try {
-    await exchangeSpot.fetchTickers(['BTC/USDT']);
-    state.isConnected = true;
-    logger.info('Conexão com a Binance está ativa.');
-  } catch (e) {
-    state.isConnected = false;
-    logger.warn(`Conexão com a Binance perdida: ${e.message}. Tentando reconectar...`);
-    await reconnect();
-  }
-}
-
-async function reconnect() {
-  if (state.isConnected) return;
-  try {
-    await exchangeSpot.loadMarkets();
-    await exchangeFutures.loadMarkets();
-    state.isConnected = true;
-    logger.info('Reconexão bem-sucedida.');
-  } catch (e) {
-    logger.error(`Falha na reconexão: ${e.message}. Tentando novamente em ${config.RECONNECT_INTERVAL_MS}ms...`);
-    setTimeout(reconnect, config.RECONNECT_INTERVAL_MS);
-  }
-}
-
 // ================= UTILITÁRIOS ================= //
 async function withRetry(fn, retries = 5, delayBase = 1000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (e) {
-      if (attempt === retries) {
-        logger.warn(`Falha após ${retries} tentativas: ${e.message}`);
-        throw e;
-      }
+      if (attempt === retries) throw e;
       const delay = Math.pow(2, attempt - 1) * delayBase;
-      logger.info(`Tentativa ${attempt} falhou, retry após ${delay}ms: ${e.message}`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      logger.info(`Tentativa ${attempt} falhou, retry em ${delay}ms: ${e.message}`);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 }
-
 function getCachedData(key) {
-  const cacheEntry = state.dataCache.get(key);
-  if (cacheEntry && Date.now() - cacheEntry.timestamp < config.CACHE_TTL) {
-    logger.info(`Usando cache para ${key}`);
-    return cacheEntry.data;
-  }
+  const entry = state.dataCache.get(key);
+  if (entry && Date.now() - entry.timestamp < config.CACHE_TTL) return entry.data;
   state.dataCache.delete(key);
   return null;
 }
-
 function setCachedData(key, data) {
   if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
-    const oldestKey = state.dataCache.keys().next().value;
-    state.dataCache.delete(oldestKey);
-    logger.info(`Cache cheio, removido item mais antigo: ${oldestKey}`);
+    const oldest = state.dataCache.keys().next().value;
+    state.dataCache.delete(oldest);
   }
   state.dataCache.set(key, { timestamp: Date.now(), data });
   setTimeout(() => {
     if (state.dataCache.has(key) && Date.now() - state.dataCache.get(key).timestamp >= config.CACHE_TTL) {
       state.dataCache.delete(key);
-      logger.info(`Cache limpo para ${key}`);
     }
   }, config.CACHE_TTL + 1000);
 }
-
 async function limitConcurrency(items, fn, limit = 5) {
+  logger.info(`Iniciando limitConcurrency com ${items.length} itens`);
   const results = [];
   for (let i = 0; i < items.length; i += limit) {
     const batch = items.slice(i, i + limit);
-    const batchResults = await Promise.all(batch.map(item => fn(item)));
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    results.push(...batchResults);
+    logger.info(`Processando batch: ${batch.join(', ')}`);
+    const settled = await Promise.allSettled(batch.map(item => fn(item)));
+    const rejected = settled.filter(r => r.status === 'rejected');
+    if (rejected.length > 0) {
+      logger.error(`Erros no batch: ${rejected.map(r => r.reason.message).join('; ')}`);
+    }
+    results.push(...settled.filter(r => r.status === 'fulfilled').map(r => r.value));
   }
   return results;
 }
-
+// ================= RECONEXÃO ================= //
+async function checkConnection() {
+  try {
+    await exchangeSpot.fetchTime();
+    if (!state.isOnline) {
+      logger.info('Conexão restaurada!');
+      state.isOnline = true;
+      if (state.reconnectTimer) {
+        clearInterval(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+      startMonitoring();
+    }
+  } catch (err) {
+    if (state.isOnline) {
+      logger.error(`Conexão perdida: ${err.message}`);
+      state.isOnline = false;
+      stopMonitoring();
+    }
+    if (!state.reconnectTimer) {
+      state.reconnectTimer = setInterval(() => {
+        logger.info('Tentando reconectar...');
+        checkConnection();
+      }, config.RECONNECT_INTERVAL_MS);
+    }
+  }
+}
+let monitoringInterval = null;
+function startMonitoring() {
+  if (monitoringInterval) return;
+  logger.info('Monitoramento INICIADO');
+  checkConditions().catch(e => logger.error(`Erro no checkConditions inicial: ${e.message}`));
+  monitoringInterval = setInterval(() => {
+    checkConditions().catch(e => logger.error(`Erro no checkConditions interval: ${e.message}`));
+  }, config.INTERVALO_VERIFICACAO_MS);
+}
+function stopMonitoring() {
+  if (monitoringInterval) {
+    clearInterval(monitoringInterval);
+    monitoringInterval = null;
+    logger.warn('Monitoramento PAUSADO (sem internet)');
+  }
+}
+// Verificação de conexão a cada 30s
+setInterval(checkConnection, 30 * 1000);
 // ================= INDICADORES ================= //
+async function fetchLSR(symbol) {
+  const cacheKey = `lsr_${symbol}`;
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+  try {
+    const symbolWithoutSlash = symbol.replace('/', '');
+    const res = await withRetry(() => axios.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio', {
+      params: { symbol: symbolWithoutSlash, period: '5m', limit: 2 },
+      timeout: 10000
+    }));
+    const data = res.data;
+    if (!data || data.length < 2) {
+      logger.warn(`Dados insuficientes de LSR para ${symbol}: ${data?.length || 0} registros`);
+      return { value: null, percentChange: '0.00' };
+    }
+    const currentLSR = parseFloat(data[0].longShortRatio);
+    const previousLSR = parseFloat(data[1].longShortRatio);
+    if (isNaN(currentLSR) || isNaN(previousLSR)) {
+      logger.warn(`LSR inválido para ${symbol}`);
+      return { value: null, percentChange: '0.00' };
+    }
+    const percentChange = previousLSR !== 0 ? ((currentLSR - previousLSR) / previousLSR * 100).toFixed(2) : '0.00';
+    const result = { value: currentLSR, percentChange };
+    setCachedData(cacheKey, result);
+    logger.info(`LSR obtido para ${symbol}: ${currentLSR}, variação: ${percentChange}%`);
+    return result;
+  } catch (e) {
+    logger.error(`Erro ao fetch LSR para ${symbol}: ${e.message}`);
+    return { value: 1.0, percentChange: '0.00' };
+  }
+}
 function normalizeOHLCV(data) {
   return data.map(c => ({
     time: c[0],
@@ -173,807 +222,321 @@ function normalizeOHLCV(data) {
     volume: Number(c[5])
   })).filter(c => !isNaN(c.close) && !isNaN(c.volume));
 }
-
-function calculateRSI(data, period = config.RSI_PERIOD) {
-  if (!data || data.length < period + 1) return [];
-  const rsi = TechnicalIndicators.RSI.calculate({
-    period,
-    values: data.map(d => d.close || d[4])
-  });
-  return rsi.filter(v => !isNaN(v));
+function calculateRSI(data) {
+  if (!data || data.length < config.RSI_PERIOD + 1) return [];
+  const closes = data.map(d => d.close).filter(c => !isNaN(c));
+  return TechnicalIndicators.RSI.calculate({ period: config.RSI_PERIOD, values: closes });
 }
-
-function calculateStochastic(data, periodK = 5, smoothK = 3, periodD = 3) {
-  if (!data || data.length < periodK + smoothK + periodD - 2) return null;
-  const highs = data.map(c => c.high || c[2]).filter(h => !isNaN(h));
-  const lows = data.map(c => c.low || c[3]).filter(l => !isNaN(l));
-  const closes = data.map(c => c.close || c[4]).filter(cl => !isNaN(cl));
-  if (highs.length < periodK || lows.length < periodK || closes.length < periodK) return null;
-  const result = TechnicalIndicators.Stochastic.calculate({
-    high: highs,
-    low: lows,
-    close: closes,
-    period: periodK,
-    signalPeriod: periodD,
-    smoothing: smoothK
-  });
-  return result.length ? { k: parseFloat(result[result.length - 1].k.toFixed(2)), d: parseFloat(result[result.length - 1].d.toFixed(2)) } : null;
-}
-
-function calculateCCI(ohlcv) {
-  const typicalPrices = ohlcv.map(candle => (candle[2] + candle[3] + candle[4]) / 3);
-  const cci = TechnicalIndicators.CCI.calculate({
-    high: ohlcv.map(c => c[2]),
-    low: ohlcv.map(c => c[3]),
-    close: ohlcv.map(c => c[4]),
-    period: config.CCI_LENGTH,
-  });
-  return cci;
-}
-
-function calculateEMA(data, period) {
-  return TechnicalIndicators.EMA.calculate({ period, values: data });
-}
-
-function calculateSupportResistance(ohlcv, period = config.SUPPORT_RESISTANCE_LENGTH) {
-  const recentCandles = ohlcv.slice(-period);
-  const highs = recentCandles.map(c => c[2]);
-  const lows = recentCandles.map(c => c[3]);
-  const resistance = Math.max(...highs);
-  const support = Math.min(...lows);
-  return { support, resistance };
-}
-
-function calculateATR(ohlcv, period = config.ATR_LENGTH) {
-  const atr = TechnicalIndicators.ATR.calculate({
-    high: ohlcv.map(c => c[2]),
-    low: ohlcv.map(c => c[3]),
-    close: ohlcv.map(c => c[4]),
-    period,
-  });
-  return atr;
-}
-
-function calculateVolumeAnomaly(ohlcv, lookback = config.VOLUME_LOOKBACK) {
-  const volumes = ohlcv.slice(-lookback).map(c => c[5]);
-  const avgVolume = volumes.slice(0, -1).reduce((sum, vol) => sum + vol, 0) / (lookback - 1);
-  const currentVolume = volumes[volumes.length - 1];
-  return currentVolume > avgVolume * config.VOLUME_MULTIPLIER;
-}
-
-function calculateVWAP(ohlcv, period = config.VWAP_PERIOD) {
-  if (!ohlcv || ohlcv.length < period) return null;
-  const slicedData = ohlcv.slice(-period);
-  let sumPriceVolume = 0;
-  let sumVolume = 0;
-  for (const candle of slicedData) {
-    const typicalPrice = (candle[2] + candle[3] + candle[4]) / 3; // (high + low + close) / 3
-    const volume = candle[5];
-    sumPriceVolume += typicalPrice * volume;
-    sumVolume += volume;
-  }
-  return sumVolume > 0 ? sumPriceVolume / sumVolume : null;
-}
-
-function detectarQuebraEstrutura(ohlcv) {
-  if (!ohlcv || ohlcv.length < 2) return { estruturaAlta: 0, estruturaBaixa: 0 };
-  const lookbackPeriod = 50;
-  const previousCandles = ohlcv.slice(0, -1).slice(-lookbackPeriod);
-  const highs = previousCandles.map(c => c.high || c[2]).filter(h => !isNaN(h));
-  const lows = previousCandles.map(c => c.low || c[3]).filter(l => !isNaN(l));
-  if (highs.length === 0 || lows.length === 0) {
-    return { estruturaAlta: 0, estruturaBaixa: 0 };
-  }
-  const maxHigh = Math.max(...highs);
-  const minLow = Math.min(...lows);
-  return {
-    estruturaAlta: maxHigh,
-    estruturaBaixa: minLow
+function detectRSIDivergence(ohlcv, rsiValues, lookback = 30) { // Ideal
+  if (!ohlcv || !rsiValues || ohlcv.length < lookback) return { isBullish: false, isBearish: false };
+  const price = ohlcv.slice(-lookback);
+  const rsi = rsiValues.slice(-lookback);
+  const findExtremes = (arr, isPrice) => {
+    const peaks = [], troughs = [];
+    for (let i = 1; i < arr.length - 1; i++) {
+      const v = isPrice ? arr[i].close : arr[i];
+      const p = isPrice ? arr[i-1].close : arr[i-1];
+      const n = isPrice ? arr[i+1].close : arr[i+1];
+      if (v > p && v > n) peaks.push({ i, v });
+      if (v < p && v < n) troughs.push({ i, v });
+    }
+    return { peaks, troughs };
   };
+  const { peaks: pPeaks, troughs: pTroughs } = findExtremes(price, true);
+  const { peaks: rPeaks, troughs: rTroughs } = findExtremes(rsi, false);
+  let isBullish = false, isBearish = false;
+  if (pTroughs.length >= 2 && rTroughs.length >= 2) {
+    const [t1, t2] = pTroughs.slice(-2);
+    const [r1, r2] = rTroughs.slice(-2);
+    if (t2.v < t1.v && r2.v > r1.v && r2.v < 50) isBullish = true;
+  }
+  if (pPeaks.length >= 2 && rPeaks.length >= 2) {
+    const [p1, p2] = pPeaks.slice(-2);
+    const [r1, r2] = rPeaks.slice(-2);
+    if (p2.v > p1.v && r2.v < r1.v && r2.v > 50) isBearish = true;
+  }
+  return { isBullish, isBearish };
 }
-
-function detectPivots(ohlcv, lookback = 2) {
-  const pivotsHigh = [];
-  const pivotsLow = [];
-  for (let i = lookback; i < ohlcv.length - lookback; i++) {
-    const candle = ohlcv[i];
-    const isHighPivot = ohlcv.slice(i - lookback, i + lookback + 1).every((c, idx) => {
-      if (idx === lookback) return true;
-      return c[2] <= candle[2]; // Comparar highs
-    });
-    const isLowPivot = ohlcv.slice(i - lookback, i + lookback + 1).every((c, idx) => {
-      if (idx === lookback) return true;
-      return c[3] >= candle[3]; // Comparar lows
-    });
-    if (isHighPivot) pivotsHigh.push({ time: candle[0], price: candle[2], index: i });
-    if (isLowPivot) pivotsLow.push({ time: candle[0], price: candle[3], index: i });
+async function fetchVolumeData(symbol) {
+  try {
+    // Usamos futures para volume mais relevante em trading
+    const ohlcvRaw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, config.VOLUME_LOOKBACK + 1));
+    if (!ohlcvRaw || ohlcvRaw.length < config.VOLUME_LOOKBACK + 1) return { avgVolume: null, stdDev: null };
+    const ohlcv = normalizeOHLCV(ohlcvRaw);
+    const pastCandles = ohlcv.slice(0, config.VOLUME_LOOKBACK); // Últimas 20 velas fechadas
+    const currentCandle = ohlcv[ohlcv.length - 1]; // Vela atual (aberta)
+    
+    const volumes = pastCandles.map(c => c.volume);
+    const avgVolume = volumes.reduce((s, v) => s + v, 0) / volumes.length;
+    const variance = volumes.reduce((s, v) => s + Math.pow(v - avgVolume, 2), 0) / volumes.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Para volume atual, usamos trades da vela atual para buy/sell
+    const now = Date.now();
+    const threeMinAgo = now - 3 * 60 * 1000;
+    const trades = await withRetry(() => exchangeFutures.fetchTrades(symbol, threeMinAgo, 1000));
+    let buy = 0, sell = 0;
+    for (const t of trades) {
+      if (t.timestamp >= threeMinAgo) {
+        if (t.side === 'buy') buy += t.amount;
+        else if (t.side === 'sell') sell += t.amount;
+      }
+    }
+    const totalVolume = buy + sell;
+    
+    // Adicional: Verificar se o volume da última vela fechada também mostra aumento (para confirmar tendência)
+    const lastClosedVolume = pastCandles[pastCandles.length - 1].volume;
+    const lastClosedZ = (lastClosedVolume - avgVolume) / stdDev;
+    
+    return { 
+      avgVolume, 
+      stdDev, 
+      totalVolume, 
+      buyVolume: buy, 
+      sellVolume: sell,
+      lastClosedZ,
+      currentCandle // Para checar direção da vela
+    };
+  } catch (e) {
+    logger.error(`Erro volume ${symbol}: ${e.message}`);
+    return { avgVolume: null, stdDev: null };
   }
-  return { pivotsHigh, pivotsLow };
 }
-
-function calculateTrendLine(ohlcv, pivots, type = 'uptrend', minTouches = 2, timeframe = '15m') {
-  if (pivots.length < minTouches) return null;
-
-  // Filtrar pivots recentes (últimos 50 candles, ajustável)
-  const recentPivots = pivots.slice(-10).filter(p => ohlcv[ohlcv.length - 1][0] - p.time <= 50 * 15 * 60 * 1000); // 50 velas de 15m
-  if (recentPivots.length < minTouches) return null;
-
-  // Ordenar pivots por tempo
-  recentPivots.sort((a, b) => a.time - b.time);
-
-  // Calcular inclinação usando regressão linear simples
-  const n = recentPivots.length;
-  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-  for (let i = 0; i < n; i++) {
-    const x = i; // Índice como proxy de tempo
-    const y = recentPivots[i].price;
-    sumX += x;
-    sumY += y;
-    sumXY += x * y;
-    sumXX += x * x;
-  }
-  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-  const intercept = (sumY - slope * sumX) / n;
-
-  // Validar inclinação
-  const isUptrend = type === 'uptrend' && slope > 0;
-  const isDowntrend = type === 'downtrend' && slope < 0;
-  if (!isUptrend && !isDowntrend) return null;
-
-  // Calcular o valor da linha de tendência no último candle
-  const lastIndex = ohlcv.length - 1;
-  const trendLineValue = slope * (recentPivots.length - 1) + intercept;
-
-  // Verificar toques (pivots próximos à linha)
-  let touches = 0;
-  for (const pivot of recentPivots) {
-    const expectedPrice = slope * recentPivots.findIndex(p => p.time === pivot.time) + intercept;
-    if (Math.abs(pivot.price - expectedPrice) / pivot.price < 0.005) touches++; // Tolerância de 0.5%
-  }
-  if (touches < minTouches) return null;
-
-  return {
-    slope,
-    intercept,
-    value: trendLineValue,
-    type,
-    touches
+async function fetchAndCalculateADX(symbol, timeframe, period = 14) {
+  const key = `ohlcv_adx_${symbol}_${timeframe}`;
+  const raw = getCachedData(key) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, period * 2)); // Mudado para futures
+  if (!raw) return null;
+  const ohlcv = normalizeOHLCV(raw);
+  setCachedData(key, raw);
+  if (ohlcv.length < period * 2) return null;
+  const input = {
+    high: ohlcv.map(c => c.high),
+    low: ohlcv.map(c => c.low),
+    close: ohlcv.map(c => c.close),
+    period
   };
+  const adxResults = TechnicalIndicators.ADX.calculate(input);
+  return adxResults[adxResults.length - 1]?.adx ?? null;
 }
-
-async function fetchLSR(symbol) {
-  const cacheKey = `lsr_${symbol}`;
+// ================= VWAP (mantido, mudado para futures) ================= //
+async function fetchVWAP1h(symbol) {
+  const cacheKey = `vwap1h_${symbol}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const symbolWithoutSlash = symbol.replace('/', '');
-    const res = await withRetry(() => axios.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio', {
-      params: { symbol: symbolWithoutSlash, period: '15m', limit: 2 }
-    }));
-    if (!res.data || res.data.length < 2) {
-      logger.warn(`Dados insuficientes de LSR para ${symbol}: ${res.data?.length || 0} registros`);
-      return getCachedData(cacheKey) || { value: null, isRising: false, percentChange: '0.00', error: 'Dados insuficientes' };
-    }
-    const currentLSR = parseFloat(res.data[0].longShortRatio);
-    const previousLSR = parseFloat(res.data[1].longShortRatio);
-    if (isNaN(currentLSR) || currentLSR < 0 || isNaN(previousLSR) || previousLSR < 0) {
-      logger.warn(`LSR inválido para ${symbol}`);
-      return { value: null, isRising: false, percentChange: '0.00', error: 'LSR inválido' };
-    }
-    const percentChange = previousLSR !== 0 ? ((currentLSR - previousLSR) / previousLSR * 100).toFixed(2) : '0.00';
-    const result = { value: currentLSR, isRising: currentLSR > previousLSR, percentChange };
-    setCachedData(cacheKey, result);
-    logger.info(`LSR obtido para ${symbol}: ${currentLSR}, variação: ${percentChange}%`);
-    return result;
-  } catch (e) {
-    logger.warn(`Erro ao buscar LSR para ${symbol}: ${e.message}`);
-    return getCachedData(cacheKey) || { value: null, isRising: false, percentChange: '0.00', error: `Erro ao buscar LSR: ${e.message}` };
-  }
-}
-
-async function fetchOpenInterest(symbol, timeframe, retries = 5) {
-  const cacheKey = `oi_${symbol}_${timeframe}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const oiData = await withRetry(() => exchangeFutures.fetchOpenInterestHistory(symbol, timeframe, undefined, 30));
-    if (!oiData || oiData.length < 3) {
-      logger.warn(`Dados insuficientes de Open Interest para ${symbol} no timeframe ${timeframe}: ${oiData?.length || 0} registros`);
-      if (retries > 0) {
-        const delay = Math.pow(2, 5 - retries) * 1000;
-        logger.info(`Tentando novamente para ${symbol} no timeframe ${timeframe}, tentativas restantes: ${retries}, delay: ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await fetchOpenInterest(symbol, timeframe, retries - 1);
-      }
-      if (timeframe === '5m') {
-        logger.info(`Fallback para timeframe 15m para ${symbol}`);
-        return await fetchOpenInterest(symbol, '15m', 3);
-      }
-      return { isRising: false, percentChange: '0.00' };
-    }
-    const validOiData = oiData
-      .filter(d => {
-        const oiValue = d.openInterest || d.openInterestAmount || (d.info && d.info.sumOpenInterest);
-        return typeof oiValue === 'number' && !isNaN(oiValue) && oiValue >= 0;
-      })
-      .map(d => ({
-        ...d,
-        openInterest: d.openInterest || d.openInterestAmount || (d.info && d.info.sumOpenInterest)
-      }))
-      .sort((a, b) => b.timestamp - a.timestamp);
-    if (validOiData.length < 3) {
-      logger.warn(`Registros válidos insuficientes para ${symbol} no timeframe ${timeframe}: ${validOiData.length} registros válidos`);
-      if (retries > 0) {
-        const delay = Math.pow(2, 5 - retries) * 1000;
-        logger.info(`Tentando novamente para ${symbol} no timeframe ${timeframe}, tentativas restantes: ${retries}, delay: ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await fetchOpenInterest(symbol, timeframe, retries - 1);
-      }
-      if (timeframe === '5m') {
-        logger.info(`Fallback para timeframe 15m para ${symbol}`);
-        return await fetchOpenInterest(symbol, '15m', 3);
-      }
-      return { isRising: false, percentChange: '0.00' };
-    }
-    const oiValues = validOiData.map(d => d.openInterest).filter(v => v !== undefined);
-    const sortedOi = [...oiValues].sort((a, b) => a - b);
-    const q1 = sortedOi[Math.floor(sortedOi.length / 4)];
-    const q3 = sortedOi[Math.floor(3 * sortedOi.length / 4)];
-    const iqr = q3 - q1;
-    const lowerBound = q1 - 1.5 * iqr;
-    const upperBound = q3 + 1.5 * iqr;
-    const filteredOiData = validOiData.filter(d => d.openInterest >= lowerBound && d.openInterest <= upperBound);
-    if (filteredOiData.length < 3) {
-      logger.warn(`Registros válidos após filtro IQR insuficientes para ${symbol} no timeframe ${timeframe}: ${filteredOiData.length}`);
-      if (retries > 0) {
-        const delay = Math.pow(2, 5 - retries) * 1000;
-        logger.info(`Tentando novamente para ${symbol} no timeframe ${timeframe}, tentativas restantes: ${retries}, delay: ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return await fetchOpenInterest(symbol, timeframe, retries - 1);
-      }
-      if (timeframe === '5m') {
-        logger.info(`Fallback para timeframe 15m para ${symbol}`);
-        return await fetchOpenInterest(symbol, '15m', 3);
-      }
-      return { isRising: false, percentChange: '0.00' };
-    }
-    const recentOi = filteredOiData.slice(0, 3).map(d => d.openInterest);
-    const sma = recentOi.reduce((sum, val) => sum + val, 0) / recentOi.length;
-    const previousRecentOi = filteredOiData.slice(3, 6).map(d => d.openInterest);
-    const previousSma = previousRecentOi.length >= 3 ? previousRecentOi.reduce((sum, val) => sum + val, 0) / previousRecentOi.length : recentOi[recentOi.length - 1];
-    const oiPercentChange = previousSma !== 0 ? ((sma - previousSma) / previousSma * 100).toFixed(2) : '0.00';
-    const result = {
-      isRising: sma > previousSma,
-      percentChange: oiPercentChange
+    const raw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '1h', undefined, 48)); // Mudado para futures
+    const ohlcv = normalizeOHLCV(raw);
+    const input = {
+      high: ohlcv.map(c => c.high),
+      low: ohlcv.map(c => c.low),
+      close: ohlcv.map(c => c.close),
+      volume: ohlcv.map(c => c.volume)
     };
-    setCachedData(cacheKey, result);
-    logger.info(`Open Interest calculado para ${symbol} no timeframe ${timeframe}: sma=${sma}, previousSma=${previousSma}, percentChange=${oiPercentChange}%`);
-    return result;
+    const vwapResults = TechnicalIndicators.VWAP.calculate(input);
+    const vwap = vwapResults[vwapResults.length - 1] || ohlcv[ohlcv.length - 1].close;
+    setCachedData(cacheKey, vwap);
+    return vwap;
   } catch (e) {
-    if (e.message.includes('binance does not have market symbol') || e.message.includes('Invalid symbol')) {
-      logger.error(`Símbolo ${symbol} não suportado para Open Interest no timeframe ${timeframe}. Ignorando.`);
-      return { isRising: false, percentChange: '0.00' };
-    }
-    logger.warn(`Erro ao buscar Open Interest para ${symbol} no timeframe ${timeframe}: ${e.message}`);
-    return getCachedData(cacheKey) || { isRising: false, percentChange: '0.00' };
+    logger.warn(`Erro VWAP ${symbol}: ${e.message}`);
+    return null;
   }
 }
-
-async function fetchFundingRate(symbol) {
-  const cacheKey = `funding_${symbol}`;
+async function fetchEMA55_3m(symbol) {
+  const cacheKey = `ema55_3m_${symbol}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const fundingData = await withRetry(() => exchangeFutures.fetchFundingRateHistory(symbol, undefined, 2));
-    if (fundingData && fundingData.length >= 2) {
-      const currentFunding = parseFloat(fundingData[fundingData.length - 1].fundingRate);
-      const previousFunding = parseFloat(fundingData[fundingData.length - 2].fundingRate);
-      const percentChange = previousFunding !== 0 ? ((currentFunding - previousFunding) / Math.abs(previousFunding) * 100).toFixed(2) : '0.00';
-      const result = { current: currentFunding, isRising: currentFunding > previousFunding, percentChange };
-      setCachedData(cacheKey, result);
-      return result;
-    }
-    return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
+    const raw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, 110));
+    const ohlcv = normalizeOHLCV(raw);
+    if (ohlcv.length < 56) return null;
+    const closes = ohlcv.map(c => c.close);
+    const ema = TechnicalIndicators.EMA.calculate({ period: 55, values: closes });
+    const lastEMA = ema[ema.length - 1];
+    setCachedData(cacheKey, lastEMA);
+    return lastEMA;
   } catch (e) {
-    logger.warn(`Erro ao buscar Funding Rate para ${symbol}: ${e.message}`);
-    return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
+    logger.error(`Erro EMA55 3m ${symbol}: ${e.message}`);
+    return null;
   }
 }
-
-async function calculateAggressiveDelta(symbol, timeframe = '3m', limit = 100) {
-  const cacheKey = `delta_${symbol}_${timeframe}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const trades = await withRetry(() => exchangeSpot.fetchTrades(symbol, undefined, limit));
-    let buyVolume = 0;
-    let sellVolume = 0;
-    const volumes = trades.map(trade => trade.amount).filter(amount => !isNaN(amount));
-    const avgVolume = volumes.length > 0 ? volumes.reduce((sum, v) => sum + v, 0) / volumes.length : 0;
-    const minVolumeThreshold = avgVolume * 0.001;
-    for (const trade of trades) {
-      const { side, amount, price } = trade;
-      if (!side || !amount || !price || isNaN(amount) || isNaN(price) || amount < minVolumeThreshold) continue;
-      if (side === 'buy') buyVolume += amount;
-      else if (side === 'sell') sellVolume += amount;
-    }
-    const totalVolume = buyVolume + sellVolume;
-    if (totalVolume === 0) {
-      logger.warn(`Volume total zero para ${symbol}, retornando delta neutro`);
-      return { delta: 0, deltaPercent: 0, isBuyPressure: false, isSignificant: false };
-    }
-    const delta = buyVolume - sellVolume;
-    const deltaPercent = (delta / totalVolume * 100).toFixed(2);
-    const result = {
-      delta,
-      deltaPercent: parseFloat(deltaPercent),
-      isBuyPressure: delta > 0,
-      isSignificant: Math.abs(deltaPercent) > 10
-    };
-    setCachedData(cacheKey, result);
-    logger.info(`Delta Agressivo para ${symbol}: Buy=${buyVolume}, Sell=${sellVolume}, Delta=${delta}, Delta%=${deltaPercent}%, MinVolumeThreshold=${minVolumeThreshold}`);
-    return result;
-  } catch (e) {
-    logger.error(`Erro ao calcular Delta Agressivo para ${symbol}: ${e.message}`);
-    return getCachedData(cacheKey) || { delta: 0, deltaPercent: 0, isBuyPressure: false, isSignificant: false };
-  }
-}
-
-// ================= FUNÇÕES DE ALERTAS ================= //
-function getStochasticEmoji(value) {
-  if (!value) return "";
-  return value < 10 ? "🔵" : value < 25 ? "🟢" : value <= 55 ? "🟡" : value <= 70 ? "🟠" : value <= 80 ? "🔴" : "💥";
-}
-
-function getSetaDirecao(current, previous) {
-  if (!current || !previous) return "➡️";
-  return current > previous ? "⬆️" : current < previous ? "⬇️" : "➡️";
-}
-
-async function sendAlertRompimentoEstrutura15m(symbol, price, zonas, ohlcv15m, rsi1h, lsr, fundingRate, aggressiveDelta, estocasticoD, estocastico4h, oi15m) {
+// ================= ALERTA (com filtro volatilidade mínima) ================= //
+async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, divergence, lsr, rsi1hValue, volumeData, adx15m, adx1h, vwap1h) {
   const agora = Date.now();
-  if (!state.ultimoRompimento[symbol]) state.ultimoRompimento[symbol] = { historico: [] };
-  if (state.ultimoRompimento[symbol]['15m'] && agora - state.ultimoRompimento[symbol]['15m'] < config.TEMPO_COOLDOWN_MS) return;
-  const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
-  const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
-  const currentCandle = ohlcv15m[ohlcv15m.length - 1];
-  const previousCandle = ohlcv15m.length >= 2 ? ohlcv15m[ohlcv15m.length - 2] : null;
-  const isValidPreviousCandle = previousCandle !== null && !isNaN(previousCandle.close || previousCandle[4]);
-  if (!currentCandle || !isValidPreviousCandle) return;
-  const currentClose = currentCandle.close || currentCandle[4];
-  const currentHigh = currentCandle.high || currentCandle[2];
-  const currentLow = currentCandle.low || currentCandle[3];
-  const previousClose = previousCandle.close || previousCandle[4];
-  const isPriceRising = currentClose > previousClose;
-  const isPriceFalling = currentClose < previousClose;
-  // Calcular EMA 34
-  const ema34 = calculateEMA(ohlcv15m.map(c => c.close || c[4]), config.EMA_34_LENGTH);
-  const ema34Value = ema34.length > 0 ? ema34[ema34.length - 1] : null;
-  // Calcular volume anormal no 3m
-  const ohlcv3mRaw = getCachedData(`ohlcv_${symbol.replace('/', '')}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, config.VOLUME_LOOKBACK));
-  setCachedData(`ohlcv_${symbol.replace('/', '')}_3m`, ohlcv3mRaw);
-  const isVolumeAnomaly = calculateVolumeAnomaly(ohlcv3mRaw);
-  // Calcular VWAP 15m e 1h
-  const ohlcv1hRaw = getCachedData(`ohlcv_${symbol.replace('/', '')}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, config.VWAP_PERIOD));
-  setCachedData(`ohlcv_${symbol.replace('/', '')}_1h`, ohlcv1hRaw);
-  const vwap15m = calculateVWAP(ohlcv15m, config.VWAP_PERIOD);
-  const vwap1h = calculateVWAP(ohlcv1hRaw, config.VWAP_PERIOD);
-  // Adicionar OI 5m
-  const oi5m = await fetchOpenInterest(symbol, '5m');
-  let alertText = '';
-  const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
-  const rsi1hEmoji = rsi1h > 60 ? "☑︎" : rsi1h < 40 ? "☑︎" : "";
-  let lsrSymbol = '🔘Consol.';
-  if (lsr.value !== null) {
-    if (lsr.value <= 1.4) lsrSymbol = '✅Baixo';
-    else if (lsr.value >= 3) lsrSymbol = '📛Alto';
-  }
-  let fundingRateEmoji = '';
-  if (fundingRate.current !== null) {
-    if (fundingRate.current <= -0.002) fundingRateEmoji = '🟢🟢🟢';
-    else if (fundingRate.current <= -0.001) fundingRateEmoji = '🟢🟢';
-    else if (fundingRate.current <= -0.0005) fundingRateEmoji = '🟢';
-    else if (fundingRate.current >= 0.001) fundingRateEmoji = '🔴🔴🔴';
-    else if (fundingRate.current >= 0.0003) fundingRateEmoji = '🔴🔴';
-    else if (fundingRate.current >= 0.0002) fundingRateEmoji = '🔴';
-    else fundingRateEmoji = '🟢';
-  }
-  const fundingRateText = fundingRate.current !== null 
-    ? `${fundingRateEmoji} ${(fundingRate.current * 100).toFixed(5)}% ${fundingRate.isRising ? '⬆️' : '⬇️'}`
-    : '🔹 Indisp.';
-  const deltaText = aggressiveDelta.isSignificant 
-    ? `${aggressiveDelta.isBuyPressure ? '💹F.Comprador' : '⭕F.Vendedor'} ${aggressiveDelta.deltaPercent > 60 && lsr.value !== null && lsr.value < 1 ? '💥' : ''}(${aggressiveDelta.deltaPercent}%)`
-    : '🔘Neutro';
-  const oiText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
-  const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
-  const volumeAnomalyText = isVolumeAnomaly ? '✅CONFIRMADO' : '❌Ausente';
-  const vwap15mText = vwap15m ? `${price > vwap15m ? '📈 Acima' : '📉 Abaixo'} VWAP 15m: $${format(vwap15m)}` : '🔹 Indisp.';
-  const vwap1hText = vwap1h ? `${price > vwap1h ? '📈 Acima' : '📉 Abaixo'} VWAP 1h: $${format(vwap1h)}` : '🔹 Indisp.';
-  if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
-  const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
-  const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
-  state.ultimoEstocastico[symbol].kD = estocasticoD?.k;
-  state.ultimoEstocastico[symbol].k4h = estocastico4h?.k;
-  const direcaoD = getSetaDirecao(estocasticoD?.k, kAnteriorD);
-  const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
-  const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
-  const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-  if (isValidPreviousCandle && 
-      zonas.estruturaAlta > 0 && 
-      previousClose < zonas.estruturaAlta && 
-      currentHigh >= zonas.estruturaAlta &&
-      estocasticoD?.k < 80 && 
-      estocastico4h?.k < 80 &&
-      rsi1h < 60 &&
-      (lsr.value === null || lsr.value < 2.6) &&  
-      isPriceRising 
-      ) {
-    const nivelRompido = zonas.estruturaAlta;
-    const foiAlertado = state.ultimoRompimento[symbol].historico.some(r => 
-      r.nivel === nivelRompido && 
-      r.direcao === 'alta' && 
-      (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
-    );
-    if (!foiAlertado) {
-      alertText = `💹 Resistência/Romp. de 🚀Alta🚀\n\n` +
-                  `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço Atual: ${format(price)}\n` +
-                  `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔸 Vol.Delta: ${deltaText}\n` +
-                  `🔹 Bullish acima de: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
-                  `🔹 VWAP 15m: ${vwap15mText}\n` +
-                  `🔹 VWAP 1h: ${vwap1hText}\n` +
-                  `🔹 Suporte: ${format(zonas.estruturaBaixa)}\n` +
-                  `🔹 Resistência: ${format(zonas.estruturaAlta)}\n` +
-                  `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
-                  `🔹 Fund. R: ${fundingRateText}\n` +
-                  `🔹 OI 15m: ${oiText}\n` +
-                  `🔹 OI 5m: ${oi5mText}\n` +
-                  `🔹 Stoch Diário %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-                  `🔹 Stoch 4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                  `☑︎ Monitor -🤖 @J4Rviz`;
-      state.ultimoRompimento[symbol]['15m'] = agora;
-      state.ultimoRompimento[symbol].historico.push({ nivel: nivelRompido, direcao: 'alta', timestamp: agora });
-      state.ultimoRompimento[symbol].historico = state.ultimoRompimento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Rompimento de alta detectado para ${symbol}: Preço=${format(price)}, Estrutura Alta=${format(zonas.estruturaAlta)}, Tendência=Subindo, Preço Anterior=${format(previousClose)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'Spot'}, Delta=${aggressiveDelta.deltaPercent}%, OI 15m=${oi15m.percentChange}%, OI 5m=${oi5m.percentChange}%, RSI 1h=${rsi1h.toFixed(2)}`);
-    }
-  } else if (isValidPreviousCandle && 
-             zonas.estruturaBaixa > 0 && 
-             previousClose > zonas.estruturaBaixa && 
-             currentLow <= zonas.estruturaBaixa && 
-             (lsr.value === null || lsr.value < 1.6) && 
-             isPriceFalling &&
-             isVolumeAnomaly &&
-             aggressiveDelta.isBuyPressure &&
-             oi5m.isRising) {
-    const nivelRompido = zonas.estruturaBaixa;
-    const foiAlertado = state.ultimoRompimento[symbol].historico.some(r => 
-      r.nivel === nivelRompido && 
-      r.direcao === 'baixa' && 
-      (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
-    );
-    if (!foiAlertado) {
-      alertText = `✳️ Zona de Liquidação/SUPORTE \n\n` +
-                  `🔹 Ativo: <<*${symbol}*>> [- TradingView](${tradingViewLink})\n` +
-                  `💲 Preço Atual: ${format(price)}\n` +
-                  `🔹 RSI 1h: ${rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
-                  `🔹 Bearish abaixo de: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
-                  `🔹 VWAP 15m: ${vwap15mText}\n` +
-                  `🔹 VWAP 1h: ${vwap1hText}\n` +
-                  `🔹 Suporte: ${format(zonas.estruturaBaixa)}\n` +
-                  `🔹 Resistência: ${format(zonas.estruturaAlta)}\n` +
-                  `🔹 LSR: ${lsr.value ? lsr.value.toFixed(2) : '🔹Spot'} ${lsrSymbol} (${lsr.percentChange}%)\n` +
-                  `🔹 Fund. R: ${fundingRateText}\n` +
-                  `🔸 Vol.Delta: ${deltaText}\n` +
-                  `🔹 OI 15m: ${oiText}\n` +
-                  `🔹 OI 5m: ${oi5mText}\n` +
-                  `💥 Vol. Anormal 3m: ${volumeAnomalyText}\n` +
-                  `🔹 Stoch Diário %K: ${estocasticoD ? estocasticoD.k.toFixed(2) : '--'} ${stochDEmoji} ${direcaoD}\n` +
-                  `🔹 Stoch 4H %K: ${estocastico4h ? estocastico4h.k.toFixed(2) : '--'} ${stoch4hEmoji} ${direcao4h}\n` +
-                  `☑︎ Monitor -🤖 @J4Rviz`;
-      state.ultimoRompimento[symbol]['15m'] = agora;
-      state.ultimoRompimento[symbol].historico.push({ nivel: nivelRompido, direcao: 'baixa', timestamp: agora });
-      state.ultimoRompimento[symbol].historico = state.ultimoRompimento[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      logger.info(`Rompimento de baixa detectado para ${symbol}: Preço=${format(price)}, Estrutura Baixa=${format(zonas.estruturaBaixa)}, Tendência=Caindo, Preço Anterior=${format(previousClose)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'Spot'}, Delta=${aggressiveDelta.deltaPercent}%, OI 15m=${oi15m.percentChange}%, OI 5m=${oi5m.percentChange}%, RSI 1h=${rsi1h.toFixed(2)}`);
-    }
-  }
-  if (alertText) {
-    try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, alertText, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      }));
-      logger.info(`Alerta de rompimento de estrutura enviado para ${symbol}: ${alertText}`);
-    } catch (e) {
-      logger.error(`Erro ao enviar alerta para ${symbol}: ${e.message}`);
-    }
-  }
-}
-
-async function sendAlertCCICross(symbol, price, rsi15m, rsi1h, lsr, fundingRate, support, resistance, atr, oi5m, oi15m, trendLine) {
-  const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
-  const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
-  // Calcular EMA 34 e EMA 9
-  const ohlcv15mRaw = getCachedData(`ohlcv_${symbol.replace('/', '')}_15m`) || [];
-  const ohlcv1hRaw = getCachedData(`ohlcv_${symbol.replace('/', '')}_1h`) || [];
-  const ema34 = calculateEMA(ohlcv15mRaw.map(c => c[4]), config.EMA_34_LENGTH);
-  const ema9 = calculateEMA(ohlcv15mRaw.map(c => c[4]), config.EMA_9_LENGTH);
-  const ema34Value = ema34.length > 0 ? ema34[ema34.length - 1] : null;
-  const ema9Current = ema9.length > 0 ? ema9[ema9.length - 1] : null;
-  // Calcular VWAP 15m e 1h
-  const vwap15m = calculateVWAP(ohlcv15mRaw, config.VWAP_PERIOD);
-  const vwap1h = calculateVWAP(ohlcv1hRaw, config.VWAP_PERIOD);
-  const vwap15mText = vwap15m ? `${price > vwap15m ? '📈 Acima' : '📉 Abaixo'} VWAP 15m: $${format(vwap15m)}` : '🔹 Indisp.';
-  const vwap1hText = vwap1h ? `${price > vwap1h ? '📈 Acima' : '📉 Abaixo'} VWAP 1h: $${format(vwap1h)}` : '🔹 Indisp.';
-  const rsi1hEmoji = rsi1h < 50 ? '🟢' : rsi1h > 70 ? '🔴' : '';
-  let lsrSymbol = '🔘 Consol.';
-  let lsrText = lsr.value !== null ? `${lsr.value.toFixed(2)} (${lsr.percentChange}%)` : '🔹 Indisp.';
-  if (lsr.value !== null) {
-    if (lsr.value <= 1.4) lsrSymbol = '✅ Baixo';
-    else if (lsr.value >= 2.8) lsrSymbol = '📛 Alto';
-  }
-  let fundingRateEmoji = '';
-  let fundingRateText = '🔹 Indisp.';
-  if (fundingRate.current !== null) {
-    if (fundingRate.current <= -0.002) fundingRateEmoji = '🟢🟢🟢';
-    else if (fundingRate.current <= -0.001) fundingRateEmoji = '🟢🟢';
-    else if (fundingRate.current <= -0.0005) fundingRateEmoji = '🟢';
-    else if (fundingRate.current >= 0.001) fundingRateEmoji = '🔴🔴🔴';
-    else if (fundingRate.current >= 0.0003) fundingRateEmoji = '🔴🔴';
-    else if (fundingRate.current >= 0.0002) fundingRateEmoji = '🔴';
-    else fundingRateEmoji = '🟢';
-    fundingRateText = `${fundingRateEmoji} ${(fundingRate.current * 100).toFixed(5)}% ${fundingRate.isRising ? '⬆️' : '⬇️'}`;
-  }
-  const oi5mText = oi5m ? `${oi5m.isRising ? '📈' : '📉'} OI 5m: ${oi5m.percentChange}%` : '🔹 Indisp.';
-  const oi15mText = oi15m ? `${oi15m.isRising ? '📈' : '📉'} OI 15m: ${oi15m.percentChange}%` : '🔹 Indisp.';
-  const trendText = trendLine ? `${trendLine.type === 'uptrend' ? '✅ Alta' : '🔴 Baixa'}: $${format(trendLine.value)} (${trendLine.touches} toques)` : '🔹 Indisp.';
-  let alertText = '';
-  if (rsi1h < 55 && state.lastSignals[symbol] !== 'COMPRA' && oi5m.isRising && price > vwap15m) {
-    alertText = `💹 *Ind.CCI - Analisar COMPRA💥: ${symbol}*\n` +
-                `- *Preço Atual*: $${format(price)}\n` +
-                `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
-                `- *Bullish acima de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
-                `- *Trend*: ${trendText}\n` +
-                `- *LSR*: ${lsrText} ${lsrSymbol}\n` +
-                `- *Fund. Rate*: ${fundingRateText}\n` +
-                `- *OI 5m*: ${oi5mText}\n` +
-                `- *OI 15m*: ${oi15mText}\n` +
-                `- *VWAP 15m*: ${vwap15mText}\n` +
-                `- *VWAP 1h*: ${vwap1hText}\n` +
-                `- *🟰Resistência*: $${format(resistance)}\n` +
-                `- *➖Suporte*: $${format(support)}\n` +
-                ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz`;
-    state.lastSignals[symbol] = 'COMPRA';
-    logger.info(`Sinal de COMPRA enviado para ${symbol} (RSI subindo, volume anormal, volatilidade mínima, OI 5m subindo, preço acima do VWAP 15m)`);
-  } else if (rsi1h > 68 && state.lastSignals[symbol] !== 'VENDA' && !oi5m.isRising && price < vwap15m) {
-    alertText = `🔻 *Ind.CCI - Analisar CORREÇÃO💥: ${symbol}*\n` +
-                `- *Preço Atual*: $${format(price)}\n` +
-                `- ${rsi1hEmoji} *RSI (1h)*: ${rsi1h.toFixed(2)}\n` +
-                `- *Bearish abaixo de*: ${ema34Value ? format(ema34Value) : 'N/A'}\n` +
-                `- *Trend*: ${trendText}\n` +
-                `- *LSR*: ${lsrText} ${lsrSymbol}\n` +
-                `- *Fund. Rate*: ${fundingRateText}\n` +
-                `- *OI 5m*: ${oi5mText}\n` +
-                `- *OI 15m*: ${oi15mText}\n` +
-                `- *VWAP 15m*: ${vwap15mText}\n` +
-                `- *VWAP 1h*: ${vwap1hText}\n` +
-                `- *🟰Resistência*: $${format(resistance)}\n` +
-                `- *➖Suporte*: $${format(support)}\n` +
-                ` ☑︎ Gerencie seu Risco -🤖 @J4Rviz`;
-    state.lastSignals[symbol] = 'VENDA';
-    logger.info(`Sinal de VENDA enviado para ${symbol} (RSI descendo, volume anormal, volatilidade mínima, OI 5m caindo, preço abaixo do VWAP 15m)`);
-  }
-  if (alertText) {
-    try {
-      await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, alertText, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      }));
-      logger.info(`Alerta de CCI Cross enviado para ${symbol}: ${alertText}`);
-    } catch (e) {
-      logger.error(`Erro ao enviar alerta CCI para ${symbol}: ${e.message}`);
-    }
-  }
-}
-
-// ================= MONITORAMENTO ================= //
-async function monitorRompimentoEstrutura() {
-  try {
-    if (!state.isConnected) {
-      await checkConnection();
-      if (!state.isConnected) return;
-    }
-    await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
-      const symbolWithSlash = symbol.replace('USDT', '/USDT');
-      const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(51, config.EMA_34_LENGTH, config.VWAP_PERIOD)));
-      const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '4h', undefined, 20));
-      const ohlcvDiarioRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1d', undefined, 20));
-      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, config.VWAP_PERIOD));
-      setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
-      setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
-      setCachedData(`${cacheKeyPrefix}_1d`, ohlcvDiarioRaw);
-      setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
-      if (!ohlcv15mRaw || !ohlcv4hRaw || !ohlcvDiarioRaw || !ohlcv1hRaw) {
-        logger.warn(`Dados OHLCV insuficientes para ${symbol}, pulando...`);
-        return;
-      }
-      const ohlcv15m = normalizeOHLCV(ohlcv15mRaw);
-      const ohlcv4h = normalizeOHLCV(ohlcv4hRaw);
-      const ohlcvDiario = normalizeOHLCV(ohlcvDiarioRaw);
-      const closes15m = ohlcv15m.map(c => c.close).filter(c => !isNaN(c));
-      const currentPrice = closes15m[closes15m.length - 1];
-      if (isNaN(currentPrice)) {
-        logger.warn(`Preço atual inválido para ${symbol}, pulando...`);
-        return;
-      }
-      const rsi1hValues = calculateRSI(ohlcv15m);
-      const zonas = detectarQuebraEstrutura(ohlcv15m);
-      const estocasticoD = calculateStochastic(ohlcvDiario, 5, 3, 3);
-      const estocastico4h = calculateStochastic(ohlcv4h, 5, 3, 3);
-      const lsr = await fetchLSR(symbolWithSlash);
-      const oi15m = await fetchOpenInterest(symbolWithSlash, '15m');
-      const fundingRate = await fetchFundingRate(symbolWithSlash);
-      if (!rsi1hValues.length) {
-        logger.warn(`Indicadores insuficientes para ${symbol}, pulando...`);
-        return;
-      }
-      await sendAlertRompimentoEstrutura15m(symbolWithSlash, currentPrice, zonas, ohlcv15m, rsi1hValues[rsi1hValues.length - 1], lsr, fundingRate, await calculateAggressiveDelta(symbolWithSlash), estocasticoD, estocastico4h, oi15m);
-    }, 5);
-  } catch (e) {
-    logger.error(`Erro ao processar condições de rompimento: ${e.message}`);
-    state.isConnected = false;
-    await reconnect();
-  }
-}
-
-async function monitorCCICrossovers() {
-  try {
-    if (!state.isConnected) {
-      await checkConnection();
-      if (!state.isConnected) return;
-    }
-    await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
-      const symbolWithSlash = symbol.replace('USDT', '/USDT');
-      const cacheKeyPrefix = `ohlcv_${symbol}`;
-      const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '15m', undefined, Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.EMA_9_LENGTH, config.VWAP_PERIOD)));
-      const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '1h', undefined, Math.max(config.RSI_PERIOD + 1, config.VWAP_PERIOD)));
-      const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbolWithSlash, '3m', undefined, config.VOLUME_LOOKBACK));
-      const tickerRaw = getCachedData(`ticker_${symbol}`) || await withRetry(() => exchangeSpot.fetchTicker(symbolWithSlash));
-      setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
-      setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
-      setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
-      setCachedData(`ticker_${symbol}`, tickerRaw);
-      if (!ohlcv15mRaw || ohlcv15mRaw.length < Math.max(config.CCI_LENGTH + config.EMA_LONG_LENGTH, config.SUPPORT_RESISTANCE_LENGTH, config.ATR_LENGTH, config.EMA_34_LENGTH, config.EMA_9_LENGTH, config.VWAP_PERIOD)) {
-        logger.warn(`Dados insuficientes para ${symbol} (15m)`);
-        return;
-      }
-      if (!ohlcv1hRaw || ohlcv1hRaw.length < Math.max(config.RSI_PERIOD, config.VWAP_PERIOD)) {
-        logger.warn(`Dados insuficientes para ${symbol} (1h)`);
-        return;
-      }
-      if (!ohlcv3mRaw || ohlcv3mRaw.length < config.VOLUME_LOOKBACK) {
-        logger.warn(`Dados insuficientes para ${symbol} (3m)`);
-        return;
-      }
-      if (!tickerRaw || tickerRaw.last === undefined) {
-        logger.warn(`Preço não disponível para ${symbol}`);
-        return;
-      }
-      const lsr = await fetchLSR(symbolWithSlash);
-      if (lsr.error) {
-        logger.warn(`Não foi possível obter LSR para ${symbol}: ${lsr.error}`);
-        return;
-      }
-      const fundingRate = await fetchFundingRate(symbolWithSlash);
-      const oi5m = await fetchOpenInterest(symbolWithSlash, '5m');
-      const oi15m = await fetchOpenInterest(symbolWithSlash, '15m');
-      const cci = calculateCCI(ohlcv15mRaw);
-      if (!cci || cci.length < 2) {
-        logger.warn(`CCI não calculado para ${symbol} (15m)`);
-        return;
-      }
-      const rsi15m = calculateRSI(ohlcv15mRaw);
-      const rsi1h = calculateRSI(ohlcv1hRaw);
-      if (!rsi15m || rsi15m.length < 2 || !rsi1h || rsi1h.length < 1) {
-        logger.warn(`RSI não calculado para ${symbol}`);
-        return;
-      }
-      const emaShort = calculateEMA(cci, config.EMA_SHORT_LENGTH);
-      const emaLong = calculateEMA(cci, config.EMA_LONG_LENGTH);
-      if (emaShort.length < 2 || emaLong.length < 2) {
-        logger.warn(`EMAs não calculadas para ${symbol}`);
-        return;
-      }
-      const ema9 = calculateEMA(ohlcv15mRaw.map(c => c[4]), config.EMA_9_LENGTH);
-      if (!ema9 || ema9.length < 1) {
-        logger.warn(`EMA de preço (9 períodos) não calculada para ${symbol}`);
-        return;
-      }
-      const { support, resistance } = calculateSupportResistance(ohlcv15mRaw);
-      const atr = calculateATR(ohlcv15mRaw);
-      if (!atr || atr.length < 1) {
-        logger.warn(`ATR não calculado para ${symbol} (15m)`);
-        return;
-      }
-      // Calcular linhas de tendência
-      const { pivotsHigh, pivotsLow } = detectPivots(ohlcv15mRaw);
-      const uptrendLine = calculateTrendLine(ohlcv15mRaw, pivotsLow, 'uptrend');
-      const downtrendLine = calculateTrendLine(ohlcv15mRaw, pivotsHigh, 'downtrend');
-      const isVolumeAnomaly = calculateVolumeAnomaly(ohlcv3mRaw);
-      const price = parseFloat(tickerRaw.last);
-      const atrValue = atr[atr.length - 1];
-      const isMinVolatility = atrValue / price >= config.MIN_VOLATILITY;
-      const emaShortCurrent = emaShort[emaShort.length - 1];
-      const emaShortPrevious = emaShort[emaShort.length - 2];
-      const emaLongCurrent = emaLong[emaLong.length - 1];
-      const emaLongPrevious = emaLong[emaLong.length - 2];
-      const rsi15mCurrent = rsi15m[rsi15m.length - 1];
-      const rsi15mPrevious = rsi15m[rsi15m.length - 2];
-      const ema9Current = ema9[ema9.length - 1];
-      const currentClose = ohlcv15mRaw[ohlcv15mRaw.length - 1][4];
-      const crossover = emaShortPrevious <= emaLongPrevious && emaShortCurrent > emaLongCurrent;
-      const crossunder = emaShortPrevious >= emaLongPrevious && emaShortCurrent < emaLongCurrent;
-      const rsiRising = rsi15mCurrent > rsi15mPrevious;
-      const rsiFalling = rsi15mCurrent < rsi15mPrevious;
-      // Adicionar condição de Trend Line
-      const isAboveUptrend = uptrendLine && price > uptrendLine.value;
-      const isBelowDowntrend = downtrendLine && price < downtrendLine.value;
-      if (crossover && rsiRising && isVolumeAnomaly && isMinVolatility && currentClose > ema9Current && isAboveUptrend) {
-        await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m, uptrendLine);
-      } else if (crossunder && rsiFalling && isVolumeAnomaly && isMinVolatility && currentClose < ema9Current && isBelowDowntrend) {
-        await sendAlertCCICross(symbolWithSlash, price, rsi15mCurrent, rsi1h[rsi1h.length - 1], lsr, fundingRate, support, resistance, atrValue, oi5m, oi15m, downtrendLine);
-      }
-    }, 5);
-  } catch (e) {
-    logger.error(`Erro ao processar condições de CCI: ${e.message}`);
-    state.isConnected = false;
-    await reconnect();
-  }
-}
-
-// ================= COMANDOS DO TELEGRAM ================= //
-bot.command('price', async (ctx) => {
-  const coin = ctx.match ? ctx.match.toUpperCase() + 'USDT' : null;
-  if (!coin) {
-    await ctx.reply('Uso: /price <símbolo> (ex: /price ENJ)');
+  if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = {};
+  if (!state.ultimoAlertaPorAtivo[symbol][timeframe]) state.ultimoAlertaPorAtivo[symbol][timeframe] = { historico: [] };
+  const ema55_3m = await fetchEMA55_3m(symbol);
+  if (ema55_3m === null) {
+    logger.warn(`EMA55 3m indisponível para ${symbol}`);
     return;
   }
-  const coinWithSlash = coin.replace('USDT', '/USDT');
-  try {
-    const ticker = await exchangeSpot.fetchTicker(coinWithSlash);
-    if (ticker && ticker.last !== undefined) {
-      await ctx.reply(`${coin}: $${ticker.last.toFixed(2)}`);
-      logger.info(`Consulta de preço para ${coin}`);
-    } else {
-      await ctx.reply(`❌ Par ${coin} não encontrado.`);
+  const { isBullish, isBearish } = divergence;
+  let direcao = '', tipo = '';
+  let lsrOk = false, rsiOk = false, volOk = false;
+  const adxStrong = (adx15m ?? 0) > 25 && (adx1h ?? 0) > 25;
+  const currentZ = volumeData.stdDev > 0 ? (volumeData.totalVolume - volumeData.avgVolume) / volumeData.stdDev : 0;
+  
+  if (isBullish) {
+    
+    rsiOk = rsi1hValue < 60;
+    // VolOk melhorado: z-score > threshold, multiplicador mínimo, buy > sell, última vela fechada também com z > 1, e vela atual verde
+    volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
+            volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
+            volumeData.buyVolume > volumeData.sellVolume &&
+            volumeData.lastClosedZ > 1.0 &&
+            volumeData.currentCandle.close > volumeData.currentCandle.open;
+    if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m) {
+      direcao = 'buy';
+      tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
     }
-  } catch (error) {
-    await ctx.reply(`❌ Erro ao obter preço para ${coin}: ${error.message}`);
-    logger.error(`Erro na consulta de preço para ${coin}: ${error.message}`);
+  } else if (isBearish) {
+    
+    rsiOk = rsi1hValue > 55;
+    // Similar para bearish, vela atual vermelha
+    volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
+            volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
+            volumeData.sellVolume > volumeData.buyVolume &&
+            volumeData.lastClosedZ > 1.0 &&
+            volumeData.currentCandle.close < volumeData.currentCandle.open;
+    if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m) {
+      direcao = 'sell';
+      tipo = adxStrong ? '🔴VENDA' : '♦️🤖IA Análise Bearish';
+    }
   }
-});
-
-// ================= INICIALIZAÇÃO DO BOT ================= //
-async function main() {
-  logger.info('Iniciando bot Titanium');
+  if (!direcao) return;
+  const historico = state.ultimoAlertaPorAtivo[symbol][timeframe].historico;
+  if (historico.some(h => h.direcao === direcao && agora - h.timestamp < config.TEMPO_COOLDOWN_MS)) return;
+  const format = v => isNaN(v) ? 'N/A' : (v < 1 ? v.toFixed(8) : v < 10 ? v.toFixed(6) : v < 100 ? v.toFixed(4) : v.toFixed(2));
+  const link = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=${timeframe.toUpperCase()}`;
+  const ohlcv50Raw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, 50)); // Mudado para futures
+  const ohlcv50 = normalizeOHLCV(ohlcv50Raw);
+  const highs = ohlcv50.map(c => c.high);
+  const lows = ohlcv50.map(c => c.low);
+  const resistance = Math.max(...highs);
+  const support = Math.min(...lows);
+  const dataHora = new Date().toLocaleString('pt-BR');
+  const lsrEmoji = lsr.value < 1 ? ' 🟢' : '';
+  const adx15mValue = adx15m ?? 'N/A';
+  const adx1hValue = adx1h ?? 'N/A';
+  const emoji15m = adx15m > 25 ? '🟢' : '🟡';
+  const emoji1h = adx1h > 25 ? '🟢' : '🟡';
+  const vwapEmoji = vwap1h !== null && price > vwap1h ? '🟢' : vwap1h !== null ? '🔴' : '';
+  let msg = `${tipo} - ${timeframe.toUpperCase()}\n\n` +
+            `${dataHora}\n\n` +
+            `Ativo: *#${symbol}* [- TV](${link})\n` +
+            `Preço Atual: ${format(price)}\n` +
+            `RSI ${timeframe}: ${rsiValue.toFixed(2)}\n` +
+            `RSI 1H: ${rsi1hValue.toFixed(2)}\n` +
+            `Force 15m: ${isNaN(adx15mValue) ? adx15mValue : adx15mValue.toFixed(2)} ${emoji15m}\n` +
+            `Force 1h: ${isNaN(adx1hValue) ? adx1hValue : adx1hValue.toFixed(2)} ${emoji1h}\n` +
+            `#LSR: ${lsr.value.toFixed(2)}${lsrEmoji}\n` +
+            `#VWAP 1H: ${vwap1h !== null ? format(vwap1h) : 'N/A'} ${vwapEmoji}\n` +
+            `#Suporte: ${format(support)}\n` +
+            `#Resistência: ${format(resistance)}\n` +
+            `#Vol: ${currentZ.toFixed(2)}\n`; // Adicionado para log
+  if (adxStrong) {
+    const inputATR = {
+      period: 14,
+      high: ohlcv50.map(c => c.high),
+      low: ohlcv50.map(c => c.low),
+      close: ohlcv50.map(c => c.close),
+    };
+    const atrResults = TechnicalIndicators.ATR.calculate(inputATR);
+    const atr = atrResults[atrResults.length - 1] ?? 0;
+    const volatilityOk = atr > 0 && (atr / price) >= 0.005; // <<< VOLATILIDADE MÍNIMA 0.5%
+    if (!volatilityOk) {
+      tipo = direcao === 'buy' ? '💹🤖IA Análise Bullish' : '♦️🤖IA Análise Bearish';
+    }
+    if (volatilityOk) {
+      const stop = direcao === 'buy' ? price - atr * 1 : price + atr * 1;
+      const targets = direcao === 'buy'
+        ? [price + atr * 1, price + atr * 2, price + atr * 3, price + atr * 4, resistance]
+        : [price - atr * 1, price - atr * 2, price - atr * 3, price - atr * 4, support];
+      msg += `\n⛔Stop: ${format(stop)}\n` +
+             `Alvo 1: ${format(targets[0])}\n` +
+             `Alvo 2: ${format(targets[1])}\n` +
+             `Alvo 3: ${format(targets[2])}\n` +
+             `Alvo 4: ${format(targets[3])}\n` +
+             `Alvo 5: ${format(targets[4])}\n`;
+    }
+  }
+  msg += `\n🤖 Titanium ALFA🌟 by @J4Rviz`;
+  historico.push({ direcao, timestamp: agora });
+  if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
   try {
-    await checkConnection();
-    const pairCount = config.PARES_MONITORADOS.length;
-    const pairsList = pairCount > 5 ? `${config.PARES_MONITORADOS.slice(0, 5).join(', ')} e mais ${pairCount - 5} pares` : config.PARES_MONITORADOS.join(', ');
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, `✅ *Titanium 7 Start*\nMonitorando ${pairCount} pares: ${pairsList}\nRompimentos e CCI Crossovers`, { parse_mode: 'Markdown' }));
-    await monitorRompimentoEstrutura();
-    await monitorCCICrossovers();
-    setInterval(monitorRompimentoEstrutura, config.INTERVALO_ALERTA_3M_MS);
-    setInterval(monitorCCICrossovers, config.INTERVALO_CCI_MS);
-    setInterval(checkConnection, config.RECONNECT_INTERVAL_MS);
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, msg, {
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    }));
+    logger.info(`Alerta enviado: ${symbol} ${timeframe} ${direcao}`);
   } catch (e) {
-    logger.error(`Erro ao iniciar bot: ${e.message}`);
-    state.isConnected = false;
-    await reconnect();
+    logger.error(`Erro envio: ${e.message}`);
   }
 }
-
-main().catch(e => logger.error(`Erro fatal: ${e.message}`));
-bot.start();
-logger.info('Bot Titanium está rodando...');
+async function fetchAndCalculateRSI(symbol, timeframe) {
+  const key = `ohlcv_${symbol}_${timeframe}`;
+  const raw = getCachedData(key) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, config.RSI_PERIOD + 30)); // Mudado para futures
+  if (!raw) return { ohlcv: null, rsiValue: null };
+  const ohlcv = normalizeOHLCV(raw);
+  setCachedData(key, raw);
+  if (ohlcv.length < config.RSI_PERIOD + 2) return { ohlcv: null, rsiValue: null };
+  const rsi = calculateRSI(ohlcv);
+  return { ohlcv, rsiValue: rsi[rsi.length - 1] || null };
+}
+// ================= LOOP PRINCIPAL ================= //
+async function checkConditions() {
+  if (!state.isOnline) return;
+  logger.info('Iniciando checkConditions com pares: ' + config.PARES_MONITORADOS.join(', '));
+  try {
+    await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
+      logger.info(`Verificando condições para ${symbol}...`);
+      const lsr = await fetchLSR(symbol);
+      const { rsiValue: rsi1h } = await fetchAndCalculateRSI(symbol, '1h');
+      if (rsi1h === null) {
+        logger.warn(`RSI 1h indisponível para ${symbol}`);
+        return;
+      }
+      const volume = await fetchVolumeData(symbol);
+      if (volume.avgVolume === null) {
+        logger.warn(`Volume indisponível para ${symbol}`);
+        return;
+      }
+      const adx15m = await fetchAndCalculateADX(symbol, '15m');
+      const adx1h = await fetchAndCalculateADX(symbol, '1h');
+      const vwap1h = await fetchVWAP1h(symbol);
+      for (const tf of config.TIMEFRAMES_MONITORADOS) {
+        const { ohlcv, rsiValue } = await fetchAndCalculateRSI(symbol, tf);
+        if (!ohlcv || rsiValue === null) continue;
+        const price = ohlcv[ohlcv.length - 1].close;
+        if (isNaN(price)) continue;
+        const rsiFull = calculateRSI(ohlcv);
+        const div = detectRSIDivergence(ohlcv, rsiFull, 30);
+        if (div.isBullish || div.isBearish) {
+          const rsi1hUse = tf === '1h' ? rsiValue : rsi1h;
+          await sendAlertRSIDivergence(symbol, tf, price, rsiValue, div, lsr, rsi1hUse, volume, adx15m, adx1h, vwap1h);
+        } else {
+          logger.info(`Nenhuma divergência em ${symbol} no ${tf}`);
+        }
+      }
+    }, 5);
+  } catch (e) {
+    logger.error(`Erro no loop: ${e.message}`);
+  }
+}
+// ================= INICIALIZAÇÃO CORRIGIDA ================= //
+async function main()
+  {
+  logger.info('Iniciando Titanium Max Profit...');
+  try {
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA🌟 start'));
+    logger.info('Mensagem de start enviada');
+    await checkConnection();
+  } catch (e) {
+    logger.error(`Falha crítica na inicialização: ${e.message}`);
+    process.exit(1);
+  }
+}
+// Inicia tudo
+main().catch(err => {
+  logger.error(`Erro fatal: ${err.message}`);
+  process.exit(1);
+});
