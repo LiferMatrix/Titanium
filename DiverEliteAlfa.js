@@ -22,8 +22,8 @@ const config = {
   LOG_RETENTION_DAYS: 2,
   RECONNECT_INTERVAL_MS: 10 * 1000,
   VOLUME_LOOKBACK: 13, // Aumentado para média mais robusta
-  VOLUME_Z_THRESHOLD: 1.85, // Limiar de z-score para detecção de pico
-  VOLUME_MULTIPLIER: 1.5, // Multiplicador mínimo sobre a média (ajustado)
+  VOLUME_Z_THRESHOLD: 2.3, // Limiar de z-score para detecção de pico
+  VOLUME_MULTIPLIER: 2, // Multiplicador mínimo sobre a média (ajustado)
 };
 // Logger
 const logger = winston.createLogger({
@@ -366,7 +366,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
     }
   } else if (isBearish) {
-    lsrOk = lsr.value > 2.8;
+    lsrOk = lsr.value > 2.7;
     rsiOk = rsi1hValue > 55;
     // Similar para bearish, vela atual vermelha
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
@@ -504,7 +504,7 @@ async function main()
   {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium #ALFA🌟 start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '#Titanium #ALFA🌟 start'));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
