@@ -18,8 +18,8 @@ const config = {
   RSI_PERIOD: 14,
   RSI_HIGH_THRESHOLD_1: 76, // Alerta de RSI alto (todos os timeframes)
   RSI_HIGH_THRESHOLD_2: 76, // Alerta de RSI extremo (5m, 15m, 1h)
-  RSI_LOW_THRESHOLD: 21, // Alerta de RSI baixo (todos os timeframes)
-  RSI_EXTREME_LOW_THRESHOLD: 21, // Alerta de RSI extremo baixo (5m, 15m, 1h)
+  RSI_LOW_THRESHOLD: 23, // Alerta de RSI baixo (todos os timeframes)
+  RSI_EXTREME_LOW_THRESHOLD: 23, // Alerta de RSI extremo baixo (5m, 15m, 1h)
   CACHE_TTL: 2 * 60 * 1000, // 2 minutos para cache
   MAX_CACHE_SIZE: 50, // Reduzido para 50 entradas
   MAX_HISTORICO_ALERTAS: 10,
@@ -491,7 +491,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
   const direcaoD = getSetaDirecao(stoch1d ? stoch1d.k : null, stoch1dPrevious ? stoch1dPrevious.k : null);
 
   // Montar texto do alerta sem volume anormal
-  alertText = `💠 RSI Indicator \n` +
+  alertText = `🤖IA Análise Momentum \n` +
               `🔘Ativo: $${symbolWithoutSlash}\n` +
               `💲Preço: ${format(price)}\n` +
               `${alertType}\n` +
@@ -507,7 +507,7 @@ async function sendAlertRSI(symbol, price, rsi5m, rsi15m, rsi1h, rsi4h, rsi1d, l
               `🟰Suporte : ${supportText}\n` +
               `🟰Resistência : ${resistanceText}\n` +
               `➖VWAP (1h): ${vwapText}\n` +
-              `☑︎ 🤖 Titanium  - @J4Rviz`;
+              `☑︎ Titanium  - @J4Rviz`;
 
   // Verificar se o alerta já foi enviado recentemente
   const nivelRompido = alertType;
