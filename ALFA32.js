@@ -551,7 +551,7 @@ async function checkConditions() {
           logger.info(`Nenhuma divergência em ${symbol} no ${tf}`);
         }
       }
-    }, 5);
+    }, 20);
   } catch (e) {
     logger.error(`Erro no loop: ${e.message}`);
   }
