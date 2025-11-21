@@ -3,7 +3,7 @@ const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs/promises');
 
-// ===================== CONFIGURAÇÕES =====================
+// ===================== CONFIG =====================
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
@@ -30,10 +30,10 @@ setInterval(async () => {
   try {
     await fs.writeFile(logFile, '', 'utf8');
     await logMessage('🧹 Logs limpos automaticamente.');
-  } catch (e) {}
+  } catch (e) { }
 }, 2 * 24 * 60 * 60 * 1000);
 
-// ===================== RECONEXÃO SEGURA =====================
+// ===================== RECONEXÃO =====================
 async function safeRequest(fn, retries = 5) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -45,16 +45,17 @@ async function safeRequest(fn, retries = 5) {
   return null;
 }
 
-// ===================== FUNÇÕES EXTRAS =====================
+// ===================== FUNÇÕES =====================
 
 // RSI
-function rsi(values, period) {
+function rsi(values, period = 14) {
   let gains = 0, losses = 0;
+
   for (let i = 1; i <= period; i++) {
     const diff = values[i] - values[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+    diff >= 0 ? gains += diff : losses -= diff;
   }
+
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
@@ -64,8 +65,8 @@ function rsi(values, period) {
     avgLoss = (avgLoss * (period - 1) + (diff < 0 ? -diff : 0)) / period;
   }
 
-  const rs = avgGain / (avgLoss || 1);
-  return 100 - 100 / (1 + rs);
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
 }
 
 // Estocástico 5-3-3
@@ -89,48 +90,41 @@ function stochastic(highs, lows, closes) {
   return { K: smoothedK, D: smoothedD };
 }
 
-// ===================== ANÁLISE RÁPIDA DO BTC =====================
+// ===================== ANÁLISE BTC =====================
 async function enviarAnaliseBTC() {
   try {
-    const [priceRes, k1hRes, k4hRes, depthRes, oiRes, lsrRes] = await Promise.all([
+    const [
+      priceRes, klines1hRes, klines4hRes, klines12hRes, klines1dRes,
+      depthRes, oiRes, lsrRes
+    ] = await Promise.all([
       axios.get('https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT'),
+
       axios.get('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&limit=200'),
       axios.get('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=200'),
+      axios.get('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=12h&limit=200'),
+      axios.get('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1d&limit=200'),
+
       axios.get('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000'),
       axios.get('https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=5m&limit=13'),
+
       axios.get('https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1')
     ]);
 
     const price = parseFloat(priceRes.data.price);
 
-    // LSR Ratio
-    const lsr = parseFloat(lsrRes.data[0].longShortRatio).toFixed(2);
+    // === RSI ===
+    const closes1h = klines1hRes.data.map(k => +k[4]);
+    const closes4h = klines4hRes.data.map(k => +k[4]);
 
-    // RSI 1H
-    const closes1h = k1hRes.data.map(k => parseFloat(k[4]));
-    const rsi1h = rsi(closes1h, 14).toFixed(1);
-    const rsi1hDir = closes1h.at(-1) > closes1h.at(-2) ? "⬆️" : "⬇️";
+    const rsi1h = rsi(closes1h).toFixed(1);
+    const rsi4h = rsi(closes4h).toFixed(1);
 
-    // RSI 4H
-    const closes4h = k4hRes.data.map(k => parseFloat(k[4]));
-    const rsi4h = rsi(closes4h, 14).toFixed(1);
-    const rsi4hDir = closes4h.at(-1) > closes4h.at(-2) ? "⬆️" : "⬇️";
-
-    // Estocástico 5-3-3
-    const highs = k1hRes.data.map(k => parseFloat(k[2]));
-    const lows = k1hRes.data.map(k => parseFloat(k[3]));
-    const closes = k1hRes.data.map(k => parseFloat(k[4]));
-    const stoch = stochastic(highs, lows, closes);
-
-    const kDir = stoch.K > stoch.D ? "⬆️" : "⬇️";
-    const dDir = stoch.D > stoch.K ? "⬆️" : "⬇️";
-
-    // EMAs
+    // === EMAs ===
     const ema = (arr, p) => {
       const k = 2 / (p + 1);
-      let val = arr[0];
-      for (let i = 1; i < arr.length; i++) val = arr[i] * k + val * (1 - k);
-      return val;
+      let v = arr[0];
+      for (let i = 1; i < arr.length; i++) v = arr[i] * k + v * (1 - k);
+      return v;
     };
 
     const ema13 = ema(closes1h, 13);
@@ -140,45 +134,88 @@ async function enviarAnaliseBTC() {
     const tendencia = ema13 > ema34 ? 'Alta' : 'Baixa';
     const pos55 = price > ema55 ? 'acima' : 'abaixo';
 
-    const oiAtual = parseFloat(oiRes.data.at(-1).sumOpenInterestValue) / 1e9;
-    const oiVar = (parseFloat(oiRes.data.at(-1).sumOpenInterestValue) - parseFloat(oiRes.data[0].sumOpenInterestValue)) / 1e6;
+    // === ESTOCASTICO 4H / 12H / DIARIO ===
+    function calcStoch(data) {
+      const highs = data.map(k => +k[2]);
+      const lows = data.map(k => +k[3]);
+      const closes = data.map(k => +k[4]);
+      return stochastic(highs, lows, closes);
+    }
 
-    const bids = depthRes.data.bids.filter(b => +b[0] >= price * 0.995).reduce((s, b) => s + +b[1], 0);
-    const asks = depthRes.data.asks.filter(a => +a[0] <= price * 1.005).reduce((s, a) => s + +a[1], 0);
+    // 4H
+    const st4 = calcStoch(klines4hRes.data);
+    const st4Prev = calcStoch(klines4hRes.data.slice(0, -1));
+    const k4 = st4.K, d4 = st4.D;
+    const k4_dir = k4 > st4Prev.K ? "↑" : "↓";
+    const d4_dir = d4 > st4Prev.D ? "↑" : "↓";
+
+    // 12H
+    const st12 = calcStoch(klines12hRes.data);
+    const st12Prev = calcStoch(klines12hRes.data.slice(0, -1));
+    const k12 = st12.K, d12 = st12.D;
+    const k12_dir = k12 > st12Prev.K ? "↑" : "↓";
+    const d12_dir = d12 > st12Prev.D ? "↑" : "↓";
+
+    // DIÁRIO
+    const stD = calcStoch(klines1dRes.data);
+    const stDPrev = calcStoch(klines1dRes.data.slice(0, -1));
+    const kD = stD.K, dD = stD.D;
+    const kD_dir = kD > stDPrev.K ? "↑" : "↓";
+    const dD_dir = dD > stDPrev.D ? "↑" : "↓";
+
+    // === LSR ===
+    const lsr = parseFloat(lsrRes.data[0].longShortRatio).toFixed(2);
+
+    // === Open Interest ===
+    const oiAtual = parseFloat(oiRes.data.at(-1).sumOpenInterestValue) / 1e9;
+    const oiVar = (parseFloat(oiRes.data.at(-1).sumOpenInterestValue) -
+                   parseFloat(oiRes.data[0].sumOpenInterestValue)) / 1e6;
 
     const dir = v => v > 0 ? 'Subiu' : v < 0 ? 'Caiu' : 'Estável';
 
-    const msg = ` *BTCUSDT - 🤖 IA Titanium* (${new Date().toLocaleString('pt-BR')})
+    // === Order Blocks ===
+    const bids = depthRes.data.bids
+      .filter(b => +b[0] >= price * 0.995)
+      .reduce((s, b) => s + +b[1], 0);
 
-💲 Preço Atual: $${price.toFixed(1)}
+    const asks = depthRes.data.asks
+      .filter(a => +a[0] <= price * 1.005)
+      .reduce((s, a) => s + +a[1], 0);
 
-📊 *LSR Ratio*: ${lsr}
+    // ===================== MENSAGEM =====================
+    const msg = `*BTCUSDT - 🤖 IA Titanium* (${new Date().toLocaleString('pt-BR')})
 
-📉 *RSI 1H*: ${rsi1h} ${rsi1hDir}
-📉 *RSI 4H*: ${rsi4h} ${rsi4hDir}
+💲 *Preço Atual:* $${price.toFixed(1)}
+📈 *Tendência 1H:* ${tendencia} (EMA13/34, ${pos55} da EMA55)
 
-📈 *Estocástico 5·3·3*  
-   • K: ${stoch.K.toFixed(1)} ${kDir}  
-   • D: ${stoch.D.toFixed(1)} ${dDir}
+📊 *RSI*
+• RSI 1H: *${rsi1h}*
+• RSI 4H: *${rsi4h}*
 
-📈 Tendência 1h: *${tendencia}* (EMA13/34, ${pos55} da EMA55)
+📊 *Stoch*
+4H — K: ${k4.toFixed(2)} ${k4_dir} | D: ${d4.toFixed(2)} ${d4_dir}
+12H — K: ${k12.toFixed(2)} ${k12_dir} | D: ${d12.toFixed(2)} ${d12_dir}
+Diário — K: ${kD.toFixed(2)} ${kD_dir} | D: ${dD.toFixed(2)} ${dD_dir}
 
-💰 Open Interest: $${oiAtual.toFixed(2)}B (${dir(oiVar)} ${Math.abs(oiVar).toFixed(0)}M)
+📊 *LSR Ratio:* ${lsr}
 
-🛡️ Order Blocks ±0.5%:
+💰 *Open Interest:* $${oiAtual.toFixed(2)}B (${dir(oiVar)} ${Math.abs(oiVar).toFixed(0)}M)
+
+🛡️ *Order Blocks ±0.5%:*
    ├ Bids: ${bids.toFixed(0)} BTC
    └ Asks: ${asks.toFixed(0)} BTC
 
 By @J4Rviz`;
 
-    await bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'Markdown' });
-    await logMessage('Análise BTC enviada');
+    await bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: "Markdown" });
+    await logMessage("Análise BTC enviada");
+
   } catch (err) {
-    await logMessage('Erro na análise BTC: ' + err.message);
+    await logMessage("Erro na análise BTC: " + err.message);
   }
 }
 
-// ===================== MONITORAMENTO DE LISTAGENS =====================
+// ===================== MONITOR DE LISTAGENS =====================
 const symbolsFile = 'initialSymbols.json';
 let initialSymbols = new Set();
 let isFirstRun = true;
@@ -188,7 +225,7 @@ async function loadInitialSymbols() {
     const data = await fs.readFile(symbolsFile, 'utf8');
     initialSymbols = new Set(JSON.parse(data));
     isFirstRun = false;
-    await logMessage(`Carregados ${initialSymbols.size} símbolos do histórico.`);
+    await logMessage(`Carregados ${initialSymbols.size} símbolos.`);
   } catch (err) {
     if (err.code !== 'ENOENT') console.error(err);
     isFirstRun = true;
@@ -196,7 +233,7 @@ async function loadInitialSymbols() {
 }
 
 async function saveInitialSymbols(symbols) {
-  await fs.writeFile(symbolsFile, JSON.stringify(Array.from(symbols)), 'utf8');
+  await fs.writeFile(symbolsFile, JSON.stringify([...symbols]), 'utf8');
 }
 
 async function getUsdtSymbols() {
@@ -220,12 +257,13 @@ async function checkListings() {
   }
 
   const novas = current.filter(s => !initialSymbols.has(s));
+
   if (novas.length > 0) {
     for (const symbol of novas) {
       const hora = new Date().toLocaleString('pt-BR');
       const msg = `⚠️ *NOVA LISTAGEM BINANCE FUTURES!*\n\n\`${symbol}\`\n\n⏰ ${hora}`;
       await bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'Markdown' });
-      await logMessage(`NOVA LISTAGEM: ${symbol}`);
+      await logMessage(`Nova listagem: ${symbol}`);
     }
   }
 
@@ -233,23 +271,18 @@ async function checkListings() {
   await saveInitialSymbols(initialSymbols);
 }
 
-// ===================== INÍCIO =====================
+// ===================== START =====================
 (async () => {
   await loadInitialSymbols();
-  await logMessage('🤖 Bot ');
+  await logMessage('🤖 Bot iniciado!');
 
-  // Análise BTC na inicialização
   await enviarAnaliseBTC();
-
-  // Análise BTC de hora em hora
   setInterval(enviarAnaliseBTC, 60 * 60 * 1000);
 
-  // Verifica listagens a cada 30s
   await checkListings();
   setInterval(checkListings, 30 * 1000);
 })();
 
-// Salvamento ao encerrar
 process.on('SIGINT', async () => {
   await saveInitialSymbols(initialSymbols);
   await logMessage('Bot encerrado.');
