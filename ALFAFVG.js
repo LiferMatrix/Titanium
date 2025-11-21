@@ -519,7 +519,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     }
   }
 
-  msg += `\nTitanium ALFA32 + FVG by @J4Rviz`;
+  msg += `\n🤖 Titanium ALFA by @J4Rviz`;
 
   historico.push({ direcao, timestamp: agora });
   if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
