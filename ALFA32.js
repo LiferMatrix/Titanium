@@ -410,7 +410,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
  
   if (isBullish) {
    
-    rsiOk = rsi1hValue < 60;
+    rsiOk = rsi1hValue < 55;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.buyVolume > volumeData.sellVolume &&
@@ -422,7 +422,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     }
   } else if (isBearish) {
    
-    rsiOk = rsi1hValue > 55;
+    rsiOk = rsi1hValue > 60;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.sellVolume > volumeData.buyVolume &&
