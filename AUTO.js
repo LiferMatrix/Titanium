@@ -183,7 +183,7 @@ async function enviarAnaliseBTC() {
       .reduce((s, a) => s + +a[1], 0);
 
     // ===================== MENSAGEM =====================
-    const msg = `*BTCUSDT - 🤖 IA Titanium* (${new Date().toLocaleString('pt-BR')})
+    const msg = `*👑#BTCUSDT - 🤖#IA Titanium* (${new Date().toLocaleString('pt-BR')})
 
 💲 *Preço Atual:* $${price.toFixed(1)}
 📈 *Tendência 1H:* ${tendencia} (EMA13/34, ${pos55} da EMA55)
