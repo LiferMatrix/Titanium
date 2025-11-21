@@ -461,7 +461,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close > volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m && fvg.hasBullish) {
       direcao = 'buy';
-      tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
+      tipo = adxStrong ? '🟢COMPRA' : '💹🤖#IA Análise Bullish';
     }
   } else if (isBearish) {
     lsrOk = lsr.value > 2.8;
@@ -473,7 +473,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close < volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m && fvg.hasBearish) {
       direcao = 'sell';
-      tipo = adxStrong ? '🔴VENDA' : '♦️🤖IA Análise Bearish';
+      tipo = adxStrong ? '🔴VENDA' : '♦️🤖#IA Análise Bearish';
     }
   }
   if (!direcao) return;
@@ -521,7 +521,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     const atr = atrResults[atrResults.length - 1] ?? 0;
     const volatilityOk = atr > 0 && (atr / price) >= 0.005; // <<< VOLATILIDADE MÍNIMA 0.5%
     if (!volatilityOk) {
-      tipo = direcao === 'buy' ? '💹🤖IA Análise Bullish' : '♦️🤖IA Análise Bearish';
+      tipo = direcao === 'buy' ? '💹🤖#IA Análise Bullish' : '♦️🤖#IA Análise Bearish';
     }
     if (volatilityOk) {
       const stop = direcao === 'buy' ? price - atr * 1 : price + atr * 1;
@@ -536,7 +536,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
              `Alvo 5: ${format(targets[4])}\n`;
     }
   }
-  msg += `\n🤖 Titanium ALFA🌟 by @J4Rviz`;
+  msg += `\n🤖 #Titanium ALFA by @J4Rviz`;
   historico.push({ direcao, timestamp: agora });
   if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
   try {
@@ -607,7 +607,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA32🌟 start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium #ALFA '));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
