@@ -202,10 +202,10 @@ Diário — K: ${kD.toFixed(2)} ${kD_dir} | D: ${dD.toFixed(2)} ${dD_dir}
 💰 *Open Interest:* $${oiAtual.toFixed(2)}B (${dir(oiVar)} ${Math.abs(oiVar).toFixed(0)}M)
 
 🛡️ *Order Blocks ±0.5%:*
-   ├ Bids: ${bids.toFixed(0)} BTC
-   └ Asks: ${asks.toFixed(0)} BTC
+   ├ Bids: ${bids.toFixed(0)} BTC Vendendo 
+   └ Asks: ${asks.toFixed(0)} BTC Comprando
 
-By @J4Rviz`;
+                                     By @J4Rviz`;
 
     await bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: "Markdown" });
     await logMessage("Análise BTC enviada");
