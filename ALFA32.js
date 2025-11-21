@@ -22,8 +22,8 @@ const config = {
   LOG_RETENTION_DAYS: 2,
   RECONNECT_INTERVAL_MS: 10 * 1000,
   VOLUME_LOOKBACK: 13,
-  VOLUME_Z_THRESHOLD: 1.8, // Limiar de z-score para detecção de pico antes 2.0
-  VOLUME_MULTIPLIER: 2.0, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
+  VOLUME_Z_THRESHOLD: 2.0, // Limiar de z-score para detecção de pico antes 2.0
+  VOLUME_MULTIPLIER: 2.3, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
   MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
 };
 // Logger
@@ -414,7 +414,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.buyVolume > volumeData.sellVolume &&
-            volumeData.lastClosedZ > 0.7 &&
+            volumeData.lastClosedZ > 1.0 &&
             volumeData.currentCandle.close > volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m) {
       direcao = 'buy';
@@ -426,7 +426,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.sellVolume > volumeData.buyVolume &&
-            volumeData.lastClosedZ > 0.7 &&
+            volumeData.lastClosedZ > 1.0 &&
             volumeData.currentCandle.close < volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m) {
       direcao = 'sell';
