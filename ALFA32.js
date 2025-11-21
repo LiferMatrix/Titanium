@@ -409,7 +409,8 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const currentZ = volumeData.stdDev > 0 ? (volumeData.totalVolume - volumeData.avgVolume) / volumeData.stdDev : 0;
  
   if (isBullish) {
-   
+    
+    lsrOk = lsr.value < 2.6;
     rsiOk = rsi1hValue < 55;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
@@ -421,7 +422,8 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
     }
   } else if (isBearish) {
-   
+    
+    lsrOk = lsr.value > 2.8;
     rsiOk = rsi1hValue > 60;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
