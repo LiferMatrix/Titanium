@@ -491,13 +491,12 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             `${dataHora}\n\n` +
             `Ativo: *#${symbol}* [- TV](${link})\n` +
             `Preço Atual: ${format(price)}\n` +
-            `FVG 3m: ${fvg.bullish ? 'BULLISH' : fvg.bearish ? 'BEARISH' : 'NENHUM'} (${fvgText})\n` +
             `RSI 1H: ${rsi1hValue.toFixed(2)}\n` +
             `#LSR: ${lsr.value.toFixed(2)}\n` +
             `#VWAP 1H: ${vwap1h !== null ? format(vwap1h) : 'N/A'}\n` +
             `#Suporte: ${format(support)}\n` +
             `#Resistência: ${format(resistance)}\n` +
-            `#Vol Z: ${currentZ.toFixed(2)}\n`;
+            `#Vol: ${currentZ.toFixed(2)}\n`;
 
   if (adxStrong) {
     const inputATR = { period: 14, high: ohlcv50.map(c => c.high), low: ohlcv50.map(c => c.low), close: ohlcv50.map(c => c.close) };
@@ -589,7 +588,7 @@ async function checkConditions() {
 async function main() {
   logger.info('Iniciando Titanium ALFA32 + FVG...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium Omega'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium Omega1'));
     await checkConnection();
   } catch (e) {
     logger.error(`Falha crítica: ${e.message}`);
