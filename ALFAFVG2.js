@@ -6,7 +6,6 @@ const winston = require('winston');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-
 // ================= CONFIGURAÇÃO ================= //
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
@@ -27,7 +26,6 @@ const config = {
   VOLUME_MULTIPLIER: 2.3, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
   MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
 };
-
 // Logger
 const logger = winston.createLogger({
   level: 'info',
@@ -40,7 +38,6 @@ const logger = winston.createLogger({
     new winston.transports.Console()
   ]
 });
-
 // Limpeza de logs antigos
 function cleanOldLogs() {
   const logPath = path.resolve(config.LOG_FILE);
@@ -59,19 +56,15 @@ function cleanOldLogs() {
 }
 cleanOldLogs();
 setInterval(cleanOldLogs, 24 * 60 * 60 * 1000);
-
 // Estado global
 const state = {
   ultimoAlertaPorAtivo: {},
   dataCache: new Map(),
   isOnline: false,
   reconnectTimer: null,
-  contadorCompra: 0,
-  contadorVenda: 0,
-  contadorAnalise: 0,
+  alertCounters: {}, // Novo: contadores por moeda e tipo { symbol: { analiseBullish: 0, analiseBearish: 0, compra: 0, venda: 0 } }
   lastResetDate: null
 };
-
 // Validação de env
 function validateEnv() {
   const required = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'COINS'];
@@ -83,7 +76,6 @@ function validateEnv() {
   }
 }
 validateEnv();
-
 // Inicialização
 const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
 const exchangeSpot = new ccxt.binance({
@@ -100,7 +92,6 @@ const exchangeFutures = new ccxt.binance({
   timeout: 30000,
   options: { defaultType: 'future', defaultSubType: 'linear' }
 });
-
 // ================= UTILITÁRIOS ================= //
 async function withRetry(fn, retries = 5, delayBase = 1000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -114,14 +105,12 @@ async function withRetry(fn, retries = 5, delayBase = 1000) {
     }
   }
 }
-
 function getCachedData(key) {
   const entry = state.dataCache.get(key);
   if (entry && Date.now() - entry.timestamp < config.CACHE_TTL) return entry.data;
   state.dataCache.delete(key);
   return null;
 }
-
 function setCachedData(key, data) {
   if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
     const oldest = state.dataCache.keys().next().value;
@@ -134,7 +123,6 @@ function setCachedData(key, data) {
     }
   }, config.CACHE_TTL + 1000);
 }
-
 async function limitConcurrency(items, fn, limit = 5) {
   logger.info(`Iniciando limitConcurrency com ${items.length} itens`);
   const results = [];
@@ -150,7 +138,6 @@ async function limitConcurrency(items, fn, limit = 5) {
   }
   return results;
 }
-
 // ================= RECONEXÃO ================= //
 async function checkConnection() {
   try {
@@ -178,7 +165,6 @@ async function checkConnection() {
     }
   }
 }
-
 let monitoringInterval = null;
 function startMonitoring() {
   if (monitoringInterval) return;
@@ -188,7 +174,6 @@ function startMonitoring() {
     checkConditions().catch(e => logger.error(`Erro no checkConditions interval: ${e.message}`));
   }, config.INTERVALO_VERIFICACAO_MS);
 }
-
 function stopMonitoring() {
   if (monitoringInterval) {
     clearInterval(monitoringInterval);
@@ -196,10 +181,8 @@ function stopMonitoring() {
     logger.warn('Monitoramento PAUSADO (sem internet)');
   }
 }
-
 // Verificação de conexão a cada 30s
 setInterval(checkConnection, 30 * 1000);
-
 // ================= INDICADORES ================= //
 async function fetchLSR(symbol) {
   const cacheKey = `lsr_${symbol}`;
@@ -232,7 +215,6 @@ async function fetchLSR(symbol) {
     return { value: 1.0, percentChange: '0.00' };
   }
 }
-
 function normalizeOHLCV(data) {
   return data.map(c => ({
     time: c[0],
@@ -243,13 +225,11 @@ function normalizeOHLCV(data) {
     volume: Number(c[5])
   })).filter(c => !isNaN(c.close) && !isNaN(c.volume));
 }
-
 function calculateRSI(data) {
   if (!data || data.length < config.RSI_PERIOD + 1) return [];
   const closes = data.map(d => d.close).filter(c => !isNaN(c));
   return TechnicalIndicators.RSI.calculate({ period: config.RSI_PERIOD, values: closes });
 }
-
 function detectRSIDivergence(ohlcv, rsiValues, lookback = 30) { // Ideal
   if (!ohlcv || !rsiValues || ohlcv.length < lookback) return { isBullish: false, isBearish: false };
   const price = ohlcv.slice(-lookback);
@@ -280,7 +260,6 @@ function detectRSIDivergence(ohlcv, rsiValues, lookback = 30) { // Ideal
   }
   return { isBullish, isBearish };
 }
-
 async function fetchVolumeData(symbol) {
   try {
     const ohlcvRaw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, config.VOLUME_LOOKBACK + 1));
@@ -319,7 +298,6 @@ async function fetchVolumeData(symbol) {
     return { avgVolume: null, stdDev: null };
   }
 }
-
 async function fetchAndCalculateADX(symbol, timeframe, period = 14) {
   const key = `ohlcv_adx_${symbol}_${timeframe}`;
   const raw = getCachedData(key) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, period * 2));
@@ -336,7 +314,6 @@ async function fetchAndCalculateADX(symbol, timeframe, period = 14) {
   const adxResults = TechnicalIndicators.ADX.calculate(input);
   return adxResults[adxResults.length - 1]?.adx ?? null;
 }
-
 async function fetchAndCalculateStochastic(symbol, timeframe) {
   const stoKPeriod = 5;
   const stoSlow = 3;
@@ -376,7 +353,6 @@ async function fetchAndCalculateStochastic(symbol, timeframe) {
   const direction = prevK !== undefined ? (lastK > prevK ? '↑' : (lastK < prevK ? '↓' : '→')) : '';
   return { k: lastK, d: lastD, direction };
 }
-
 // ================= VWAP (mantido, mudado para futures) ================= //
 async function fetchVWAP1h(symbol) {
   const cacheKey = `vwap1h_${symbol}`;
@@ -400,7 +376,6 @@ async function fetchVWAP1h(symbol) {
     return null;
   }
 }
-
 async function fetchEMA55_3m(symbol) {
   const cacheKey = `ema55_3m_${symbol}`;
   const cached = getCachedData(cacheKey);
@@ -419,7 +394,6 @@ async function fetchEMA55_3m(symbol) {
     return null;
   }
 }
-
 async function detectRecentFVG(symbol) {
   try {
     const raw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, '3m', undefined, 20));
@@ -439,40 +413,23 @@ async function detectRecentFVG(symbol) {
     return { hasBullish: false, hasBearish: false };
   }
 }
-
-// Função para resetar contadores
+// ================= RESET DIÁRIO DOS CONTADORES ================= //
 function resetCounters() {
-  state.contadorCompra = 0;
-  state.contadorVenda = 0;
-  state.contadorAnalise = 0;
-  logger.info('Contadores resetados às 21:00 BRT');
-}
-
-// Verificação de reset diário às 21:00 BRT
-setInterval(() => {
   const now = new Date();
-  const options = {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  };
-  const currentDate = now.toLocaleDateString('pt-BR', options);
-  const timeOptions = {
-    timeZone: 'America/Sao_Paulo',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  };
-  const currentTimeStr = now.toLocaleTimeString('pt-BR', timeOptions).replace(/:/g, '');
-  const currentTime = parseInt(currentTimeStr);
-  if (currentTime >= 210000 && state.lastResetDate !== currentDate) {
-    resetCounters();
-    state.lastResetDate = currentDate;
+  const currentHour = now.getUTCHours(); // Assumindo UTC, ajuste se necessário
+  const currentMinute = now.getUTCMinutes();
+  if (currentHour === 21 && currentMinute === 0) {
+    const today = now.toISOString().split('T')[0];
+    if (state.lastResetDate !== today) {
+      state.alertCounters = {};
+      state.lastResetDate = today;
+      logger.info('Contadores de alertas resetados às 21:00');
+    }
   }
-}, 60 * 1000); // Verifica a cada minuto
-
-// ================= ALERTA (com filtro volatilidade mínima) ================= //
+}
+// Verifica reset a cada minuto
+setInterval(resetCounters, 60 * 1000);
+// ================= ALERTA (com filtro volatilidade mínima e contadores) ================= //
 async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, divergence, lsr, rsi1hValue, volumeData, adx15m, adx1h, vwap1h, fvg) {
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = {};
@@ -515,6 +472,35 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   if (!direcao) return;
   const historico = state.ultimoAlertaPorAtivo[symbol][timeframe].historico;
   if (historico.some(h => h.direcao === direcao && agora - h.timestamp < config.TEMPO_COOLDOWN_MS)) return;
+  // Inicializa contadores se necessário
+  if (!state.alertCounters[symbol]) {
+    state.alertCounters[symbol] = {
+      analiseBullish: 0,
+      analiseBearish: 0,
+      compra: 0,
+      venda: 0
+    };
+  }
+  // Incrementa o contador apropriado
+  let counter = 0;
+  let counterType = '';
+  if (tipo === '🟢COMPRA') {
+    counterType = 'compra';
+    state.alertCounters[symbol].compra += 1;
+    counter = state.alertCounters[symbol].compra;
+  } else if (tipo === '🔴VENDA') {
+    counterType = 'venda';
+    state.alertCounters[symbol].venda += 1;
+    counter = state.alertCounters[symbol].venda;
+  } else if (tipo === '💹🤖#IA Análise Bullish') {
+    counterType = 'analiseBullish';
+    state.alertCounters[symbol].analiseBullish += 1;
+    counter = state.alertCounters[symbol].analiseBullish;
+  } else if (tipo === '♦️🤖#IA Análise Bearish') {
+    counterType = 'analiseBearish';
+    state.alertCounters[symbol].analiseBearish += 1;
+    counter = state.alertCounters[symbol].analiseBearish;
+  }
   const format = v => isNaN(v) ? 'N/A' : (v < 1 ? v.toFixed(8) : v < 10 ? v.toFixed(6) : v < 100 ? v.toFixed(4) : v.toFixed(2));
   const link = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=${timeframe.toUpperCase()}`;
   const ohlcv50Raw = await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, 50)); // Mudado para futures
@@ -532,19 +518,8 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const vwapEmoji = vwap1h !== null && price > vwap1h ? '🟢' : vwap1h !== null ? '🔴' : '';
   const sto4h = await fetchAndCalculateStochastic(symbol, '4h');
   const stoDaily = await fetchAndCalculateStochastic(symbol, '1d');
-  let contador;
-  if (tipo === '🟢COMPRA') {
-    state.contadorCompra++;
-    contador = state.contadorCompra;
-  } else if (tipo === '🔴VENDA') {
-    state.contadorVenda++;
-    contador = state.contadorVenda;
-  } else {
-    state.contadorAnalise++;
-    contador = state.contadorAnalise;
-  }
-  let msg = `${tipo} - ${timeframe.toUpperCase()}\n\n` +
-            `${contador}ºAlerta - ${dataHora}\n\n` +
+  let msg = `${tipo} #${counter} - ${timeframe.toUpperCase()}\n\n` +
+            `${dataHora}\n\n` +
             `Ativo: *#${symbol}* [- TV](${link})\n` +
             `Preço Atual: ${format(price)}\n` +
             `RSI 1H: ${rsi1hValue.toFixed(2)}\n` +
@@ -568,7 +543,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     const atr = atrResults[atrResults.length - 1] ?? 0;
     const volatilityOk = atr > 0 && (atr / price) >= 0.005; // <<< VOLATILIDADE MÍNIMA 0.5%
     if (!volatilityOk) {
-      tipo = direcao === 'buy' ? '💹🤖IA Análise Bullish' : '♦️🤖IA Análise Bearish';
+      tipo = direcao === 'buy' ? '💹🤖#IA Análise Bullish' : '♦️🤖#IA Análise Bearish';
     }
     if (volatilityOk) {
       const stop = direcao === 'buy' ? price - atr * 1 : price + atr * 1;
@@ -583,7 +558,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
              `Alvo 5: ${format(targets[4])}\n`;
     }
   }
-  msg += `\n🤖 Titanium ALFA by @J4Rviz`;
+  msg += `\n🤖 #Titanium ALFA by @J4Rviz`;
   historico.push({ direcao, timestamp: agora });
   if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
   try {
@@ -591,12 +566,11 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       parse_mode: 'Markdown',
       disable_web_page_preview: true
     }));
-    logger.info(`Alerta enviado: ${symbol} ${timeframe} ${direcao}`);
+    logger.info(`Alerta enviado: ${symbol} ${timeframe} ${direcao} #${counter}`);
   } catch (e) {
     logger.error(`Erro envio: ${e.message}`);
   }
 }
-
 async function fetchAndCalculateRSI(symbol, timeframe) {
   const key = `ohlcv_${symbol}_${timeframe}`;
   const raw = getCachedData(key) || await withRetry(() => exchangeFutures.fetchOHLCV(symbol, timeframe, undefined, config.RSI_PERIOD + 30)); // Mudado para futures
@@ -607,7 +581,6 @@ async function fetchAndCalculateRSI(symbol, timeframe) {
   const rsi = calculateRSI(ohlcv);
   return { ohlcv, rsiValue: rsi[rsi.length - 1] || null };
 }
-
 // ================= LOOP PRINCIPAL ================= //
 async function checkConditions() {
   if (!state.isOnline) return;
@@ -649,20 +622,20 @@ async function checkConditions() {
     logger.error(`Erro no loop: ${e.message}`);
   }
 }
-
 // ================= INICIALIZAÇÃO CORRIGIDA ================= //
 async function main() {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium #ALFA2 '));
     logger.info('Mensagem de start enviada');
     await checkConnection();
+    // Inicializa reset
+    resetCounters();
   } catch (e) {
     logger.error(`Falha crítica na inicialização: ${e.message}`);
     process.exit(1);
   }
 }
-
 // Inicia tudo
 main().catch(err => {
   logger.error(`Erro fatal: ${err.message}`);
