@@ -62,8 +62,8 @@ function calculateStochastic(klines) {
   return {
     k: kLine.toFixed(2),
     d: dLine.toFixed(2),
-    kDir: kLine > prevK ? 'Up' : kLine < prevK ? 'Down' : 'Right',
-    dDir: dLine > prevD ? 'Up' : dLine < prevD ? 'Down' : 'Right'
+    kDir: kLine > prevK ? '⬆︎' : kLine < prevK ? '⬇︎' : '➡︎',
+    dDir: dLine > prevD ? '⬆︎' : dLine < prevD ? '⬇︎' : '➡︎'
   };
 }
 
@@ -141,7 +141,7 @@ Movimento: ${(Math.abs(price - emaLevel)/emaLevel*100).toFixed(2)}%
 
 ${direction === 'UP' ? 'COMPRA AGRESSIVA!' : 'CUIDADO COM LONGS / POSSÍVEL SHORT'}
 
-By @J4Rviz — Titanium Elite 2025
+By @J4Rviz — Titanium 
   `.trim();
 
   await bot.sendMessage(TELEGRAM_CHAT_ID, msg, {parse_mode: 'Markdown'});
@@ -188,8 +188,8 @@ async function enviarAnaliseBTC() {
     const ema13_15m = ema(c15m,13), ema34_15m = ema(c15m,34), ema55_15m = ema(c15m,55);
     const ema55_3m = ema(c3m,55);
 
-    const tendencia1h = ema13_1h > ema34_1h ? 'Alta' : 'Baixa';
-    const tendencia15m = ema13_15m > ema34_15m ? 'Alta' : 'Baixa';
+    const tendencia1h = ema13_1h > ema34_1h ? '⬆︎' : '⬇︎';
+    const tendencia15m = ema13_15m > ema34_15m ? '⬆︎' : '⬇︎';
 
     adx15m = calculateADX(k15m.data.map(k=>parseFloat(k[2])), k15m.data.map(k=>parseFloat(k[3])), c15m);
     adx1h = calculateADX(k1h.data.map(k=>parseFloat(k[2])), k1h.data.map(k=>parseFloat(k[3])), c1h);
@@ -220,7 +220,7 @@ async function enviarAnaliseBTC() {
 
     const oiAtual = (parseFloat(oiRes.data.at(-1).sumOpenInterestValue)/1e9).toFixed(2);
     const oiVar = (parseFloat(oiRes.data.at(-1).sumOpenInterestValue) - parseFloat(oiRes.data[0].sumOpenInterestValue))/1e6;
-    const dirOI = oiVar > 0 ? 'Subiu' : 'Caiu';
+    const dirOI = oiVar > 0 ? '⬆︎' : '⬇︎';
 
     const bids = depthRes.data.bids.filter(b=>parseFloat(b[0]) >= price*0.99);
     const asks = depthRes.data.asks.filter(a=>parseFloat(a[0]) <= price*1.01);
@@ -236,7 +236,7 @@ async function enviarAnaliseBTC() {
     const lsr = lsrRes.data[0] ? parseFloat(lsrRes.data[0].longShortRatio).toFixed(2) : 'N/A';
     const price1hAgo = price1hAgoRes.data[0] ? parseFloat(price1hAgoRes.data[0][4]) : price;
     const change1h = ((price - price1hAgo)/price1hAgo*100).toFixed(2);
-    const dir1h = change1h > 0 ? 'Subiu' : 'Caiu';
+    const dir1h = change1h > 0 ? '⬆︎' : '⬇︎';
 
     const support = Math.min(...l1h.slice(-50)).toFixed(1);
     const resistance = Math.max(...h1h.slice(-50)).toFixed(1);
@@ -248,9 +248,9 @@ async function enviarAnaliseBTC() {
 *Tendência:* 1h → ${tendencia1h} | 15m → ${tendencia15m}
 
 *EMA55*
-├ 3m:  $${ema55_3m.toFixed(1)} ${price > ema55_3m ? 'Up acima' : 'Down abaixo'}
-├ 15m: $${ema55_15m.toFixed(1)} ${price > ema55_15m ? 'Up acima' : 'Down abaixo'}
-└ 1h:  $${ema55_1h.toFixed(1)} ${price > ema55_1h ? 'Up acima' : 'Down abaixo'}
+├ 3m:  $${ema55_3m.toFixed(1)} ${price > ema55_3m ? '⬆︎' : '⬇︎'}
+├ 15m: $${ema55_15m.toFixed(1)} ${price > ema55_15m ? '⬆︎' : '⬇︎'}
+└ 1h:  $${ema55_1h.toFixed(1)} ${price > ema55_1h ? '⬆︎' : '⬇︎'}
 
 *ADX* → 15m: ${adx15m} | 1h: ${adx1h}
 
