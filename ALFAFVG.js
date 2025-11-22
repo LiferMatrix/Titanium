@@ -24,7 +24,7 @@ const config = {
   RECONNECT_INTERVAL_MS: 10 * 1000,
   VOLUME_LOOKBACK: 13,
   VOLUME_Z_THRESHOLD: 2.5, // Limiar de z-score para detecção de pico antes 2.0
-  VOLUME_MULTIPLIER: 2.3, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
+  VOLUME_MULTIPLIER: 2.5, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
   MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
 };
 
@@ -452,7 +452,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const adxStrong = (adx15m ?? 0) > 25 && (adx1h ?? 0) > 25;
   const currentZ = volumeData.stdDev > 0 ? (volumeData.totalVolume - volumeData.avgVolume) / volumeData.stdDev : 0;
   if (isBullish) {
-    lsrOk = lsr.value < 2.6;
+    //lsrOk = lsr.value < 2.6;
     rsiOk = rsi1hValue < 55;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
@@ -464,7 +464,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       tipo = adxStrong ? '🟢COMPRA' : '💹🤖#IA Análise Bullish';
     }
   } else if (isBearish) {
-    lsrOk = lsr.value > 2.8;
+    //lsrOk = lsr.value > 2.8;
     rsiOk = rsi1hValue > 60;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
