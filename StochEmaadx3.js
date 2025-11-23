@@ -442,9 +442,9 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
-         `${fundingRateText}\n` +
+         `Funding R.:${fundingRateText}\n` +
          `${vwap1hText} ${ema55Emoji}\n` +
-         `Stoch Diário: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
@@ -465,9 +465,9 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
-         `${fundingRateText}\n` +
+         `Funding R.:${fundingRateText}\n` +
          `${vwap1hText} ${ema55Emoji}\n` +
-         `Stoch Diário: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
