@@ -21,7 +21,7 @@ const config = {
   LOG_FILE: 'simple_trading_bot.log',
   LOG_RETENTION_DAYS: 2,
   RECONNECT_INTERVAL_MS: 10 * 1000,
-  VOLUME_LOOKBACK: 13,
+  VOLUME_LOOKBACK: 30,
   VOLUME_Z_THRESHOLD: 2.5, // Limiar de z-score para detecção de pico antes 2.0
   VOLUME_MULTIPLIER: 2.3, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
   MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
