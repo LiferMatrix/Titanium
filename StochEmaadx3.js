@@ -21,7 +21,7 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
   CACHE_TTL: 30 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 4000,
@@ -33,7 +33,7 @@ const config = {
   LOG_MAX_SIZE: '100m', // Tamanho máximo de cada arquivo de log
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
-  VOLUME_LOOKBACK: 21, // Período de lookback para calcular volume médio (candles de 3m)
+  VOLUME_LOOKBACK: 30, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 2.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
   MIN_ATR_PERCENT: 0.7, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
