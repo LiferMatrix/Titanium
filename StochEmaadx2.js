@@ -14,7 +14,7 @@ const config = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000, 
-  TEMPO_COOLDOWN_MS: 15 * 60 * 1000, 
+  TEMPO_COOLDOWN_MS: 30 * 60 * 1000, 
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -35,7 +35,7 @@ const config = {
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
   VOLUME_LOOKBACK: 21, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 2.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
-  MIN_ATR_PERCENT: 0.7, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
+  MIN_ATR_PERCENT: 0.8, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, // Mínimo ADX para considerar tendência forte nos alertas
 };
