@@ -13,15 +13,15 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
-  INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000, 
-  TEMPO_COOLDOWN_MS: 30 * 60 * 1000, 
+  INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000,
+  TEMPO_COOLDOWN_MS: 30 * 60 * 1000,
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
   STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.5, // Limite máximo de LSR para compra
+  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
   LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
   CACHE_TTL: 30 * 60 * 1000, // 10 minutos
   MAX_CACHE_SIZE: 4000,
@@ -33,9 +33,10 @@ const config = {
   LOG_MAX_SIZE: '100m', // Tamanho máximo de cada arquivo de log
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
-  VOLUME_LOOKBACK: 21, // Período de lookback para calcular volume médio (candles de 3m)
+  FVG_CACHE_TTL: 5 * 60 * 1000, // 5 minutos de cache pro FVG (perfeito)
+  VOLUME_LOOKBACK: 30, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 2.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
-  MIN_ATR_PERCENT: 0.8, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
+  MIN_ATR_PERCENT: 0.7, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, // Mínimo ADX para considerar tendência forte nos alertas
 };
@@ -145,20 +146,26 @@ function getCachedData(key) {
   state.dataCache.delete(key);
   return null;
 }
-function setCachedData(key, data) {
+function setCachedData(key, data, ttl = config.CACHE_TTL) {
+  // Remove o item mais antigo se o cache estiver cheio
   if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
     const oldestKey = state.dataCache.keys().next().value;
     state.dataCache.delete(oldestKey);
     logger.info(`Cache cheio, removido item mais antigo: ${oldestKey}`);
   }
+
+  // Salva o novo dado
   state.dataCache.set(key, { timestamp: Date.now(), data });
+
+  // Agenda a limpeza automática com TTL personalizado
   setTimeout(() => {
-    if (state.dataCache.has(key) && Date.now() - state.dataCache.get(key).timestamp >= config.CACHE_TTL) {
+    if (state.dataCache.has(key)) {
       state.dataCache.delete(key);
-      logger.info(`Cache limpo para ${key}`);
+      logger.info(`Cache expirado e removido: ${key}`);
     }
-  }, config.CACHE_TTL + 1000);
+  }, ttl + 1000);
 }
+
 async function limitConcurrency(items, fn, limit = 5) {
   const results = [];
   for (let i = 0; i < items.length; i += limit) {
@@ -351,6 +358,34 @@ async function fetchFundingRate(symbol) {
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   }
 }
+async function detectRecentFVG(symbol) {
+  const cacheKey = `fvg_${symbol}`;
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 20));
+    const ohlcv = normalizeOHLCV(raw);
+    let hasBullish = false, hasBearish = false;
+    const lookback = 10;
+
+    for (let i = ohlcv.length - 1; i >= ohlcv.length - lookback; i--) {
+      if (i < 2) break;
+      const c0 = ohlcv[i-2];
+      const c2 = ohlcv[i];
+
+      if (c2.low > c0.high) hasBullish = true;
+      if (c2.high < c0.low) hasBearish = true;
+    }
+
+    const result = { hasBullish, hasBearish };
+    setCachedData(cacheKey, result, config.FVG_CACHE_TTL);  // ← AQUI É O LUGAR CERTO
+    return result;
+  } catch (e) {
+    logger.error(`Erro FVG ${symbol}: ${e.message}`);
+    return { hasBullish: false, hasBearish: false };
+  }
+}
 // ================= FUNÇÕES DE ALERTAS ================= //
 function getStochasticEmoji(value) {
   if (!value && value !== 0) return "";
@@ -406,14 +441,14 @@ function calculateTargetsAndZones(data) {
     targetSell
   };
 }
-function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
+function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-  
+ 
   return `*🟢🤖 #IA Análise Bullish*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TradingView](${tradingViewLink})\n` +
+         `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
-         `Entrada/Retração: ${format(buyEntryLow)} - ${format(price)}\n` +
+         `Retração: ${format(buyEntryLow)} - ${format(price)}\n` +
          `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
          `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
          `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
@@ -423,23 +458,21 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
-         `${fundingRateText}\n` +
-         `${vwap1hText} ${ema55Emoji}\n` +
-         `Stoch Diário: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Funding R.:${fundingRateText}\n` +
+         `${vwap1hText} \n` +
+         `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
          `Titanium By @J4Rviz`;
 }
-
-function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
+function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-
   return `*🔴🤖 #IA Análise Bearish*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
-         `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TradingView](${tradingViewLink})\n` +
+         `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
-         `Correção/Retração: ${format(price)} - ${format(sellEntryHigh)}\n` +
+         `Retração: ${format(price)} - ${format(sellEntryHigh)}\n` +
          `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
          `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
          `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
@@ -448,17 +481,16 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
-         `${fundingRateText}\n` +
-         `${vwap1hText} ${ema55Emoji}\n` +
-         `Stoch Diário: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
+         `Funding R.:${fundingRateText}\n` +
+         `${vwap1hText} \n` +
+         `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
          `Titanium By @J4Rviz`;
 }
-
 async function sendAlertStochasticCross(symbol, data) {
-  const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx1h } = data;
+  const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx1h, fvg } = data;
   const agora = Date.now();
   if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
   if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
@@ -495,10 +527,10 @@ async function sendAlertStochasticCross(symbol, data) {
   const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-  let ema55Emoji = '';
   
-  
-  
+ 
+ 
+ 
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
   // Condições para compra
   const isBuySignal = estocastico4h && estocasticoD &&
@@ -511,7 +543,8 @@ async function sendAlertStochasticCross(symbol, data) {
                       ema55_3m !== null && price > ema55_3m &&
                       isAbnormalVol &&
                       (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
-                      isStrongTrend;
+                      isStrongTrend &&
+                      fvg.hasBullish;
   // Condições para venda
   const isSellSignal = estocastico4h && estocasticoD &&
                        estocastico4h.k < estocastico4h.d &&
@@ -523,7 +556,8 @@ async function sendAlertStochasticCross(symbol, data) {
                        ema55_3m !== null && price < ema55_3m &&
                        isAbnormalVol &&
                        (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
-                       isStrongTrend;
+                       isStrongTrend &&
+                       fvg.hasBearish;
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   if (isBuySignal) {
@@ -590,56 +624,49 @@ async function sendAlertStochasticCross(symbol, data) {
     }
   }
 }
-    async function checkConditions() {
+async function checkConditions() {
   try {
     // VERSÃO FINAL TURBO — 570 PARES EM MENOS DE 20 SEGUNDOS
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       try {
         const cacheKeyPrefix = `ohlcv_${symbol}`;
-
-        const ohlcv3mRaw  = getCachedData(`${cacheKeyPrefix}_3m`)  || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m',  undefined, 100));
+        const ohlcv3mRaw = getCachedData(`${cacheKeyPrefix}_3m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 100));
         const ohlcv15mRaw = getCachedData(`${cacheKeyPrefix}_15m`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 90));
-        const ohlcv4hRaw  = getCachedData(`${cacheKeyPrefix}_4h`)  || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h',  undefined, 50));
-        const ohlcv1hRaw  = getCachedData(`${cacheKeyPrefix}_1h`)  || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h',  undefined, 100));
-        const ohlcv1dRaw  = getCachedData(`${cacheKeyPrefix}_1d`)  || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1d',  undefined, 30));
-        const ohlcv1wRaw  = getCachedData(`${cacheKeyPrefix}_1w`)  || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1w',  undefined, 30));
-
-        setCachedData(`${cacheKeyPrefix}_3m`,  ohlcv3mRaw);
+        const ohlcv4hRaw = getCachedData(`${cacheKeyPrefix}_4h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '4h', undefined, 50));
+        const ohlcv1hRaw = getCachedData(`${cacheKeyPrefix}_1h`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, 100));
+        const ohlcv1dRaw = getCachedData(`${cacheKeyPrefix}_1d`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1d', undefined, 30));
+        const ohlcv1wRaw = getCachedData(`${cacheKeyPrefix}_1w`) || await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1w', undefined, 30));
+        setCachedData(`${cacheKeyPrefix}_3m`, ohlcv3mRaw);
         setCachedData(`${cacheKeyPrefix}_15m`, ohlcv15mRaw);
-        setCachedData(`${cacheKeyPrefix}_4h`,  ohlcv4hRaw);
-        setCachedData(`${cacheKeyPrefix}_1h`,  ohlcv1hRaw);
-        setCachedData(`${cacheKeyPrefix}_1d`,  ohlcv1dRaw);
-        setCachedData(`${cacheKeyPrefix}_1w`,  ohlcv1wRaw);
-
-        const ohlcv3m     = normalizeOHLCV(ohlcv3mRaw);
-        const ohlcv15m    = normalizeOHLCV(ohlcv15mRaw);
-        const ohlcv4h     = normalizeOHLCV(ohlcv4hRaw);
-        const ohlcv1h     = normalizeOHLCV(ohlcv1hRaw);
+        setCachedData(`${cacheKeyPrefix}_4h`, ohlcv4hRaw);
+        setCachedData(`${cacheKeyPrefix}_1h`, ohlcv1hRaw);
+        setCachedData(`${cacheKeyPrefix}_1d`, ohlcv1dRaw);
+        setCachedData(`${cacheKeyPrefix}_1w`, ohlcv1wRaw);
+        const ohlcv3m = normalizeOHLCV(ohlcv3mRaw);
+        const ohlcv15m = normalizeOHLCV(ohlcv15mRaw);
+        const ohlcv4h = normalizeOHLCV(ohlcv4hRaw);
+        const ohlcv1h = normalizeOHLCV(ohlcv1hRaw);
         const ohlcvDiario = normalizeOHLCV(ohlcv1dRaw);
         const ohlcvSemanal = normalizeOHLCV(ohlcv1wRaw);
-
         if (!ohlcv3m.length || !ohlcv15m.length || !ohlcv1h.length) return;
-
         const currentPrice = ohlcv15m[ohlcv15m.length - 1].close;
-
-        const rsi1hValues   = calculateRSI(ohlcv1h);
+        const rsi1hValues = calculateRSI(ohlcv1h);
         const estocastico4h = calculateStochastic(ohlcv4h);
-        const estocasticoD  = calculateStochastic(ohlcvDiario);
-        const lsr           = await fetchLSR(symbol);
-        const fundingRate   = await fetchFundingRate(symbol);
-        const atrValues     = calculateATR(ohlcv15m);
+        const estocasticoD = calculateStochastic(ohlcvDiario);
+        const lsr = await fetchLSR(symbol);
+        const fundingRate = await fetchFundingRate(symbol);
+        const atrValues = calculateATR(ohlcv15m);
         const ema13_3mValues = calculateEMA(ohlcv3m, 13);
         const ema34_3mValues = calculateEMA(ohlcv3m, 34);
         const ema55_3mValues = calculateEMA(ohlcv3m, 55);
-        const vwap1h        = calculateVWAP(ohlcv1h);
-        const adx1h         = calculateADX(ohlcv1h);
+        const vwap1h = calculateVWAP(ohlcv1h);
+        const adx1h = calculateADX(ohlcv1h);
         const isAbnormalVol = isAbnormalVolume(ohlcv3m);
-
+        const fvg = await detectRecentFVG(symbol);
         if (!rsi1hValues.length || !estocastico4h || !estocasticoD || !atrValues.length ||
             ema13_3mValues.length < 2 || !ema55_3mValues.length || adx1h === null) {
           return;
         }
-
         await sendAlertStochasticCross(symbol, {
           ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, ohlcvSemanal,
           price: currentPrice,
@@ -651,9 +678,8 @@ async function sendAlertStochasticCross(symbol, data) {
           ema55_3m: ema55_3mValues[ema55_3mValues.length - 1],
           ema13_3m_prev: ema13_3mValues[ema13_3mValues.length - 2],
           ema34_3m_prev: ema34_3mValues[ema34_3mValues.length - 2],
-          vwap1h, isAbnormalVol, adx1h
+          vwap1h, isAbnormalVol, adx1h, fvg
         });
-
       } catch (err) {
         if (err.message?.includes('-1122') || err.message?.includes('Invalid symbol')) {
           logger.warn(`Par ignorado (suspenso/inválido): ${symbol}`);
@@ -661,8 +687,7 @@ async function sendAlertStochasticCross(symbol, data) {
         }
         logger.error(`Erro inesperado no par ${symbol}: ${err.message}`);
       }
-    }, 30); 
-
+    }, 40);
   } catch (e) {
     logger.error(`Erro crítico em checkConditions: ${e.message}`);
   }
