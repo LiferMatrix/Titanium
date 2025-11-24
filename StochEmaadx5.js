@@ -15,6 +15,7 @@ const config = {
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 30 * 60 * 1000,
+  TEMPO_COOLDOWN_SAME_DIR_MS: 4 * 60 * 60 * 1000, // 4 horas para mesma direção
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -33,7 +34,6 @@ const config = {
   LOG_MAX_SIZE: '100m', // Tamanho máximo de cada arquivo de log
   LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
-  FVG_CACHE_TTL: 5 * 60 * 1000, // 5 minutos de cache pro FVG (perfeito)
   VOLUME_LOOKBACK: 30, // Período de lookback para calcular volume médio (candles de 3m)
   VOLUME_MULTIPLIER: 2.5, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
   MIN_ATR_PERCENT: 0.7, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
@@ -146,26 +146,20 @@ function getCachedData(key) {
   state.dataCache.delete(key);
   return null;
 }
-function setCachedData(key, data, ttl = config.CACHE_TTL) {
-  // Remove o item mais antigo se o cache estiver cheio
+function setCachedData(key, data) {
   if (state.dataCache.size >= config.MAX_CACHE_SIZE) {
     const oldestKey = state.dataCache.keys().next().value;
     state.dataCache.delete(oldestKey);
     logger.info(`Cache cheio, removido item mais antigo: ${oldestKey}`);
   }
-
-  // Salva o novo dado
   state.dataCache.set(key, { timestamp: Date.now(), data });
-
-  // Agenda a limpeza automática com TTL personalizado
   setTimeout(() => {
-    if (state.dataCache.has(key)) {
+    if (state.dataCache.has(key) && Date.now() - state.dataCache.get(key).timestamp >= config.CACHE_TTL) {
       state.dataCache.delete(key);
-      logger.info(`Cache expirado e removido: ${key}`);
+      logger.info(`Cache limpo para ${key}`);
     }
-  }, ttl + 1000);
+  }, config.CACHE_TTL + 1000);
 }
-
 async function limitConcurrency(items, fn, limit = 5) {
   const results = [];
   for (let i = 0; i < items.length; i += limit) {
@@ -358,42 +352,72 @@ async function fetchFundingRate(symbol) {
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   }
 }
-// FVG INSTITUCIONAL DE 3 CANDLES (MELHORADO)
-async function detectRecentFVG(symbol) {
-  const cacheKey = `fvg_${symbol}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
 
+// === DETECÇÃO DE FVG (Fair Value Gap) - VERSÃO TURBO (12 candles = 36 minutos) ===
+async function detectRecentFVG(symbol) {
   try {
-    const raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 30));
+    // Só 20 candles já é mais que suficiente (60 minutos de histórico)
+    // Mas vamos pegar só os últimos 15 para análise → velocidade máxima
+    const raw = await withRetry(() => 
+      exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 20)
+    );
     const ohlcv = normalizeOHLCV(raw);
+
+    // Se não tiver pelo menos 5 candles, nem perde tempo
     if (ohlcv.length < 5) return { hasBullish: false, hasBearish: false };
 
     let hasBullish = false;
     let hasBearish = false;
 
-    // Percorre as últimas 15 candles (evita falsos positivos muito antigos)
-    for (let i = ohlcv.length - 1; i >= 3; i--) {
-      const c0 = ohlcv[i - 2];  // candle mais antiga
-      const c1 = ohlcv[i - 1];  // candle do meio
-      const c2 = ohlcv[i];     // candle mais recente
+    // Analisa apenas os últimos 12 trios possíveis (36 minutos)
+    const maxLookback = Math.min(12, ohlcv.length - 2);
 
-      // FVG Bullish institucional: low do c2 > high do c0 (gap real)
-      if (c2.low > c0.high) {
-        hasBullish = true;
+    for (let i = ohlcv.length - 1; i >= ohlcv.length - maxLookback; i--) {
+      const candle1 = ohlcv[i - 2];  // candle antiga (impulso)
+      const candle2 = ohlcv[i - 1];  // candle do meio (gap)
+      const candle3 = ohlcv[i];     // candle atual (confirma gap)
+
+      // === BULLISH FVG (3 candles - ICT Style) ===
+      if (
+        candle3.open > candle1.high &&                     // abre acima do high anterior
+        candle1.close > candle1.open &&                    // candle1 foi de alta (impulso)
+        candle2.low > candle1.high &&                      // gap real: low da candle2 > high da candle1
+        candle2.high < candle3.low                                 // opcional: reforça que não foi preenchido ainda
+      ) {
+        // Verifica se já foi mitigado por algum candle depois
+        let mitigated = false;
+        for (let j = i + 1; j < ohlcv.length; j++) {
+          if (ohlcv[j].low <= candle1.high) {
+            mitigated = true;
+            break;
+          }
+        }
+        if (!mitigated) hasBullish = true;
       }
 
-      // FVG Bearish institucional: high do c2 < low do c0 (gap real)
-      if (c2.high < c0.low) {
-        hasBearish = true;
+      // === BEARISH FVG ===
+      if (
+        candle3.open < candle1.low &&
+        candle1.close < candle1.open &&
+        candle2.high < candle1.low &&
+        candle2.low > candle3.high
+      ) {
+        let mitigated = false;
+        for (let j = i + 1; j < ohlcv.length; j++) {
+          if (ohlcv[j].high >= candle1.low) {
+            mitigated = true;
+            break;
+          }
+        }
+        if (!mitigated) hasBearish = true;
       }
 
-      if (hasBullish && hasBearish) break; // já achou os dois, pode parar
+      // Se já achou os dois, sai imediatamente (economiza ciclos)
+      if (hasBullish && hasBearish) break;
     }
 
-    const result = { hasBullish, hasBearish };
-    setCachedData(cacheKey, result, config.FVG_CACHE_TTL);
-    return result;
+    return { hasBullish, hasBearish };
+
   } catch (e) {
     logger.error(`Erro FVG ${symbol}: ${e.message}`);
     return { hasBullish: false, hasBearish: false };
@@ -456,7 +480,6 @@ function calculateTargetsAndZones(data) {
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
- 
   return `*🟢🤖 #IA Análise Bullish*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -472,7 +495,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
          `Funding R.:${fundingRateText}\n` +
-         `${vwap1hText} \n` +
+         `${vwap1hText}\n` +
          `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
@@ -495,7 +518,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
          `Funding R.:${fundingRateText}\n` +
-         `${vwap1hText} \n` +
+         `${vwap1hText}\n` +
          `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
@@ -505,8 +528,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
 async function sendAlertStochasticCross(symbol, data) {
   const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx1h, fvg } = data;
   const agora = Date.now();
-  if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [] };
-  if (state.ultimoAlertaPorAtivo[symbol]['4h'] && agora - state.ultimoAlertaPorAtivo[symbol]['4h'] < config.TEMPO_COOLDOWN_MS) return;
+  if (!state.ultimoAlertaPorAtivo[symbol]) state.ultimoAlertaPorAtivo[symbol] = { historico: [], ultimoBuy: 0, ultimoSell: 0 };
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
   const { zonas, buyEntryLow, buyEntryMax, sellEntryHigh, sellEntryMin, targetBuyLong1, targetBuyLong2, targetBuyLong3, targetSellShort1, targetSellShort2, targetBuy, targetSell } = calculateTargetsAndZones(data);
@@ -540,10 +562,6 @@ async function sendAlertStochasticCross(symbol, data) {
   const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-  
- 
- 
- 
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
   // Condições para compra
   const isBuySignal = estocastico4h && estocasticoD &&
@@ -574,8 +592,11 @@ async function sendAlertStochasticCross(symbol, data) {
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   if (isBuySignal) {
+    const cooldown = state.ultimoAlertaPorAtivo[symbol].ultimoBuy && (agora - state.ultimoAlertaPorAtivo[symbol].ultimoBuy < config.TEMPO_COOLDOWN_SAME_DIR_MS)
+      ? config.TEMPO_COOLDOWN_SAME_DIR_MS
+      : config.TEMPO_COOLDOWN_MS;
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
-      r.direcao === 'buy' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
+      r.direcao === 'buy' && (agora - r.timestamp) < cooldown
     );
     if (!foiAlertado) {
       const direcao = 'buy';
@@ -593,15 +614,18 @@ async function sendAlertStochasticCross(symbol, data) {
       const targetLong2Pct = ((targetBuyLong2 - entry) / entry * 100).toFixed(2);
       const targetLong3Pct = ((targetBuyLong3 - entry) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h);
-      state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
+      alertText = buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h);
+      state.ultimoAlertaPorAtivo[symbol].ultimoBuy = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'buy', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
       logger.info(`Sinal de compra detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(buyEntryLow)}, Entrada Máxima=${format(buyEntryMax)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}, ADX 1h=${adx1h?.toFixed(2)}`);
     }
   } else if (isSellSignal) {
+    const cooldown = state.ultimoAlertaPorAtivo[symbol].ultimoSell && (agora - state.ultimoAlertaPorAtivo[symbol].ultimoSell < config.TEMPO_COOLDOWN_SAME_DIR_MS)
+      ? config.TEMPO_COOLDOWN_SAME_DIR_MS
+      : config.TEMPO_COOLDOWN_MS;
     const foiAlertado = state.ultimoAlertaPorAtivo[symbol].historico.some(r =>
-      r.direcao === 'sell' && (agora - r.timestamp) < config.TEMPO_COOLDOWN_MS
+      r.direcao === 'sell' && (agora - r.timestamp) < cooldown
     );
     if (!foiAlertado) {
       const direcao = 'sell';
@@ -618,8 +642,8 @@ async function sendAlertStochasticCross(symbol, data) {
       const targetShort1Pct = ((entry - targetSellShort1) / entry * 100).toFixed(2);
       const targetShort2Pct = ((entry - targetSellShort2) / entry * 100).toFixed(2);
       const classificacao = classificarRR(ratio);
-      alertText = buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h);
-      state.ultimoAlertaPorAtivo[symbol]['4h'] = agora;
+      alertText = buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h);
+      state.ultimoAlertaPorAtivo[symbol].ultimoSell = agora;
       state.ultimoAlertaPorAtivo[symbol].historico.push({ direcao: 'sell', timestamp: agora });
       state.ultimoAlertaPorAtivo[symbol].historico = state.ultimoAlertaPorAtivo[symbol].historico.slice(-config.MAX_HISTORICO_ALERTAS);
       logger.info(`Sinal de venda detectado para ${symbol}: Preço=${format(price)}, Entrada Ideal=${format(sellEntryHigh)}, Entrada Mínima=${format(sellEntryMin)}, Stoch 4h K=${estocastico4h.k}, D=${estocastico4h.d}, Stoch Diário K=${estocasticoD.k}, RSI 1h=${rsi1h.toFixed(2)}, LSR=${lsr.value ? lsr.value.toFixed(2) : 'N/A'}, VWAP 1h=${vwap1h ? format(vwap1h) : 'N/A'}, EMA 55 3m=${ema55_3m ? format(ema55_3m) : 'N/A'}, ADX 1h=${adx1h?.toFixed(2)}`);
@@ -718,7 +742,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs(); // Executar limpeza imediatamente na inicialização
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium Ômega by J4Rviz...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium by J4Rviz...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS); // Agendar limpeza a cada 2 dias
