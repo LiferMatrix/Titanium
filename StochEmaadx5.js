@@ -15,7 +15,7 @@ const config = {
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 30 * 60 * 1000,
-  TEMPO_COOLDOWN_SAME_DIR_MS: 60 * 60 * 1000, 
+  TEMPO_COOLDOWN_SAME_DIR_MS: 60 * 60 * 1000,
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -352,37 +352,31 @@ async function fetchFundingRate(symbol) {
     return getCachedData(cacheKey) || { current: null, isRising: false, percentChange: '0.00' };
   }
 }
-
 // === DETECÇÃO DE FVG (Fair Value Gap) - VERSÃO TURBO (12 candles = 36 minutos) ===
 async function detectRecentFVG(symbol) {
   try {
     // Só 20 candles já é mais que suficiente (60 minutos de histórico)
     // Mas vamos pegar só os últimos 15 para análise → velocidade máxima
-    const raw = await withRetry(() => 
-      exchangeSpot.fetchOHLCV(symbol, '3m', undefined, 20)
+    const raw = await withRetry(() =>
+      exchangeFutures.fetchOHLCV(symbol, '3m', undefined, 20)
     );
     const ohlcv = normalizeOHLCV(raw);
-
     // Se não tiver pelo menos 5 candles, nem perde tempo
     if (ohlcv.length < 5) return { hasBullish: false, hasBearish: false };
-
     let hasBullish = false;
     let hasBearish = false;
-
     // Analisa apenas os últimos 12 trios possíveis (36 minutos)
     const maxLookback = Math.min(12, ohlcv.length - 2);
-
     for (let i = ohlcv.length - 1; i >= ohlcv.length - maxLookback; i--) {
-      const candle1 = ohlcv[i - 2];  // candle antiga (impulso)
-      const candle2 = ohlcv[i - 1];  // candle do meio (gap)
-      const candle3 = ohlcv[i];     // candle atual (confirma gap)
-
+      const candle1 = ohlcv[i - 2]; // candle antiga (impulso)
+      const candle2 = ohlcv[i - 1]; // candle do meio (gap)
+      const candle3 = ohlcv[i]; // candle atual (confirma gap)
       // === BULLISH FVG (3 candles - ICT Style) ===
       if (
-        candle3.open > candle1.high &&                     // abre acima do high anterior
-        candle1.close > candle1.open &&                    // candle1 foi de alta (impulso)
-        candle2.low > candle1.high &&                      // gap real: low da candle2 > high da candle1
-        candle2.high < candle3.low                                 // opcional: reforça que não foi preenchido ainda
+        candle3.open > candle1.high && // abre acima do high anterior
+        candle1.close > candle1.open && // candle1 foi de alta (impulso)
+        candle2.low > candle1.high && // gap real: low da candle2 > high da candle1
+        candle2.high < candle3.low // opcional: reforça que não foi preenchido ainda
       ) {
         // Verifica se já foi mitigado por algum candle depois
         let mitigated = false;
@@ -394,7 +388,6 @@ async function detectRecentFVG(symbol) {
         }
         if (!mitigated) hasBullish = true;
       }
-
       // === BEARISH FVG ===
       if (
         candle3.open < candle1.low &&
@@ -411,13 +404,10 @@ async function detectRecentFVG(symbol) {
         }
         if (!mitigated) hasBearish = true;
       }
-
       // Se já achou os dois, sai imediatamente (economiza ciclos)
       if (hasBullish && hasBearish) break;
     }
-
     return { hasBullish, hasBearish };
-
   } catch (e) {
     logger.error(`Erro FVG ${symbol}: ${e.message}`);
     return { hasBullish: false, hasBearish: false };
@@ -563,6 +553,9 @@ async function sendAlertStochasticCross(symbol, data) {
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
+  const ema13_3m = data.ema13_3m;
+  const ema34_3m = data.ema34_3m;
+  const ema55_3m_prev = data.ema55_3mValues ? data.ema55_3mValues[data.ema55_3mValues.length - 2] : null;
   // Condições para compra
   const isBuySignal = estocastico4h && estocasticoD &&
                       estocastico4h.k > estocastico4h.d &&
@@ -571,6 +564,7 @@ async function sendAlertStochasticCross(symbol, data) {
                       rsi1h < 60 &&
                       (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       ema13_3m_prev > ema34_3m_prev &&
+                      ema34_3m_prev > ema55_3m_prev &&
                       ema55_3m !== null && price > ema55_3m &&
                       isAbnormalVol &&
                       (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
@@ -584,6 +578,7 @@ async function sendAlertStochasticCross(symbol, data) {
                        rsi1h > 60 &&
                        (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        ema13_3m_prev < ema34_3m_prev &&
+                       ema34_3m_prev < ema55_3m_prev &&
                        ema55_3m !== null && price < ema55_3m &&
                        isAbnormalVol &&
                        (data.atr / price > config.MIN_ATR_PERCENT / 100) &&
@@ -715,6 +710,7 @@ async function checkConditions() {
           ema55_3m: ema55_3mValues[ema55_3mValues.length - 1],
           ema13_3m_prev: ema13_3mValues[ema13_3mValues.length - 2],
           ema34_3m_prev: ema34_3mValues[ema34_3mValues.length - 2],
+          ema55_3mValues: ema55_3mValues,  // Adicionado para acessar prev
           vwap1h, isAbnormalVol, adx1h, fvg
         });
       } catch (err) {
