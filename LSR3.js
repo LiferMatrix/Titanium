@@ -1,7 +1,7 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
-const bot = new Telegraf('8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A');
+const bot = new Telegraf('7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A');
 
 async function getInfo(symbol) {
   const s = symbol.toUpperCase().trim();
