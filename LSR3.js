@@ -2,11 +2,11 @@ require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
-// === MESMO FORMATO DO SEU TITANIUM ST3 ===
+// === EXATAMENTE COMO NO TEU TITANIUM ST3 ===
 const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
-  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
+  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,ENJUSDT").split(","),
 };
 
 if (!config.TELEGRAM_BOT_TOKEN) {
@@ -30,21 +30,22 @@ async function getInfo(symbol) {
       axios.get(`https://fapi.binance.com/fapi/v1/depth?symbol=${s}&limit=20`)
     ].map(p => p.catch(() => ({ data: null }))));
 
-    if (!priceRes.data) throw new Error('Símbolo inválido ou Binance bloqueada');
+    if (!priceRes.data) throw new Error('Símbolo inválido');
 
     const price = +priceRes.data.price;
 
-    // RSI simples e rápido
+    // RSI rápido
     const closes = k1h.data.map(c => +c[4]);
     const changes = closes.slice(-15).map((c, i, a) => i > 0 ? c - a[i-1] : 0);
-    const gains = changes.map(x => x > 0 ? x : 0);
-    const losses = changes.map(x => x < 0 ? -x : 0);
+    const gains = changes.filter(x => x > 0);
+    const losses = changes.filter(x => x < 0).map(x => -x);
     const avgGain = gains.reduce((a,b)=>a+b,0)/14;
     const avgLoss = losses.reduce((a,b)=>a+b,0)/14 || 0.0001;
     const rsi = (100 - (100 / (1 + avgGain/avgLoss))).toFixed(1);
 
     // Stochastic simples
     const stoch = (data) => {
+      if (data.length < 14) return { k: 'N/D', zone: '' };
       const h = data.slice(-14).map(c => +c[2]);
       const l = data.slice(-14).map(c => +c[3]);
       const c = +data[data.length-1][4];
@@ -66,20 +67,20 @@ async function getInfo(symbol) {
     const bidsVol = depthRes.data.bids.reduce((a,[p,q]) => Math.abs(price - p) <= thresh ? a + +q : a, 0).toFixed(1);
     const asksVol = depthRes.data.asks.reduce((a,[p,q]) => Math.abs(price - p) <= thresh ? a + +q : a, 0).toFixed(1);
 
-    return `*${s}* — Análise Instantânea
+    return `*${s}* — Análise Rápida
 
 💲 Preço: $${price.toFixed(price < 1 ? 6 : 2)}
-📊 RSI 1h: ${rsi} ${rsi > 70 ? 'Overbought' : rsi < 30 ? 'Oversold' : ''}
-Stoch 4h → %K ${s4h.k} ${s4h.zone}
-Stoch 12h → %K ${s12h.k} ${s12h.zone}
-Stoch 1d → %K ${s1d.k} ${s1d.zone}
+📊 RSI 1h: ${rsi} ${rsi > 70 ? '🔴 Overbought' : rsi < 30 ? '🟢 Oversold' : ''}
+Stoch 4h: %K ${s4h.k} ${s4h.zone}
+Stoch 12h: %K ${s12h.k} ${s12h.zone}
+Stoch 1d: %K ${s1d.k} ${s1d.zone}
 
-Long/Short Ratio: ${lsr.toFixed(3)}
+#LSR: ${lsr.toFixed(3)}
 Open Interest: $${oiB}B
 Order Blocks ±0.5%: Bids ${bidsVol} | Asks ${asksVol}`;
 
   } catch (e) {
-    return `Erro ${s}: símbolo inválido ou Binance bloqueou temporariamente`;
+    return `❌ Erro ${s}: ${e.message}`;
   }
 }
 
@@ -93,17 +94,17 @@ bot.command('info', async (ctx) => {
   ctx.telegram.editMessageText(ctx.chat.id, loading.message_id, null, texto, { parse_mode: 'Markdown' });
 });
 
-// Comando /all — mostra todos os seus pares monitorados de uma vez
+// Comando /all — análise de todos os teus pares do .env
 bot.command('all', async (ctx) => {
-  const msg = await ctx.reply('Coletando análise de todos os pares...');
-  let resultado = '*Análise Rápida - Todos os Pares*\n\n';
+  const loading = await ctx.reply('Analisando todos os pares...');
+  let texto = '*Análise Completa - Seus Pares*\n\n';
   for (const par of config.PARES_MONITORADOS) {
-    resultado += await getInfo(par) + '\n\n';
+    texto += await getInfo(par) + '\n\n';
   }
-  ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, resultado, { parse_mode: 'Markdown' });
+  ctx.telegram.editMessageText(ctx.chat.id, loading.message_id, null, texto, { parse_mode: 'Markdown' });
 });
 
-bot.start(ctx => ctx.reply('Bot de análise rápida ativo!\n/info BTCUSDT\n/all para todos os seus pares'));
+bot.start(ctx => ctx.reply('Bot de análise rápida ativo!\n/info BTCUSDT ou /all para todos os pares do .env'));
 
 bot.launch();
-console.log('BOT DE ANÁLISE RÁPIDA RODANDO NO TERMUX - usando seu .env atual');
+console.log('BOT DE ANÁLISE RODANDO NO TERMUX - usando teu .env exato');
