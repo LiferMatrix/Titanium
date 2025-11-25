@@ -37,12 +37,12 @@ const config = {
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
   VOLUME_LOOKBACK: 35,
   VOLUME_MULTIPLIER: 1.5,
-  VOLUME_Z_THRESHOLD: 2.5, // Adicionado do ALFA2
+  VOLUME_Z_THRESHOLD: 2.5, 
   MIN_ATR_PERCENT: 0.5,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 20,
-  LSR_PERIOD: '4h', // Alterado para 4h
-  EMA55_TIMEFRAME: '15m', // Alterado para 15m
+  LSR_PERIOD: '15m', 
+  EMA55_TIMEFRAME: '3m', 
 };
 
 // Logger
