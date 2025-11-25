@@ -19,25 +19,25 @@ const config = {
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
-  STOCHASTIC_BUY_MAX: 70, // Limite máximo para compra (4h e Diário)
-  STOCHASTIC_SELL_MIN: 65, // Limite mínimo para venda (4h e Diário)
-  LSR_BUY_MAX: 2.7, // Limite máximo de LSR para compra
-  LSR_SELL_MIN: 2.8, // Limite mínimo de LSR para venda
-  CACHE_TTL: 30 * 60 * 1000, // 10 minutos
+  STOCHASTIC_BUY_MAX: 70, 
+  STOCHASTIC_SELL_MIN: 65, 
+  LSR_BUY_MAX: 2.4, 
+  LSR_SELL_MIN: 2.6, 
+  CACHE_TTL: 30 * 60 * 1000, 
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
-  BUY_TOLERANCE_PERCENT: 0.025, // 2.5% abaixo do preço de alerta para entrada de compra
-  ATR_MULTIPLIER_BUY: 1.5, // Multiplicador ATR para entrada máxima de compra
-  ATR_MULTIPLIER_SELL: 1.5, // Multiplicador ATR para entrada mínima de venda
-  TARGET_MULTIPLIER: 1.5, // Multiplicador ATR para alvo longo
-  LOG_MAX_SIZE: '100m', // Tamanho máximo de cada arquivo de log
-  LOG_MAX_FILES: 2, // Manter logs dos últimos 2 dias
-  LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, // 2 dias em milissegundos
-  VOLUME_LOOKBACK: 45, // Período de lookback para calcular volume médio (candles de 3m)
-  VOLUME_MULTIPLIER: 2.3, // Multiplicador para considerar volume "anormal" (ex: 1.5x o médio)
-  MIN_ATR_PERCENT: 0.7, // Volatilidade mínima como porcentagem do preço para alertas (evitar falsos positivos em baixa volatilidade)
+  BUY_TOLERANCE_PERCENT: 0.025, 
+  ATR_MULTIPLIER_BUY: 1.5, 
+  ATR_MULTIPLIER_SELL: 1.5, 
+  TARGET_MULTIPLIER: 1.5, 
+  LOG_MAX_SIZE: '100m', 
+  LOG_MAX_FILES: 2, 
+  LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000, 
+  VOLUME_LOOKBACK: 45, 
+  VOLUME_MULTIPLIER: 2.4, 
+  MIN_ATR_PERCENT: 0.8, 
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, // Mínimo ADX para considerar tendência forte nos alertas
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25, 
 };
 // Logger
 const logger = winston.createLogger({
@@ -428,7 +428,7 @@ function calculateTargetsAndZones(data) {
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
  
-  return `*🟢🤖 #IA Scalp - Compra*\n` +
+  return `*🟢🤖 #IA Scalp/Swing - Compra*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
@@ -447,11 +447,11 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium ALFA By @J4Rviz`;
+         `#Titanium #ALFA by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-  return `*🔴🤖 #IA Scalp - Correção a*\n` +
+  return `*🔴🤖 #IA Scalp/Swing - Correção*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
@@ -470,7 +470,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium ALFA By @J4Rviz`;
+         `#Titanium #ALFA by @J4Rviz`;
 }
 async function sendAlertStochasticCross(symbol, data) {
   const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx1h, fvg } = data;
@@ -521,7 +521,7 @@ async function sendAlertStochasticCross(symbol, data) {
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX &&
                       estocasticoD.k <= config.STOCHASTIC_BUY_MAX &&
                       rsi1h < 60 &&
-                      //(lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
+                      (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       ema13_3m_prev > ema34_3m_prev &&
                       ema55_3m !== null && price > ema55_3m &&
                       isAbnormalVol &&
@@ -534,7 +534,7 @@ async function sendAlertStochasticCross(symbol, data) {
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 65 &&
-                       //(lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
+                       (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        ema13_3m_prev < ema34_3m_prev &&
                        ema55_3m !== null && price < ema55_3m &&
                        isAbnormalVol &&
