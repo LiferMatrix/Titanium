@@ -11,7 +11,7 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT,DOGEUSDT,PEPEUSDT,XRPUSDT,TONUSDT,AVAXUSDT").split(","),
-  INTERVALO_VERIFICACAO_MS: 1 * 60 * 1000,
+  INTERVALO_VERIFICACAO_MS: 3 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Reduzido pra mais trades
   RSI_PERIOD: 14,
   CACHE_TTL: 10 * 60 * 1000,
@@ -21,7 +21,7 @@ const config = {
   LOG_FILE: 'simple_trading_bot.log',
   LOG_RETENTION_DAYS: 2,
   RECONNECT_INTERVAL_MS: 10 * 1000,
-  VOLUME_LOOKBACK: 13,
+  VOLUME_LOOKBACK: 45,
   VOLUME_Z_THRESHOLD: 2.5, // Limiar de z-score para detecção de pico antes 2.0
   VOLUME_MULTIPLIER: 2.5, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
   MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
@@ -563,7 +563,7 @@ async function main()
   {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA32🌟 start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA🌟 start'));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
