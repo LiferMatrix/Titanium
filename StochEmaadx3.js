@@ -428,7 +428,7 @@ function calculateTargetsAndZones(data) {
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
  
-  return `*🟢🤖 #IA Scalp*\n` +
+  return `*🟢🤖 #IA Scalp - Compra*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
@@ -447,11 +447,11 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium3 By @J4Rviz`;
+         `Titanium ALFA By @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, ema55Emoji, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-  return `*🔴🤖 #IA Scalp a*\n` +
+  return `*🔴🤖 #IA Scalp - Correção a*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
@@ -470,7 +470,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium3 By @J4Rviz`;
+         `Titanium ALFA By @J4Rviz`;
 }
 async function sendAlertStochasticCross(symbol, data) {
   const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, isAbnormalVol, adx1h, fvg } = data;
