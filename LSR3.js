@@ -2,25 +2,24 @@ require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const chatId = process.env.TELEGRAM_CHAT_ID;
-const pares = (process.env.PARES_MONITORADOS || 'BTCUSDT,ETHUSDT,BNBUSDT').split(',');
-const intervalo = parseInt(process.env.INTERVALO_MONITORAMENTO) || 300000; // 5min default
+// === MESMO FORMATO DO SEU TITANIUM ST3 ===
+const config = {
+  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+  PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
+};
+
+if (!config.TELEGRAM_BOT_TOKEN) {
+  console.error('ERRO: TELEGRAM_BOT_TOKEN não encontrado no .env');
+  process.exit(1);
+}
+
+const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
 async function getInfo(symbol) {
   const s = symbol.toUpperCase().trim();
-
   try {
-    const [
-      priceRes,
-      klines1h,
-      klines4h,
-      klines12h,
-      klinesDaily,
-      lsrRes,
-      oiRes,
-      depthRes
-    ] = await Promise.all([
+    const [priceRes, k1h, k4h, k12h, k1d, lsrRes, oiRes, depthRes] = await Promise.all([
       axios.get(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${s}`),
       axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${s}&interval=1h&limit=100`),
       axios.get(`https://fapi.binance.com/fapi/v1/klines?symbol=${s}&interval=4h&limit=100`),
@@ -29,168 +28,82 @@ async function getInfo(symbol) {
       axios.get(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${s}&period=1h&limit=5`),
       axios.get(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${s}`),
       axios.get(`https://fapi.binance.com/fapi/v1/depth?symbol=${s}&limit=20`)
-    ]);
+    ].map(p => p.catch(() => ({ data: null }))));
 
-    const price = parseFloat(priceRes.data.price);
-    const trend1h = parseFloat(klines1h.data[klines1h.data.length - 1][4]) > parseFloat(klines1h.data[klines1h.data.length - 2][4]) ? '📈Alta' : '📉Baixa';
+    if (!priceRes.data) throw new Error('Símbolo inválido ou Binance bloqueada');
 
-    // RSI 1h
-    const closes1h = klines1h.data.map(k => parseFloat(k[4]));
-    const rsi1h = calculateRSI(closes1h, 14);
-    const rsiText = rsi1h >= 70 ? `🔴 ${rsi1h.toFixed(1)}` : rsi1h <= 30 ? `🟢 ${rsi1h.toFixed(1)}` : `${rsi1h.toFixed(1)}`;
+    const price = +priceRes.data.price;
 
-    // MACD 1h
-    const macd = calculateMACD(closes1h);
-    const macdDir = macd.hist > macd.prevHist ? '⤴︎' : macd.hist < macd.prevHist ? '⤵︎' : '➡︎';
-    const macdSignal = macd.hist > 0 ? '🟢bullish' : '🔴bearish';
+    // RSI simples e rápido
+    const closes = k1h.data.map(c => +c[4]);
+    const changes = closes.slice(-15).map((c, i, a) => i > 0 ? c - a[i-1] : 0);
+    const gains = changes.map(x => x > 0 ? x : 0);
+    const losses = changes.map(x => x < 0 ? -x : 0);
+    const avgGain = gains.reduce((a,b)=>a+b,0)/14;
+    const avgLoss = losses.reduce((a,b)=>a+b,0)/14 || 0.0001;
+    const rsi = (100 - (100 / (1 + avgGain/avgLoss))).toFixed(1);
 
-    // Suporte e Resistência (50 velas 1h)
-    const last50 = klines1h.data.slice(-50);
-    const resistance = Math.max(...last50.map(k => parseFloat(k[2])));
-    const support = Math.min(...last50.map(k => parseFloat(k[3])));
+    // Stochastic simples
+    const stoch = (data) => {
+      const h = data.slice(-14).map(c => +c[2]);
+      const l = data.slice(-14).map(c => +c[3]);
+      const c = +data[data.length-1][4];
+      const hh = Math.max(...h);
+      const ll = Math.min(...l);
+      const k = hh === ll ? 50 : ((c - ll) / (hh - ll) * 100).toFixed(1);
+      const zone = k > 80 ? 'Overbought' : k < 20 ? 'Oversold' : 'Neutral';
+      return { k, zone };
+    };
 
-    // Estocásticos
-    const stoch4h = getStoch(klines4h.data);
-    const stoch12h = getStoch(klines12h.data);
-    const stoch1d = getStoch(klinesDaily.data);
+    const s4h = stoch(k4h.data);
+    const s12h = stoch(k12h.data);
+    const s1d = stoch(k1d.data);
 
-    // LSR
-    const currentLSR = parseFloat(lsrRes.data[0].longShortRatio).toFixed(3);
-    const prevLSR = parseFloat(lsrRes.data[1]?.longShortRatio || currentLSR);
-    const lsrChange = (currentLSR - prevLSR).toFixed(4);
+    const lsr = +lsrRes.data[0].longShortRatio;
+    const oiB = (+oiRes.data.openInterest / 1e9).toFixed(2);
 
-    // Open Interest
-    const oiData = oiRes.data;
-    const currentOI = (parseFloat(oiData.openInterest) / 1e9).toFixed(3); // em bilhões
+    const thresh = price * 0.005;
+    const bidsVol = depthRes.data.bids.reduce((a,[p,q]) => Math.abs(price - p) <= thresh ? a + +q : a, 0).toFixed(1);
+    const asksVol = depthRes.data.asks.reduce((a,[p,q]) => Math.abs(price - p) <= thresh ? a + +q : a, 0).toFixed(1);
 
-    // Order Blocks (±0.5%)
-    const threshold = price * 0.005;
-    let bidsVol = 0, asksVol = 0;
+    return `*${s}* — Análise Instantânea
 
-    depthRes.data.bids.forEach(([p, q]) => {
-      if (Math.abs(price - parseFloat(p)) <= threshold) bidsVol += parseFloat(q);
-    });
-    depthRes.data.asks.forEach(([p, q]) => {
-      if (Math.abs(price - parseFloat(p)) <= threshold) asksVol += parseFloat(q);
-    });
+💲 Preço: $${price.toFixed(price < 1 ? 6 : 2)}
+📊 RSI 1h: ${rsi} ${rsi > 70 ? 'Overbought' : rsi < 30 ? 'Oversold' : ''}
+Stoch 4h → %K ${s4h.k} ${s4h.zone}
+Stoch 12h → %K ${s12h.k} ${s12h.zone}
+Stoch 1d → %K ${s1d.k} ${s1d.zone}
 
-    const base = s.replace('USDT', '');
+Long/Short Ratio: ${lsr.toFixed(3)}
+Open Interest: $${oiB}B
+Order Blocks ±0.5%: Bids ${bidsVol} | Asks ${asksVol}`;
 
-    return `#ATIVO: ${s}
-Preço Atual: $${price.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-Tendência 1h: ${trend1h}
-
-NÍVEIS - #1H
-Suporte próximo: $${support.toFixed(2)}
-Resistência próxima: $${resistance.toFixed(2)}
-
-INDICADORES
-• RSI 1h - ${rsiText}
-• MACD 1h - Hist ${macd.hist.toFixed(2)} ${macdDir} ${macdSignal}
-• ESTOCÁSTICO (5,3,3)
-• #4h - ${stoch4h.text} ${stoch4h.zone}
-• #12h- ${stoch12h.text} ${stoch12h.zone}
-• #1d - ${stoch1d.text} ${stoch1d.zone}
-
-MERCADO INSTITUCIONAL
-#LSR: ${currentLSR} (${lsrChange > 0 ? '+' : ''}${lsrChange})
-Open Interest: $${currentOI}B
-
-ORDER BLOCKS (±0.5% do preço atual)
-🟢Bids (compras): ${bidsVol.toFixed(2)} ${base}
-🔴Asks (vendas): ${asksVol.toFixed(2)} ${base}`;
-
-  } catch (error) {
-    console.error('Erro ao analisar:', error.message);
-    return `Erro ao analisar ${s}: ${error.message}`;
+  } catch (e) {
+    return `Erro ${s}: símbolo inválido ou Binance bloqueou temporariamente`;
   }
 }
 
-// Funções auxiliares (já estavam, corrigi acessos at(-1) pra compatibilidade)
-function calculateRSI(closes, period = 14) {
-  if (closes.length < period + 1) return 50;
-  let gains = 0, losses = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gains += diff; else losses -= diff;
-  }
-  const avgGain = gains / period;
-  const avgLoss = Math.abs(losses) / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-function calculateMACD(closes) {
-  const ema = (data, period) => {
-    const k = 2 / (period + 1);
-    let emaVal = data[0];
-    for (let i = 1; i < data.length; i++) emaVal = data[i] * k + emaVal * (1 - k);
-    return emaVal;
-  };
-
-  const ema12 = ema(closes.slice(-50), 12);
-  const ema26 = ema(closes.slice(-50), 26);
-  const macdLine = ema12 - ema26;
-
-  const prevCloses = closes.slice(0, -1);
-  const prevEma12 = ema(prevCloses.slice(-50), 12);
-  const prevEma26 = ema(prevCloses.slice(-50), 26);
-  const prevMacd = prevEma12 - prevEma26;
-
-  const hist = macdLine;
-  const prevHist = prevMacd;
-
-  return { hist, prevHist };
-}
-
-function getStoch(klines) {
-  const length = klines.length;
-  if (length < 20) return { text: "N/D", zone: "" };
-
-  const highs = klines.slice(-20).map(k => parseFloat(k[2]));
-  const lows = klines.slice(-20).map(k => parseFloat(k[3]));
-  const closes = klines.slice(-20).map(k => parseFloat(k[4]));
-
-  const high14 = Math.max(...highs.slice(-14));
-  const low14 = Math.min(...lows.slice(-14));
-  const k = low14 === high14 ? 50 : ((closes[closes.length - 1] - low14) / (high14 - low14)) * 100;
-
-  const prevHigh = Math.max(...highs.slice(-15, -1));
-  const prevLow = Math.min(...lows.slice(-15, -1));
-  const prevK = prevLow === prevHigh ? 50 : ((closes[closes.length - 2] - prevLow) / (prevHigh - prevLow)) * 100;
-
-  const slowK = (k + prevK + (closes[closes.length - 3] && ((closes[closes.length - 3] - Math.min(...lows.slice(-16, -2))) / (Math.max(...highs.slice(-16, -2)) - Math.min(...lows.slice(-16, -2)))) * 100 || k)) / 3;
-  const d = slowK;
-
-  const kDir = k > prevK ? '⤴︎' : k < prevK ? '⤵︎' : '➡︎';
-  const zone = k > 80 ? '🔴' : k < 20 ? '🟢' : k > d ? '📈Alta' : '📉Baixa';
-
-  return { text: `%K ${k.toFixed(1)} ${kDir} | %D ${d.toFixed(1)}`, zone };
-}
-
-// Comando /info (sob demanda)
+// Comando /info
 bot.command('info', async (ctx) => {
   const args = ctx.message.text.split(' ');
   if (args.length < 2) return ctx.reply('Uso: /info BTCUSDT');
-
   const symbol = args[1].toUpperCase();
+  const loading = await ctx.reply('Analisando...');
   const texto = await getInfo(symbol);
-  ctx.reply(texto, { parse_mode: 'Markdown' });
+  ctx.telegram.editMessageText(ctx.chat.id, loading.message_id, null, texto, { parse_mode: 'Markdown' });
 });
 
-// Comando /start (pra pegar chat ID se precisar)
-bot.start((ctx) => ctx.reply(`Bot pronto! Seu chat ID: ${ctx.chat.id}. Use /info SYMBOL`));
-
-// Monitoramento automático (cada par a cada intervalo)
-async function monitorarPares() {
-  for (const par of pares) {
-    const texto = await getInfo(par);
-    await bot.telegram.sendMessage(chatId, texto, { parse_mode: 'Markdown' }).catch(err => console.error('Erro envio:', err));
+// Comando /all — mostra todos os seus pares monitorados de uma vez
+bot.command('all', async (ctx) => {
+  const msg = await ctx.reply('Coletando análise de todos os pares...');
+  let resultado = '*Análise Rápida - Todos os Pares*\n\n';
+  for (const par of config.PARES_MONITORADOS) {
+    resultado += await getInfo(par) + '\n\n';
   }
-}
+  ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, resultado, { parse_mode: 'Markdown' });
+});
 
-setInterval(monitorarPares, intervalo);
+bot.start(ctx => ctx.reply('Bot de análise rápida ativo!\n/info BTCUSDT\n/all para todos os seus pares'));
 
 bot.launch();
-console.log('Bot rodando no Termux - monitoramento ativo!');
+console.log('BOT DE ANÁLISE RÁPIDA RODANDO NO TERMUX - usando seu .env atual');
