@@ -35,12 +35,12 @@ const config = {
   LOG_MAX_SIZE: '100m',
   LOG_MAX_FILES: 2,
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
-  VOLUME_LOOKBACK: 35,
-  VOLUME_MULTIPLIER: 1.5,
+  VOLUME_LOOKBACK: 45,
+  VOLUME_MULTIPLIER: 2.3,
   VOLUME_Z_THRESHOLD: 2.5, 
-  MIN_ATR_PERCENT: 0.5,
+  MIN_ATR_PERCENT: 0.7,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 20,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 23,
   LSR_PERIOD: '15m', 
   EMA55_TIMEFRAME: '3m', 
 };
@@ -538,7 +538,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Vol: ${volumeZScore.toFixed(2)}\n` +  // Adicionado
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium ST3 By @J4Rviz`;
+         `#Titanium #ST3 By @J4Rviz`;
 }
 
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore) {
@@ -563,7 +563,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Vol: ${volumeZScore.toFixed(2)}\n` +  // Adicionado
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium ST3 By @J4Rviz`;
+         `#Titanium #ST3 By @J4Rviz`;
 }
 
 async function sendAlertStochasticCross(symbol, data) {
@@ -616,7 +616,7 @@ async function sendAlertStochasticCross(symbol, data) {
                       estocastico4h.k <= config.STOCHASTIC_BUY_MAX &&
                       estocasticoD.k <= config.STOCHASTIC_BUY_MAX &&
                       rsi1h < 60 &&
-                      (lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
+                      //(lsr.value === null || lsr.value < config.LSR_BUY_MAX) &&
                       ema13_3m_prev > ema34_3m_prev &&
                       ema34_3m_prev > ema55_3m_prev &&
                       ema55 !== null && price > ema55 &&
@@ -631,7 +631,7 @@ async function sendAlertStochasticCross(symbol, data) {
                        estocastico4h.k >= config.STOCHASTIC_SELL_MIN &&
                        estocasticoD.k >= config.STOCHASTIC_SELL_MIN &&
                        rsi1h > 60 &&
-                       (lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
+                       //(lsr.value === null || lsr.value > config.LSR_SELL_MIN) &&
                        ema13_3m_prev < ema34_3m_prev &&
                        ema34_3m_prev < ema55_3m_prev &&
                        ema55 !== null && price < ema55 &&
@@ -798,7 +798,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium ST4 by J4Rviz...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 #Titanium #ST3 by J4Rviz...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
