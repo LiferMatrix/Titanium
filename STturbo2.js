@@ -659,7 +659,6 @@ async function sendAlertStochasticCross(symbol, data) {
     logger.warn(`LSR BLOQUEOU SHORT → ${symbol} | LSR = ${lsrValue?.toFixed(3)} ${lsr.isRising ? 'subindo' : 'caindo'}`);
   }
   if (!isInSession()) return; // Ajuste 7: só envia em sessão
-  if (!isInSession()) return; // Ajuste 7: só envia em sessão
   const lastEntry = state.ultimoAlertaPorAtivo[symbol].lastEntryPrice;
   const lastDirection = state.ultimoAlertaPorAtivo[symbol].lastDirection;
   const isReentryBuy = lastDirection === 'buy' && Math.abs(price - lastEntry) <= 1.5 * atr && volumeZScore > config.VOLUME_Z_THRESHOLD;
