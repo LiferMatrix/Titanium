@@ -35,11 +35,11 @@ const config = {
   LOG_MAX_FILES: 2,
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
   VOLUME_LOOKBACK: 45,
-  VOLUME_MULTIPLIER: 1.8,
+  VOLUME_MULTIPLIER: 2.3,
   VOLUME_Z_THRESHOLD: 1.8,
-  MIN_ATR_PERCENT: 0.5,
+  MIN_ATR_PERCENT: 0.7,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 20,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 23,
   LSR_PERIOD: '15m',
   EMA55_TIMEFRAME: '1h', // Alterado para 1h (ajuste 4)
   SESSION_START_HOUR_UTC: 8, // London open
