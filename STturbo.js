@@ -36,10 +36,10 @@ const config = {
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
   VOLUME_LOOKBACK: 45,
   VOLUME_MULTIPLIER: 2.3,
-  VOLUME_Z_THRESHOLD: 2.3,
+  VOLUME_Z_THRESHOLD: 2.0,
   MIN_ATR_PERCENT: 0.7,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 23,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
   EMA55_TIMEFRAME: '1h', // Alterado para 1h (ajuste 4)
   SESSION_START_HOUR_UTC: 8, // London open
@@ -491,6 +491,7 @@ function calculateTargetsAndZones(data) {
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
   return `*🟢🤖 #IA Análise - COMPRA - ${signalStrength.level} (${signalStrength.leverage})*\n` +
+         `Nível Lucro/Cross - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
@@ -516,6 +517,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
   return `*🔴🤖 #IA Análise - CORREÇÃO - ${signalStrength.level} (${signalStrength.leverage})*\n` +
+         `Nível Lucro/Cross - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
