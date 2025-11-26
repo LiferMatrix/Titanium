@@ -511,7 +511,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `#Titanium #Ômega By @J4Rviz ${tag}`;
+         `Titanium by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
@@ -536,7 +536,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium #Ômega By @J4Rviz ${tag}`;
+         `Titanium by @J4Rviz`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
