@@ -23,9 +23,9 @@ const config = {
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 75,
   STOCHASTIC_SELL_MIN: 70,
-  LSR_BUY_MAX: 2.7,
-  LSR_SELL_MIN: 2.8,
-  CACHE_TTL: 30 * 60 * 1000,
+  LSR_BUY_MAX: 2.9,
+  LSR_SELL_MIN: 2.5,
+  CACHE_TTL: 15 * 60 * 1000,
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
   BUY_TOLERANCE_PERCENT: 0.025,
@@ -36,11 +36,11 @@ const config = {
   LOG_MAX_FILES: 2,
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
   VOLUME_LOOKBACK: 45,
-  VOLUME_MULTIPLIER: 2.3,
-  VOLUME_Z_THRESHOLD: 2.5, 
-  MIN_ATR_PERCENT: 0.7,
+  VOLUME_MULTIPLIER: 1.8,
+  VOLUME_Z_THRESHOLD: 1.8, 
+  MIN_ATR_PERCENT: 0.5,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 23,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 20,
   LSR_PERIOD: '15m', 
   EMA55_TIMEFRAME: '3m', 
 };
@@ -538,7 +538,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Vol: ${volumeZScore.toFixed(2)}\n` +  // Adicionado
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `#Titanium #ST3 By @J4Rviz`;
+         `#Titanium #Ômega By @J4Rviz`;
 }
 
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore) {
@@ -563,7 +563,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Vol: ${volumeZScore.toFixed(2)}\n` +  // Adicionado
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `#Titanium #ST3 By @J4Rviz`;
+         `#Titanium #Ômega By @J4Rviz`;
 }
 
 async function sendAlertStochasticCross(symbol, data) {
