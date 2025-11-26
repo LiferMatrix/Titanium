@@ -651,6 +651,14 @@ async function sendAlertStochasticCross(symbol, data) {
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   let tag = symbol.endsWith('USDT') ? '#USDTM' : symbol.endsWith('USD') ? '#COINM' : '#SPOT'; // Ajuste 9
+  // === DEBUG LSR (coloque aqui) ===
+  if (signalStrengthBuy.level && stochOkBuy && rsiOkBuy && atrOk && lsrOkForLong === false) {
+    logger.warn(`LSR BLOQUEOU LONG → ${symbol} | LSR = ${lsrValue?.toFixed(3)} ${lsr.isRising ? 'subindo' : 'caindo'}`);
+  }
+  if (signalStrengthSell.level && stochOkSell && rsiOkSell && atrOk && lsrOkForShort === false) {
+    logger.warn(`LSR BLOQUEOU SHORT → ${symbol} | LSR = ${lsrValue?.toFixed(3)} ${lsr.isRising ? 'subindo' : 'caindo'}`);
+  }
+  if (!isInSession()) return; // Ajuste 7: só envia em sessão
   if (!isInSession()) return; // Ajuste 7: só envia em sessão
   const lastEntry = state.ultimoAlertaPorAtivo[symbol].lastEntryPrice;
   const lastDirection = state.ultimoAlertaPorAtivo[symbol].lastDirection;
