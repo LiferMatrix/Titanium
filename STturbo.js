@@ -42,8 +42,8 @@ const config = {
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
   EMA55_TIMEFRAME: '1h', // Alterado para 1h (ajuste 4)
-  SESSION_START_HOUR_UTC: 8, // London open
-  SESSION_END_HOUR_UTC: 16, // NY close
+  //SESSION_START_HOUR_UTC: 8, // London open
+  //SESSION_END_HOUR_UTC: 16, // NY close
 };
 // Logger
 const logger = winston.createLogger({
@@ -638,7 +638,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   let tag = symbol.endsWith('USDT') ? '#USDTM' : symbol.endsWith('USD') ? '#COINM' : '#SPOT'; // Ajuste 9
-  if (!isInSession()) return; // Ajuste 7: só envia em sessão
+  //if (!isInSession()) return; // Ajuste 7: só envia em sessão
   const lastEntry = state.ultimoAlertaPorAtivo[symbol].lastEntryPrice;
   const lastDirection = state.ultimoAlertaPorAtivo[symbol].lastDirection;
   const isReentryBuy = lastDirection === 'buy' && Math.abs(price - lastEntry) <= 1.5 * atr && volumeZScore > config.VOLUME_Z_THRESHOLD;
