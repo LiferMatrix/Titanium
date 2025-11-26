@@ -23,7 +23,7 @@ const config = {
   STOCHASTIC_BUY_MAX: 75,
   STOCHASTIC_SELL_MIN: 70,
   LSR_BUY_MAX: 2.9,
-  LSR_SELL_MIN: 2.0,
+  LSR_SELL_MIN: 2.5,
   CACHE_TTL: 15 * 60 * 1000,
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
@@ -42,8 +42,8 @@ const config = {
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
   EMA55_TIMEFRAME: '1h', // Alterado para 1h (ajuste 4)
-  SESSION_START_HOUR_UTC: 8, // London open
-  SESSION_END_HOUR_UTC: 16, // NY close
+  //SESSION_START_HOUR_UTC: 8, // London open
+  //SESSION_END_HOUR_UTC: 16, // NY close
 };
 // Logger
 const logger = winston.createLogger({
@@ -606,10 +606,8 @@ async function sendAlertStochasticCross(symbol, data) {
   const volumeZScore = volumeData.zScore;
   const isAbnormalVol = volumeZScore > config.VOLUME_Z_THRESHOLD &&
                         volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume;
-  // Condições LSR corrigidas e respeitando config
-    // Condições LSR corrigidas e respeitando config
-  const lsrOkForLong  = !lsr.value ? true : lsr.value <= config.LSR_BUY_MAX;      
-  const lsrOkForShort  = !lsr.value ? true : lsr.value >= config.LSR_SELL_MIN; 
+  const lsrOkForLong = !lsr.value ? true : lsr.value <= config.LSR_BUY_MAX;
+  const lsrOkForShort = !lsr.value ? true : lsr.value >= config.LSR_SELL_MIN;
   const emaOkBuy = ema13_3m_prev > ema34_3m_prev && ema34_3m_prev > ema55_3m_prev && ema55 !== null && price > ema55;
   const emaOkSell = ema13_3m_prev < ema34_3m_prev && ema34_3m_prev < ema55_3m_prev && ema55 !== null && price < ema55;
   const stochOkBuy = estocastico4h && estocasticoD && estocastico4h.k > estocastico4h.d && estocastico4h.k <= config.STOCHASTIC_BUY_MAX && estocasticoD.k <= config.STOCHASTIC_BUY_MAX;
@@ -632,7 +630,7 @@ async function sendAlertStochasticCross(symbol, data) {
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   let tag = symbol.endsWith('USDT') ? '#USDTM' : symbol.endsWith('USD') ? '#COINM' : '#SPOT'; // Ajuste 9
-  if (!isInSession()) return; // Ajuste 7: só envia em sessão
+  //if (!isInSession()) return; // Ajuste 7: só envia em sessão
   const lastEntry = state.ultimoAlertaPorAtivo[symbol].lastEntryPrice;
   const lastDirection = state.ultimoAlertaPorAtivo[symbol].lastDirection;
   const isReentryBuy = lastDirection === 'buy' && Math.abs(price - lastEntry) <= 1.5 * atr && volumeZScore > config.VOLUME_Z_THRESHOLD;
@@ -809,7 +807,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 #Titanium #STturbo2 by J4Rviz...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium STturbo by J4Rviz...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
