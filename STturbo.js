@@ -21,7 +21,7 @@ const config = {
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 75,
-  STOCHASTIC_SELL_MIN: 70,
+  STOCHASTIC_SELL_MIN: 75,
   LSR_BUY_MAX: 2.9,
   LSR_SELL_MIN: 2.5,
   CACHE_TTL: 15 * 60 * 1000,
@@ -604,8 +604,16 @@ async function sendAlertStochasticCross(symbol, data) {
   const volumeZScore = volumeData.zScore;
   const isAbnormalVol = volumeZScore > config.VOLUME_Z_THRESHOLD &&
                         volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume;
-  const lsrOkForLong = !lsr.value || lsr.value <= 2.9 || (lsr.value > 2.9 && lsr.isRising === false); // Ajuste 2
-  const lsrOkForShort = !lsr.value || lsr.value >= 2.2 || (lsr.value < 2.2 && lsr.isRising === true); // Ajuste 2
+  // Condições LSR corrigidas e respeitando config
+  const lsrOkForLong = !lsr.value 
+  ? true 
+  : lsr.value <= config.LSR_BUY_MAX 
+    || (lsr.value > config.LSR_BUY_MAX && !lsr.isRising);  // só permite acima se estiver caindo
+
+  const lsrOkForShort = !lsr.value 
+  ? true 
+  : lsr.value >= config.LSR_SELL_MIN 
+    || (lsr.value < config.LSR_SELL_MIN && lsr.isRising);   // só permite abaixo se estiver subindo
   const emaOkBuy = ema13_3m_prev > ema34_3m_prev && ema34_3m_prev > ema55_3m_prev && ema55 !== null && price > ema55;
   const emaOkSell = ema13_3m_prev < ema34_3m_prev && ema34_3m_prev < ema55_3m_prev && ema55 !== null && price < ema55;
   const stochOkBuy = estocastico4h && estocasticoD && estocastico4h.k > estocastico4h.d && estocastico4h.k <= config.STOCHASTIC_BUY_MAX && estocasticoD.k <= config.STOCHASTIC_BUY_MAX;
