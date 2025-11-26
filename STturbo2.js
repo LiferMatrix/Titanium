@@ -14,16 +14,16 @@ const config = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 3 * 60 * 1000,
-  TEMPO_COOLDOWN_MS: 60 * 60 * 1000,
-  TEMPO_COOLDOWN_SAME_DIR_MS: 60 * 60 * 1000,
+  TEMPO_COOLDOWN_MS: 2 * 60 * 60 * 1000,
+  TEMPO_COOLDOWN_SAME_DIR_MS: 2 * 60 * 60 * 1000,
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
   STOCHASTIC_PERIOD_D: 3,
   STOCHASTIC_BUY_MAX: 75,
   STOCHASTIC_SELL_MIN: 70,
-  LSR_BUY_MAX: 2.5,
-  LSR_SELL_MIN: 2.8,
+  LSR_BUY_MAX: 2.9,
+  LSR_SELL_MIN: 2.5,
   CACHE_TTL: 15 * 60 * 1000,
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
@@ -37,9 +37,9 @@ const config = {
   VOLUME_LOOKBACK: 45,
   VOLUME_MULTIPLIER: 2.3,
   VOLUME_Z_THRESHOLD: 2.0,
-  MIN_ATR_PERCENT: 0.5,
+  MIN_ATR_PERCENT: 0.7,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
-  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 23,
+  ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
   EMA55_TIMEFRAME: '1h', // Alterado para 1h (ajuste 4)
   SESSION_START_HOUR_UTC: 8, // London open
@@ -449,9 +449,9 @@ function classificarRR(ratio) {
   return "6-#Ruim";
 }
 function getSignalStrength(confluencePoints) {
-  if (confluencePoints >= 7) return { level: '💥Forte', leverage: '10-20x' };
-  if (confluencePoints >= 5) return { level: '💹Médio', leverage: '5-10x' };
-  if (confluencePoints >= 3) return { level: '✔︎Fraco', leverage: '3-5x' };
+  if (confluencePoints >= 7) return { level: 'Forte', leverage: '10-20x' };
+  if (confluencePoints >= 5) return { level: 'Médio', leverage: '5-10x' };
+  if (confluencePoints >= 3) return { level: 'Fraco', leverage: '3-5x' };
   return { level: null, leverage: null };
 }
 function calculateTargetsAndZones(data) {
@@ -490,7 +490,7 @@ function calculateTargetsAndZones(data) {
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-  return `*🟢🤖 #IA #Análise - COMPRA  *\n` +
+  return `*🟢🤖 #IA Análise - COMPRA - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `Nível Lucro/Cross - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -500,7 +500,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
          `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
          `Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
-         `Stop ou 2% maior: ${format(zonas.suporte)}\n` +
+         `Stop: ${format(zonas.suporte)}\n` +
          `${classificacao} R:R ${ratio.toFixed(2)}:1\n` +
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -512,11 +512,11 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium @J4Rviz ${tag}`;
+         `Titanium by @J4Rviz ${tag}`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag) {
   const isStrongTrend = adx1h !== null && adx1h > config.ADX_MIN_TREND;
-  return `*🔴🤖 #IA #Análise - CORREÇÃO *\n` +
+  return `*🔴🤖 #IA Análise - CORREÇÃO - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `Nível Lucro/Cross - ${signalStrength.level} (${signalStrength.leverage})*\n` +
          `${count}º Alerta - ${dataHora}\n\n` +
          `Ativo: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -525,8 +525,8 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
          `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
          `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
-         `Alvo 4: ${format(targetSellShort3)} (${targetShort3Pct}%)\n` + 
-         `Stop ou 2% maior: ${format(zonas.resistencia)}\n` +
+         `Alvo 4: ${format(targetSellShort3)} (${targetShort3Pct}%)\n` + // Adicionado alvo 4 para short
+         `Stop: ${format(zonas.resistencia)}\n` +
          `${classificacao} R:R ${ratio.toFixed(2)}:1\n` +
          `Lucro a 10x: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
@@ -538,7 +538,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)} \n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium @J4Rviz ${tag}`;
+         `Titanium By @J4Rviz ${tag}`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
@@ -606,29 +606,10 @@ async function sendAlertStochasticCross(symbol, data) {
   const volumeZScore = volumeData.zScore;
   const isAbnormalVol = volumeZScore > config.VOLUME_Z_THRESHOLD &&
                         volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume;
-    // ====== LSR INSTITUCIONAL CORRIGIDO – VERSÃO FINAL 100% FUNCIONAL (26/11/2025) ======
-  const lsrValue = lsr.value ?? null;
-
-  let lsrOkForLong = true;
-  let lsrOkForShort = true;
-
-  if (lsrValue !== null) {
-    const lsrMuitoAlto = lsrValue > config.LSR_BUY_MAX;        // ex: > 2.7
-    const lsrMuitoBaixo = lsrValue < (1 / config.LSR_SELL_MIN); // ex: < 0.4 se SELL_MIN = 2.5
-
-    // LONG só pode se LSR não estiver muito alto OU se estiver caindo forte
-    lsrOkForLong = !lsrMuitoAlto || (lsrMuitoAlto && !lsr.isRising);
-
-    // SHORT só pode se LSR não estiver muito baixo OU se estiver subindo forte
-    lsrOkForShort = !lsrMuitoBaixo || (lsrMuitoBaixo && lsr.isRising);
-
-    // Bloqueio total em casos extremos
-    if (lsrValue >= 4.0) lsrOkForLong = false;
-    if (lsrValue <= 0.25) lsrOkForShort = false;
-  }
-
-  // LOGS AGORA FUNCIONAM (movidos para depois de todas as variáveis serem declaradas)
-  // (vão aparecer no console quando o LSR realmente bloquear)
+  // Condições LSR corrigidas e respeitando config
+    // Condições LSR corrigidas e respeitando config
+  const lsrOkForLong  = !lsr.value ? true : lsr.value <= config.LSR_BUY_MAX;      
+  const lsrOkForShort  = !lsr.value ? true : lsr.value >= config.LSR_SELL_MIN; 
   const emaOkBuy = ema13_3m_prev > ema34_3m_prev && ema34_3m_prev > ema55_3m_prev && ema55 !== null && price > ema55;
   const emaOkSell = ema13_3m_prev < ema34_3m_prev && ema34_3m_prev < ema55_3m_prev && ema55 !== null && price < ema55;
   const stochOkBuy = estocastico4h && estocasticoD && estocastico4h.k > estocastico4h.d && estocastico4h.k <= config.STOCHASTIC_BUY_MAX && estocasticoD.k <= config.STOCHASTIC_BUY_MAX;
@@ -651,13 +632,6 @@ async function sendAlertStochasticCross(symbol, data) {
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let alertText = '';
   let tag = symbol.endsWith('USDT') ? '#USDTM' : symbol.endsWith('USD') ? '#COINM' : '#SPOT'; // Ajuste 9
-  // === DEBUG LSR (coloque aqui) ===
-  if (signalStrengthBuy.level && stochOkBuy && rsiOkBuy && atrOk && lsrOkForLong === false) {
-    logger.warn(`LSR BLOQUEOU LONG → ${symbol} | LSR = ${lsrValue?.toFixed(3)} ${lsr.isRising ? 'subindo' : 'caindo'}`);
-  }
-  if (signalStrengthSell.level && stochOkSell && rsiOkSell && atrOk && lsrOkForShort === false) {
-    logger.warn(`LSR BLOQUEOU SHORT → ${symbol} | LSR = ${lsrValue?.toFixed(3)} ${lsr.isRising ? 'subindo' : 'caindo'}`);
-  }
   if (!isInSession()) return; // Ajuste 7: só envia em sessão
   const lastEntry = state.ultimoAlertaPorAtivo[symbol].lastEntryPrice;
   const lastDirection = state.ultimoAlertaPorAtivo[symbol].lastDirection;
@@ -835,7 +809,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium STturbo by J4Rviz...'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 #Titanium #STturbo2 by J4Rviz...'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
