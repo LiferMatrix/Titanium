@@ -441,17 +441,17 @@ function getSetaDirecao(current, previous) {
   return current > previous ? "⬆︎" : current < previous ? "⬇︎" : "➡︎";
 }
 function classificarRR(ratio) {
-  if (ratio >= 4.0) return "1-#Excelente";
-  if (ratio >= 3.0) return "2-#Ótimo";
-  if (ratio >= 2.5) return "3-#Muito #Bom";
-  if (ratio >= 2.0) return "4-#Bom";
-  if (ratio >= 1.5) return "5-#Regular";
-  return "6-#Ruim";
+  if (ratio >= 4.0) return "1-Excelente";
+  if (ratio >= 3.0) return "2-Ótimo";
+  if (ratio >= 2.5) return "3-Muito #Bom";
+  if (ratio >= 2.0) return "4-Bom";
+  if (ratio >= 1.5) return "5-Regular";
+  return "6-Ruim";
 }
 function getSignalStrength(confluencePoints) {
-  if (confluencePoints >= 7) return { level: 'Forte', leverage: '10-20x' };
-  if (confluencePoints >= 5) return { level: 'Médio', leverage: '5-10x' };
-  if (confluencePoints >= 3) return { level: 'Fraco', leverage: '3-5x' };
+  if (confluencePoints >= 7) return { level: '#Forte', leverage: '10-20x' };
+  if (confluencePoints >= 5) return { level: '#Mediana', leverage: '5-10x' };
+  if (confluencePoints >= 3) return { level: '#Regular', leverage: '3-5x' };
   return { level: null, leverage: null };
 }
 function calculateTargetsAndZones(data) {
@@ -490,7 +490,7 @@ function calculateTargetsAndZones(data) {
 }
 // NOVA FUNÇÃO PARA CALCULAR STOP DINÂMICO BASEADO EM ATR
 function calcularStopDinamico(direction, entryPrice, atr) {
-  const multiplier = 2.0; // você pode aumentar para 2.2~2.5 se quiser ainda mais segurança
+  const multiplier = 2.2; // você pode aumentar para 2.2~2.5 se quiser ainda mais segurança
   if (direction === 'buy') {
     return entryPrice - (atr * multiplier);
   } else { // sell
