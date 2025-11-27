@@ -37,7 +37,7 @@ const config = {
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
   VOLUME_LOOKBACK: 45,
   VOLUME_MULTIPLIER: 2.5,
-  VOLUME_Z_THRESHOLD: 2.0,
+  VOLUME_Z_THRESHOLD: 2.5,
   MIN_ATR_PERCENT: 0.7,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
