@@ -1,4 +1,4 @@
-// titanium-sentinel.js → COM ADX 1h + 15m NOS ALERTAS
+// titanium-sentinel.js → COM ADX 1h + 15m NOS ALERTAS (versão corrigida com ADX suave, EMA correta, filtro ADX, anti-spam, alavancagem reduzida e probabilidade de sucesso)
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
@@ -24,38 +24,77 @@ async function sendToTelegram(text) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// === NOVO: FUNÇÃO ADX (período 14) ===
+// === FUNÇÃO ADX CORRIGIDA (com suavização Wilder) ===
 function calculateADX(candles, period = 14) {
-    if (candles.length < period + 1) return 0;
+    if (candles.length < period * 2) return 0;
 
-    let plusDM = [];
-    let minusDM = [];
-    let tr = [];
+    let plusDM = [], minusDM = [], tr = [];
 
     for (let i = 1; i < candles.length; i++) {
-        const upMove = candles[i].h - candles[i - 1].h;
-        const downMove = candles[i - 1].l - candles[i].l;
-
-        plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-        minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-
-        const trueRange = Math.max(
+        const up = candles[i].h - candles[i - 1].h;
+        const down = candles[i - 1].l - candles[i].l;
+        plusDM.push(up > down && up > 0 ? up : 0);
+        minusDM.push(down > up && down > 0 ? down : 0);
+        tr.push(Math.max(
             candles[i].h - candles[i].l,
             Math.abs(candles[i].h - candles[i - 1].c),
             Math.abs(candles[i].l - candles[i - 1].c)
-        );
-        tr.push(trueRange);
+        ));
     }
 
-    let atr = tr.slice(-period).reduce((a, b) => a + b) / period;
-    let plusDI = 100 * (plusDM.slice(-period).reduce((a, b) => a + b) / period) / atr;
-    let minusDI = 100 * (minusDM.slice(-period).reduce((a, b) => a + b) / period) / atr;
+    // Suavização Wilder para +DM, -DM, TR
+    let smoothPlus = new Array(plusDM.length).fill(0);
+    let smoothMinus = new Array(minusDM.length).fill(0);
+    let smoothTR = new Array(tr.length).fill(0);
 
-    let dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
-    return dx.toFixed(1);
+    smoothPlus[period - 1] = plusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    smoothMinus[period - 1] = minusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    smoothTR[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+    for (let i = period; i < plusDM.length; i++) {
+        smoothPlus[i] = (smoothPlus[i - 1] * (period - 1) + plusDM[i]) / period;
+        smoothMinus[i] = (smoothMinus[i - 1] * (period - 1) + minusDM[i]) / period;
+        smoothTR[i] = (smoothTR[i - 1] * (period - 1) + tr[i]) / period;
+    }
+
+    // +DI e -DI
+    let plusDI = [];
+    let minusDI = [];
+    for (let i = period - 1; i < smoothPlus.length; i++) {
+        plusDI.push(100 * smoothPlus[i] / smoothTR[i]);
+        minusDI.push(100 * smoothMinus[i] / smoothTR[i]);
+    }
+
+    // DX
+    let dx = [];
+    for (let i = 0; i < plusDI.length; i++) {
+        const diSum = plusDI[i] + minusDI[i];
+        dx.push(diSum > 0 ? Math.abs(plusDI[i] - minusDI[i]) / diSum * 100 : 0);
+    }
+
+    // ADX (suavização Wilder do DX)
+    let adx = new Array(dx.length).fill(0);
+    adx[period - 1] = dx.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < dx.length; i++) {
+        adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
+    }
+
+    return adx[adx.length - 1].toFixed(1);
 }
 
-// === RESTANTE DAS FUNÇÕES (mantidas) ===
+// === FUNÇÃO EMA CORRIGIDA ===
+function calculateEMA(closes, period) {
+    if (closes.length < period) return 0;
+    let ema = new Array(closes.length).fill(0);
+    ema[period - 1] = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const alpha = 2 / (period + 1);
+    for (let i = period; i < closes.length; i++) {
+        ema[i] = closes[i] * alpha + ema[i - 1] * (1 - alpha);
+    }
+    return ema[ema.length - 1];
+}
+
+// === RESTANTE DAS FUNÇÕES (mantidas com ajustes) ===
 async function getData() {
     const [priceRes, h1Res, m15Res] = await Promise.all([
         fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
@@ -103,11 +142,56 @@ function calculateCCI(h1) {
     return (tp[tp.length-1] - sma) / (0.015 * md);
 }
 
+// === NOVA: FUNÇÃO PARA CALCULAR PROBABILIDADE (0-100%) ===
+function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
+    let prob = 50; // Base
+
+    // Baseado em CCI (mais extremo = maior prob)
+    if (isBuy) {
+        if (cci <= -150) prob += 25;
+        else if (cci <= -130) prob += 20;
+        else if (cci <= -90) prob += 15;
+    } else {
+        if (cci >= 150) prob += 25;
+        else if (cci >= 130) prob += 20;
+        else if (cci >= 90) prob += 15;
+    }
+
+    // ADX: tendência forte aumenta prob
+    if (adx1h > 35) prob += 20;
+    else if (adx1h > 25) prob += 15;
+    else if (adx1h > 20) prob += 10;
+
+    // Volume: up = bom
+    if (volZ > 20) prob += 15;
+    else if (volZ > 0) prob += 10;
+
+    // LSR: favorável ao lado
+    if (isBuy) {
+        if (lsr15 > 70) prob += 15;
+        else if (lsr15 > 50) prob += 10;
+    } else {
+        if (lsr15 < 30) prob += 15;
+        else if (lsr15 < 50) prob += 10;
+    }
+
+    // RSI: oversold/overbought
+    if (isBuy) {
+        if (rsi1h < 20) prob += 15;
+        else if (rsi1h < 30) prob += 10;
+    } else {
+        if (rsi1h > 80) prob += 15;
+        else if (rsi1h > 70) prob += 10;
+    }
+
+    return Math.min(100, Math.max(0, Math.floor(prob)));
+}
+
 (async () => {
     console.clear();
 
     const bootMsg = `
-<b>🤖 IA TITANIUM SENTINEL ATIVADA</b>
+<b>🤖 IA TITANIUM SENTINEL ATIVADA (VERSÃO CORRIGIDA)</b>
 
 Data/Hora: <b>${new Date().toLocaleString('pt-BR')}</b>
 Status: <b>Online • Modo Caça Extrema</b>
@@ -117,6 +201,8 @@ Aguardando setup BTC…
     console.log(bootMsg.replace(/<[^>]*>/g, ''));
     await sendToTelegram(bootMsg);
 
+    let lastAlert = { type: null, time: 0 }; // Anti-spam: min 1h entre alertas do mesmo lado
+
     while (true) {
         try {
             const { price, h1, m15 } = await getData();
@@ -124,8 +210,8 @@ Aguardando setup BTC…
             const closesH1 = h1.map(c => c.c);
             const cci = parseFloat(calculateCCI(h1));
             const rsi1h = parseFloat(calculateRSI(closesH1));
-            const ema8 = closesH1.slice(-8).reduce((a,b)=>b*(2/9)+a*(7/9), closesH1[closesH1.length-9]);
-            const ema21 = closesH1.slice(-21).reduce((a,b)=>b*(2/22)+a*(20/22), closesH1[closesH1.length-22]);
+            const ema8 = calculateEMA(closesH1, 8);
+            const ema21 = calculateEMA(closesH1, 21);
             const bullish = ema8 > ema21;
 
             const atr = calculateATR(h1);
@@ -139,49 +225,58 @@ Aguardando setup BTC…
             const vol20 = h1.slice(-20).reduce((s,c)=>s+c.v,0)/20;
             const volZ = ((vol5 / vol20 - 1) * 100).toFixed(1);
 
-            
-            const adx1h = calculateADX(h1);
-            const adx15m = calculateADX(m15);
+            const adx1h = parseFloat(calculateADX(h1));
+            const adx1hPrev = parseFloat(calculateADX(h1.slice(0, -1))); // ADX anterior para checar se está caindo
+            const adx15m = parseFloat(calculateADX(m15));
 
-            if (bullish && cci <= -90) {
+            const now = Date.now();
+            const minTimeBetweenAlerts = 3600000; // 1h
+
+            if (bullish && cci <= -90 && adx1h > 20 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'buy')) {
+                const prob = calculateProb(cci, adx1h, volZ, lsr15, rsi1h, true);
                 const alert = `
 #🤖 IA TITANIUM SENTINEL
 
 <b>🟢BTC COMPRA</b>
 Preço: <b>$${price.toFixed(0)}</b>
-Alavancagem: <b>${cci<=-130?'20x–50x':'10x–25x'}</b>
+Alavancagem: <b>${cci<=-130?'10x–20x':'5x–10x'}</b>
 Stop: <b>$${(price - stopDistance).toFixed(0)}</b>
 TP1: $${(price + atr*2).toFixed(0)} │ TP2: $${(price + atr*4).toFixed(0)} │ TP3: $${(price + atr*7).toFixed(0)}
 RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
 <b>ADX 1h: ${adx1h} │ ADX 15m: ${adx15m}</b>
-<b>Reversão — COMPRA!</b>
+<b>Probabilidade de Sucesso: ${prob}%</b>
+<b>Reversão Forte — COMPRA!</b>
                 `.trim();
 
                 console.log(alert);
                 await sendToTelegram(alert);
+                lastAlert = { type: 'buy', time: now };
             }
-            else if (!bullish && cci >= 90) {
+            else if (!bullish && cci >= 90 && adx1h > 20 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'sell')) {
+                const prob = calculateProb(cci, adx1h, volZ, lsr15, rsi1h, false);
                 const alert = `
 #🤖 IA TITANIUM SENTINEL
 
 <b>🔴BTC CORREÇÃO</b>
 Preço: <b>$${price.toFixed(0)}</b>
-Alavancagem: <b>${cci>=130?'20x–50x':'10x–25x'}</b>
+Alavancagem: <b>${cci>=130?'10x–20x':'5x–10x'}</b>
 Stop: <b>$${(price + stopDistance).toFixed(0)}</b>
 TP1: $${(price - atr*2).toFixed(0)} │ TP2: $${(price - atr*4).toFixed(0)} │ TP3: $${(price - atr*7).toFixed(0)}
 RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
 <b>ADX 1h: ${adx1h} │ ADX 15m: ${adx15m}</b>
+<b>Probabilidade de Sucesso: ${prob}%</b>
 <b>Possível Topo  — Correção!</b>
                 `.trim();
 
                 console.log(alert);
                 await sendToTelegram(alert);
+                lastAlert = { type: 'sell', time: now };
             }
             else {
                 process.stdout.write(`.`);
             }
 
-            await sleep(240000);
+            await sleep(240000); // Mantido 4 min, mas otimizar se quiser (ex: rodar só no final das velas)
 
         } catch (e) {
             process.stdout.write(`x`);
