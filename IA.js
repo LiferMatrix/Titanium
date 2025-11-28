@@ -154,7 +154,7 @@ Stop: <b>$${(price - stopDistance).toFixed(0)}</b>
 TP1: $${(price + atr*2).toFixed(0)} │ TP2: $${(price + atr*4).toFixed(0)} │ TP3: $${(price + atr*7).toFixed(0)}
 RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
 <b>ADX 1h: ${adx1h} │ ADX 15m: ${adx15m}</b>
-<b>Reversão Forte — COMPRA!</b>
+<b>Reversão — COMPRA!</b>
                 `.trim();
 
                 console.log(alert);
