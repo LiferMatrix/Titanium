@@ -73,7 +73,7 @@ async function getCurrentSymbols() {
 async function sendAlert(symbol) {
   const agora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const msg = `
-*✔︎💎NOVA LISTAGEM BINANCE FUTUROS!*
+*⚠️NOVA LISTAGEM BINANCE FUTUROS!⚠️*
 
 \`${symbol}\`
 
