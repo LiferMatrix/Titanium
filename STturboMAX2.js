@@ -14,7 +14,7 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
-  INTERVALO_ALERTA_4H_MS: 30 * 60 * 1000,
+  INTERVALO_ALERTA_4H_MS: 15 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 60 * 60 * 1000,
   TEMPO_COOLDOWN_SAME_DIR_MS: 60 * 60 * 1000,
   RSI_PERIOD: 14,
@@ -38,7 +38,7 @@ const config = {
   VOLUME_LOOKBACK: 45,
   VOLUME_MULTIPLIER: 2.5,
   VOLUME_Z_THRESHOLD: 2.5,
-  MIN_ATR_PERCENT: 0.7,
+  MIN_ATR_PERCENT: 0.8,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
@@ -500,7 +500,8 @@ async function sendAlertStochasticCross(symbol, data) {
       ultimoBuy: 0,
       ultimoSell: 0,
       lastEntryPrice: null,
-      lastDirection: null
+      lastDirection: null,
+      lastEma55Cross: null,  // Novo: armazena o tipo do último cruzamento da EMA55 ('above' ou 'below')
     };
   }
   const ativo = state.ultimoAlertaPorAtivo[symbol];
@@ -508,8 +509,15 @@ async function sendAlertStochasticCross(symbol, data) {
   const volumeZScore = volumeData.zScore || 0;
   const precoPertoDaUltimaEntrada = ativo.lastEntryPrice !== null && Math.abs(price - ativo.lastEntryPrice) <= 1.8 * (atr || 0);
   const reentryForcada = precoPertoDaUltimaEntrada && volumeZScore > config.VOLUME_Z_THRESHOLD + 1.5;
+  // Cooldown base: 60min, mas permite se for reentry forçada
   if (tempoDesdeUltimoAlerta < config.TEMPO_COOLDOWN_MS && !reentryForcada) {
     logger.info(`BLOQUEADO: ${symbol} - Tempo desde último: ${(tempoDesdeUltimoAlerta / 60000).toFixed(1)}min | Reentry? ${reentryForcada ? 'SIM' : 'NÃO'}`);
+    return;
+  }
+  // Novo cooldown inteligente baseado em EMA55: só alerta de novo se houver rompimento real
+  const currentEmaCross = close_3m > ema55_3m ? 'above' : close_3m < ema55_3m ? 'below' : null;
+  if (ativo.lastEma55Cross && currentEmaCross === ativo.lastEma55Cross && tempoDesdeUltimoAlerta < config.TEMPO_COOLDOWN_MS * 2) {
+    logger.info(`BLOQUEADO: ${symbol} - Sem rompimento novo da EMA55 (mesmo lado: ${currentEmaCross})`);
     return;
   }
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
@@ -588,6 +596,7 @@ async function sendAlertStochasticCross(symbol, data) {
     ativo.historico = ativo.historico.slice(-config.MAX_HISTORICO_ALERTAS);
     ativo.lastEntryPrice = price;
     ativo.lastDirection = 'buy';
+    ativo.lastEma55Cross = 'above';  // Atualiza o cruzamento
     state.dailyStats.signals++;
     state.dailyStats.longs++;
     state.dailyStats.avgRR = (state.dailyStats.avgRR * (state.dailyStats.signals - 1) + ratio) / state.dailyStats.signals;
@@ -616,6 +625,7 @@ async function sendAlertStochasticCross(symbol, data) {
     ativo.historico = ativo.historico.slice(-config.MAX_HISTORICO_ALERTAS);
     ativo.lastEntryPrice = price;
     ativo.lastDirection = 'sell';
+    ativo.lastEma55Cross = 'below';  // Atualiza o cruzamento
     state.dailyStats.signals++;
     state.dailyStats.shorts++;
     state.dailyStats.avgRR = (state.dailyStats.avgRR * (state.dailyStats.signals - 1) + ratio) / state.dailyStats.signals;
