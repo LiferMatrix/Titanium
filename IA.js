@@ -1,9 +1,9 @@
-// titanium-sentinel.js → COM ADX 1h + 15m NOS ALERTAS (versão corrigida com ADX suave, EMA correta, filtro ADX, anti-spam, alavancagem reduzida e probabilidade de sucesso)
+// titanium-sentinel.js → COM ADX 1h + 15m NOS ALERTAS (versão corrigida com ADX suave, EMA correta, filtro ADX, anti-spam, alavancagem reduzida, probabilidade de sucesso, reconexão automática e limpeza de console a cada 2 dias)
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHANNEL_ID = '-1001';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHANNEL_ID = '-1001990889297';
 
 async function sendToTelegram(text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -187,11 +187,40 @@ function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
     return Math.min(100, Math.max(0, Math.floor(prob)));
 }
 
+// === NOVA: FUNÇÃO PARA RECONEXÃO AUTOMÁTICA ===
+async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fetch(url, options);
+        } catch (e) {
+            if (i === retries - 1) throw e;
+            const delay = backoff * Math.pow(2, i); // Exponential backoff
+            console.log(`Reconectando após erro de rede: tentativa ${i + 1}/${retries} - aguardando ${delay/1000}s`);
+            await sleep(delay);
+        }
+    }
+}
+
+// === ATUALIZAÇÃO EM getData PARA USAR fetchWithRetry ===
+async function getData() {
+    const [priceRes, h1Res, m15Res] = await Promise.all([
+        fetchWithRetry('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
+        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=100'),
+        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=100')
+    ]);
+
+    const price = parseFloat((await priceRes.json()).price);
+    const h1 = (await h1Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5] }));
+    const m15 = (await m15Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4] }));
+
+    return { price, h1, m15 };
+}
+
 (async () => {
     console.clear();
 
     const bootMsg = `
-<b>🤖 IA TITANIUM SENTINEL ATIVADA (VERSÃO CORRIGIDA)</b>
+<b>🤖 IA TITANIUM SENTINEL ATIVADA </b>
 
 Data/Hora: <b>${new Date().toLocaleString('pt-BR')}</b>
 Status: <b>Online • Modo Caça Extrema</b>
@@ -202,9 +231,20 @@ Aguardando setup BTC…
     await sendToTelegram(bootMsg);
 
     let lastAlert = { type: null, time: 0 }; // Anti-spam: min 1h entre alertas do mesmo lado
+    let lastClean = Date.now(); // Para limpeza automática a cada 2 dias
+    const cleanInterval = 2 * 24 * 60 * 60 * 1000; // 2 dias em ms
 
     while (true) {
         try {
+            const now = Date.now();
+
+            // Limpeza automática de console a cada 2 dias (não há arquivos, então só limpa console)
+            if (now - lastClean > cleanInterval) {
+                console.clear();
+                console.log('Limpeza automática executada: console limpo.');
+                lastClean = now;
+            }
+
             const { price, h1, m15 } = await getData();
 
             const closesH1 = h1.map(c => c.c);
@@ -229,7 +269,6 @@ Aguardando setup BTC…
             const adx1hPrev = parseFloat(calculateADX(h1.slice(0, -1))); // ADX anterior para checar se está caindo
             const adx15m = parseFloat(calculateADX(m15));
 
-            const now = Date.now();
             const minTimeBetweenAlerts = 3600000; // 1h
 
             if (bullish && cci <= -90 && adx1h > 20 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'buy')) {
@@ -279,8 +318,8 @@ RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
             await sleep(240000); // Mantido 4 min, mas otimizar se quiser (ex: rodar só no final das velas)
 
         } catch (e) {
-            process.stdout.write(`x`);
-            await sleep(10000);
+            console.log(`Erro geral: ${e.message}. Tentando reconectar...`);
+            await sleep(10000); // Delay base no catch geral
         }
     }
 })();
