@@ -418,7 +418,8 @@ async function fetchFundingRate(symbol) {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const funding = await withRetry(() => exchangeFutures.fetchFundingRate(symbol));
+    const formattedSymbol = symbol.replace(/([A-Z]+)(USDT)/, '$1/$2'); // ← LINHA NOVA: Corrige pra 'BTC/USDT'
+    const funding = await withRetry(() => exchangeFutures.fetchFundingRate(formattedSymbol));
     const result = { current: funding.current };
     setCachedData(cacheKey, result);
     logger.info(`Funding rate obtido para ${symbol}: ${result.current}`);
@@ -454,7 +455,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close > volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m) {
       direcao = 'buy';
-      tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise: DIVERGÊNCIA BULL';
+      tipo = adxStrong ? '🟢COMPRA - Divergeência Bull' : '💹🤖IA Análise: DIVERGÊNCIA BULL';
     }
   } else if (isBearish) {
   
@@ -467,7 +468,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close < volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m) {
       direcao = 'sell';
-      tipo = adxStrong ? '🔴VENDA' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
+      tipo = adxStrong ? '🔴VENDA - Divergência Bear' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
     }
   }
   if (!direcao) return;
@@ -542,7 +543,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
              `Alvo 5: ${format(targets[4])}\n`;
     }
   }
-  msg += `\n Titanium by @J4Rviz`;
+  msg += `\n🤖 Titanium ALFA🌟 by @J4Rviz`;
   historico.push({ direcao, timestamp: agora });
   if (historico.length > config.MAX_HISTORICO_ALERTAS) historico.shift();
   try {
