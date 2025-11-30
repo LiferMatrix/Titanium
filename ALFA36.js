@@ -11,7 +11,7 @@ const config = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT,DOGEUSDT,PEPEUSDT,XRPUSDT,TONUSDT,AVAXUSDT").split(","),
-  INTERVALO_VERIFICACAO_MS: 3 * 60 * 1000,
+  INTERVALO_VERIFICACAO_MS: 5 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Reduzido pra mais trades
   RSI_PERIOD: 14,
   CACHE_TTL: 10 * 60 * 1000,
@@ -22,9 +22,9 @@ const config = {
   LOG_RETENTION_DAYS: 2,
   RECONNECT_INTERVAL_MS: 10 * 1000,
   VOLUME_LOOKBACK: 45,
-  VOLUME_Z_THRESHOLD: 2.5, // Limiar de z-score para detecção de pico antes 2.0
-  VOLUME_MULTIPLIER: 2.5, // Multiplicador mínimo sobre a média (ajustado) antes 2.3
-  MIN_CANDLES_4H: 25 // Novo: mínimo para considerar moeda madura
+  VOLUME_Z_THRESHOLD: 2.5,
+  VOLUME_MULTIPLIER: 2.5,
+  MIN_CANDLES_4H: 25
 };
 // Logger
 const logger = winston.createLogger({
@@ -228,33 +228,54 @@ function calculateRSI(data) {
   const closes = data.map(d => d.close).filter(c => !isNaN(c));
   return TechnicalIndicators.RSI.calculate({ period: config.RSI_PERIOD, values: closes });
 }
-function detectRSIDivergence(ohlcv, rsiValues, lookback = 30) { // Ideal
+function detectRSIDivergence(ohlcv, rsiValues, lookback = 30) {
   if (!ohlcv || !rsiValues || ohlcv.length < lookback) return { isBullish: false, isBearish: false };
   const price = ohlcv.slice(-lookback);
   const rsi = rsiValues.slice(-lookback);
-  const findExtremes = (arr, isPrice) => {
+  const findExtremes = (arr, isPrice, minDistance = 3) => {
     const peaks = [], troughs = [];
-    for (let i = 1; i < arr.length - 1; i++) {
+    for (let i = 2; i < arr.length - 2; i++) {
       const v = isPrice ? arr[i].close : arr[i];
-      const p = isPrice ? arr[i-1].close : arr[i-1];
-      const n = isPrice ? arr[i+1].close : arr[i+1];
-      if (v > p && v > n) peaks.push({ i, v });
-      if (v < p && v < n) troughs.push({ i, v });
+      const p1 = isPrice ? arr[i-1].close : arr[i-1];
+      const p2 = isPrice ? arr[i-2].close : arr[i-2];
+      const n1 = isPrice ? arr[i+1].close : arr[i+1];
+      const n2 = isPrice ? arr[i+2].close : arr[i+2];
+      if (v > p1 && v > n1 && v > p2 && v > n2) peaks.push({ i, v });
+      if (v < p1 && v < n1 && v < p2 && v < n2) troughs.push({ i, v });
     }
-    return { peaks, troughs };
+    // Ordenar por índice ascendente
+    peaks.sort((a, b) => a.i - b.i);
+    troughs.sort((a, b) => a.i - b.i);
+    // Filtrar distância mínima
+    const filterMinDistance = (extremes) => {
+      const filtered = [];
+      for (let j = 0; j < extremes.length; j++) {
+        if (filtered.length === 0 || extremes[j].i - filtered[filtered.length - 1].i >= minDistance) {
+          filtered.push(extremes[j]);
+        }
+      }
+      return filtered;
+    };
+    return { peaks: filterMinDistance(peaks), troughs: filterMinDistance(troughs) };
   };
   const { peaks: pPeaks, troughs: pTroughs } = findExtremes(price, true);
   const { peaks: rPeaks, troughs: rTroughs } = findExtremes(rsi, false);
   let isBullish = false, isBearish = false;
   if (pTroughs.length >= 2 && rTroughs.length >= 2) {
-    const [t1, t2] = pTroughs.slice(-2);
-    const [r1, r2] = rTroughs.slice(-2);
-    if (t2.v < t1.v && r2.v > r1.v && r2.v < 50) isBullish = true;
+    const t1 = pTroughs[pTroughs.length - 2];
+    const t2 = pTroughs[pTroughs.length - 1];
+    const r1 = rTroughs[rTroughs.length - 2];
+    const r2 = rTroughs[rTroughs.length - 1];
+    const priceDiff = Math.abs(t2.v - t1.v) / t1.v;
+    if (priceDiff > 0.005 && t2.v < t1.v && r2.v > r1.v && r2.v < 50) isBullish = true;
   }
   if (pPeaks.length >= 2 && rPeaks.length >= 2) {
-    const [p1, p2] = pPeaks.slice(-2);
-    const [r1, r2] = rPeaks.slice(-2);
-    if (p2.v > p1.v && r2.v < r1.v && r2.v > 50) isBearish = true;
+    const p1 = pPeaks[pPeaks.length - 2];
+    const p2 = pPeaks[pPeaks.length - 1];
+    const r1 = rPeaks[rPeaks.length - 2];
+    const r2 = rPeaks[rPeaks.length - 1];
+    const priceDiff = Math.abs(p2.v - p1.v) / p1.v;
+    if (priceDiff > 0.005 && p2.v > p1.v && r2.v < r1.v && r2.v > 50) isBearish = true;
   }
   return { isBullish, isBearish };
 }
@@ -392,6 +413,22 @@ async function fetchEMA55_3m(symbol) {
     return null;
   }
 }
+async function fetchFundingRate(symbol) {
+  const cacheKey = `funding_${symbol}`;
+  const cached = getCachedData(cacheKey);
+  if (cached) return cached;
+  try {
+    const data = await withRetry(() => exchangeFutures.fetchFundingRateHistory(symbol, undefined, 2));
+    if (data.length < 2) return { current: null, isRising: false, percentChange: '0.00' };
+    const current = parseFloat(data[data.length - 1].fundingRate);
+    const prev = parseFloat(data[data.length - 2].fundingRate);
+    const result = { current, isRising: current > prev, percentChange: (Math.abs(prev) ? ((current - prev) / Math.abs(prev) * 100).toFixed(2) : '0.00') };
+    setCachedData(cacheKey, result);
+    return result;
+  } catch (e) {
+    return { current: null, isRising: false, percentChange: '0.00' };
+  }
+}
 // ================= ALERTA (com filtro volatilidade mínima) ================= //
 async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, divergence, lsr, rsi1hValue, volumeData, adx15m, adx1h, vwap1h) {
   const agora = Date.now();
@@ -407,32 +444,31 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   let lsrOk = false, rsiOk = false, volOk = false;
   const adxStrong = (adx15m ?? 0) > 25 && (adx1h ?? 0) > 25;
   const currentZ = volumeData.stdDev > 0 ? (volumeData.totalVolume - volumeData.avgVolume) / volumeData.stdDev : 0;
- 
   if (isBullish) {
-    
-    lsrOk = lsr.value < 2.6;
-    rsiOk = rsi1hValue < 55;
+ 
+    lsrOk = lsr.value <= 2.5;
+    rsiOk = rsi1hValue < 60;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.buyVolume > volumeData.sellVolume &&
             volumeData.lastClosedZ > 1.0 &&
             volumeData.currentCandle.close > volumeData.currentCandle.open;
-    if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m) {
+    if (rsiOk && volOk && lsrOk && volumeData.currentCandle.close > ema55_3m) {
       direcao = 'buy';
-      tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise Bullish';
+      tipo = adxStrong ? '🟢COMPRA Divergência Bull' : '💹🤖IA Análise: DIVERGÊNCIA BULL';
     }
   } else if (isBearish) {
-    
-    lsrOk = lsr.value > 2.8;
+ 
+    lsrOk = lsr.value >= 2.8;
     rsiOk = rsi1hValue > 60;
     volOk = currentZ > config.VOLUME_Z_THRESHOLD &&
             volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume &&
             volumeData.sellVolume > volumeData.buyVolume &&
             volumeData.lastClosedZ > 1.0 &&
             volumeData.currentCandle.close < volumeData.currentCandle.open;
-    if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m) {
+    if (rsiOk && volOk && lsrOk && volumeData.currentCandle.close < ema55_3m) {
       direcao = 'sell';
-      tipo = adxStrong ? '🔴VENDA' : '♦️🤖IA Análise Bearish';
+      tipo = adxStrong ? '🔴VENDA Divergência Bear' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
     }
   }
   if (!direcao) return;
@@ -447,7 +483,10 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const resistance = Math.max(...highs);
   const support = Math.min(...lows);
   const dataHora = new Date().toLocaleString('pt-BR');
-  const lsrEmoji = lsr.value < 1 ? ' 🟢' : '';
+  let lsrSymbol = '🔘Consol.';
+  if (lsr.value !== null) {
+    lsrSymbol = lsr.value <= 1.4 ? '✅Baixo' : lsr.value >= 2.8 ? '📛Alto' : lsrSymbol;
+  }
   const adx15mValue = adx15m ?? 'N/A';
   const adx1hValue = adx1h ?? 'N/A';
   const emoji15m = adx15m > 25 ? '🟢' : '🟡';
@@ -455,6 +494,17 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
   const vwapEmoji = vwap1h !== null && price > vwap1h ? '🟢' : vwap1h !== null ? '🔴' : '';
   const sto4h = await fetchAndCalculateStochastic(symbol, '4h');
   const stoDaily = await fetchAndCalculateStochastic(symbol, '1d');
+  const fundingRate = await fetchFundingRate(symbol);
+  let fundingRateEmoji = '';
+  if (fundingRate.current !== null) {
+    const rate = fundingRate.current * 100;
+    if (rate <= -0.2) fundingRateEmoji = '🟢🟢🟢🟢';
+    else if (rate <= -0.1) fundingRateEmoji = '🟢🟢🟢';
+    else if (rate <= -0.05) fundingRateEmoji = '🟢🟢';
+    else if (rate >= 0.1) fundingRateEmoji = '🔴🔴🔴🔴';
+    else if (rate >= 0.03) fundingRateEmoji = '🔴🔴🔴';
+    else if (rate >= 0.02) fundingRateEmoji = '🔴🔴';
+  }
   let msg = `${tipo} - ${timeframe.toUpperCase()}\n\n` +
             `${dataHora}\n\n` +
             `Ativo: *#${symbol}* [- TV](${link})\n` +
@@ -464,11 +514,12 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             `Stoch #1D: ${stoDaily.k ? stoDaily.k.toFixed(2) : ''} ${stoDaily.d ? stoDaily.d.toFixed(2) : ''} ${stoDaily.direction} \n`+
             `Force 15m: ${isNaN(adx15mValue) ? adx15mValue : adx15mValue.toFixed(2)} ${emoji15m}\n` +
             `Force 1h: ${isNaN(adx1hValue) ? adx1hValue : adx1hValue.toFixed(2)} ${emoji1h}\n` +
-            `#LSR: ${lsr.value.toFixed(2)}${lsrEmoji}\n` +
+            `#LSR: ${lsrSymbol} ${lsr.value.toFixed(2)}\n` +
+            `#Funding R.: ${fundingRateEmoji} ${fundingRate.current !== null ? (fundingRate.current * 100).toFixed(4) + '%' + (fundingRate.isRising ? ' ↑' : ' ↓') : 'N/A'}\n` +
             `#VWAP 1H: ${vwap1h !== null ? format(vwap1h) : 'N/A'} ${vwapEmoji}\n` +
             `#Suporte: ${format(support)}\n` +
             `#Resistência: ${format(resistance)}\n` +
-            `#Vol: ${currentZ.toFixed(2)}\n`; 
+            `#Vol: ${currentZ.toFixed(2)}\n`;
   if (adxStrong) {
     const inputATR = {
       period: 14,
@@ -480,10 +531,10 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     const atr = atrResults[atrResults.length - 1] ?? 0;
     const volatilityOk = atr > 0 && (atr / price) >= 0.005; // <<< VOLATILIDADE MÍNIMA 0.5%
     if (!volatilityOk) {
-      tipo = direcao === 'buy' ? '💹🤖IA Análise Bullish' : '♦️🤖IA Análise Bearish';
+      tipo = direcao === 'buy' ? '💹🤖IA Análise: DIVERGÊNCIA BULL' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
     }
     if (volatilityOk) {
-      const stop = direcao === 'buy' ? price - atr * 1 : price + atr * 1;
+      const stop = direcao === 'buy' ? price - atr * 2.2 : price + atr * 2.2;
       const targets = direcao === 'buy'
         ? [price + atr * 1, price + atr * 2, price + atr * 3, price + atr * 4, resistance]
         : [price - atr * 1, price - atr * 2, price - atr * 3, price - atr * 4, support];
@@ -563,7 +614,7 @@ async function main()
   {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA🌟 start'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA2'));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
