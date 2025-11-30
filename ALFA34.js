@@ -418,15 +418,15 @@ async function fetchFundingRate(symbol) {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const formattedSymbol = symbol.replace(/([A-Z]+)(USDT)/, '$1/$2'); // ← LINHA NOVA: Corrige pra 'BTC/USDT'
-    const funding = await withRetry(() => exchangeFutures.fetchFundingRate(formattedSymbol));
-    const result = { current: funding.current };
+    const data = await withRetry(() => exchangeFutures.fetchFundingRateHistory(symbol, undefined, 2));
+    if (data.length < 2) return { current: null, isRising: false, percentChange: '0.00' };
+    const current = parseFloat(data[data.length - 1].fundingRate);
+    const prev = parseFloat(data[data.length - 2].fundingRate);
+    const result = { current, isRising: current > prev, percentChange: (Math.abs(prev) ? ((current - prev) / Math.abs(prev) * 100).toFixed(2) : '0.00') };
     setCachedData(cacheKey, result);
-    logger.info(`Funding rate obtido para ${symbol}: ${result.current}`);
     return result;
   } catch (e) {
-    logger.error(`Erro ao fetch funding rate para ${symbol}: ${e.message}`);
-    return { current: null };
+    return { current: null, isRising: false, percentChange: '0.00' };
   }
 }
 // ================= ALERTA (com filtro volatilidade mínima) ================= //
@@ -455,7 +455,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close > volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close > ema55_3m) {
       direcao = 'buy';
-      tipo = adxStrong ? '🟢COMPRA - Divergeência Bull' : '💹🤖IA Análise: DIVERGÊNCIA BULL';
+      tipo = adxStrong ? '🟢COMPRA' : '💹🤖IA Análise: DIVERGÊNCIA BULL';
     }
   } else if (isBearish) {
   
@@ -468,7 +468,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             volumeData.currentCandle.close < volumeData.currentCandle.open;
     if (rsiOk && volOk && volumeData.currentCandle.close < ema55_3m) {
       direcao = 'sell';
-      tipo = adxStrong ? '🔴VENDA - Divergência Bear' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
+      tipo = adxStrong ? '🔴VENDA' : '♦️🤖IA Análise: DIVERGÊNCIA BEAR';
     }
   }
   if (!direcao) return;
@@ -512,7 +512,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
             `Force 15m: ${isNaN(adx15mValue) ? adx15mValue : adx15mValue.toFixed(2)} ${emoji15m}\n` +
             `Force 1h: ${isNaN(adx1hValue) ? adx1hValue : adx1hValue.toFixed(2)} ${emoji1h}\n` +
             `#LSR: ${lsr.value.toFixed(2)}${lsrEmoji}\n` +
-            `#Funding Rate: ${fundingRateEmoji} ${fundingRate.current !== null ? (fundingRate.current * 100).toFixed(4) + '%' : 'N/A'}\n` +
+            `#Funding Rate: ${fundingRateEmoji} ${fundingRate.current !== null ? (fundingRate.current * 100).toFixed(4) + '%' + (fundingRate.isRising ? ' ↑' : ' ↓') + ` (${fundingRate.percentChange}%)` : 'N/A'}\n` +
             `#VWAP 1H: ${vwap1h !== null ? format(vwap1h) : 'N/A'} ${vwapEmoji}\n` +
             `#Suporte: ${format(support)}\n` +
             `#Resistência: ${format(resistance)}\n` +
