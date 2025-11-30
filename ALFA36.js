@@ -12,7 +12,7 @@ const config = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,ADAUSDT,DOGEUSDT,PEPEUSDT,XRPUSDT,TONUSDT,AVAXUSDT").split(","),
   INTERVALO_VERIFICACAO_MS: 5 * 60 * 1000,
-  TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // Reduzido pra mais trades
+  TEMPO_COOLDOWN_MS: 15 * 60 * 1000, 
   RSI_PERIOD: 14,
   CACHE_TTL: 10 * 60 * 1000,
   MAX_CACHE_SIZE: 100,
@@ -505,7 +505,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
     else if (rate >= 0.03) fundingRateEmoji = '🔴🔴🔴';
     else if (rate >= 0.02) fundingRateEmoji = '🔴🔴';
   }
-  let msg = `${tipo} - ${timeframe.toUpperCase()}\n\n` +
+  let msg = `${tipo} - ${timeframe.toUpperCase()}\n` +
             `${dataHora}\n\n` +
             `Ativo: *#${symbol}* [- TV](${link})\n` +
             `Preço Atual: ${format(price)}\n` +
@@ -538,7 +538,7 @@ async function sendAlertRSIDivergence(symbol, timeframe, price, rsiValue, diverg
       const targets = direcao === 'buy'
         ? [price + atr * 1, price + atr * 2, price + atr * 3, price + atr * 4, resistance]
         : [price - atr * 1, price - atr * 2, price - atr * 3, price - atr * 4, support];
-      msg += `\n⛔Stop: ${format(stop)}\n` +
+      msg += `⛔Stop: ${format(stop)}\n` +
              `Alvo 1: ${format(targets[0])}\n` +
              `Alvo 2: ${format(targets[1])}\n` +
              `Alvo 3: ${format(targets[2])}\n` +
@@ -604,7 +604,7 @@ async function checkConditions() {
           logger.info(`Nenhuma divergência em ${symbol} no ${tf}`);
         }
       }
-    }, 20);
+    }, 30);
   } catch (e) {
     logger.error(`Erro no loop: ${e.message}`);
   }
@@ -614,7 +614,7 @@ async function main()
   {
   logger.info('Iniciando Titanium Max Profit...');
   try {
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA2'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, 'Titanium ALFA3'));
     logger.info('Mensagem de start enviada');
     await checkConnection();
   } catch (e) {
