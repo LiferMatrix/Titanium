@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHANNEL_ID = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:A';
+const TELEGRAM_CHANNEL_ID = '-1001';
 async function sendToTelegram(text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     try {
