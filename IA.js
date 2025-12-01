@@ -1,10 +1,7 @@
-// titanium-sentinel.js → COM ADX 1h + 15m NOS ALERTAS (versão corrigida com ADX suave, EMA correta, filtro ADX, anti-spam, alavancagem reduzida, probabilidade de sucesso, reconexão automática e limpeza de console a cada 2 dias)
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
-
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVF';
-const TELEGRAM_CHANNEL_ID = '-100199';
-
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHANNEL_ID = '-1001990889297';
 async function sendToTelegram(text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     try {
@@ -21,15 +18,11 @@ async function sendToTelegram(text) {
         console.log('Erro Telegram:', e.message);
     }
 }
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 // === FUNÇÃO ADX CORRIGIDA (com suavização Wilder) ===
 function calculateADX(candles, period = 14) {
     if (candles.length < period * 2) return 0;
-
     let plusDM = [], minusDM = [], tr = [];
-
     for (let i = 1; i < candles.length; i++) {
         const up = candles[i].h - candles[i - 1].h;
         const down = candles[i - 1].l - candles[i].l;
@@ -41,22 +34,18 @@ function calculateADX(candles, period = 14) {
             Math.abs(candles[i].l - candles[i - 1].c)
         ));
     }
-
     // Suavização Wilder para +DM, -DM, TR
     let smoothPlus = new Array(plusDM.length).fill(0);
     let smoothMinus = new Array(minusDM.length).fill(0);
     let smoothTR = new Array(tr.length).fill(0);
-
     smoothPlus[period - 1] = plusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
     smoothMinus[period - 1] = minusDM.slice(0, period).reduce((a, b) => a + b, 0) / period;
     smoothTR[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-
     for (let i = period; i < plusDM.length; i++) {
         smoothPlus[i] = (smoothPlus[i - 1] * (period - 1) + plusDM[i]) / period;
         smoothMinus[i] = (smoothMinus[i - 1] * (period - 1) + minusDM[i]) / period;
         smoothTR[i] = (smoothTR[i - 1] * (period - 1) + tr[i]) / period;
     }
-
     // +DI e -DI
     let plusDI = [];
     let minusDI = [];
@@ -64,27 +53,26 @@ function calculateADX(candles, period = 14) {
         plusDI.push(100 * smoothPlus[i] / smoothTR[i]);
         minusDI.push(100 * smoothMinus[i] / smoothTR[i]);
     }
-
     // DX
     let dx = [];
     for (let i = 0; i < plusDI.length; i++) {
         const diSum = plusDI[i] + minusDI[i];
         dx.push(diSum > 0 ? Math.abs(plusDI[i] - minusDI[i]) / diSum * 100 : 0);
     }
-
     // ADX (suavização Wilder do DX)
     let adx = new Array(dx.length).fill(0);
     adx[period - 1] = dx.slice(0, period).reduce((a, b) => a + b, 0) / period;
     for (let i = period; i < dx.length; i++) {
         adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
     }
-
     return adx[adx.length - 1].toFixed(1);
 }
-
-// === FUNÇÃO EMA CORRIGIDA ===
+// === FUNÇÃO EMA CORRIGIDA (COM ROBUSTEZ: VERIFICA DADOS SUFICIENTES E EVITA FALHAS) ===
 function calculateEMA(closes, period) {
-    if (closes.length < period) return 0;
+    if (closes.length < period * 2) { // Requer ao menos 2x o período para estabilidade
+        console.log(`Dados insuficientes para EMA${period}: ${closes.length} < ${period * 2}`);
+        return 0; // Retorna 0 se não houver dados robustos
+    }
     let ema = new Array(closes.length).fill(0);
     ema[period - 1] = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
     const alpha = 2 / (period + 1);
@@ -93,22 +81,18 @@ function calculateEMA(closes, period) {
     }
     return ema[ema.length - 1];
 }
-
 // === RESTANTE DAS FUNÇÕES (mantidas com ajustes) ===
 async function getData() {
     const [priceRes, h1Res, m15Res] = await Promise.all([
-        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
-        fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=100'),
-        fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=100')
+        fetchWithRetry('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
+        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=200'), // Aumentei limit para 200 para robustez nas EMAs longas
+        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=200')  // Mesma coisa
     ]);
-
     const price = parseFloat((await priceRes.json()).price);
     const h1 = (await h1Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5] }));
     const m15 = (await m15Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4] }));
-
     return { price, h1, m15 };
 }
-
 function calculateATR(candles, period = 14) {
     let trs = [];
     for (let i = 1; i < candles.length; i++) {
@@ -121,7 +105,6 @@ function calculateATR(candles, period = 14) {
     }
     return trs.slice(-period).reduce((a,b)=>a+b,0)/period;
 }
-
 function calculateRSI(closes, period =14) {
     let gains = 0, losses = 0;
     for (let i = 1; i <= period; i++) {
@@ -132,7 +115,6 @@ function calculateRSI(closes, period =14) {
     const avgLoss = Math.abs(losses) / period;
     return (100 - (100 / (1 + avgGain/avgLoss))).toFixed(1);
 }
-
 function calculateCCI(h1) {
     const period = 20;
     const last = h1.slice(-period);
@@ -141,11 +123,9 @@ function calculateCCI(h1) {
     const md = tp.reduce((s,v)=>s+Math.abs(v-sma),0)/period;
     return (tp[tp.length-1] - sma) / (0.015 * md);
 }
-
 // === NOVA: FUNÇÃO PARA CALCULAR PROBABILIDADE (0-100%) ===
 function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
     let prob = 50; // Base
-
     // Baseado em CCI (mais extremo = maior prob)
     if (isBuy) {
         if (cci <= -150) prob += 25;
@@ -156,16 +136,13 @@ function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
         else if (cci >= 130) prob += 20;
         else if (cci >= 90) prob += 15;
     }
-
     // ADX: tendência forte aumenta prob
     if (adx1h > 35) prob += 20;
     else if (adx1h > 25) prob += 15;
     else if (adx1h > 20) prob += 10;
-
     // Volume: up = bom
     if (volZ > 20) prob += 15;
     else if (volZ > 0) prob += 10;
-
     // LSR: favorável ao lado
     if (isBuy) {
         if (lsr15 > 70) prob += 15;
@@ -174,7 +151,6 @@ function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
         if (lsr15 < 30) prob += 15;
         else if (lsr15 < 50) prob += 10;
     }
-
     // RSI: oversold/overbought
     if (isBuy) {
         if (rsi1h < 20) prob += 15;
@@ -183,10 +159,8 @@ function calculateProb(cci, adx1h, volZ, lsr15, rsi1h, isBuy) {
         if (rsi1h > 80) prob += 15;
         else if (rsi1h > 70) prob += 10;
     }
-
     return Math.min(100, Math.max(0, Math.floor(prob)));
 }
-
 // === NOVA: FUNÇÃO PARA RECONEXÃO AUTOMÁTICA ===
 async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
     for (let i = 0; i < retries; i++) {
@@ -200,82 +174,82 @@ async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
         }
     }
 }
-
-// === ATUALIZAÇÃO EM getData PARA USAR fetchWithRetry ===
-async function getData() {
-    const [priceRes, h1Res, m15Res] = await Promise.all([
-        fetchWithRetry('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
-        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=100'),
-        fetchWithRetry('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=100')
-    ]);
-
-    const price = parseFloat((await priceRes.json()).price);
-    const h1 = (await h1Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5] }));
-    const m15 = (await m15Res.json()).map(c => ({ o: +c[1], h: +c[2], l: +c[3], c: +c[4] }));
-
-    return { price, h1, m15 };
+// === NOVA: FUNÇÃO PARA SINCRONIZAR COM FECHAMENTO DE VELA (evita alertar antes do fechamento) ===
+async function waitForCandleClose(intervalMs) {
+    const now = Date.now();
+    const remainder = now % intervalMs;
+    const timeToNextClose = intervalMs - remainder + 1000; // +1s buffer pós-fechamento
+    console.log(`Aguardando fechamento da próxima vela: ${timeToNextClose / 1000}s`);
+    await sleep(timeToNextClose);
 }
-
 (async () => {
     console.clear();
-
     const bootMsg = `
 <b>🤖 IA TITANIUM SENTINEL ATIVADA </b>
-
 Data/Hora: <b>${new Date().toLocaleString('pt-BR')}</b>
 Status: <b>Online • Modo Caça Extrema</b>
 Aguardando setup BTC…
     `.trim();
-
     console.log(bootMsg.replace(/<[^>]*>/g, ''));
     await sendToTelegram(bootMsg);
-
     let lastAlert = { type: null, time: 0 }; // Anti-spam: min 1h entre alertas do mesmo lado
     let lastClean = Date.now(); // Para limpeza automática a cada 2 dias
     const cleanInterval = 2 * 24 * 60 * 60 * 1000; // 2 dias em ms
-
+    const ADX_MINIMO = 25; // Filtro forte
+    const INTERVAL_15M_MS = 15 * 60 * 1000; // 15 minutos em ms para sincronia
+    // Sincroniza o primeiro loop com fechamento de vela 15m
+    await waitForCandleClose(INTERVAL_15M_MS);
     while (true) {
         try {
             const now = Date.now();
-
-            // Limpeza automática de console a cada 2 dias (não há arquivos, então só limpa console)
+            // Limpeza automática de console a cada 2 dias
             if (now - lastClean > cleanInterval) {
                 console.clear();
                 console.log('Limpeza automática executada: console limpo.');
                 lastClean = now;
             }
-
             const { price, h1, m15 } = await getData();
-
+            // === CÁLCULOS 1h (com verificação robusta) ===
             const closesH1 = h1.map(c => c.c);
+            const ema8_1h = calculateEMA(closesH1, 8);
+            const ema21_1h = calculateEMA(closesH1, 21);
+            if (ema8_1h === 0 || ema21_1h === 0) {
+                console.log('EMAs 1h inválidas - pulando ciclo');
+                process.stdout.write(`.`);
+                await waitForCandleClose(INTERVAL_15M_MS); // Aguarda próxima vela
+                continue;
+            }
+            const bullish = ema8_1h > ema21_1h; // Cruzamento confirmado só se EMAs válidas
             const cci = parseFloat(calculateCCI(h1));
             const rsi1h = parseFloat(calculateRSI(closesH1));
-            const ema8 = calculateEMA(closesH1, 8);
-            const ema21 = calculateEMA(closesH1, 21);
-            const bullish = ema8 > ema21;
-
             const atr = calculateATR(h1);
             const stopDistance = atr * 1.5;
-
+            // === CÁLCULOS 15m (com verificação robusta) ===
+            const closes15m = m15.map(c => c.c);
+            const ema55_15m = calculateEMA(closes15m, 55);
+            if (ema55_15m === 0) {
+                console.log('EMA55 15m inválida - pulando ciclo');
+                process.stdout.write(`.`);
+                await waitForCandleClose(INTERVAL_15M_MS);
+                continue;
+            }
+            const acimaEma55 = price > ema55_15m; // Usa preço de fechamento recente
+            const abaixoEma55 = price < ema55_15m;
             const longs15 = m15.slice(-20).filter(c => c.c > c.o).length;
             const shorts15 = m15.slice(-20).filter(c => c.c < c.o).length;
             const lsr15 = (longs15 / (longs15 + shorts15) * 100).toFixed(1);
-
             const vol5 = h1.slice(-5).reduce((s,c)=>s+c.v,0)/5;
             const vol20 = h1.slice(-20).reduce((s,c)=>s+c.v,0)/20;
             const volZ = ((vol5 / vol20 - 1) * 100).toFixed(1);
-
             const adx1h = parseFloat(calculateADX(h1));
-            const adx1hPrev = parseFloat(calculateADX(h1.slice(0, -1))); // ADX anterior para checar se está caindo
             const adx15m = parseFloat(calculateADX(m15));
-
+            const tendenciaForte = adx1h >= ADX_MINIMO && adx15m >= ADX_MINIMO;
             const minTimeBetweenAlerts = 3600000; // 1h
-
-            if (bullish && cci <= -90 && adx1h > 20 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'buy')) {
+            // === SINAL DE COMPRA (LONG) ===
+            if (bullish && cci <= -90 && tendenciaForte && acimaEma55 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'buy')) {
                 const prob = calculateProb(cci, adx1h, volZ, lsr15, rsi1h, true);
                 const alert = `
 #🤖 IA TITANIUM SENTINEL
-
 <b>🟢BTC COMPRA</b>
 Preço: <b>$${price.toFixed(0)}</b>
 Alavancagem: <b>${cci<=-130?'10x–20x':'5x–10x'}</b>
@@ -286,16 +260,15 @@ RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
 <b>Probabilidade de Sucesso: ${prob}%</b>
 <b>Reversão Forte — COMPRA!</b>
                 `.trim();
-
                 console.log(alert);
                 await sendToTelegram(alert);
                 lastAlert = { type: 'buy', time: now };
             }
-            else if (!bullish && cci >= 90 && adx1h > 20 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'sell')) {
+            // === SINAL DE VENDA (SHORT) ===
+            else if (!bullish && cci >= 90 && tendenciaForte && abaixoEma55 && (now - lastAlert.time > minTimeBetweenAlerts || lastAlert.type !== 'sell')) {
                 const prob = calculateProb(cci, adx1h, volZ, lsr15, rsi1h, false);
                 const alert = `
 #🤖 IA TITANIUM SENTINEL
-
 <b>🔴BTC CORREÇÃO</b>
 Preço: <b>$${price.toFixed(0)}</b>
 Alavancagem: <b>${cci>=130?'10x–20x':'5x–10x'}</b>
@@ -304,9 +277,8 @@ TP1: $${(price - atr*2).toFixed(0)} │ TP2: $${(price - atr*4).toFixed(0)} │ 
 RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
 <b>ADX 1h: ${adx1h} │ ADX 15m: ${adx15m}</b>
 <b>Probabilidade de Sucesso: ${prob}%</b>
-<b>Possível Topo  — Correção!</b>
+<b>Possível Topo — Correção!</b>
                 `.trim();
-
                 console.log(alert);
                 await sendToTelegram(alert);
                 lastAlert = { type: 'sell', time: now };
@@ -314,9 +286,8 @@ RSI 1h: ${rsi1h}% • LSR: ${lsr15}% • Vol ${volZ>0?'up':'down'}${volZ}%
             else {
                 process.stdout.write(`.`);
             }
-
-            await sleep(240000); // Mantido 4 min, mas otimizar se quiser (ex: rodar só no final das velas)
-
+            // Sincroniza com próximo fechamento de vela 15m (não alerta antes do fechamento)
+            await waitForCandleClose(INTERVAL_15M_MS);
         } catch (e) {
             console.log(`Erro geral: ${e.message}. Tentando reconectar...`);
             await sleep(10000); // Delay base no catch geral
