@@ -378,7 +378,7 @@ function getStochasticEmoji(value) {
 function getVWAPEmoji(price, vwap) {
   if (!vwap) return "";
   const diff = Math.abs(price - vwap) / vwap;
-  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹🐋💰";
+  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹💰";
 }
 function getSetaDirecao(current, previous) {
   if (current === undefined || previous === undefined) return "➡︎";
@@ -530,10 +530,10 @@ async function sendAlertStochasticCross(symbol, data) {
                      rsi1h > 60 ? "🔴Alto" : 
                      rsi1h < 40 ? "🟡Sobrevenda" : 
                      rsi1h >= 50 ? "✅🟠Tend. Alta" :
-                     rsi1h > 40 ? "🟢Consol." :
+                     rsi1h > 41 ? "🟢Consol." :
                      rsi1h < 30 ? "🔵Baixo" : 
                      rsi1h < 25 ? "🔵🔵Muito Baixo" :
-                   "🔘";
+                   "🟢Consol";
   let lsrSymbol = '🔘Consol.';
   if (lsr.value !== null) {
     lsrSymbol = lsr.value <= 1.4 ? '✅Baixo' : lsr.value >= 2.8 ? '📛Alto' : lsrSymbol;
