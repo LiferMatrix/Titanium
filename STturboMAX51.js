@@ -378,7 +378,7 @@ function getStochasticEmoji(value) {
 function getVWAPEmoji(price, vwap) {
   if (!vwap) return "";
   const diff = Math.abs(price - vwap) / vwap;
-  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹💰";
+  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹🐋💰";
 }
 function getSetaDirecao(current, previous) {
   if (current === undefined || previous === undefined) return "➡︎";
@@ -745,7 +745,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium V5.1 by J4Rviz!'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium V5.11 by J4Rviz!'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
