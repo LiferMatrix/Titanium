@@ -1,9 +1,9 @@
-// ==================== TITANIUM SENTINEL HÍBRIDA v12.4 (com ATR + 3 TPs) ====================
+// ==================== TITANIUM SENTINEL HÍBRIDA v12.3 – VERSÃO 3M (MENSAGEM FIXA) ====================
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-const TOKEN   = '8010060485:AAESqJMqL';
-const CHANNEL = '-10025';
+const TOKEN   = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const CHANNEL = '-1002554953979';
 
 const ATIVOS = [
     "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","SANDUSDT","MANAUSDT","VETUSDT","LTCUSDT","XRPUSDT","LINKUSDT","ADAUSDT","DOTUSDT","AVAXUSDT",
@@ -31,7 +31,7 @@ async function retry(url, retries = 6) {
     }
 }
 
-async function klines(symbol, interval, limit = 350) {
+async function klines(symbol, interval, limit = 400) {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const res = await retry(url);
     const data = await res.json();
@@ -41,17 +41,6 @@ async function klines(symbol, interval, limit = 350) {
 async function price(symbol) {
     const res = await retry(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
     return parseFloat((await res.json()).price);
-}
-
-// === ATR (14 períodos) no 15m ===
-function atr14(candles) {
-    if (candles.length < 15) return 0;
-    let tr = [];
-    for (let i = 1; i < candles.length; i++) {
-        const h = candles[i].h, l = candles[i].l, pc = candles[i-1].c;
-        tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
-    }
-    return tr.slice(-14).reduce((a, b) => a + b, 0) / 14;
 }
 
 function ema(closes, period) {
@@ -66,7 +55,8 @@ function adx(candles, period = 14) {
     if (candles.length < period * 2) return 0;
     let up = [], dn = [], tr = [];
     for (let i = 1; i < candles.length; i++) {
-        const h = candles[i].h, l = candles[i].l, ph = candles[i-1].h, pl = candles[i-1].l, pc = candles[i-1].c;
+        const h = candles[i].h, l = candles[i].l;
+        const ph = candles[i-1].h, pl = candles[i-1].l, pc = candles[i-1].c;
         up.push(h - ph > pl - l ? Math.max(h - ph, 0) : 0);
         dn.push(pl - l > h - ph ? Math.max(pl - l, 0) : 0);
         tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
@@ -94,36 +84,39 @@ function cci(candles, period = 20) {
     return +((tp[tp.length - 1] - sma) / (0.015 * md)).toFixed(1);
 }
 
-async function wait15m() {
-    const next = Math.ceil(Date.now() / (15 * 60 * 1000)) * (15 * 60 * 1000);
-    await sleep(next - Date.now() + 4000);
+async function wait3m() {
+    const next = Math.ceil(Date.now() / (3 * 60 * 1000)) * (3 * 60 * 1000);
+    await sleep(next - Date.now() + 3000);
 }
 
 (async () => {
     console.clear();
-    await tg("<b>TITANIUM SENTINEL</b>\n46 ativos ");
-    console.log("TITANIUM  ...");
+    console.log("Enviando mensagem de inicialização...");
+
+    // ← MENSAGEM GARANTIDA ANTES DE TUDO
+    await tg("<b>TITANIUM SENTINEL HÍBRIDA v12.3 – VERSÃO 3M</b>\n\n27 ativos • Tudo no 3m • 5x mais rápido • 30-70x\n\nBot iniciado com sucesso!");
+
+    console.log("TITANIUM HÍBRIDA v12.3 3M rodando perfeitamente...");
 
     const hotList  = {};
     const antiSpam = {};
 
-    await wait15m();
+    await wait3m();   // espera o primeiro candle fechar
 
     while (true) {
         try {
             for (const sym of ATIVOS) {
                 try {
-                    const [p, m15, h1] = await Promise.all([price(sym), klines(sym,"15m",300), klines(sym,"1h",100)]);
-                    if (m15.length < 100 || h1.length < 50) continue;
+                    const [p, m3, h1] = await Promise.all([price(sym), klines(sym,"3m",400), klines(sym,"1h",100)]);
+                    if (m3.length < 150 || h1.length < 50) continue;
 
-                    const closes15 = m15.map(c => c.c);
-                    const ema8  = ema(closes15,8);
-                    const ema21 = ema(closes15,21);
-                    const ema55 = ema(closes15,55);
-                    const cci15 = cci(m15);
-                    const adx15 = adx(m15);
+                    const closes3 = m3.map(c => c.c);
+                    const ema8  = ema(closes3,8);
+                    const ema21 = ema(closes3,21);
+                    const ema55 = ema(closes3,55);
+                    const cci3  = cci(m3);
+                    const adx3  = adx(m3);
                     const adx1h = adx(h1);
-                    const atr    = atr14(m15); // ATR 14 no 15m
 
                     const bullish = ema8 > ema21;
                     const bearish = ema8 < ema21;
@@ -131,10 +124,10 @@ async function wait15m() {
                     const below55 = p < ema55;
                     const now = Date.now();
 
-                    if (bullish && cci15 <= -100 && adx15 >= 28 && adx1h >= 25 && above55 && atr > 0) {
-                        hotList[sym] = { type:"buy", price:p, ema55, atr, ts:now };
-                    } else if (bearish && cci15 >= 100 && adx15 >= 28 && adx1h >= 25 && below55 && atr > 0) {
-                        hotList[sym] = { type:"sell", price:p, ema55, atr, ts:now };
+                    if (bullish && cci3 <= -100 && adx3 >= 28 && adx1h >= 25 && above55) {
+                        hotList[sym] = { type:"buy", price:p, ema55, ts:now };
+                    } else if (bearish && cci3 >= 100 && adx3 >= 28 && adx1h >= 25 && below55) {
+                        hotList[sym] = { type:"sell", price:p, ema55, ts:now };
                     }
                 } catch(e) {}
             }
@@ -153,30 +146,15 @@ async function wait15m() {
 
                     if (okBuy || okSell) {
                         const lev = (e.type==="buy" ? cci3<=-120 : cci3>=120) ? "50x-70x" : "30x-50x";
-                        const dir = e.type==="buy" ? "COMPRA " : "CORREÇÃO";
+                        const dir = e.type==="buy" ? "COMPRA AGORA" : "VENDA AGORA";
 
-                        //const stop = e.type==="buy" ? p3 - e.atr * 1.9 : p3 + e.atr * 1.9;   // ← 1.9R (stop mais apertado)
-                        //const tp1  = e.type==="buy" ? p3 + e.atr * 4.5 : p3 - e.atr * 4.5;   // ← 4.5R
-                        //const tp2  = e.type==="buy" ? p3 + e.atr * 9.0 : p3 - e.atr * 9.0;   // ← 9R
-                        //const tp3  = e.type==="buy" ? p3 + e.atr * 20.0 : p3 - e.atr * 20.0; // ← 20R (insano)
-
-                        const stop = e.type==="buy" ? p3 - e.atr * 2.2 : p3 + e.atr * 2.2;   
-                        const tp1  = e.type==="buy" ? p3 + e.atr * 3.5 : p3 - e.atr * 3.5;   
-                        const tp2  = e.type==="buy" ? p3 + e.atr * 7.0 : p3 - e.atr * 7.0;   
-                        const tp3  = e.type==="buy" ? p3 + e.atr * 14.0 : p3 - e.atr * 14.0; 
                         const msg = `
-#TITANIUM HÍBRID0
+#TITANIUM HÍBRIDA 3M
 <b>${sym.replace("USDT","")} ${dir}</b>
 Preço: <b>$${p3.toFixed(p3<10?6:2)}</b>
 <b>Alavancagem: ${lev}</b>
-
-<b>Stop Loss:</b> $${stop.toFixed(p3<10?6:2)}
-<b>TP1 (+2R):</b> $${tp1.toFixed(p3<10?6:2)}
-<b>TP2 (+4R):</b> $${tp2.toFixed(p3<10?6:2)}
-<b>TP3 (+8R):</b> $${tp3.toFixed(p3<10?6:2)}
-
-CCI 15m ${e.type==="buy"?"≤-100":"≥+100"} → CCI 3m ${cci3}
-Entrada confirmada!
+CCI 3m ${e.type==="buy"?"≤-100":"≥+100"} → CCI 3m ${cci3}
+Entrada confirmada no fundo/topo!
                         `.trim();
 
                         console.log("\n" + msg.replace(/<[^>]*>/g,''));
@@ -187,8 +165,8 @@ Entrada confirmada!
                 } catch(e) {}
             }
 
-            process.stdout.write("✓");
-            await wait15m();
+            process.stdout.write("Active");
+            await wait3m();
 
         } catch (e) {
             console.log("Erro geral:", e.message);
