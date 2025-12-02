@@ -2,8 +2,8 @@
 const fetch = require('node-fetch');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-const TOKEN   = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
-const CHANNEL = '-1002554953979';
+const TOKEN   = '8010060485:AAESq';
+const CHANNEL = '-10025';
 
 // 48 ATIVOS MAIS LUCRATIVOS DE 2025
 const ATIVOS = [
