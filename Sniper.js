@@ -11,8 +11,8 @@ const CronJob = require('cron').CronJob;
 
 // ================= CONFIGURAÇÃO ================= //
 const config = {
-  TELEGRAM_BOT_TOKEN: "8010060485:AA",
-  TELEGRAM_CHAT_ID: "-10",
+  TELEGRAM_BOT_TOKEN: "8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A",
+  TELEGRAM_CHAT_ID: "-1002554953979",
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_MS: 3 * 60 * 1000,  // Verificação a cada 3 minutos para movimentos menores
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000,  // 15 min entre alertas
@@ -424,15 +424,15 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
   return `*🤖IA Titanium Sniper -💹COMPRA*\n` +
          `Intensidade: ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Alerta - ${dataHora}\n` +
-         `#${symbol} [TradingView](${tradingViewLink})\n` +
+         `💹 #${symbol} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
          `Entrada: ${format(buyEntryLow)} - ${format(price)}\n` +
          `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
-         `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
-         `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
+         `Alvo 2: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
+         `Alvo 3: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
          `Stop: ${format(stopLoss)} (Risco ≈ ${((price - stopLoss)/price*100).toFixed(2)}%)\n` +
          `R:R ${ratio.toFixed(2)}:1 - ${classificacao}\n` +
-         `Potencial 10x Alvo 1: ${reward10x.toFixed(2)}%\n` +
+         `10x Alvo 1: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
          `Funding: ${fundingRateText}\n` +
@@ -448,15 +448,15 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
   return `*🤖IA Titanium Sniper -🛑CORREÇÃO*\n` +
          `Intensidade: ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Sinal - ${dataHora}\n` +
-         `#${symbol} [TradingView](${tradingViewLink})\n` +
+         `🛑 #${symbol} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
-         `Entrada Sugerida: ${format(price)} - ${format(sellEntryHigh)}\n` +
+         `Entrada: ${format(price)} - ${format(sellEntryHigh)}\n` +
          `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
-         `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
-         `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
+         `Alvo 2: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
+         `Alvo 3: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
          `Stop: ${format(stopLoss)} (Risco ≈ ${((stopLoss - price)/price*100).toFixed(2)}%)\n` +
          `R:R ${ratio.toFixed(2)}:1 - ${classificacao}\n` +
-         `Potencial 10x Alvo 1: ${reward10x.toFixed(2)}%\n` +
+         `10x Alvo 1: ${reward10x.toFixed(2)}%\n` +
          `RSI 1h: ${data.rsi1h.toFixed(2)} ${rsi1hEmoji}\n` +
          `LSR: ${lsr.value ? lsr.value.toFixed(2) : 'Spot'} ${lsrSymbol}\n` +
          `Funding: ${fundingRateText}\n` +
@@ -687,7 +687,7 @@ async function checkConditions() {
         const avgVol5 = volumes3m.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
         const currentVol = volumes3m[5];
         const previousVol = volumes3m[4];
-        const volumeSurge = currentVol > avgVol5 * 2.5 && currentVol > previousVol * 1.4;  
+        const volumeSurge = currentVol > avgVol5 * 2.4 && currentVol > previousVol * 1.4;  
         const volumeData = await fetchVolumeData(symbol);
         const isAbnormalVol = volumeSurge && (volumeData.zScore > config.VOLUME_Z_THRESHOLD);
         const fvg = await detectRecentOBFVG(symbol);
@@ -720,7 +720,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🔷 Sniper Titanium !'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🔷 Sniper Titanium2 !'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
