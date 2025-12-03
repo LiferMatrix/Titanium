@@ -726,7 +726,7 @@ async function checkConditions() {
         const previousVol = volumes3m[4];
 
         // Volume tem que estar subindo + ser MUITO acima da média recente
-        const volumeSurge = currentVol > avgVol5 * 2.0 &&     // aumentei um pouco (3.5 → 3.8)
+        const volumeSurge = currentVol > avgVol5 * 2.5 &&     // aumentei um pouco (3.5 → 3.8)
                            currentVol > previousVol * 1.4;   // candle atual > 40% do anterior
 
         // Manter o volumeData antigo (z-score, buy/sell volume, etc)
