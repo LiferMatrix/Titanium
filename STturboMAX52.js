@@ -425,7 +425,7 @@ function calcularStopDinamico(direction, entryPrice, atr) {
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr) {
   const stopLoss = calcularStopDinamico('buy', buyEntryLow, atr);
-  return `*🟢🤖 #IA Análise - COMPRA *\n` +
+  return `*❇️🤖 #IA Análise - ❇️COMPRA❇️ *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Alerta - ${dataHora}\n` +
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -447,11 +447,11 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Elite by @J4Rviz`;
+         `Titanium SNIPER by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr) {
   const stopLoss = calcularStopDinamico('sell', sellEntryHigh, atr);
-  return `*🔴🤖 #IA Análise - #CORREÇÃO *\n` +
+  return `*🛑🤖 #IA Análise - 🛑CORREÇÃO🛑 *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Alerta - ${dataHora}\n` +
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -473,7 +473,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Elite by @J4Rviz`;
+         `Titanium SNIPER by @J4Rviz`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
@@ -726,7 +726,7 @@ async function checkConditions() {
         const previousVol = volumes3m[4];
 
         // Volume tem que estar subindo + ser MUITO acima da média recente
-        const volumeSurge = currentVol > avgVol5 * 3.5 &&     // aumentei um pouco (3.5 → 3.8)
+        const volumeSurge = currentVol > avgVol5 * 2.0 &&     // aumentei um pouco (3.5 → 3.8)
                            currentVol > previousVol * 1.4;   // candle atual > 40% do anterior
 
         // Manter o volumeData antigo (z-score, buy/sell volume, etc)
