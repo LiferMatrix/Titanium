@@ -11,8 +11,8 @@ const CronJob = require('cron').CronJob;
 
 // ================= CONFIGURAÇÃO ================= //
 const config = {
-  TELEGRAM_BOT_TOKEN: "8010060485:",
-  TELEGRAM_CHAT_ID: "-10025",
+  TELEGRAM_BOT_TOKEN: "8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A",
+  TELEGRAM_CHAT_ID: "-1002554953979",
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_MS: 3 * 60 * 1000,  // Verificação a cada 3 minutos para movimentos menores
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000,  // 15 min entre alertas
@@ -377,7 +377,7 @@ function getStochasticEmoji(value) {
 function getVWAPEmoji(price, vwap) {
   if (!vwap) return "";
   const diff = Math.abs(price - vwap) / vwap;
-  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹💰";
+  return diff < 0.01 ? "✅" : price > vwap ? "🔴" : "💹🐋💰";
 }
 function getSetaDirecao(current, previous) {
   if (current === undefined || previous === undefined) return "➡︎";
@@ -421,12 +421,12 @@ function calcularStopDinamico(direction, entryPrice, atr) {
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr) {
   const stopLoss = calcularStopDinamico('buy', buyEntryLow, atr);
-  return `*🔷 Sniper Titanium - Alerta de Compra*\n` +
+  return `*🤖IA Titanium Sniper -💹COMPRA*\n` +
          `Intensidade: ${signalStrength.level} (${signalStrength.leverage})\n` +
-         `${count}º Sinal - ${dataHora}\n` +
+         `${count}º Alerta - ${dataHora}\n` +
          `#${symbol} [TradingView](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
-         `Entrada Sugerida: ${format(buyEntryLow)} - ${format(price)}\n` +
+         `Entrada: ${format(buyEntryLow)} - ${format(price)}\n` +
          `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
          `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
          `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
@@ -441,11 +441,11 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Sniper Titanium by @J4Rviz`;
+         `📍Technology by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr) {
   const stopLoss = calcularStopDinamico('sell', sellEntryHigh, atr);
-  return `*🔷 Sniper Titanium - Alerta de Venda*\n` +
+  return `*🤖IA Titanium Sniper -🛑CORREÇÃO*\n` +
          `Intensidade: ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Sinal - ${dataHora}\n` +
          `#${symbol} [TradingView](${tradingViewLink})\n` +
@@ -465,7 +465,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Vol: ${volumeZScore.toFixed(2)}\n` +
          `Suporte: ${format(zonas.suporte)}\n` +
          `Resistência: ${format(zonas.resistencia)}\n` +
-         `Sniper Titanium by @J4Rviz`;
+         `📍Technology by @J4Rviz`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
@@ -687,7 +687,7 @@ async function checkConditions() {
         const avgVol5 = volumes3m.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
         const currentVol = volumes3m[5];
         const previousVol = volumes3m[4];
-        const volumeSurge = currentVol > avgVol5 * 2.5 && currentVol > previousVol * 1.4;  // Ajustado para 3.2 como sugerido
+        const volumeSurge = currentVol > avgVol5 * 2.5 && currentVol > previousVol * 1.4;  
         const volumeData = await fetchVolumeData(symbol);
         const isAbnormalVol = volumeSurge && (volumeData.zScore > config.VOLUME_Z_THRESHOLD);
         const fvg = await detectRecentOBFVG(symbol);
@@ -720,7 +720,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🔷 Sniper Titanium Online!'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🔷 Sniper Titanium !'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
