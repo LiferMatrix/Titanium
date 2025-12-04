@@ -10,8 +10,8 @@ const path = require('path');
 const CronJob = require('cron').CronJob;
 // ================= CONFIGURAÇÃO ================= //
 const config = {
-  TELEGRAM_BOT_TOKEN: "8010060485:AAESq",
-  TELEGRAM_CHAT_ID: "-1002554",
+  TELEGRAM_BOT_TOKEN: "8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A",
+  TELEGRAM_CHAT_ID: "-1002554953979",
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_MS: 3 * 60 * 1000, // Verificação a cada 3 minutos para movimentos menores
   TEMPO_COOLDOWN_MS: 15 * 60 * 1000, // 15 min entre alertas
@@ -78,7 +78,7 @@ const state = {
 // ================= OTIMIZAÇÕES TURBO ================= //
 const TIMEFRAMES = {
   '3m': { limit: 120, ttl: 4 * 60 * 1000 },
-  '15m': { limit: 90, ttl: 12 * 60 * 1000 },
+  '15m': { limit: 120, ttl: 15 * 60 * 1000 },
   '1h': { limit: 110, ttl: 12 * 60 * 1000 },
   '4h': { limit: 50, ttl: 30 * 60 * 1000 },
   '1d': { limit: 30, ttl: 2 * 60 * 60 * 1000 },
@@ -400,7 +400,7 @@ function calculateTargetsAndZones(data) {
   };
 }
 function calcularStopDinamico(direction, entryPrice, atr) {
-  const multiplier = 2.7;
+  const multiplier = 2.45;
   return direction === 'buy' ? entryPrice - (atr * multiplier) : entryPrice + (atr * multiplier);
 }
 function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, estocastico1d, stoch1dEmoji, direcao1d) {
@@ -647,6 +647,12 @@ async function checkConditions() {
           ohlcv3m = normalizeOHLCV(raw);
           setCached(cachePrefix + '3m', ohlcv3m);
         }
+        let ohlcv15m = getCached(cachePrefix + '15m');
+        if (!ohlcv15m) {
+          const raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, TIMEFRAMES['15m'].limit));
+          ohlcv15m = normalizeOHLCV(raw);
+          setCached(cachePrefix + '15m', ohlcv15m);
+        }
         let ohlcv1h = getCached(cachePrefix + '1h');
         if (!ohlcv1h) {
           const raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '1h', undefined, TIMEFRAMES['1h'].limit));
@@ -665,7 +671,7 @@ async function checkConditions() {
           ohlcv1d = normalizeOHLCV(raw);
           setCached(cachePrefix + '1d', ohlcv1d);
         }
-        if (ohlcv3m.length < 55 || ohlcv1h.length < 14 || ohlcv4h.length < 14 || ohlcv1d.length < 14) return;
+        if (ohlcv3m.length < 55 || ohlcv15m.length < 14 || ohlcv1h.length < 14 || ohlcv4h.length < 14 || ohlcv1d.length < 14) return;
         const price = ohlcv3m[ohlcv3m.length - 1].close;
         const close_3m = ohlcv3m[ohlcv3m.length - 1].close;
         const rsi1hValues = calculateRSI(ohlcv1h);
@@ -673,9 +679,8 @@ async function checkConditions() {
         const estocastico1d = calculateStochastic(ohlcv1d);
         const lsr = await fetchLSR(symbol);
         const fundingRate = await fetchFundingRate(symbol);
-        // ATR no 1h → muito mais estável e profissional
-        const atrValues1h = calculateATR(ohlcv1h); // ← usa o 1h agora
-        const atr = atrValues1h.length > 0 ? atrValues1h[atrValues1h.length - 1] : null;
+        const atrValues15m = calculateATR(ohlcv15m);
+        const atr = atrValues15m.length > 0 ? atrValues15m[atrValues15m.length - 1] : null;
         if (!atr) return; // segurança
         const ema8_3mValues = calculateEMA(ohlcv3m, 8);
         const ema21_3mValues = calculateEMA(ohlcv3m, 21);
@@ -688,11 +693,11 @@ async function checkConditions() {
         const avgVol5 = volumes3m.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
         const currentVol = volumes3m[5];
         const previousVol = volumes3m[4];
-        const volumeSurge = currentVol > avgVol5 * 2.4 && currentVol > previousVol * 1.4;
+        const volumeSurge = currentVol > avgVol5 * 1.8 && currentVol > previousVol * 1.25;
         const volumeData = await fetchVolumeData(symbol);
         const isAbnormalVol = volumeSurge && (volumeData.zScore > config.VOLUME_Z_THRESHOLD);
         const fvg = await detectRecentOBFVG(symbol);
-        if (!rsi1hValues.length || !estocastico4h || !atrValues1h.length || ema8_3mValues.length < 2 || !ema55_3mValues.length || adx1h === null || !estocastico1d) return;
+        if (!rsi1hValues.length || !estocastico4h || !atrValues15m.length || ema8_3mValues.length < 2 || !ema55_3mValues.length || adx1h === null || !estocastico1d) return;
         await sendAlertEmaCross(symbol, {
           ohlcv3m, ohlcv4h, ohlcv1h,
           price, rsi1h: rsi1hValues[rsi1hValues.length - 1], lsr, fundingRate, estocastico4h,
