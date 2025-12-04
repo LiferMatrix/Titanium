@@ -693,7 +693,7 @@ async function checkConditions() {
         const avgVol5 = volumes3m.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
         const currentVol = volumes3m[5];
         const previousVol = volumes3m[4];
-        const volumeSurge = currentVol > avgVol5 * 1.8 && currentVol > previousVol * 1.25;
+        const volumeSurge = currentVol > avgVol5 * 2.5 && currentVol > previousVol * 1.4;
         const volumeData = await fetchVolumeData(symbol);
         const isAbnormalVol = volumeSurge && (volumeData.zScore > config.VOLUME_Z_THRESHOLD);
         const fvg = await detectRecentOBFVG(symbol);
