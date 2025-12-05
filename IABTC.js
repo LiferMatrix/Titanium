@@ -4,9 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID   = '-10025';
-
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
@@ -24,6 +23,26 @@ const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10MB por arquivo de log
 const INITIAL_RETRY_DELAY = 5000; // 5 segundos
 const MAX_RETRY_DELAY = 60000; // 1 minuto
 const MAX_RETRY_ATTEMPTS = 10;
+
+// Função para obter data e hora de Brasília
+function getBrazilianDateTime() {
+  const now = new Date();
+  // Converter para horário de Brasília (GMT-3)
+  const brasiliaTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+  
+  const day = String(brasiliaTime.getDate()).padStart(2, '0');
+  const month = String(brasiliaTime.getMonth() + 1).padStart(2, '0');
+  const year = brasiliaTime.getFullYear();
+  const hours = String(brasiliaTime.getHours()).padStart(2, '0');
+  const minutes = String(brasiliaTime.getMinutes()).padStart(2, '0');
+  const seconds = String(brasiliaTime.getSeconds()).padStart(2, '0');
+  
+  return {
+    date: `${day}/${month}/${year}`,
+    time: `${hours}:${minutes}:${seconds}`,
+    full: `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`
+  };
+}
 
 // Função para inicializar sistema de logs
 function initLogSystem() {
@@ -167,10 +186,10 @@ async function getADX(timeframe) {
   }
 }
 
-// Função para buscar Long/Short Ratio
+// Função para buscar Long/Short Ratio - CORRIGIDA
 async function getLSR(period = '15m') {
   try {
-    const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${SYMBOL}&period=${period}`;
+    const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${SYMBOL}&period=${period}&limit=1`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
@@ -180,17 +199,36 @@ async function getLSR(period = '15m') {
     const data = await res.json();
     
     if (data && data.length > 0) {
-      const latest = data[data.length - 1];
+      const latest = data[0]; // Pega o primeiro (mais recente)
+      
+      // Converter as strings para números
+      const longAccount = parseFloat(latest.longAccount);
+      const shortAccount = parseFloat(latest.shortAccount);
+      
+      // Calcular o LSR (Long/Short Ratio)
+      const lsrRatio = longAccount / shortAccount;
+      
       return {
-        ratio: (+latest.longAccount).toFixed(4),
-        shortRatio: (+latest.shortAccount).toFixed(4),
+        longAccount: longAccount.toFixed(4),
+        shortAccount: shortAccount.toFixed(4),
+        lsrRatio: lsrRatio.toFixed(4),
         period: period
       };
     }
-    return { ratio: "N/A", shortRatio: "N/A", period: period };
+    return { 
+      longAccount: "N/A", 
+      shortAccount: "N/A", 
+      lsrRatio: "N/A", 
+      period: period 
+    };
   } catch (e) {
     logToFile(`⚠️ Erro ao buscar LSR(${period}): ${e.message}`);
-    return { ratio: "N/A", shortRatio: "N/A", period: period };
+    return { 
+      longAccount: "N/A", 
+      shortAccount: "N/A", 
+      lsrRatio: "N/A", 
+      period: period 
+    };
   }
 }
 
@@ -313,7 +351,12 @@ async function mainBotLoop() {
   
   console.log(initMsg);
   logToFile('🤖 Bot iniciado - Sistema de logs ativado');
-  await sendAlert('🤖 <b>BOT INICIADO</b>\nSistema de logs e reconexão automática ativados\nMonitorando BTC/USDT 1H...');
+  
+  const brDateTime = getBrazilianDateTime();
+  await sendAlert(`🤖 <b>BOT INICIADO</b>\n` +
+                  `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
+                  `Sistema de logs e reconexão automática ativados\n` +
+                  `Monitorando BTC/USDT 1H...`);
 
   let lastBuyAlert = 0;
   let lastSellAlert = 0;
@@ -363,14 +406,16 @@ async function mainBotLoop() {
           if (now - lastSellAlert > COOLDOWN) {
             
             // Buscar dados adicionais
-            const [adx15m, adx1h, lsr15m, orderBook] = await Promise.all([
+            const [adx15m, adx1h, lsrData, orderBook] = await Promise.all([
               getADX('15m'),
               getADX('1h'),
               getLSR('15m'),
               getOrderBook()
             ]);
             
-            const msg = `🛑 <b> Liquidez Bear💰 </b>\n\n` +
+            const brDateTime = getBrazilianDateTime();
+            const msg = `🛑 <b>LIQUIDEZ BEAR SWEEP DETECTADA</b>\n\n` +
+                       `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>Par:</b> ${SYMBOL}\n` +
                        ` <b>Preço Atual:</b> $${formatNumber(price)}\n` +
                        ` <b>Nível Sweep:</b> $${formatNumber(fractalHigh)}\n` +
@@ -378,17 +423,19 @@ async function mainBotLoop() {
                        ` <b>ANÁLISE TÉCNICA</b>\n` +
                        `• ADX (15m): <b>${adx15m.value}</b>\n` +
                        `• ADX (1h): <b>${adx1h.value}</b>\n` +
-                       `• LSR: <b>${lsr15m.ratio}</b>\n\n` +
+                       `• Long Account: <b>${lsrData.longAccount}</b>\n` +
+                       `• Short Account: <b>${lsrData.shortAccount}</b>\n` +
+                       `• LSR Ratio: <b>${lsrData.lsrRatio}</b>\n\n` +
                        ` <b>BOOK DE ORDENS</b>\n` +
                        `• Melhor Bid: <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
                        `• Melhor Ask: <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
                        `• Volume Bid: <b>${orderBook.bidVolume}</b>\n` +
                        `• Volume Ask: <b>${orderBook.askVolume}</b>\n` +
                        `• Spread: <b>${orderBook.spread} bps</b>\n\n` +
-                       ` <b>Titanium Sweep System</b>`;
+                       `   <b>Titanium Sweep System v2.0</b>`;
             
             console.log(`\n${msg}`);
-            logToFile(`SWEEP BEAR DETECTADO - Preço: $${price} - Nível: $${fractalHigh}`);
+            logToFile(`SWEEP BEAR DETECTADO - Preço: $${price} - Nível: $${fractalHigh} - ${brDateTime.full}`);
             await sendAlert(msg);
             lastSellAlert = now;
             sellSignal = true;
@@ -404,14 +451,16 @@ async function mainBotLoop() {
           if (now - lastBuyAlert > COOLDOWN) {
             
             // Buscar dados adicionais
-            const [adx15m, adx1h, lsr15m, orderBook] = await Promise.all([
+            const [adx15m, adx1h, lsrData, orderBook] = await Promise.all([
               getADX('15m'),
               getADX('1h'),
               getLSR('15m'),
               getOrderBook()
             ]);
             
-            const msg = `🟢 <b> Liquidez Bull💰 </b>\n\n` +
+            const brDateTime = getBrazilianDateTime();
+            const msg = `🟢 <b>LIQUIDEZ BULL SWEEP DETECTADA</b>\n\n` +
+                       `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>Par:</b> ${SYMBOL}\n` +
                        ` <b>Preço Atual:</b> $${formatNumber(price)}\n` +
                        ` <b>Nível Sweep:</b> $${formatNumber(fractalLow)}\n` +
@@ -419,17 +468,19 @@ async function mainBotLoop() {
                        ` <b>ANÁLISE TÉCNICA</b>\n` +
                        `• ADX (15m): <b>${adx15m.value}</b>\n` +
                        `• ADX (1h): <b>${adx1h.value}</b>\n` +
-                       `• LSR: <b>${lsr15m.ratio}</b>\n\n` +
+                       `• Long Account: <b>${lsrData.longAccount}</b>\n` +
+                       `• Short Account: <b>${lsrData.shortAccount}</b>\n` +
+                       `• LSR Ratio: <b>${lsrData.lsrRatio}</b>\n\n` +
                        ` <b>BOOK DE ORDENS</b>\n` +
                        `• Melhor Bid: <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
                        `• Melhor Ask: <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
                        `• Volume Bid: <b>${orderBook.bidVolume}</b>\n` +
                        `• Volume Ask: <b>${orderBook.askVolume}</b>\n` +
                        `• Spread: <b>${orderBook.spread} bps</b>\n\n` +
-                       ` <b>Titanium Sweep System</b>`;
+                       `   <b>Titanium Sweep System v2.0</b>`;
             
             console.log(`\n${msg}`);
-            logToFile(`SWEEP BULL DETECTADO - Preço: $${price} - Nível: $${fractalLow}`);
+            logToFile(`SWEEP BULL DETECTADO - Preço: $${price} - Nível: $${fractalLow} - ${brDateTime.full}`);
             await sendAlert(msg);
             lastBuyAlert = now;
             buySignal = true;
