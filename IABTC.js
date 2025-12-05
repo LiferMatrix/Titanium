@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_';
-const TELEGRAM_CHAT_ID   = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID   = '-1001990889297';
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
@@ -183,6 +183,149 @@ async function getADX(timeframe) {
   } catch (e) {
     logToFile(`⚠️ Erro ao buscar ADX(${timeframe}): ${e.message}`);
     return { value: "N/A", timeframe: timeframe };
+  }
+}
+
+// Função para buscar RSI (14 períodos)
+async function getRSI(timeframe, period = 14) {
+  try {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${SYMBOL}&interval=${timeframe}&limit=${period + 50}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    const data = await res.json();
+    const closes = data.map(c => +c[4]);
+    
+    if (closes.length < period + 1) {
+      return { value: "N/A", timeframe: timeframe };
+    }
+    
+    // Cálculo do RSI
+    let gains = 0;
+    let losses = 0;
+    
+    for (let i = 1; i <= period; i++) {
+      const difference = closes[i] - closes[i - 1];
+      if (difference >= 0) {
+        gains += difference;
+      } else {
+        losses -= difference;
+      }
+    }
+    
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    
+    for (let i = period + 1; i < closes.length; i++) {
+      const difference = closes[i] - closes[i - 1];
+      const currentGain = difference >= 0 ? difference : 0;
+      const currentLoss = difference < 0 ? -difference : 0;
+      
+      avgGain = (avgGain * (period - 1) + currentGain) / period;
+      avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
+    }
+    
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return {
+      value: rsi.toFixed(2),
+      timeframe: timeframe
+    };
+  } catch (e) {
+    logToFile(`⚠️ Erro ao buscar RSI(${timeframe}): ${e.message}`);
+    return { value: "N/A", timeframe: timeframe };
+  }
+}
+
+// Função para buscar Estocástico (5,3,3)
+async function getStochastic(timeframe, kPeriod = 5, dPeriod = 3, smooth = 3) {
+  try {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${SYMBOL}&interval=${timeframe}&limit=${kPeriod + dPeriod + smooth + 20}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    const data = await res.json();
+    
+    const highs = data.map(c => +c[2]);
+    const lows = data.map(c => +c[3]);
+    const closes = data.map(c => +c[4]);
+    
+    if (closes.length < kPeriod + dPeriod + smooth) {
+      return { 
+        k: "N/A", 
+        d: "N/A", 
+        kDirection: "➡️", 
+        dDirection: "➡️", 
+        timeframe: timeframe 
+      };
+    }
+    
+    // Calcular %K
+    const kValues = [];
+    for (let i = 0; i <= closes.length - kPeriod; i++) {
+      const periodHighs = highs.slice(i, i + kPeriod);
+      const periodLows = lows.slice(i, i + kPeriod);
+      const currentClose = closes[i + kPeriod - 1];
+      
+      const highestHigh = Math.max(...periodHighs);
+      const lowestLow = Math.min(...periodLows);
+      
+      const kValue = lowestLow === highestHigh ? 50 : 
+                    ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+      kValues.push(kValue);
+    }
+    
+    // Suavizar %K (simple moving average)
+    const smoothedK = [];
+    for (let i = 0; i <= kValues.length - smooth; i++) {
+      const sum = kValues.slice(i, i + smooth).reduce((a, b) => a + b, 0);
+      smoothedK.push(sum / smooth);
+    }
+    
+    // Calcular %D (simple moving average do %K suavizado)
+    const dValues = [];
+    for (let i = 0; i <= smoothedK.length - dPeriod; i++) {
+      const sum = smoothedK.slice(i, i + dPeriod).reduce((a, b) => a + b, 0);
+      dValues.push(sum / dPeriod);
+    }
+    
+    // Valores atuais
+    const currentK = smoothedK[smoothedK.length - 1];
+    const currentD = dValues[dValues.length - 1];
+    
+    // Valores anteriores para determinar direção
+    const previousK = smoothedK[smoothedK.length - 2] || currentK;
+    const previousD = dValues[dValues.length - 2] || currentD;
+    
+    // Determinar direções com emojis
+    const kDirection = currentK > previousK ? "⬆️" : 
+                      currentK < previousK ? "⬇️" : "➡️";
+    const dDirection = currentD > previousD ? "⬆️" : 
+                      currentD < previousD ? "⬇️" : "➡️";
+    
+    return {
+      k: currentK.toFixed(2),
+      d: currentD.toFixed(2),
+      kDirection: kDirection,
+      dDirection: dDirection,
+      timeframe: timeframe
+    };
+  } catch (e) {
+    logToFile(`⚠️ Erro ao buscar Estocástico(${timeframe}): ${e.message}`);
+    return { 
+      k: "N/A", 
+      d: "N/A", 
+      kDirection: "➡️", 
+      dDirection: "➡️", 
+      timeframe: timeframe 
+    };
   }
 }
 
@@ -406,33 +549,41 @@ async function mainBotLoop() {
           if (now - lastSellAlert > COOLDOWN) {
             
             // Buscar dados adicionais
-            const [adx15m, adx1h, lsrData, orderBook] = await Promise.all([
+            const [adx15m, adx1h, lsrData, orderBook, rsi1h, stoch4h, stochDaily] = await Promise.all([
               getADX('15m'),
               getADX('1h'),
               getLSR('15m'),
-              getOrderBook()
+              getOrderBook(),
+              getRSI('1h'),
+              getStochastic('4h'),
+              getStochastic('1d')
             ]);
             
             const brDateTime = getBrazilianDateTime();
-            const msg = `🛑 <b>LIQUIDEZ BEAR SWEEP DETECTADA</b>\n\n` +
+            const msg = `🛑<b>🤖 IA Titanium Sentinel</b>\n\n` +
+                      ` <b>📛Zona de liquidez de Venda:</b>\n` +
+                      ` <b>Avaliar Realizar Lucros...</b>\n` +
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
-                       ` <b>Par:</b> ${SYMBOL}\n` +
+                       ` <b>Ativo:</b> ${SYMBOL}\n` +
                        ` <b>Preço Atual:</b> $${formatNumber(price)}\n` +
                        ` <b>Nível Sweep:</b> $${formatNumber(fractalHigh)}\n` +
                        ` <b>Timeframe:</b> 1H\n\n` +
-                       ` <b>ANÁLISE TÉCNICA</b>\n` +
-                       `• ADX (15m): <b>${adx15m.value}</b>\n` +
-                       `• ADX (1h): <b>${adx1h.value}</b>\n` +
-                       `• Long Account: <b>${lsrData.longAccount}</b>\n` +
-                       `• Short Account: <b>${lsrData.shortAccount}</b>\n` +
+                       ` <b>Indicadores e Sentimento</b>\n` +
+                       `• Force 15m: <b>${adx15m.value}</b>\n` +
+                       `• Force 1h: <b>${adx1h.value}</b>\n` +
+                       `• RSI 1h: <b>${rsi1h.value}</b>\n` +
+                       `• Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                       `• Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                       `• Contas em Long: <b>${lsrData.longAccount}</b>\n` +
+                       `• Contas em Short: <b>${lsrData.shortAccount}</b>\n` +
                        `• LSR Ratio: <b>${lsrData.lsrRatio}</b>\n\n` +
-                       ` <b>BOOK DE ORDENS</b>\n` +
-                       `• Melhor Bid: <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
-                       `• Melhor Ask: <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
-                       `• Volume Bid: <b>${orderBook.bidVolume}</b>\n` +
-                       `• Volume Ask: <b>${orderBook.askVolume}</b>\n` +
-                       `• Spread: <b>${orderBook.spread} bps</b>\n\n` +
-                       `   <b>Titanium Sweep System v2.0</b>`;
+                       ` <b>Livro de Ordens</b>\n` +
+                       `• Bid:(venda): <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
+                       `• Ask:(compra): <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
+                       `• Vol Bid: <b>${orderBook.bidVolume}</b>\n` +
+                       `• Vol Ask: <b>${orderBook.askVolume}</b>\n` +
+                       `• Diferença Bid/Ask: <b>${orderBook.spread} bps</b>\n\n` +
+                       `         <b>Tecnology by @J4Rviz </b>`;
             
             console.log(`\n${msg}`);
             logToFile(`SWEEP BEAR DETECTADO - Preço: $${price} - Nível: $${fractalHigh} - ${brDateTime.full}`);
@@ -451,33 +602,41 @@ async function mainBotLoop() {
           if (now - lastBuyAlert > COOLDOWN) {
             
             // Buscar dados adicionais
-            const [adx15m, adx1h, lsrData, orderBook] = await Promise.all([
+            const [adx15m, adx1h, lsrData, orderBook, rsi1h, stoch4h, stochDaily] = await Promise.all([
               getADX('15m'),
               getADX('1h'),
               getLSR('15m'),
-              getOrderBook()
+              getOrderBook(),
+              getRSI('1h'),
+              getStochastic('4h'),
+              getStochastic('1d')
             ]);
             
             const brDateTime = getBrazilianDateTime();
-            const msg = `🟢 <b>LIQUIDEZ BULL SWEEP DETECTADA</b>\n\n` +
+            const msg = `🟢<b>🤖 IA Titanium Sentinel</b>\n\n` +
+                       ` <b>💹Zona de liquidez de Compra:</b>\n` +
+                       ` <b>Avaliar ponto de Reverção...</b>\n` +
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
-                       ` <b>Par:</b> ${SYMBOL}\n` +
+                       ` <b>Ativo:</b> ${SYMBOL}\n` +
                        ` <b>Preço Atual:</b> $${formatNumber(price)}\n` +
-                       ` <b>Nível Sweep:</b> $${formatNumber(fractalLow)}\n` +
+                       ` <b>Nível Liquidez:</b> $${formatNumber(fractalLow)}\n` +
                        ` <b>Timeframe:</b> 1H\n\n` +
-                       ` <b>ANÁLISE TÉCNICA</b>\n` +
-                       `• ADX (15m): <b>${adx15m.value}</b>\n` +
-                       `• ADX (1h): <b>${adx1h.value}</b>\n` +
-                       `• Long Account: <b>${lsrData.longAccount}</b>\n` +
-                       `• Short Account: <b>${lsrData.shortAccount}</b>\n` +
+                       ` <b>Indicadores e Sentimento</b>\n` +
+                       `• Force 15m: <b>${adx15m.value}</b>\n` +
+                       `• Force 1h: <b>${adx1h.value}</b>\n` +
+                       `• RSI 1h: <b>${rsi1h.value}</b>\n` +
+                       `• Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                       `• Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                       `• Contas em Long: <b>${lsrData.longAccount}</b>\n` +
+                       `• Contas em Short: <b>${lsrData.shortAccount}</b>\n` +
                        `• LSR Ratio: <b>${lsrData.lsrRatio}</b>\n\n` +
-                       ` <b>BOOK DE ORDENS</b>\n` +
-                       `• Melhor Bid: <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
-                       `• Melhor Ask: <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
-                       `• Volume Bid: <b>${orderBook.bidVolume}</b>\n` +
-                       `• Volume Ask: <b>${orderBook.askVolume}</b>\n` +
-                       `• Spread: <b>${orderBook.spread} bps</b>\n\n` +
-                       `   <b>Titanium Sweep System v2.0</b>`;
+                       ` <b>Livro de Ordens:</b>\n` +
+                       `• Bid:(venda) <b>$${formatNumber(orderBook.bestBid)}</b>\n` +
+                       `• Ask:(compra) <b>$${formatNumber(orderBook.bestAsk)}</b>\n` +
+                       `• Vol Bid: <b>${orderBook.bidVolume}</b>\n` +
+                       `• Vol Ask: <b>${orderBook.askVolume}</b>\n` +
+                       `• Diferença Bid/Ask: <b>${orderBook.spread} bps</b>\n\n` +
+                       `         <b>Tecnology by @J4Rviz </b>`;
             
             console.log(`\n${msg}`);
             logToFile(`SWEEP BULL DETECTADO - Preço: $${price} - Nível: $${fractalLow} - ${brDateTime.full}`);
