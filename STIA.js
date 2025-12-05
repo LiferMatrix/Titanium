@@ -11,8 +11,8 @@ const CronJob = require('cron').CronJob;
 
 // ================= CONFIGURAÇÃO ================= //
 const config = {
-  TELEGRAM_BOT_TOKEN: "7867596992:AAHldcC1sxG97H0FhnvHnN12qm76_cbxIvQ",
-  TELEGRAM_CHAT_ID: "-1002178970826",
+  TELEGRAM_BOT_TOKEN: "7867596992:AAHldcC1sxG",
+  TELEGRAM_CHAT_ID: "-100217",
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 15 * 60 * 1000,
   TEMPO_COOLDOWN_MS: 20 * 60 * 1000,
