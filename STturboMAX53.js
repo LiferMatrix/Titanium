@@ -571,7 +571,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
   if (dynamicTargets && dynamicTargets.partialTargets) {
     dynamicTargets.partialTargets.forEach((target, index) => {
       const targetPct = ((target.price - buyEntryLow) / buyEntryLow * 100).toFixed(2);
-      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%) - Fechar ${target.closePercent}%\n`;
+      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%) \n`;
     });
   } else {
     // Fallback para alvos antigos
@@ -610,7 +610,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
   if (dynamicTargets && dynamicTargets.partialTargets) {
     dynamicTargets.partialTargets.forEach((target, index) => {
       const targetPct = ((sellEntryHigh - target.price) / sellEntryHigh * 100).toFixed(2);
-      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%) - Fechar ${target.closePercent}%\n`;
+      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%)\n`;
     });
   } else {
     // Fallback para alvos antigos
