@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZ';
-const TELEGRAM_CHAT_ID   = '-10';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID   = '-1001990889297';
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
@@ -615,7 +615,7 @@ async function mainBotLoop() {
             const brDateTime = getBrazilianDateTime();
             const msg = `🟢<b>🤖 IA Titanium Sentinel</b>\n\n` +
                        ` <b>💹Zona de liquidez de Compra:</b>\n` +
-                       ` <b>Avaliar ponto de Reverção...</b>\n` +
+                       ` <b>  Avaliar ponto de Reversão...</b>\n` +
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>Ativo:</b> ${SYMBOL}\n` +
                        ` <b>Preço Atual:</b> $${formatNumber(price)}\n` +
