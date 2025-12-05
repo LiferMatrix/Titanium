@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID   = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o';
+const TELEGRAM_CHAT_ID   = '-10019';
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
