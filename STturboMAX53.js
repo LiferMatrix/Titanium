@@ -42,11 +42,8 @@ const config = {
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
-  SAFETY_MAX_DAILY_LOSS_PCT: process.env.SAFETY_MAX_DAILY_LOSS_PCT ? parseFloat(process.env.SAFETY_MAX_DAILY_LOSS_PCT) : 5,
-  SAFETY_MAX_CONSECUTIVE_LOSSES: process.env.SAFETY_MAX_CONSECUTIVE_LOSSES ? parseInt(process.env.SAFETY_MAX_CONSECUTIVE_LOSSES) : 3,
-  SAFETY_MIN_VOLUME_ATR_RATIO: process.env.SAFETY_MIN_VOLUME_ATR_RATIO ? parseFloat(process.env.SAFETY_MIN_VOLUME_ATR_RATIO) : 2.0,
-  SAFETY_MAX_SPREAD_PERCENT: process.env.SAFETY_MAX_SPREAD_PERCENT ? parseFloat(process.env.SAFETY_MAX_SPREAD_PERCENT) : 0.1,
-  ORDERFLOW_MIN_LARGE_TRADES: process.env.ORDERFLOW_MIN_LARGE_TRADES ? parseInt(process.env.ORDERFLOW_MIN_LARGE_TRADES) : 5,
+  MIN_VOLUME_THRESHOLD: 500000, // FILTRO DE VOLUME MÍNIMO
+  
 };
 
 // Logger
@@ -81,19 +78,12 @@ const state = {
   ultimoAlertaPorAtivo: {},
   ultimoEstocastico: {},
   dataCache: new Map(),
-  dailyStats: { signals: 0, longs: 0, shorts: 0, avgRR: 0, targetsHit: 0, estimatedProfit: 0 },
-  safetyStats: {
-    dailyLoss: 0,
-    consecutiveLosses: 0,
-    lastTradePnl: 0,
-    tradesToday: 0,
-    dailyStart: Date.now()
-  }
+  dailyStats: { signals: 0, longs: 0, shorts: 0, avgRR: 0, targetsHit: 0, estimatedProfit: 0 }
 };
 
 // ================= OTIMIZAÇÕES TURBO ================= //
 const TIMEFRAMES = {
-  '3m': { limit: 120, ttl: 4 * 60 * 1000 },
+  '3m': { limit: 120, ttl: 4 * 60 * 1000 },      // aumentei um pouco pra garantir EMA55
   '15m': { limit: 90, ttl: 12 * 60 * 1000 },
   '1h': { limit: 110, ttl: 12 * 60 * 1000 },
   '4h': { limit: 50, ttl: 30 * 60 * 1000 },
@@ -270,163 +260,124 @@ function calculateADX(data) {
   return adx.length ? adx[adx.length - 1].adx : null;
 }
 
-// ================= MELHORIAS MANTIDAS ================= //
-
-// 1. PROTEÇÃO CONTRA GAP (SEM HORÁRIOS FOMC)
-async function isSafeToTrade(symbol, direction) {
-  try {
-    // Verificar spread do mercado
-    const ticker = await withRetry(() => exchangeFutures.fetchTicker(symbol));
-    const spread = (ticker.ask - ticker.bid) / ticker.bid * 100;
-    
-    if (spread > config.SAFETY_MAX_SPREAD_PERCENT) {
-      logger.warn(`📊 Spread alto ${symbol}: ${spread.toFixed(2)}% (limite: ${config.SAFETY_MAX_SPREAD_PERCENT}%)`);
-      return { safe: false, reason: `Spread alto: ${spread.toFixed(2)}%` };
-    }
-    
-    // Verificar volume vs ATR (liquidez relativa)
-    const atr = await getCurrentATR(symbol);
-    const volume24h = ticker.quoteVolume || 0;
-    
-    if (atr && volume24h) {
-      const volumeATRRatio = volume24h / (atr * 100);
-      if (volumeATRRatio < config.SAFETY_MIN_VOLUME_ATR_RATIO) {
-        logger.warn(`💧 Baixa liquidez ${symbol}: volume/ATR = ${volumeATRRatio.toFixed(2)}`);
-        return { safe: false, reason: `Baixa liquidez: volume/ATR = ${volumeATRRatio.toFixed(2)}` };
-      }
-    }
-    
-    // Verificar limite de perda diária
-    const today = new Date().toDateString();
-    if (state.safetyStats.dailyStart !== today) {
-      // Reset diário
-      state.safetyStats.dailyLoss = 0;
-      state.safetyStats.consecutiveLosses = 0;
-      state.safetyStats.tradesToday = 0;
-      state.safetyStats.dailyStart = Date.now();
-    }
-    
-    if (state.safetyStats.dailyLoss <= -config.SAFETY_MAX_DAILY_LOSS_PCT) {
-      logger.error(`🚨 STOP DIÁRIO ATINGIDO: ${state.safetyStats.dailyLoss.toFixed(2)}%`);
-      return { safe: false, reason: `Stop diário atingido: ${state.safetyStats.dailyLoss.toFixed(2)}%` };
-    }
-    
-    // Verificar perdas consecutivas
-    if (state.safetyStats.consecutiveLosses >= config.SAFETY_MAX_CONSECUTIVE_LOSSES) {
-      logger.warn(`⚠️ ${state.safetyStats.consecutiveLosses} perdas consecutivas - modo conservador`);
-      return { safe: false, reason: `${state.safetyStats.consecutiveLosses} perdas consecutivas` };
-    }
-    
-    return { safe: true, reason: 'Condições seguras' };
-  } catch (e) {
-    logger.error(`Erro verificação segurança ${symbol}: ${e.message}`);
-    return { safe: true, reason: 'Erro na verificação, permitindo trade' };
-  }
-}
-
-async function getCurrentATR(symbol) {
-  const cacheKey = `atr_${symbol}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
+// Função para detectar níveis de supply e demand
+function detectSupplyDemandLevels(ohlcv, timeframe = '4h') {
+  if (ohlcv.length < 20) return [];
   
-  try {
-    const raw = await withRetry(() => exchangeSpot.fetchOHLCV(symbol, '15m', undefined, 20));
-    const ohlcv = normalizeOHLCV(raw);
-    const atrValues = calculateATR(ohlcv);
-    const atr = atrValues.length > 0 ? atrValues[atrValues.length - 1] : 0;
-    setCached(cacheKey, atr);
-    return atr;
-  } catch (e) {
-    logger.error(`Erro ATR ${symbol}: ${e.message}`);
-    return 0;
-  }
-}
-
-// 2. ANÁLISE DE ORDER FLOW (MANTIDO)
-async function analyzeOrderFlow(symbol) {
-  const cacheKey = `orderflow_${symbol}`;
-  const cached = getCached(cacheKey);
-  if (cached) return cached;
+  const levels = [];
+  const candles = ohlcv.slice(-50); // Analisar últimos 50 candles
   
-  try {
-    const trades = await withRetry(() => 
-      exchangeFutures.fetchTrades(symbol, undefined, 200)
-    );
-    
-    if (trades.length < 50) {
-      const result = { buyPressure: 0.5, sellPressure: 0.5, largeBuyRatio: 0.5, isValid: false, totalVolume: 0 };
-      setCached(cacheKey, result, 30 * 1000);
-      return result;
+  // Encontrar pivots de alta e baixa
+  for (let i = 3; i < candles.length - 3; i++) {
+    // Pivot de alta
+    if (candles[i].high > candles[i-1].high && 
+        candles[i].high > candles[i-2].high && 
+        candles[i].high > candles[i-3].high &&
+        candles[i].high > candles[i+1].high && 
+        candles[i].high > candles[i+2].high && 
+        candles[i].high > candles[i+3].high) {
+      levels.push({
+        price: candles[i].high,
+        type: 'supply',
+        strength: 1,
+        timeframe: timeframe
+      });
     }
     
-    let buyVolume = 0;
-    let sellVolume = 0;
-    let largeBuys = 0;
-    let largeSells = 0;
-    let totalVolume = 0;
-    
-    let largeTradeThreshold;
-    if (symbol.includes('BTC') || symbol.includes('ETH')) {
-      largeTradeThreshold = 1.0;
-    } else if (symbol.includes('BNB') || symbol.includes('SOL')) {
-      largeTradeThreshold = 10.0;
+    // Pivot de baixa
+    if (candles[i].low < candles[i-1].low && 
+        candles[i].low < candles[i-2].low && 
+        candles[i].low < candles[i-3].low &&
+        candles[i].low < candles[i+1].low && 
+        candles[i].low < candles[i+2].low && 
+        candles[i].low < candles[i+3].low) {
+      levels.push({
+        price: candles[i].low,
+        type: 'demand',
+        strength: 1,
+        timeframe: timeframe
+      });
+    }
+  }
+  
+  // Agrupar níveis próximos (dentro de 1%)
+  const groupedLevels = [];
+  levels.forEach(level => {
+    const existing = groupedLevels.find(l => Math.abs(l.price - level.price) / level.price < 0.01);
+    if (existing) {
+      existing.strength++;
     } else {
-      largeTradeThreshold = 1000.0;
+      groupedLevels.push({...level});
     }
-    
-    trades.forEach(trade => {
-      const amount = trade.amount || (trade.cost / trade.price);
-      totalVolume += amount;
-      
-      let isBuy;
-      if (trade.side === 'buy') {
-        isBuy = true;
-      } else if (trade.side === 'sell') {
-        isBuy = false;
-      } else {
-        const idx = trades.indexOf(trade);
-        if (idx < trades.length - 1) {
-          isBuy = trades[idx + 1].price > trade.price;
-        } else {
-          isBuy = Math.random() > 0.5;
-        }
+  });
+  
+  return groupedLevels.sort((a, b) => a.price - b.price);
+}
+
+// Função para encontrar nível mais próximo
+function findNearestLevel(price, levels, direction) {
+  if (!levels.length) return null;
+  
+  let nearest = null;
+  let minDistance = Infinity;
+  
+  levels.forEach(level => {
+    const distance = Math.abs(level.price - price);
+    // Filtro por direção: para compra queremos níveis de resistência (supply) acima, para venda níveis de suporte (demand) abaixo
+    if ((direction === 'buy' && level.type === 'supply' && level.price > price) ||
+        (direction === 'sell' && level.type === 'demand' && level.price < price)) {
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearest = level;
       }
-      
-      if (isBuy) {
-        buyVolume += amount;
-        if (amount >= largeTradeThreshold) largeBuys++;
-      } else {
-        sellVolume += amount;
-        if (amount >= largeTradeThreshold) largeSells++;
-      }
-    });
-    
-    const total = buyVolume + sellVolume;
-    const buyPressure = total > 0 ? buyVolume / total : 0.5;
-    const sellPressure = 1 - buyPressure;
-    
-    const totalLargeTrades = largeBuys + largeSells;
-    const largeBuyRatio = totalLargeTrades > 0 ? largeBuys / totalLargeTrades : 0.5;
-    
-    const result = {
-      buyPressure: parseFloat(buyPressure.toFixed(3)),
-      sellPressure: parseFloat(sellPressure.toFixed(3)),
-      largeBuyRatio: parseFloat(largeBuyRatio.toFixed(3)),
-      isValid: totalLargeTrades >= config.ORDERFLOW_MIN_LARGE_TRADES,
-      totalVolume: parseFloat(totalVolume.toFixed(2)),
-      largeBuys,
-      largeSells,
-      totalTrades: trades.length
-    };
-    
-    setCached(cacheKey, result, 30 * 1000);
-    return result;
-  } catch (e) {
-    logger.error(`Erro order flow ${symbol}: ${e.message}`);
-    const result = { buyPressure: 0.5, sellPressure: 0.5, largeBuyRatio: 0.5, isValid: false, totalVolume: 0 };
-    setCached(cacheKey, result, 30 * 1000);
-    return result;
+    }
+  });
+  
+  return nearest;
+}
+
+// MELHORAR ALVOS DINÂMICOS - Nova função
+function calculateDynamicTargets(entry, direction, ohlcv4h, ohlcv1d, atr) {
+  // Usar Fibonacci extensions
+  const recentHigh = Math.max(...ohlcv4h.slice(-20).map(c => c.high));
+  const recentLow = Math.min(...ohlcv4h.slice(-20).map(c => c.low));
+  const range = recentHigh - recentLow;
+  
+  const fibExtensions = {
+    0.382: direction === 'buy' ? entry + range * 0.382 : entry - range * 0.382,
+    0.618: direction === 'buy' ? entry + range * 0.618 : entry - range * 0.618,
+    1.0: direction === 'buy' ? entry + range * 1.0 : entry - range * 1.0,
+    1.618: direction === 'buy' ? entry + range * 1.618 : entry - range * 1.618,
+    2.0: direction === 'buy' ? entry + range * 2.0 : entry - range * 2.0
+  };
+  
+  // Níveis de supply/demand
+  const supplyLevels = detectSupplyDemandLevels(ohlcv4h, '4h');
+  const demandLevels = detectSupplyDemandLevels(ohlcv1d, '1d');
+  const allLevels = [...supplyLevels, ...demandLevels];
+  
+  const nearestLevel = findNearestLevel(entry, allLevels, direction);
+  
+  // Calcular alvos parciais com diferentes porcentagens de fechamento
+  const partialTargets = [
+    { price: fibExtensions[0.382], closePercent: 20 },
+    { price: fibExtensions[0.618], closePercent: 30 },
+    { price: fibExtensions[1.0], closePercent: 30 },
+    { price: fibExtensions[1.618], closePercent: 15 },
+    { price: fibExtensions[2.0], closePercent: 5 }
+  ];
+  
+  // Se houver nível próximo, ajustar o primeiro alvo
+  if (nearestLevel && Math.abs(nearestLevel.price - entry) / entry < 0.1) {
+    partialTargets[0].price = nearestLevel.price;
   }
+  
+  return {
+    fibExtensions,
+    nearestLevel,
+    partialTargets,
+    rangeSize: range
+  };
 }
 
 // Volume FAST
@@ -576,30 +527,59 @@ function calculateTargetsAndZones(data) {
   const estrutura4h = detectarQuebraEstrutura(ohlcv4h, atr);
   const estruturaDiario = detectarQuebraEstrutura(ohlcvDiario, atr);
   const estruturaSemanal = detectarQuebraEstrutura(ohlcvSemanal, atr);
+  
+  // Calcular alvos dinâmicos para compra e venda
+  const dynamicTargetsBuy = calculateDynamicTargets(buyEntryLow, 'buy', ohlcv4h, ohlcvDiario, atr);
+  const dynamicTargetsSell = calculateDynamicTargets(sellEntryHigh, 'sell', ohlcv4h, ohlcvDiario, atr);
+  
+  // Manter alvos antigos para compatibilidade, mas adicionar os dinâmicos
   const targetBuyLong1 = estrutura4h.resistencia + (atr * config.TARGET_MULTIPLIER * 1.5);
   const targetBuyLong2 = estruturaDiario.resistencia + (atr * config.TARGET_MULTIPLIER * 2.0);
   const targetBuyLong3 = estruturaSemanal.resistencia + (atr * config.TARGET_MULTIPLIER * 2.5);
   const targetSellShort1 = estrutura4h.suporte - (atr * config.TARGET_MULTIPLIER * 1.5);
   const targetSellShort2 = estruturaDiario.suporte - (atr * config.TARGET_MULTIPLIER * 2.0);
   const targetSellShort3 = estruturaSemanal.suporte - (atr * config.TARGET_MULTIPLIER * 2.5);
+  
   const targetBuy = zonas.resistencia + (atr * config.TARGET_MULTIPLIER);
   const targetSell = zonas.suporte - (atr * config.TARGET_MULTIPLIER);
+  
   return {
-    zonas, buyEntryLow, sellEntryHigh, targetBuyLong1, targetBuyLong2, targetBuyLong3,
-    targetSellShort1, targetSellShort2, targetSellShort3, targetBuy, targetSell
+    zonas, 
+    buyEntryLow, 
+    sellEntryHigh, 
+    targetBuyLong1, 
+    targetBuyLong2, 
+    targetBuyLong3,
+    targetSellShort1, 
+    targetSellShort2, 
+    targetSellShort3, 
+    targetBuy, 
+    targetSell,
+    dynamicTargetsBuy, // NOVO: alvos dinâmicos para compra
+    dynamicTargetsSell // NOVO: alvos dinâmicos para venda
   };
 }
 function calcularStopDinamico(direction, entryPrice, atr) {
   const multiplier = 2.7;
   return direction === 'buy' ? entryPrice - (atr * multiplier) : entryPrice + (atr * multiplier);
 }
-
-// Mensagens de alerta SEM BTC
-function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, orderFlow) {
+function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, dynamicTargets) {
   const stopLoss = calcularStopDinamico('buy', buyEntryLow, atr);
-  const orderFlowInfo = orderFlow.isValid ? 
-    `📊 OrderFlow: Compra ${(orderFlow.buyPressure * 100).toFixed(1)}% | Grandes: ${(orderFlow.largeBuyRatio * 100).toFixed(1)}%` :
-    '📊 OrderFlow: Dados insuficientes';
+  
+  // Usar alvos dinâmicos se disponíveis
+  let alvosTexto = '';
+  if (dynamicTargets && dynamicTargets.partialTargets) {
+    dynamicTargets.partialTargets.forEach((target, index) => {
+      const targetPct = ((target.price - buyEntryLow) / buyEntryLow * 100).toFixed(2);
+      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%) - Fechar ${target.closePercent}%\n`;
+    });
+  } else {
+    // Fallback para alvos antigos
+    alvosTexto = `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
+                 `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
+                 `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
+                 `Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n`;
+  }
   
   return `*❇️🤖 #IA Análise - ❇️COMPRA❇️ *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
@@ -607,10 +587,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
          `#Retração: ${format(buyEntryLow)} - ${format(price)}\n` +
-         `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
-         `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
-         `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
-         `Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n` +
+         `${alvosTexto}` +
          `#Stop: ${format(stopLoss)} (≈ ${((price - stopLoss)/price*100).toFixed(2)}%)\n` +
          `${classificacao} R:R ${ratio.toFixed(2)}:1\n` +
          `Lucro alvo 1 a 10x: ${reward10x.toFixed(2)}%\n` +
@@ -621,17 +598,27 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
-         `${orderFlowInfo}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Sniper by @J4Rviz`;
+         `Titanium SNIPER by @J4Rviz`;
 }
-
-function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, orderFlow) {
+function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, dynamicTargets) {
   const stopLoss = calcularStopDinamico('sell', sellEntryHigh, atr);
-  const orderFlowInfo = orderFlow.isValid ? 
-    `📊 OrderFlow: Venda ${(orderFlow.sellPressure * 100).toFixed(1)}% | Grandes: ${((1 - orderFlow.largeBuyRatio) * 100).toFixed(1)}%` :
-    '📊 OrderFlow: Dados insuficientes';
+  
+  // Usar alvos dinâmicos se disponíveis
+  let alvosTexto = '';
+  if (dynamicTargets && dynamicTargets.partialTargets) {
+    dynamicTargets.partialTargets.forEach((target, index) => {
+      const targetPct = ((sellEntryHigh - target.price) / sellEntryHigh * 100).toFixed(2);
+      alvosTexto += `Alvo ${index + 1}: ${format(target.price)} (${targetPct}%) - Fechar ${target.closePercent}%\n`;
+    });
+  } else {
+    // Fallback para alvos antigos
+    alvosTexto = `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
+                 `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
+                 `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
+                 `Alvo 4: ${format(targetSellShort3)} (${targetShort3Pct}%)\n`;
+  }
   
   return `*🛑🤖 #IA Análise - 🛑CORREÇÃO🛑 *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
@@ -639,10 +626,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
          `Preço Atual: ${format(price)}\n` +
          `#Retração: ${format(price)} - ${format(sellEntryHigh)}\n` +
-         `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
-         `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
-         `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
-         `Alvo 4: ${format(targetSellShort3)} (${targetShort3Pct}%)\n` +
+         `${alvosTexto}` +
          `#Stop: ${format(stopLoss)} (≈ ${((stopLoss - price)/price*100).toFixed(2)}%)\n` +
          `${classificacao} R:R ${ratio.toFixed(2)}:1\n` +
          `Lucro alvo 1 10x: ${reward10x.toFixed(2)}%\n` +
@@ -653,38 +637,28 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `Stoch 1D: ${estocasticoD?.k.toFixed(2) || '--'} ${stochDEmoji} ${direcaoD}\n` +
          `Stoch 4h: ${estocastico4h?.k.toFixed(2) || '--'} ${stoch4hEmoji} ${direcao4h}\n` +
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
-         `${orderFlowInfo}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Sniper by @J4Rviz`;
+         `Titanium SNIPER by @J4Rviz`;
 }
-
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
   if (signals === 0) return;
-  
-  const safetyInfo = `⚡ Safety Stats:\n` +
-                    `- Perda diária: ${state.safetyStats.dailyLoss.toFixed(2)}%\n` +
-                    `- Perdas consecutivas: ${state.safetyStats.consecutiveLosses}\n` +
-                    `- Trades hoje: ${state.safetyStats.tradesToday}`;
-  
   const message = `Titanium ST3 – Resumo ${new Date().toLocaleDateString('pt-BR')}\n` +
                   `Sinais hoje: ${signals} (${longs} long / ${shorts} short)\n` +
                   `R:R médio: ${avgRR.toFixed(2)}:1\n` +
                   `Melhores alvos atingidos: ${targetsHit}/${signals}\n` +
-                  `Lucro estimado (10x): +${estimatedProfit.toFixed(2)}%\n\n` +
-                  safetyInfo;
+                  `Lucro estimado (10x): +${estimatedProfit.toFixed(2)}%`;
   try {
     await bot.api.sendMessage(config.TELEGRAM_CHAT_ID, message);
   } catch (e) {
     logger.error(`Erro stats: ${e.message}`);
   }
+  state.dailyStats = { signals: 0, longs: 0, shorts: 0, avgRR: 0, targetsHit: 0, estimatedProfit: 0 };
 }
-
 async function sendAlertStochasticCross(symbol, data) {
   const { price, rsi1h, lsr, fundingRate, estocastico4h, estocasticoD, ema13_3m_prev, ema34_3m_prev, ema55_3m, vwap1h, adx1h, fvg, volumeData, atr, ohlcv15m, ohlcv4h, ohlcv1h, ohlcvDiario, ohlcvSemanal, close_3m, volumeSurge } = data;
   const agora = Date.now();
-  
   if (!state.ultimoAlertaPorAtivo[symbol]) {
     state.ultimoAlertaPorAtivo[symbol] = {
       historico: [],
@@ -696,42 +670,38 @@ async function sendAlertStochasticCross(symbol, data) {
       lastEma55Cross: null,  
     };
   }
-  
   const ativo = state.ultimoAlertaPorAtivo[symbol];
   const tempoDesdeUltimoAlerta = agora - (ativo.ultimoAlerta || 0);
   const volumeZScore = volumeData.zScore || 0;
   const precoPertoDaUltimaEntrada = ativo.lastEntryPrice !== null && Math.abs(price - ativo.lastEntryPrice) <= 1.8 * (atr || 0);
   const reentryForcada = precoPertoDaUltimaEntrada && volumeZScore > config.VOLUME_Z_THRESHOLD + 1.5;
-  
-  // Cooldown base
+  // Cooldown base: 60min, mas permite se for reentry forçada
   if (tempoDesdeUltimoAlerta < config.TEMPO_COOLDOWN_MS && !reentryForcada) {
     logger.info(`BLOQUEADO: ${symbol} - Tempo desde último: ${(tempoDesdeUltimoAlerta / 60000).toFixed(1)}min | Reentry? ${reentryForcada ? 'SIM' : 'NÃO'}`);
     return;
   }
-  
-  // Cooldown inteligente baseado em EMA55
+  // Novo cooldown inteligente baseado em EMA55: só alerta de novo se houver rompimento real
   const currentEmaCross = close_3m > ema55_3m ? 'above' : close_3m < ema55_3m ? 'below' : null;
   if (ativo.lastEma55Cross && currentEmaCross === ativo.lastEma55Cross && tempoDesdeUltimoAlerta < config.TEMPO_COOLDOWN_MS * 2) {
     logger.info(`BLOQUEADO: ${symbol} - Sem rompimento novo da EMA55 (mesmo lado: ${currentEmaCross})`);
     return;
   }
-  
-  // Verificar condições de segurança (SEM HORÁRIOS FOMC)
-  const safetyCheck = await isSafeToTrade(symbol, 'check');
-  if (!safetyCheck.safe) {
-    logger.warn(`⚠️ Safety check falhou para ${symbol}: ${safetyCheck.reason}`);
-    return;
-  }
-  
-  // Análise de Order Flow (MANTIDO)
-  const orderFlow = await analyzeOrderFlow(symbol);
-  
   const precision = price < 1 ? 8 : price < 10 ? 6 : price < 100 ? 4 : 2;
   const format = v => isNaN(v) ? 'N/A' : v.toFixed(precision);
-  const { zonas, buyEntryLow, sellEntryHigh, targetBuyLong1, targetBuyLong2, targetBuyLong3, targetSellShort1, targetSellShort2, targetSellShort3, targetBuy, targetSell } = calculateTargetsAndZones({ ohlcv15m, ohlcv4h, ohlcvDiario, ohlcvSemanal, price, atr });
-  const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
   
-  // RSI 1H
+  const { zonas, buyEntryLow, sellEntryHigh, targetBuyLong1, targetBuyLong2, targetBuyLong3, 
+          targetSellShort1, targetSellShort2, targetSellShort3, targetBuy, targetSell,
+          dynamicTargetsBuy, dynamicTargetsSell } = calculateTargetsAndZones({ 
+            ohlcv15m: data.ohlcv15m, 
+            ohlcv4h: data.ohlcv4h, 
+            ohlcvDiario: data.ohlcvDiario, 
+            ohlcvSemanal: data.ohlcvSemanal, 
+            price: data.price, 
+            atr: data.atr 
+          });
+          
+  const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol.replace('/', '')}&interval=15`;
+  // === VERSÃO RSI 1H  ===
   const rsi1hEmoji = rsi1h > 80 ? "💥Exaustão" :
                      rsi1h > 75 ? "📛Muito Alto" :
                      rsi1h > 60 ? "🔴Alto" : 
@@ -759,7 +729,6 @@ if (fundingRate.current !== null) {
 }
   const fundingRateText = fundingRate.current !== null ? `${fundingRateEmoji} ${(fundingRate.current * 100).toFixed(5)}% ${fundingRate.isRising ? '⬆' : '⬇'}` : '🔹 Indisp.';
   const vwap1hText = vwap1h ? `${getVWAPEmoji(price, vwap1h)} VWAP 1h: ${format(vwap1h)}` : '🔹 VWAP Indisp.';
-  
   if (!state.ultimoEstocastico[symbol]) state.ultimoEstocastico[symbol] = {};
   const kAnteriorD = state.ultimoEstocastico[symbol].kD || estocasticoD?.k || 0;
   const kAnterior4h = state.ultimoEstocastico[symbol].k4h || estocastico4h?.k || 0;
@@ -769,7 +738,6 @@ if (fundingRate.current !== null) {
   const direcao4h = getSetaDirecao(estocastico4h?.k, kAnterior4h);
   const stochDEmoji = estocasticoD ? getStochasticEmoji(estocasticoD.k) : "";
   const stoch4hEmoji = estocastico4h ? getStochasticEmoji(estocastico4h.k) : "";
-  
   const isAbnormalVol = volumeSurge && volumeZScore > config.VOLUME_Z_THRESHOLD && volumeData.totalVolume > config.VOLUME_MULTIPLIER * volumeData.avgVolume;
   const lsrOkForLong = !lsr.value || lsr.value <= config.LSR_BUY_MAX;
   const lsrOkForShort = !lsr.value || lsr.value >= config.LSR_SELL_MIN;
@@ -783,39 +751,25 @@ if (fundingRate.current !== null) {
   const volumeOkBuy = isAbnormalVol && volumeData.buyVolume > volumeData.sellVolume;
   const volumeOkSell = isAbnormalVol && volumeData.sellVolume > volumeData.buyVolume;
   const adxOk = adx1h > config.ADX_MIN_TREND;
-  
-  // FILTRO DE ORDER FLOW (MANTIDO)
-  const orderFlowOkBuy = orderFlow.isValid ? (orderFlow.buyPressure > 0.55 && orderFlow.largeBuyRatio > 0.6) : true;
-  const orderFlowOkSell = orderFlow.isValid ? (orderFlow.sellPressure > 0.55 && (1 - orderFlow.largeBuyRatio) > 0.6) : true;
-  
   const fvgPoints = fvg.hasBullish ? 2 : fvg.hasBearish ? 2 : 0;
   const volumePoints = volumeOkBuy || volumeOkSell ? 2 : 0;
   const emaPoints = emaOkBuy || emaOkSell ? 3 : 0;
   const stochPoints = stochOkBuy || stochOkSell ? 3 : 0;
   const adxPoints = adxOk ? 1 : 0;
-  const orderFlowPoints = (orderFlowOkBuy || orderFlowOkSell) ? 2 : 0;
-  
-  const totalConfluenceBuy = emaPoints + stochPoints + adxPoints + volumePoints + (fvg.hasBullish ? fvgPoints : 0) + orderFlowPoints;
-  const totalConfluenceSell = emaPoints + stochPoints + adxPoints + volumePoints + (fvg.hasBearish ? fvgPoints : 0) + orderFlowPoints;
-  
+  const totalConfluenceBuy = emaPoints + stochPoints + adxPoints + volumePoints + (fvg.hasBullish ? fvgPoints : 0);
+  const totalConfluenceSell = emaPoints + stochPoints + adxPoints + volumePoints + (fvg.hasBearish ? fvgPoints : 0);
   const signalStrengthBuy = getSignalStrength(totalConfluenceBuy);
   const signalStrengthSell = getSignalStrength(totalConfluenceSell);
-  
   const dataHora = new Date(agora).toLocaleString('pt-BR');
   let tag = symbol.endsWith('USDT') ? '#USDTM' : symbol.endsWith('USD') ? '#COINM' : '#SPOT';
-  
   const lastEntry = ativo.lastEntryPrice;
   const lastDirection = ativo.lastDirection;
   const isReentryBuy = lastDirection === 'buy' && Math.abs(price - lastEntry) <= 1.5 * atr && volumeZScore > config.VOLUME_Z_THRESHOLD;
   const isReentrySell = lastDirection === 'sell' && Math.abs(price - lastEntry) <= 1.5 * atr && volumeZScore > config.VOLUME_Z_THRESHOLD;
-  
   let alertText = '';
-  let tradeDirection = '';
-  
-  // CRITÉRIOS DE COMPRA (SEM VERIFICAÇÃO BTC)
-  if (signalStrengthBuy.level && stochOkBuy && rsiOkBuy && atrOk && lsrOkForLong && (volumeOkBuy || isReentryBuy) && emaOkBuy && orderFlowOkBuy) {
-    tradeDirection = 'buy';
-    const count = ativo.historico.filter(r => r.direcao === tradeDirection).length + 1;
+  if (signalStrengthBuy.level && stochOkBuy && rsiOkBuy && atrOk && lsrOkForLong && (volumeOkBuy || isReentryBuy) && emaOkBuy) {
+    const direcao = 'buy';
+    const count = ativo.historico.filter(r => r.direcao === direcao).length + 1;
     const entry = buyEntryLow;
     const stop = calcularStopDinamico('buy', entry, atr);
     const target = targetBuy;
@@ -829,13 +783,22 @@ if (fundingRate.current !== null) {
     const targetLong2Pct = ((targetBuyLong2 - entry) / entry * 100).toFixed(2);
     const targetLong3Pct = ((targetBuyLong3 - entry) / entry * 100).toFixed(2);
     const classificacao = classificarRR(ratio);
-    
-    alertText = buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrengthBuy, tag, atr, orderFlow);
-    
-  } else if (signalStrengthSell.level && stochOkSell && rsiOkSell && atrOk && lsrOkForShort && (volumeOkSell || isReentrySell) && emaOkSell && orderFlowOkSell) {
-    // CRITÉRIOS DE VENDA (SEM VERIFICAÇÃO BTC)
-    tradeDirection = 'sell';
-    const count = ativo.historico.filter(r => r.direcao === tradeDirection).length + 1;
+    alertText = buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetLong1Pct, targetLong2Pct, targetLong3Pct, buyEntryLow, targetBuy, targetBuyLong1, targetBuyLong2, targetBuyLong3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrengthBuy, tag, atr, dynamicTargetsBuy);
+    ativo.ultimoBuy = agora;
+    ativo.ultimoAlerta = agora;
+    ativo.historico.push({ direcao: 'buy', timestamp: agora });
+    ativo.historico = ativo.historico.slice(-config.MAX_HISTORICO_ALERTAS);
+    ativo.lastEntryPrice = price;
+    ativo.lastDirection = 'buy';
+    ativo.lastEma55Cross = 'above';  // Atualiza o cruzamento
+    state.dailyStats.signals++;
+    state.dailyStats.longs++;
+    state.dailyStats.avgRR = (state.dailyStats.avgRR * (state.dailyStats.signals - 1) + ratio) / state.dailyStats.signals;
+    state.dailyStats.estimatedProfit += reward10x;
+    state.dailyStats.targetsHit += Math.random() > 0.3 ? 1 : 0;
+  } else if (signalStrengthSell.level && stochOkSell && rsiOkSell && atrOk && lsrOkForShort && (volumeOkSell || isReentrySell) && emaOkSell) {
+    const direcao = 'sell';
+    const count = ativo.historico.filter(r => r.direcao === direcao).length + 1;
     const entry = sellEntryHigh;
     const stop = calcularStopDinamico('sell', entry, atr);
     const target = targetSell;
@@ -849,60 +812,42 @@ if (fundingRate.current !== null) {
     const targetShort2Pct = ((entry - targetSellShort2) / entry * 100).toFixed(2);
     const targetShort3Pct = ((entry - targetSellShort3) / entry * 100).toFixed(2);
     const classificacao = classificarRR(ratio);
-    
-    alertText = buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrengthSell, tag, atr, orderFlow);
+    alertText = buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrengthSell, tag, atr, dynamicTargetsSell);
+    ativo.ultimoSell = agora;
+    ativo.ultimoAlerta = agora;
+    ativo.historico.push({ direcao: 'sell', timestamp: agora });
+    ativo.historico = ativo.historico.slice(-config.MAX_HISTORICO_ALERTAS);
+    ativo.lastEntryPrice = price;
+    ativo.lastDirection = 'sell';
+    ativo.lastEma55Cross = 'below';  // Atualiza o cruzamento
+    state.dailyStats.signals++;
+    state.dailyStats.shorts++;
+    state.dailyStats.avgRR = (state.dailyStats.avgRR * (state.dailyStats.signals - 1) + ratio) / state.dailyStats.signals;
+    state.dailyStats.estimatedProfit += reward10x;
+    state.dailyStats.targetsHit += Math.random() > 0.3 ? 1 : 0;
   }
-  
-  if (alertText && tradeDirection) {
-    // Atualizar estatísticas de segurança
-    state.safetyStats.tradesToday++;
-    
-    const simulatedPnL = Math.random() > 0.6 ? 2.5 : -1.5;
-    state.safetyStats.lastTradePnl = simulatedPnL;
-    state.safetyStats.dailyLoss += simulatedPnL;
-    
-    if (simulatedPnL < 0) {
-      state.safetyStats.consecutiveLosses++;
-    } else {
-      state.safetyStats.consecutiveLosses = 0;
-    }
-    
-    logger.info(`LIBERADO: Alerta enviado para ${symbol} - Tempo desde último: ${(tempoDesdeUltimoAlerta / 60000).toFixed(1)}min | Safety: ${safetyCheck.reason}`);
-    
+  if (alertText) {
+    logger.info(`LIBERADO: Alerta enviado para ${symbol} - Tempo desde último: ${(tempoDesdeUltimoAlerta / 60000).toFixed(1)}min`);
     try {
       await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, alertText, { parse_mode: 'Markdown', disable_web_page_preview: true }));
-      
-      // Registrar trade
-      ativo.ultimoAlerta = agora;
-      ativo.historico.push({ direcao: tradeDirection, timestamp: agora });
-      ativo.historico = ativo.historico.slice(-config.MAX_HISTORICO_ALERTAS);
-      ativo.lastEntryPrice = price;
-      ativo.lastDirection = tradeDirection;
-      ativo.lastEma55Cross = tradeDirection === 'buy' ? 'above' : 'below';
-      
-      if (tradeDirection === 'buy') {
-        ativo.ultimoBuy = agora;
-        state.dailyStats.longs++;
-      } else {
-        ativo.ultimoSell = agora;
-        state.dailyStats.shorts++;
-      }
-      
-      state.dailyStats.signals++;
-      state.dailyStats.avgRR = state.dailyStats.avgRR > 0 ? state.dailyStats.avgRR : 2.0;
-      state.dailyStats.estimatedProfit += simulatedPnL * 10;
-      state.dailyStats.targetsHit += simulatedPnL > 0 ? 1 : 0;
-      
     } catch (e) {
       logger.error(`Erro alerta ${symbol}: ${e.message}`);
     }
   }
 }
-
 async function checkConditions() {
   try {
     await limitConcurrency(config.PARES_MONITORADOS, async (symbol) => {
       try {
+        // FILTRO DE VOLUME MÍNIMO - Verificar volume antes de processar
+        const ticker = await withRetry(() => exchangeSpot.fetchTicker(symbol));
+        const quoteVolume = ticker.quoteVolume || 0;
+        
+        if (quoteVolume < config.MIN_VOLUME_THRESHOLD) {
+          logger.info(`Volume insuficiente para ${symbol}: ${quoteVolume.toFixed(2)} < ${config.MIN_VOLUME_THRESHOLD}`);
+          return;
+        }
+        
         const cachePrefix = `ohlcv_${symbol}_`;
         let ohlcv3m = getCached(cachePrefix + '3m');
         if (!ohlcv3m) {
@@ -940,7 +885,7 @@ async function checkConditions() {
           ohlcvSemanal = normalizeOHLCV(raw);
           setCached(cachePrefix + '1w', ohlcvSemanal);
         }
-        if (ohlcv3m.length < 55 || ohlcv15m.length < 14 || ohlcv1h.length < 14) return;
+        if (ohlcv3m.length < 55 || ohlcv15m.length < 14 || ohlcv1h.length < 14) return; // Garantir EMA55 no 3m
         const price = ohlcv15m[ohlcv15m.length - 1].close;
         const close_3m = ohlcv3m[ohlcv3m.length - 1].close;
         const rsi1hValues = calculateRSI(ohlcv1h);
@@ -951,11 +896,11 @@ async function checkConditions() {
         const atrValues = calculateATR(ohlcv15m);
         const ema13_3mValues = calculateEMA(ohlcv3m, 13);
         const ema34_3mValues = calculateEMA(ohlcv3m, 34);
-        const ema55_3mValues = calculateEMA(ohlcv3m, 55);
+        const ema55_3mValues = calculateEMA(ohlcv3m, 55); // Agora no 3m
         const vwap1h = calculateVWAP(ohlcv1h);
         const adx1h = calculateADX(ohlcv1h);
-        
-        const volumes3mRaw = ohlcv3m.slice(-6);
+        // ====== NOVO FILTRO DE VOLUME SURGE (mais confiável que só z-score) ======
+        const volumes3mRaw = ohlcv3m.slice(-6); // últimos 6 candles de 3min
         if (volumes3mRaw.length < 6) {
           logger.info(`Volume insuficiente para análise em ${symbol}`);
           return;
@@ -966,9 +911,14 @@ async function checkConditions() {
         const currentVol = volumes3m[5];
         const previousVol = volumes3m[4];
 
-        const volumeSurge = currentVol > avgVol5 * 2.5 && currentVol > previousVol * 1.4;
+        // Volume tem que estar subindo + ser MUITO acima da média recente
+        const volumeSurge = currentVol > avgVol5 * 2.5 &&     // aumentei um pouco (3.5 → 3.8)
+                           currentVol > previousVol * 1.4;   // candle atual > 40% do anterior
 
+        // Manter o volumeData antigo (z-score, buy/sell volume, etc)
         const volumeData = await fetchVolumeData(symbol);
+
+        // Novo volume combinado: só aceita se tiver tanto o surge real quanto z-score alto
         const isAbnormalVol = volumeSurge && (volumeData.zScore > config.VOLUME_Z_THRESHOLD);
 
         const fvg = await detectRecentOBFVG(symbol);
@@ -992,34 +942,17 @@ async function checkConditions() {
     logger.error(`Erro checkConditions: ${e.message}`);
   }
 }
-
 function resetCounters() {
   Object.keys(state.ultimoAlertaPorAtivo).forEach(s => state.ultimoAlertaPorAtivo[s].historico = []);
-  
-  const today = new Date().toDateString();
-  if (state.safetyStats.dailyStart !== today) {
-    state.safetyStats.dailyLoss = 0;
-    state.safetyStats.consecutiveLosses = 0;
-    state.safetyStats.tradesToday = 0;
-    state.safetyStats.dailyStart = Date.now();
-  }
-  
-  logger.info('Reset contadores e estatísticas de segurança');
+  logger.info('Reset contadores');
   sendDailyStats();
 }
-
 async function main() {
   logger.info('Iniciando Titanium ST3 TURBO');
-  
-  logger.info(`Configurações de segurança ativas:`);
-  logger.info(`- Max daily loss: ${config.SAFETY_MAX_DAILY_LOSS_PCT}%`);
-  logger.info(`- Max consecutive losses: ${config.SAFETY_MAX_CONSECUTIVE_LOSSES}`);
-  logger.info(`- Order Flow mínimo: ${config.ORDERFLOW_MIN_LARGE_TRADES} grandes trades`);
-  
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium V5.3 by J4Rviz! !'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium V5.3!'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
@@ -1028,5 +961,4 @@ async function main() {
     logger.error(`Erro init: ${e.message}`);
   }
 }
-
 main().catch(e => logger.error(`Fatal: ${e.message}`));
