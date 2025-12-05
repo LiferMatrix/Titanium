@@ -42,7 +42,7 @@ const config = {
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
-  MIN_VOLUME_THRESHOLD: 500000, // FILTRO DE VOLUME MÍNIMO
+  MIN_VOLUME_THRESHOLD: 300000, // FILTRO DE VOLUME MÍNIMO
   
 };
 
@@ -514,9 +514,9 @@ function classificarRR(ratio) {
   return "6-Ruim";
 }
 function getSignalStrength(confluencePoints) {
-  if (confluencePoints >= 7) return { level: '💥#Forte', leverage: '10-20x' };
-  if (confluencePoints >= 5) return { level: '#Mediana', leverage: '5-10x' };
-  if (confluencePoints >= 3) return { level: '#Regular', leverage: '3-5x' };
+  if (confluencePoints >= 7) return { level: '💥Forte', leverage: '10-20x' };
+  if (confluencePoints >= 5) return { level: 'Mediana', leverage: '5-10x' };
+  if (confluencePoints >= 3) return { level: 'Regular', leverage: '3-5x' };
   return { level: null, leverage: null };
 }
 function calculateTargetsAndZones(data) {
@@ -575,10 +575,10 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
     });
   } else {
     // Fallback para alvos antigos
-    alvosTexto = `Alvo 1: ${format(targetBuy)} (${targetPct}%)\n` +
-                 `Alvo 2: ${format(targetBuyLong1)} (${targetLong1Pct}%)\n` +
-                 `Alvo 3: ${format(targetBuyLong2)} (${targetLong2Pct}%)\n` +
-                 `Alvo 4: ${format(targetBuyLong3)} (${targetLong3Pct}%)\n`;
+    alvosTexto = `Alvo 1: ${format(targetBuy)}\n` +
+                 `Alvo 2: ${format(targetBuyLong1)}\n` +
+                 `Alvo 3: ${format(targetBuyLong2)}\n` +
+                 `Alvo 4: ${format(targetBuyLong3)}\n`;
   }
   
   return `*❇️🤖 #IA Análise - ❇️COMPRA❇️ *\n` +
@@ -600,7 +600,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium SNIPER by @J4Rviz`;
+         `Titanium Sniper by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, dynamicTargets) {
   const stopLoss = calcularStopDinamico('sell', sellEntryHigh, atr);
@@ -614,10 +614,10 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
     });
   } else {
     // Fallback para alvos antigos
-    alvosTexto = `Alvo 1: ${format(targetSell)} (${targetPct}%)\n` +
-                 `Alvo 2: ${format(targetSellShort1)} (${targetShort1Pct}%)\n` +
-                 `Alvo 3: ${format(targetSellShort2)} (${targetShort2Pct}%)\n` +
-                 `Alvo 4: ${format(targetSellShort3)} (${targetShort3Pct}%)\n`;
+    alvosTexto = `Alvo 1: ${format(targetSell)}\n` +
+                 `Alvo 2: ${format(targetSellShort1)}\n` +
+                 `Alvo 3: ${format(targetSellShort2)}\n` +
+                 `Alvo 4: ${format(targetSellShort3)}\n`;
   }
   
   return `*🛑🤖 #IA Análise - 🛑CORREÇÃO🛑 *\n` +
@@ -639,7 +639,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium SNIPER by @J4Rviz`;
+         `Titanium Sniper by @J4Rviz`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
