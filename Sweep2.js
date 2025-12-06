@@ -4,14 +4,14 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID   = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
 
-// 🔵 ATIVOS PARA MONITORAR (23 ativos - 15 originais + 8 novos)
+// 🔵 ATIVOS PARA MONITORAR (23 ativos )
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'XRPUSDT', 'NEARUSDT',
     'ATOMUSDT', 'AVAXUSDT', 'DOTUSDT', 'BCHUSDT', 'SUIUSDT',
@@ -588,30 +588,23 @@ async function monitorSymbol(symbol) {
             const bestBidFormatted = formatNumber(orderBook.bestBid, symbol, true);
             const bestAskFormatted = formatNumber(orderBook.bestAsk, symbol, true);
             
-            const msg = `${emoji}<b>🤖 IA Titanium Sentinel</b>\n\n` +
+            const msg = `${emoji}<b>🤖 IA Titanium </b>\n` +
                       ` <b>${sellSignal ? '📛Zona de liquidez de Venda:' : '💹Zona de liquidez de Compra:'}</b>\n` +
                       ` <b>${sellSignal ? 'Avaliar Realizar Lucros...' : 'Avaliar ponto de Reversão...'}</b>\n` +
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
-                       ` <b>Ativo:</b> ${symbol}\n` +
-                       ` <b>Preço Atual:</b> $${priceFormatted}\n` +
-                       ` <b>Nível Sweep:</b> $${fractalLevelFormatted}\n` +
-                       ` <b>Timeframe:</b> 1H\n\n` +
-                       ` <b>Indicadores e Sentimento</b>\n` +
+                       ` <b>#Ativo:</b> #${symbol}\n` +
+                       ` <b>Preço:</b> $${priceFormatted}\n` +
                        `• Force 15m: <b>${adx15m.value}</b>\n` +
                        `• Force 1h: <b>${adx1h.value}</b>\n` +
-                       `• RSI 1h: <b>${rsi1h.value}</b>\n` +
-                       `• Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
-                       `• Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
-                       `• Contas em Long: <b>${lsrData.longAccount}</b>\n` +
-                       `• Contas em Short: <b>${lsrData.shortAccount}</b>\n` +
-                       `• LSR Ratio: <b>${lsrData.lsrRatio}</b>\n\n` +
-                       ` <b>Livro de Ordens</b>\n` +
-                       `• Bid (venda): <b>$${bestBidFormatted}</b>\n` +
-                       `• Ask (compra): <b>$${bestAskFormatted}</b>\n` +
+                       `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
+                       `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                       `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                       `• #LSR : <b>${lsrData.lsrRatio}</b>\n\n` +
+                       ` <b>Livro de Ordens:</b>\n` +
                        `• Vol Bid: <b>${orderBook.bidVolume}</b>\n` +
                        `• Vol Ask: <b>${orderBook.askVolume}</b>\n` +
-                       `• Diferença Bid/Ask: <b>${orderBook.spread} bps</b>\n\n` +
-                       `         <b>Tecnology by @J4Rviz</b>`;
+                       
+                       `               <b>Tecnology by @J4Rviz</b>`;
             
             return {
                 symbol: symbol,
