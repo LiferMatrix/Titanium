@@ -213,6 +213,18 @@ function formatNumber(num, symbol = null, isPrice = true) {
     });
 }
 
+// Função para calcular EMA
+function calculateEMA(data, period) {
+    const multiplier = 2 / (period + 1);
+    let ema = data.slice(0, period).reduce((a, b) => a + b) / period;
+    
+    for (let i = period; i < data.length; i++) {
+        ema = (data[i] - ema) * multiplier + ema;
+    }
+    
+    return ema;
+}
+
 // Função para buscar dados ADX
 async function getADX(symbol, timeframe) {
     try {
@@ -528,6 +540,15 @@ function isDnFractal(highs, index) {
     }
 }
 
+// Função para verificar tendência EMA 55
+function checkEMATrend(price, ema55) {
+    if (price > ema55) {
+        return "🟢Tendência 💹 ema 55 no 1h";
+    } else {
+        return "🔴Tendência 📉 ema 55 no 1h";
+    }
+}
+
 // Inicializar cooldown para cada ativo
 function initAlertsCooldown() {
     SYMBOLS.forEach(symbol => {
@@ -552,6 +573,10 @@ async function monitorSymbol(symbol) {
         const closes = candles.map(c => c.close);
         const currentIndex = candles.length - 1;
         const price = closes[currentIndex];
+
+        // Calcular EMA 55
+        const ema55 = calculateEMA(closes.slice(-100), 55);
+        const emaTrend = checkEMATrend(price, ema55);
 
         let buySignal = false;
         let sellSignal = false;
@@ -607,6 +632,7 @@ async function monitorSymbol(symbol) {
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
+                       ` <b>${emaTrend}</b>\n` +
                        `• Force 15m: <b>${adx15m.value}</b>\n` +
                        `• Force 1h: <b>${adx1h.value}</b>\n` +
                        `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
@@ -867,9 +893,9 @@ async function startBot() {
 
 // Iniciar o bot
 console.log('\n' + '='.repeat(60));
-console.log('🤖 BOT DE MONITORAMENTO DE SWEEP 1H');
-console.log('📈 Monitorando 23 ativos da Binance');
-console.log('🔧 Configuração de casas decimais otimizada');
+console.log('🤖 BOT DE MONITORAMENTO SMC 1H');
+console.log('📈 Monitorando 35 ativos da Binance');
+console.log('🔧 Configuração SMC');
 console.log('='.repeat(60) + '\n');
 
 startBot();
