@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID   = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -614,10 +614,9 @@ async function monitorSymbol(symbol) {
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                        `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
-                       `• Vol Bid: <b>${orderBook.bidVolume}</b>\n` +
-                       `• Vol Ask: <b>${orderBook.askVolume}</b>\n` +
-                       
-                       `               <b>Tecnology by @J4Rviz</b>`;
+                       `• Vol Bid(vendas): <b>${orderBook.bidVolume}</b>\n` +
+                       `• Vol Ask(compras): <b>${orderBook.askVolume}</b>\n` +
+                       `                        <b>Tecnology by @J4Rviz</b>`;
             
             return {
                 symbol: symbol,
