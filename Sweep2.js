@@ -599,7 +599,7 @@ async function monitorSymbol(symbol) {
                        `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
                        `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
-                       `• #LSR : <b>${lsrData.lsrRatio}</b>\n\n` +
+                       `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
                        `• Vol Bid: <b>${orderBook.bidVolume}</b>\n` +
                        `• Vol Ask: <b>${orderBook.askVolume}</b>\n` +
