@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -15,9 +15,11 @@ const N = 2;
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'XRPUSDT', 'NEARUSDT',
     'ATOMUSDT', 'AVAXUSDT', 'DOTUSDT', 'BCHUSDT', 'SUIUSDT',
+    'AXSUSDT', 'AAVEUSDT', 'STGUSDT', 'COTIUSDT', 'API3USDT',
+    '1000PEPEUSDT', '1000SHIBUSDT', 'GMXUSDT', 'HBARUSDT', '1000BONKUSDT',
     'SEIUSDT', 'BNBUSDT', 'SOLUSDT', 'UNIUSDT', 'GALAUSDT',
     'SUSHIUSDT', '1INCHUSDT', 'MANAUSDT', 'SANDUSDT', 'ENJUSDT',
-    'INJUSDT', 'RUNEUSDT', 'ONEUSDT'
+    'INJUSDT', 'RUNEUSDT', 'ONEUSDT', 'APEUSDT', 'FILUSDT'
 ];
 
 // Configurações de Logs
@@ -54,6 +56,17 @@ const DECIMALS_CONFIG = {
     'SUSHIUSDT': 4,    // SushiSwap
     '1INCHUSDT': 4,    // 1inch
     'MANAUSDT': 4,     // Decentraland
+    'APEUSDT': 4,      // Apecoin
+    'FILUSDT': 4,      // Filecoin
+    'AXSUSDT': 4,    // 1inch
+    'AAVEUSDT': 4,     // Decentraland
+    'API3USDT': 4,      // Apecoin
+    'STGUSDT': 4,      // Filecoin
+    'GMXUSDT': 4,    // 1inch
+    '1000BONKUSDT': 4,     // Decentraland
+    '1000SHIBUSDT': 4,      // Apecoin
+    '1000PEPEUSDT': 4,      // Filecoin
+    'HBARUSDT': 4,     // The Sandbox
     'SANDUSDT': 4,     // The Sandbox
     'ENJUSDT': 4,      // Enjin
     'INJUSDT': 3,      // Injective
@@ -725,12 +738,7 @@ async function mainBotLoop() {
                     `Sistema de logs e reconexão automática ativados\n` +
                     `Monitorando ${SYMBOLS.length} ativos em 1H...\n` +
                     `\n<b>Ativos monitorados:</b>\n` +
-                    `1. BTCUSDT, 2. ETHUSDT, 3. ADAUSDT, 4. XRPUSDT\n` +
-                    `5. NEARUSDT, 6. ATOMUSDT, 7. AVAXUSDT, 8. DOTUSDT\n` +
-                    `9. BCHUSDT, 10. SUIUSDT, 11. SEIUSDT, 12. BNBUSDT\n` +
-                    `13. SOLUSDT, 14. UNIUSDT, 15. GALAUSDT, 16. SUSHIUSDT\n` +
-                    `17. 1INCHUSDT, 18. MANAUSDT, 19. SANDUSDT, 20. ENJUSDT\n` +
-                    `21. INJUSDT, 22. RUNEUSDT, 23. ONEUSDT`);
+                    `35 ATIVOS...`);
 
     let consecutiveErrors = 0;
     let cycleCount = 0;
