@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJM';
-const TELEGRAM_CHAT_ID   = '-10025';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -57,7 +57,8 @@ const DECIMALS_CONFIG = {
     '1INCHUSDT': 4,    // 1inch
     'MANAUSDT': 4,     // Decentraland
     'APEUSDT': 4,      // Apecoin
-    'FILUSDT': 4,      // Filecoin
+    'FILUSDT': 4,
+    'COTIUSDT': 5,     // Filecoin
     'AXSUSDT': 4,    // 1inch
     'AAVEUSDT': 4,     // Decentraland
     'API3USDT': 4,      // Apecoin
