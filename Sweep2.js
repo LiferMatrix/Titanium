@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMq';
-const TELEGRAM_CHAT_ID   = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -18,6 +18,10 @@ const SYMBOLS = [
     'AXSUSDT', 'AAVEUSDT', 'STGUSDT', 'COTIUSDT', 'API3USDT',
     '1000PEPEUSDT', '1000SHIBUSDT', 'GMXUSDT', 'HBARUSDT', '1000BONKUSDT',
     'SEIUSDT', 'BNBUSDT', 'SOLUSDT', 'UNIUSDT', 'GALAUSDT',
+    'CHZUSDT', 'IOTAUSDT', 'ARBUSDT', 'BANDUSDT', 'C98USDT',
+    'IOSTUSDT', 'LDOUSDT', 'ICPUSDT', 'ENAUSDT', 'DYDXUSDT',
+    'SKLUSDT', 'TIAUSDT', 'VETUSDT', 'WLDUSDT', 'ZKUSDT',
+    'FETUSDT', 'GMTUSDT', 'GRTUSDT', 'CKBUSDT', 'LTCUSDT',
     'SUSHIUSDT', '1INCHUSDT', 'MANAUSDT', 'SANDUSDT', 'ENJUSDT',
     'INJUSDT', 'RUNEUSDT', 'ONEUSDT', 'APEUSDT', 'FILUSDT'
 ];
@@ -38,41 +42,58 @@ const COOLDOWN = 30 * 60 * 1000; // 30 minutos
 
 // Configuração de casas decimais por ativo
 const DECIMALS_CONFIG = {
-    'BTCUSDT': 2,      // Bitcoin
-    'ETHUSDT': 2,      // Ethereum
-    'ADAUSDT': 5,      // Cardano
-    'XRPUSDT': 4,      // Ripple
-    'NEARUSDT': 4,     // NEAR
-    'ATOMUSDT': 3,     // Cosmos
-    'AVAXUSDT': 3,     // Avalanche
-    'DOTUSDT': 3,      // Polkadot
-    'BCHUSDT': 2,      // Bitcoin Cash
-    'SUIUSDT': 4,      // SUI
-    'SEIUSDT': 5,      // SEI
-    'BNBUSDT': 2,      // BNB
-    'SOLUSDT': 3,      // Solana
-    'UNIUSDT': 3,      // Uniswap
-    'GALAUSDT': 5,     // GALA
-    'SUSHIUSDT': 4,    // SushiSwap
-    '1INCHUSDT': 4,    // 1inch
-    'MANAUSDT': 4,     // Decentraland
-    'APEUSDT': 4,      // Apecoin
-    'FILUSDT': 4,
-    'COTIUSDT': 5,     // Filecoin
-    'AXSUSDT': 4,    // 1inch
-    'AAVEUSDT': 4,     // Decentraland
-    'API3USDT': 4,      // Apecoin
-    'STGUSDT': 4,      // Filecoin
-    'GMXUSDT': 4,    // 1inch
-    '1000BONKUSDT': 4,     // Decentraland
-    '1000SHIBUSDT': 4,      // Apecoin
-    '1000PEPEUSDT': 4,      // Filecoin
-    'HBARUSDT': 4,     // The Sandbox
-    'SANDUSDT': 4,     // The Sandbox
-    'ENJUSDT': 4,      // Enjin
-    'INJUSDT': 3,      // Injective
-    'RUNEUSDT': 3,     // THORChain
-    'ONEUSDT': 5       // Harmony
+    'BTCUSDT': 2,      
+    'ETHUSDT': 2,      
+    'ADAUSDT': 5,      
+    'XRPUSDT': 4,      
+    'NEARUSDT': 4,     
+    'ATOMUSDT': 3,     
+    'AVAXUSDT': 3,    
+    'DOTUSDT': 3,      
+    'BCHUSDT': 2,      
+    'SUIUSDT': 4,     
+    'SEIUSDT': 5,     
+    'BNBUSDT': 2,     
+    'SOLUSDT': 3,      
+    'UNIUSDT': 3,      
+    'GALAUSDT': 5,     
+    'COTIUSDT': 5,    
+    'CHZUSDT': 5,     
+    'C98USDT': 5,     
+    'IOTAUSDT': 5,     
+    'BANDUSDT': 5,
+    'GRTUSDT': 5,     
+    'CKBUSDT': 5,
+    'LTCUSDT': 5,
+    'LDOUSDT': 5, 
+    'ICPUSDT': 5,
+    'WLDUSDT': 5,    
+    'FETUSDT': 5,
+    'GMTUSDT': 5,  
+    'VETUSDT': 5,
+    'TIAUSDT': 5,     
+    'ZKUSDT': 5,     
+    'IOSTUSDT': 5,
+    'SKLUSDT': 5,      
+    'SUSHIUSDT': 4,   
+    '1INCHUSDT': 4,    
+    'MANAUSDT': 4,    
+    'APEUSDT': 4,      
+    'FILUSDT': 4,     
+    'AXSUSDT': 4,    
+    'AAVEUSDT': 4,     
+    'API3USDT': 4,      
+    'STGUSDT': 4,     
+    'GMXUSDT': 4,    
+    '1000BONKUSDT': 4,     
+    '1000SHIBUSDT': 4,     
+    '1000PEPEUSDT': 4,     
+    'HBARUSDT': 4,   
+    'SANDUSDT': 4,   
+    'ENJUSDT': 4,      
+    'INJUSDT': 3,      
+    'RUNEUSDT': 3,     
+    'ONEUSDT': 5       
 };
 
 // Default se não encontrado
@@ -544,9 +565,9 @@ function isDnFractal(highs, index) {
 // Função para verificar tendência EMA 55
 function checkEMATrend(price, ema55) {
     if (price > ema55) {
-        return "🟢Tendência 💹 ema 55 no 1h";
+        return "🟢Tendência 💹 ema 55 1h";
     } else {
-        return "🔴Tendência 📉 ema 55 no 1h";
+        return "🔴Tendência 📉 ema 55 1h";
     }
 }
 
@@ -759,12 +780,12 @@ async function mainBotLoop() {
     console.log('='.repeat(60) + '\n');
     
     const brDateTime = getBrazilianDateTime();
-    await sendAlert(`🤖 <b>BOT INICIADO</b>\n` +
+    await sendAlert(`🤖 <b>Titanium SMC Sentinel</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `Sistema de logs e reconexão automática ativados\n` +
                     `Monitorando ${SYMBOLS.length} ativos em 1H...\n` +
                     `\n<b>Ativos monitorados:</b>\n` +
-                    `35 ATIVOS...`);
+                    `55 ATIVOS...`);
 
     let consecutiveErrors = 0;
     let cycleCount = 0;
@@ -895,7 +916,7 @@ async function startBot() {
 // Iniciar o bot
 console.log('\n' + '='.repeat(60));
 console.log('🤖 BOT DE MONITORAMENTO SMC 1H');
-console.log('📈 Monitorando 35 ativos da Binance');
+console.log('📈 Monitorando 55 ativos da Binance');
 console.log('🔧 Configuração SMC');
 console.log('='.repeat(60) + '\n');
 
