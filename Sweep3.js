@@ -247,29 +247,95 @@ function calculateEMA(data, period) {
     return ema;
 }
 
-// Função para buscar dados ADX
+// 🔴 SUBSTITUA SUA FUNÇÃO getADX ANTIGA POR ESTA AQUI (ADX DE VERDADE)
+
 async function getADX(symbol, timeframe) {
     try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=50`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=100`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
+
         const res = await fetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
-        
         const data = await res.json();
+
+        if (data.length < 30) return { value: "N/A", plusDI: "N/A", minusDI: "N/A", timeframe };
+
+        const highs = data.map(c => +c[2]);
+        const lows  = data.map(c => +c[3]);
         const closes = data.map(c => +c[4]);
-        
-        const priceChange = ((closes[closes.length-1] - closes[0]) / closes[0]) * 100;
-        const trendStrength = Math.min(Math.abs(priceChange) * 1.5, 100);
-        
+
+        // Calcula True Range e Directional Movement
+        const tr = [];
+        const plusDM = [];
+        const minusDM = [];
+
+        for (let i = 1; i < highs.length; i++) {
+            const upMove = highs[i] - highs[i-1];
+            const downMove = lows[i-1] - lows[i];
+
+            const plusDMval = upMove > downMove && upMove > 0 ? upMove : 0;
+            const minusDMval = downMove > upMove && downMove > 0 ? downMove : 0;
+
+            const tr1 = highs[i] - lows[i];
+            const tr2 = Math.abs(highs[i] - closes[i-1]);
+            const tr3 = Math.abs(lows[i] - closes[i-1]);
+            const trueRange = Math.max(tr1, tr2, tr3);
+
+            plusDM.push(plusDMval);
+            minusDM.push(minusDMval);
+            tr.push(trueRange);
+        }
+
+        // Suavização Wilder (período 14 padrão)
+        const period = 14;
+
+        let atr = tr.slice(0, period).reduce((a, b) => a + b, 0);
+        let plusDI = 100 * (plusDM.slice(0, period).reduce((a, b) => a + b, 0) / atr);
+        let minusDI = 100 * (minusDM.slice(0, period).reduce((a, b) => a + b, 0) / atr);
+
+        let dxValues = [];
+        if (plusDI + minusDI !== 0) {
+            dxValues.push(100 * Math.abs(plusDI - minusDI) / (plusDI + minusDI));
+        }
+
+        // Loop a partir do período 15 em diante (Wilder smoothing)
+        for (let i = period; i < tr.length; i++) {
+            atr = atr - (atr / period) + tr[i];
+
+            const currentPlusDM = plusDM[i] > minusDM[i] && plusDM[i] > 0 ? plusDM[i] : 0;
+            const currentMinusDM = minusDM[i] > plusDM[i] && minusDM[i] > 0 ? minusDM[i] : 0;
+
+            const smoothedPlusDM = (plusDM[period-1] * (period - 1) + currentPlusDM) / period;
+            const smoothedMinusDM = (minusDM[period-1] * (period - 1) + currentMinusDM) / period;
+
+            plusDI = 100 * (smoothedPlusDM / atr);
+            minusDI = 100 * (smoothedMinusDM / atr);
+
+            if (plusDI + minusDI !== 0) {
+                const dx = 100 * Math.abs(plusDI - minusDI) / (plusDI + minusDI);
+                dxValues.push(dx);
+            }
+        }
+
+        // ADX final = média dos últimos 14 DX
+        let adx = dxValues.slice(-period).reduce((a, b) => a + b, 0) / period;
+        adx = parseFloat(adx.toFixed(2));
+
+        const finalPlusDI = parseFloat(plusDI.toFixed(2));
+        const finalMinusDI = parseFloat(minusDI.toFixed(2));
+
         return {
-            value: trendStrength.toFixed(2),
-            timeframe: timeframe
+            value: adx,
+            plusDI: finalPlusDI,
+            minusDI: finalMinusDI,
+            strength: adx >= 25 ? "Forte" : "Fraca",
+            timeframe
         };
+
     } catch (e) {
-        logToFile(`⚠️ Erro ao buscar ADX(${symbol}, ${timeframe}): ${e.message}`);
-        return { value: "N/A", timeframe: timeframe };
+        logToFile(`Erro ADX real (${symbol}, ${timeframe}): ${e.message}`);
+        return { value: "N/A", plusDI: "N/A", minusDI: "N/A", strength: "N/A", timeframe };
     }
 }
 
@@ -583,7 +649,7 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
 }
 
 // 🔴 NOVA FUNÇÃO: Verificar volatilidade mínima no timeframe de 15 minutos
-async function checkMinimumVolatility(symbol, minPercentage = 0.5) {
+async function checkMinimumVolatility(symbol, minPercentage = 0.7) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`;
         const controller = new AbortController();
