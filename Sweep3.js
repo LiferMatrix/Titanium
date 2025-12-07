@@ -1,17 +1,17 @@
-const fetch = require('node-fetch');
+require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
 
-// 🔵 ATIVOS PARA MONITORAR (23 ativos )
+// 🔵 ATIVOS PARA MONITORAR 
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'XRPUSDT', 'NEARUSDT',
     'ATOMUSDT', 'AVAXUSDT', 'DOTUSDT', 'BCHUSDT', 'SUIUSDT',
@@ -39,6 +39,9 @@ const MAX_RETRY_ATTEMPTS = 10;
 // Objeto para armazenar alertas por ativo
 const alertsCooldown = {};
 const COOLDOWN = 30 * 60 * 1000; // 30 minutos
+
+// Objeto para rastrear sweeps recentes para confirmações
+const recentSweeps = {};
 
 // Configuração de casas decimais por ativo
 const DECIMALS_CONFIG = {
@@ -85,9 +88,9 @@ const DECIMALS_CONFIG = {
     'API3USDT': 4,      
     'STGUSDT': 4,     
     'GMXUSDT': 4,    
-    '1000BONKUSDT': 5,     
-    '1000SHIBUSDT': 5,     
-    '1000PEPEUSDT': 5,     
+    '1000BONKUSDT': 6,     
+    '1000SHIBUSDT': 6,     
+    '1000PEPEUSDT': 6,     
     'HBARUSDT': 4,   
     'SANDUSDT': 4,   
     'ENJUSDT': 4,      
@@ -95,7 +98,6 @@ const DECIMALS_CONFIG = {
     'RUNEUSDT': 3,     
     'ONEUSDT': 5       
 };
-
 
 // Default se não encontrado
 const DEFAULT_DECIMALS = 4;
@@ -650,7 +652,7 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
 }
 
 // 🔴 NOVA FUNÇÃO: Verificar volatilidade mínima no timeframe de 15 minutos
-async function checkMinimumVolatility(symbol, minPercentage = 0.5) {
+async function checkMinimumVolatility(symbol, minPercentage = 0.7) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`;
         const controller = new AbortController();
@@ -750,82 +752,6 @@ async function getEMA3m(symbol) {
     }
 }
 
-// Função para verificar critério EMA 55 3m para COMPRA
-async function checkBuyCriteriaEMA3m(symbol) {
-    try {
-        const ema3mData = await getEMA3m(symbol);
-        
-        if (ema3mData.ema55 === "N/A") {
-            logToFile(`⚠️ Não foi possível verificar EMA 55 3m para COMPRA (${symbol})`);
-            return {
-                isValid: false,
-                message: "Dados EMA 55 3m indisponíveis"
-            };
-        }
-        
-        // Para COMPRA: preço deve estar ACIMA da EMA 55 no 3m
-        const isValid = ema3mData.isAboveEMA;
-        
-        const message = `EMA 55 3m: $${ema3mData.emaFormatted}, Preço: $${ema3mData.priceFormatted}, ${isValid ? '✅ACIMA' : '❌ABAIXO'}`;
-        
-        logToFile(`📊 ${symbol} - ${message}`);
-        
-        return {
-            isValid: isValid,
-            message: message,
-            price: ema3mData.currentPrice,
-            ema55: ema3mData.ema55,
-            priceFormatted: ema3mData.priceFormatted,
-            emaFormatted: ema3mData.emaFormatted
-        };
-        
-    } catch (e) {
-        logToFile(`❌ Erro ao verificar critério COMPRA EMA 55 3m (${symbol}): ${e.message}`);
-        return {
-            isValid: false,
-            message: `Erro: ${e.message}`
-        };
-    }
-}
-
-// Função para verificar critério EMA 55 3m para VENDA
-async function checkSellCriteriaEMA3m(symbol) {
-    try {
-        const ema3mData = await getEMA3m(symbol);
-        
-        if (ema3mData.ema55 === "N/A") {
-            logToFile(`⚠️ Não foi possível verificar EMA 55 3m para VENDA (${symbol})`);
-            return {
-                isValid: false,
-                message: "Dados EMA 55 3m indisponíveis"
-            };
-        }
-        
-        // Para VENDA: preço deve estar ABAIXO da EMA 55 no 3m
-        const isValid = ema3mData.isBelowEMA;
-        
-        const message = `EMA 55 3m: $${ema3mData.emaFormatted}, Preço: $${ema3mData.priceFormatted}, ${isValid ? '✅ABAIXO' : '❌ACIMA'}`;
-        
-        logToFile(`📊 ${symbol} - ${message}`);
-        
-        return {
-            isValid: isValid,
-            message: message,
-            price: ema3mData.currentPrice,
-            ema55: ema3mData.ema55,
-            priceFormatted: ema3mData.priceFormatted,
-            emaFormatted: ema3mData.emaFormatted
-        };
-        
-    } catch (e) {
-        logToFile(`❌ Erro ao verificar critério VENDA EMA 55 3m (${symbol}): ${e.message}`);
-        return {
-            isValid: false,
-            message: `Erro: ${e.message}`
-        };
-    }
-}
-
 // Funções de detecção de fractal (mantidas do original)
 function isUpFractal(lows, index) {
     if (FRACTAL_BARS === 5) {
@@ -865,13 +791,21 @@ function initAlertsCooldown() {
     SYMBOLS.forEach(symbol => {
         alertsCooldown[symbol] = {
             lastBuyAlert: 0,
-            lastSellAlert: 0
+            lastSellAlert: 0,
+            lastBuyConfirmation: 0,
+            lastSellConfirmation: 0
+        };
+        recentSweeps[symbol] = {
+            lastBuySweep: null,
+            lastSellSweep: null,
+            buySweepPrice: 0,
+            sellSweepPrice: 0
         };
     });
 }
 
-// Função para monitorar um ativo específico
-async function monitorSymbol(symbol) {
+// Função para monitorar um ativo específico - ALERTAS DE SWEEP
+async function monitorSymbolSweep(symbol) {
     try {
         const candles = await getCandles(symbol, '1h');
         if (candles.length < 100) {
@@ -918,31 +852,14 @@ async function monitorSymbol(symbol) {
         // 🔴 ADICIONAR VERIFICAÇÕES DOS NOVOS CRITÉRIOS
         if (buySignal || sellSignal) {
             // Verificar volume anormal no 3m e volatilidade no 15m
-            const [volumeCheck, volatilityCheck, ema3mCheck] = await Promise.all([
+            const [volumeCheck, volatilityCheck] = await Promise.all([
                 checkAbnormalVolume(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5),
-                buySignal ? checkBuyCriteriaEMA3m(symbol) : checkSellCriteriaEMA3m(symbol)
+                checkMinimumVolatility(symbol, 0.5)
             ]);
             
-            // Log dos resultados dos critérios
-            logToFile(`📊 ${symbol} - Verificação de Critérios:`);
-            logToFile(`   • Volume 3m: ${volumeCheck.ratio}x (requerido: 2x) - ${volumeCheck.isAbnormal ? '✅' : '❌'}`);
-            logToFile(`   • Volatilidade 15m: ${volatilityCheck.volatility}% (requerido: 0.5%) - ${volatilityCheck.hasMinVolatility ? '✅' : '❌'}`);
-            logToFile(`   • EMA 55 3m: ${ema3mCheck.message}`);
-            
             // Se não passar nos novos critérios, não enviar alerta
-            if (!volumeCheck.isAbnormal) {
-                logToFile(`⚠️ ${symbol}: Sinal ignorado - Volume insuficiente: ${volumeCheck.ratio}x (requerido: 2x)`);
-                return null;
-            }
-            
-            if (!volatilityCheck.hasMinVolatility) {
-                logToFile(`⚠️ ${symbol}: Sinal ignorado - Volatilidade insuficiente: ${volatilityCheck.volatility}% (requerido: 0.5%)`);
-                return null;
-            }
-            
-            if (!ema3mCheck.isValid) {
-                logToFile(`⚠️ ${symbol}: Sinal ignorado - Critério EMA 55 3m não atendido: ${ema3mCheck.message}`);
+            if (!volumeCheck.isAbnormal || !volatilityCheck.hasMinVolatility) {
+                logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x), Volatilidade: ${volatilityCheck.volatility}% (req: 0.5%)`);
                 return null;
             }
 
@@ -967,16 +884,13 @@ async function monitorSymbol(symbol) {
             const bestBidFormatted = formatNumber(orderBook.bestBid, symbol, true);
             const bestAskFormatted = formatNumber(orderBook.bestAsk, symbol, true);
             
-            
-            
-            const msg = `${emoji}<b>🤖 IA Titanium </b>\n` +
-                      ` <b>${sellSignal ? '📛Zona de liquidez de Venda:' : '💹Zona de liquidez de Compra:'}</b>\n` +
-                      ` <b>${sellSignal ? 'Avaliar Realizar Lucros...' : 'Avaliar ponto de Reversão...'}</b>\n` +
+            // 🔴 ADICIONAR INFORMAÇÕES DOS NOVOS CRITÉRIOS NA MENSAGEM
+            const msg = `${emoji}<b>🤖 IA SMC CAPTURA DE LIQUIDEZ</b>\n` +
+                       ` <b>${sellSignal ? '📛Região de Distribuição/Correção' : '💹Região de Compradores/Reversão'}</b>\n` +
                        `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
                        ` <b>${emaTrend}</b>\n` +
-                       `• ${ema3mStatus}\n` +
                        `• Force 15m: <b>${adx15m.value}</b>\n` +
                        `• Force 1h: <b>${adx1h.value}</b>\n` +
                        `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
@@ -988,7 +902,16 @@ async function monitorSymbol(symbol) {
                        ` <b>Livro de Ordens:</b>\n` +
                        `• Vol Bid(vendas): <b>${orderBook.bidVolume}</b>\n` +
                        `• Vol Ask(compras): <b>${orderBook.askVolume}</b>\n` +
-                       `                        <b>Tecnology by @J4Rviz</b>`;
+                       `                    <b>SMC Tecnology by @J4Rviz</b>`;
+            
+            // Armazenar informação do sweep para possível confirmação
+            if (buySignal) {
+                recentSweeps[symbol].lastBuySweep = Date.now();
+                recentSweeps[symbol].buySweepPrice = price;
+            } else if (sellSignal) {
+                recentSweeps[symbol].lastSellSweep = Date.now();
+                recentSweeps[symbol].sellSweepPrice = price;
+            }
             
             return {
                 symbol: symbol,
@@ -1000,14 +923,117 @@ async function monitorSymbol(symbol) {
                 priceFormatted: priceFormatted,
                 fractalLevelFormatted: fractalLevelFormatted,
                 volumeInfo: volumeCheck,
-                volatilityInfo: volatilityCheck,
-                ema3mInfo: ema3mCheck
+                volatilityInfo: volatilityCheck
             };
         }
         
         return null;
     } catch (e) {
-        logToFile(`❌ Erro ao monitorar ${symbol}: ${e.message}`);
+        logToFile(`❌ Erro ao monitorar sweep ${symbol}: ${e.message}`);
+        return null;
+    }
+}
+
+// 🔵 NOVA FUNÇÃO: Monitorar confirmações de reversão via EMA 55 3m
+async function monitorConfirmation(symbol) {
+    try {
+        // Verificar se houve um sweep recente (últimas 6 horas)
+        const now = Date.now();
+        const sixHoursAgo = now - (6 * 60 * 60 * 1000);
+        
+        const hadBuySweep = recentSweeps[symbol].lastBuySweep && 
+                           recentSweeps[symbol].lastBuySweep > sixHoursAgo;
+        const hadSellSweep = recentSweeps[symbol].lastSellSweep && 
+                            recentSweeps[symbol].lastSellSweep > sixHoursAgo;
+        
+        if (!hadBuySweep && !hadSellSweep) {
+            return null; // Não houve sweep recente
+        }
+        
+        // Obter dados da EMA 55 no timeframe de 3 minutos
+        const ema3mData = await getEMA3m(symbol);
+        
+        if (ema3mData.ema55 === "N/A") {
+            return null;
+        }
+        
+        const brDateTime = getBrazilianDateTime();
+        const priceFormatted = formatNumber(ema3mData.currentPrice, symbol, true);
+        
+        let confirmationAlert = null;
+        
+        // 🔵 CONFIRMAÇÃO BULL: Preço fechou ACIMA da EMA 55 no 3m após sweep de compra
+        if (hadBuySweep && ema3mData.isAboveEMA) {
+            const now = Date.now();
+            if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a confirmação
+                const [adx15m, adx1h, rsi1h] = await Promise.all([
+                    getADX(symbol, '15m'),
+                    getADX(symbol, '1h'),
+                    getRSI(symbol, '1h')
+                ]);
+                
+                const msg = `✅ <b>🤖 Compra </b>\n` +
+                           `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                           ` <b>#Ativo:</b> #${symbol}\n` +
+                           ` <b>Preço atual:</b> $${priceFormatted}\n` +
+                           `• Force 15m: <b>${adx15m.value}</b>\n` +
+                           `• Force 1h: <b>${adx1h.value}</b>\n` +
+                           `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
+                           `• Liquidez Capturada: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           `        <b>SMC Tecnology by @J4Rviz</b>`;
+                
+                confirmationAlert = {
+                    symbol: symbol,
+                    signal: 'Confirmação Bull',
+                    message: msg,
+                    price: ema3mData.currentPrice,
+                    brDateTime: brDateTime,
+                    priceFormatted: priceFormatted
+                };
+                
+                alertsCooldown[symbol].lastBuyConfirmation = now;
+            }
+        }
+        
+        // 🔴 CONFIRMAÇÃO BEAR: Preço fechou ABAIXO da EMA 55 no 3m após sweep de venda
+        if (hadSellSweep && ema3mData.isBelowEMA) {
+            const now = Date.now();
+            if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a confirmação
+                const [adx15m, adx1h, rsi1h] = await Promise.all([
+                    getADX(symbol, '15m'),
+                    getADX(symbol, '1h'),
+                    getRSI(symbol, '1h')
+                ]);
+                
+                const msg = `✅ <b>🤖 Correção </b>\n` +
+                            `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                           ` <b>#Ativo:</b> #${symbol}\n` +
+                           ` <b>Preço atual:</b> $${priceFormatted}\n` +
+                           `• Force 15m: <b>${adx15m.value}</b>\n` +
+                           `• Force 1h: <b>${adx1h.value}</b>\n` +
+                           `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
+                           `• Liquidez Capturada: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
+                           `       <b>SMC Tecnology by @J4Rviz</b>`;
+            
+                confirmationAlert = {
+                    symbol: symbol,
+                    signal: 'Confirmação Bear',
+                    message: msg,
+                    price: ema3mData.currentPrice,
+                    brDateTime: brDateTime,
+                    priceFormatted: priceFormatted
+                };
+                
+                alertsCooldown[symbol].lastSellConfirmation = now;
+            }
+        }
+        
+        return confirmationAlert;
+        
+    } catch (e) {
+        logToFile(`❌ Erro ao monitorar confirmação ${symbol}: ${e.message}`);
         return null;
     }
 }
@@ -1029,12 +1055,20 @@ function showMonitoringStatus() {
             const symbol1 = SYMBOLS[i];
             const lastBuy1 = alertsCooldown[symbol1].lastBuyAlert;
             const lastSell1 = alertsCooldown[symbol1].lastSellAlert;
+            const lastBuyConf1 = alertsCooldown[symbol1].lastBuyConfirmation;
+            const lastSellConf1 = alertsCooldown[symbol1].lastSellConfirmation;
+            
             const buyCooldown1 = lastBuy1 > 0 ? Math.max(0, COOLDOWN - (now - lastBuy1)) : 0;
             const sellCooldown1 = lastSell1 > 0 ? Math.max(0, COOLDOWN - (now - lastSell1)) : 0;
+            const buyConfCooldown1 = lastBuyConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf1)) : 0;
+            const sellConfCooldown1 = lastSellConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf1)) : 0;
+            
             const buyStatus1 = buyCooldown1 > 0 ? `⏳${Math.round(buyCooldown1/60000)}m` : '✅';
             const sellStatus1 = sellCooldown1 > 0 ? `⏳${Math.round(sellCooldown1/60000)}m` : '✅';
+            const buyConfStatus1 = buyConfCooldown1 > 0 ? `⏳${Math.round(buyConfCooldown1/60000)}m` : '✅';
+            const sellConfStatus1 = sellConfCooldown1 > 0 ? `⏳${Math.round(sellConfCooldown1/60000)}m` : '✅';
             
-            line += `${symbol1.padEnd(10)} C:${buyStatus1.padEnd(5)} V:${sellStatus1.padEnd(5)} | `;
+            line += `${symbol1.padEnd(10)} S-C:${buyStatus1} S-V:${sellStatus1} | C-B:${buyConfStatus1} C-V:${sellConfStatus1} | `;
         }
         
         // Coluna 2
@@ -1042,12 +1076,20 @@ function showMonitoringStatus() {
             const symbol2 = SYMBOLS[i + symbolsPerColumn];
             const lastBuy2 = alertsCooldown[symbol2].lastBuyAlert;
             const lastSell2 = alertsCooldown[symbol2].lastSellAlert;
+            const lastBuyConf2 = alertsCooldown[symbol2].lastBuyConfirmation;
+            const lastSellConf2 = alertsCooldown[symbol2].lastSellConfirmation;
+            
             const buyCooldown2 = lastBuy2 > 0 ? Math.max(0, COOLDOWN - (now - lastBuy2)) : 0;
             const sellCooldown2 = lastSell2 > 0 ? Math.max(0, COOLDOWN - (now - lastSell2)) : 0;
+            const buyConfCooldown2 = lastBuyConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf2)) : 0;
+            const sellConfCooldown2 = lastSellConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf2)) : 0;
+            
             const buyStatus2 = buyCooldown2 > 0 ? `⏳${Math.round(buyCooldown2/60000)}m` : '✅';
             const sellStatus2 = sellCooldown2 > 0 ? `⏳${Math.round(sellCooldown2/60000)}m` : '✅';
+            const buyConfStatus2 = buyConfCooldown2 > 0 ? `⏳${Math.round(buyConfCooldown2/60000)}m` : '✅';
+            const sellConfStatus2 = sellConfCooldown2 > 0 ? `⏳${Math.round(sellConfCooldown2/60000)}m` : '✅';
             
-            line += `${symbol2.padEnd(10)} C:${buyStatus2.padEnd(5)} V:${sellStatus2.padEnd(5)} | `;
+            line += `${symbol2.padEnd(10)} S-C:${buyStatus2} S-V:${sellStatus2} | C-B:${buyConfStatus2} C-V:${sellConfStatus2} | `;
         }
         
         // Coluna 3
@@ -1055,19 +1097,28 @@ function showMonitoringStatus() {
             const symbol3 = SYMBOLS[i + symbolsPerColumn * 2];
             const lastBuy3 = alertsCooldown[symbol3].lastBuyAlert;
             const lastSell3 = alertsCooldown[symbol3].lastSellAlert;
+            const lastBuyConf3 = alertsCooldown[symbol3].lastBuyConfirmation;
+            const lastSellConf3 = alertsCooldown[symbol3].lastSellConfirmation;
+            
             const buyCooldown3 = lastBuy3 > 0 ? Math.max(0, COOLDOWN - (now - lastBuy3)) : 0;
             const sellCooldown3 = lastSell3 > 0 ? Math.max(0, COOLDOWN - (now - lastSell3)) : 0;
+            const buyConfCooldown3 = lastBuyConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf3)) : 0;
+            const sellConfCooldown3 = lastSellConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf3)) : 0;
+            
             const buyStatus3 = buyCooldown3 > 0 ? `⏳${Math.round(buyCooldown3/60000)}m` : '✅';
             const sellStatus3 = sellCooldown3 > 0 ? `⏳${Math.round(sellCooldown3/60000)}m` : '✅';
+            const buyConfStatus3 = buyConfCooldown3 > 0 ? `⏳${Math.round(buyConfCooldown3/60000)}m` : '✅';
+            const sellConfStatus3 = sellConfCooldown3 > 0 ? `⏳${Math.round(sellConfCooldown3/60000)}m` : '✅';
             
-            line += `${symbol3.padEnd(10)} C:${buyStatus3.padEnd(5)} V:${sellStatus3.padEnd(5)}`;
+            line += `${symbol3.padEnd(10)} S-C:${buyStatus3} S-V:${sellStatus3} | C-B:${buyConfStatus3} C-V:${sellConfStatus3}`;
         }
         
         status += line + "\n";
     }
     
     status += "=".repeat(50) + "\n";
-    status += "Legenda: C=Compra, V=Venda, ✅=Pronto, ⏳=Cooldown\n";
+    status += "Legenda: S-C=Sweep Compra, S-V=Sweep Venda, C-B=Confirmação Bull, C-V=Confirmação Bear\n";
+    status += "✅=Pronto, ⏳=Cooldown (minutos)\n";
     console.log(status);
 }
 
@@ -1080,11 +1131,7 @@ async function mainBotLoop() {
         '='.repeat(50) + '\n' +
         ' BOT DO SWEEP 1H INICIADO\n' +
         ` MONITORANDO ${SYMBOLS.length} ATIVOS\n` +
-        ' TIMEFRAME: 1H\n' +
-        ' SISTEMA DE LOGS ATIVADO\n' +
-        ' RECONEXÃO AUTOMÁTICA: ON\n' +
-        ' CRITÉRIOS ADICIONAIS ATIVADOS:\n' +
-        ' AGUARDANDO SWEEP DE LIQUIDEZ...\n' +
+       
         '='.repeat(50) + '\n';
     
     console.log(initMsg);
@@ -1111,6 +1158,8 @@ async function mainBotLoop() {
     await sendAlert(`🤖 <b>Titanium SMC Sentinel</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `Monitorando ${SYMBOLS.length} ativos\n` +
+                    `Sistema de 4 alertas ativado:\n` +
+                   
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
@@ -1137,34 +1186,34 @@ async function mainBotLoop() {
                 consecutiveErrors = 0;
             }
 
-            let alertsSent = 0;
+            let sweepAlertsSent = 0;
+            let confirmationAlertsSent = 0;
             let signalsFiltered = 0;
             
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
             
-            // Monitorar cada ativo sequencialmente
+            // Monitorar cada ativo sequencialmente - PRIMEIRO SWEEP
             for (const symbol of SYMBOLS) {
                 try {
-                    const result = await monitorSymbol(symbol);
+                    const sweepResult = await monitorSymbolSweep(symbol);
                     
-                    if (result) {
-                        console.log(`\n🔔 ALERTA DETECTADO PARA ${symbol}!`);
-                        console.log(`📊 ${result.signal} - Preço: $${result.priceFormatted}`);
-                        console.log(`📈 Volume 3m: ${result.volumeInfo.ratio}x da média`);
-                        console.log(`📉 Volatilidade 15m: ${result.volatilityInfo.volatility}%`);
-                        console.log(`📊 EMA 55 3m: ${result.ema3mInfo.message}`);
-                        logToFile(`ALERTA ${result.signal} - ${symbol} - Preço: $${result.price} - Volume: ${result.volumeInfo.ratio}x - Volatilidade: ${result.volatilityInfo.volatility}% - EMA 55 3m: ${result.ema3mInfo.isValid ? 'ATENDIDO' : 'NÃO ATENDIDO'}`);
+                    if (sweepResult) {
+                        console.log(`\n🔔 SWEEP DETECTADO PARA ${symbol}!`);
+                        console.log(`📊 ${sweepResult.signal} - Preço: $${sweepResult.priceFormatted}`);
+                        console.log(`📈 Volume 3m: ${sweepResult.volumeInfo.ratio}x da média`);
+                        console.log(`📉 Volatilidade 15m: ${sweepResult.volatilityInfo.volatility}%`);
+                        logToFile(`ALERTA SWEEP ${sweepResult.signal} - ${symbol} - Preço: $${sweepResult.price} - Volume: ${sweepResult.volumeInfo.ratio}x - Volatilidade: ${sweepResult.volatilityInfo.volatility}%`);
                         
-                        await sendAlert(result.message);
+                        await sendAlert(sweepResult.message);
                         
                         // Atualizar cooldown
-                        if (result.signal === 'Venda') {
+                        if (sweepResult.signal === 'Venda') {
                             alertsCooldown[symbol].lastSellAlert = Date.now();
                         } else {
                             alertsCooldown[symbol].lastBuyAlert = Date.now();
                         }
                         
-                        alertsSent++;
+                        sweepAlertsSent++;
                         
                         // Pequena pausa entre alertas para não sobrecarregar
                         await new Promise(r => setTimeout(r, 1000));
@@ -1176,24 +1225,66 @@ async function mainBotLoop() {
                     await new Promise(r => setTimeout(r, 200));
                     
                 } catch (e) {
-                    logToFile(`❌ Erro no processamento de ${symbol}: ${e.message}`);
-                    console.log(`\n❌ Erro em ${symbol}: ${e.message}`);
+                    logToFile(`❌ Erro no processamento de sweep ${symbol}: ${e.message}`);
+                    console.log(`\n❌ Erro em ${symbol} (sweep): ${e.message}`);
+                }
+            }
+            
+            console.log('\n🔍 Verificando confirmações de reversão...');
+            
+            // Monitorar cada ativo sequencialmente - DEPOIS CONFIRMAÇÕES
+            for (const symbol of SYMBOLS) {
+                try {
+                    const confirmationResult = await monitorConfirmation(symbol);
+                    
+                    if (confirmationResult) {
+                        console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${symbol}!`);
+                        console.log(`📊 ${confirmationResult.signal} - Preço: $${confirmationResult.priceFormatted}`);
+                        logToFile(`ALERTA CONFIRMAÇÃO ${confirmationResult.signal} - ${symbol} - Preço: $${confirmationResult.price}`);
+                        
+                        await sendAlert(confirmationResult.message);
+                        
+                        confirmationAlertsSent++;
+                        
+                        // Pequena pausa entre alertas para não sobrecarregar
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                    
+                    // Pequena pausa entre ativos para não sobrecarregar a API
+                    await new Promise(r => setTimeout(r, 200));
+                    
+                } catch (e) {
+                    logToFile(`❌ Erro no processamento de confirmação ${symbol}: ${e.message}`);
+                    console.log(`\n❌ Erro em ${symbol} (confirmação): ${e.message}`);
                 }
             }
 
-            if (alertsSent > 0) {
-                console.log(`\n📊 Total de ${alertsSent} alerta(s) enviado(s) nesta verificação`);
+            if (sweepAlertsSent > 0) {
+                console.log(`\n📊 Total de ${sweepAlertsSent} alerta(s) de SWEEP enviado(s) nesta verificação`);
             }
-            if (signalsFiltered > 0) {
-                console.log(`🚫 ${signalsFiltered} sinal(is) filtrado(s) pelos critérios`);
+            if (confirmationAlertsSent > 0) {
+                console.log(`📊 Total de ${confirmationAlertsSent} alerta(s) de CONFIRMAÇÃO enviado(s) nesta verificação`);
             }
-            if (alertsSent === 0) {
+            if (sweepAlertsSent === 0 && confirmationAlertsSent === 0) {
                 console.log(' ✓ Nenhum alerta detectado');
             }
 
             // Mostrar status a cada 10 ciclos
             if (cycleCount % 10 === 0) {
                 showMonitoringStatus();
+                
+                // Limpar sweeps muito antigos (mais de 12 horas)
+                const twelveHoursAgo = Date.now() - (12 * 60 * 60 * 1000);
+                for (const symbol of SYMBOLS) {
+                    if (recentSweeps[symbol].lastBuySweep && recentSweeps[symbol].lastBuySweep < twelveHoursAgo) {
+                        recentSweeps[symbol].lastBuySweep = null;
+                        recentSweeps[symbol].buySweepPrice = 0;
+                    }
+                    if (recentSweeps[symbol].lastSellSweep && recentSweeps[symbol].lastSellSweep < twelveHoursAgo) {
+                        recentSweeps[symbol].lastSellSweep = null;
+                        recentSweeps[symbol].sellSweepPrice = 0;
+                    }
+                }
             }
 
             consecutiveErrors = 0;
@@ -1252,10 +1343,11 @@ console.log('\n' + '='.repeat(60));
 console.log('🤖 BOT DE MONITORAMENTO SMC 1H');
 console.log('📈 Monitorando 55 ativos da Binance');
 console.log('🔧 Configuração SMC');
-console.log('🎯 Critérios de Filtro:');
-console.log('   • Volume anormal 3m (2x média)');
-console.log('   • Volatilidade mínima 15m (0.5%)');
-console.log('   • EMA 55 3m: Preço acima (compra)/abaixo (venda)');
+console.log('🎯 SISTEMA DE 4 ALERTAS:');
+console.log('   1. Sweep Compra (1H)');
+console.log('   2. Sweep Venda (1H)');
+console.log('   3. Confirmação Bull (EMA 55 3m)');
+console.log('   4. Confirmação Bear (EMA 55 3m)');
 console.log('='.repeat(60) + '\n');
 
 startBot();
