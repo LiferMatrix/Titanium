@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID   = '-10025';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -85,9 +85,9 @@ const DECIMALS_CONFIG = {
     'API3USDT': 4,      
     'STGUSDT': 4,     
     'GMXUSDT': 4,    
-    '1000BONKUSDT': 4,     
-    '1000SHIBUSDT': 4,     
-    '1000PEPEUSDT': 4,     
+    '1000BONKUSDT': 5,     
+    '1000SHIBUSDT': 5,     
+    '1000PEPEUSDT': 5,     
     'HBARUSDT': 4,   
     'SANDUSDT': 4,   
     'ENJUSDT': 4,      
@@ -95,6 +95,7 @@ const DECIMALS_CONFIG = {
     'RUNEUSDT': 3,     
     'ONEUSDT': 5       
 };
+
 
 // Default se não encontrado
 const DEFAULT_DECIMALS = 4;
@@ -649,7 +650,7 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
 }
 
 // 🔴 NOVA FUNÇÃO: Verificar volatilidade mínima no timeframe de 15 minutos
-async function checkMinimumVolatility(symbol, minPercentage = 0.7) {
+async function checkMinimumVolatility(symbol, minPercentage = 0.5) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`;
         const controller = new AbortController();
@@ -688,6 +689,140 @@ async function checkMinimumVolatility(symbol, minPercentage = 0.7) {
     } catch (e) {
         logToFile(`⚠️ Erro ao verificar volatilidade 15m (${symbol}): ${e.message}`);
         return { hasMinVolatility: false, volatility: 0, priceRange: 0, minRequired: minPercentage };
+    }
+}
+
+// 🔵 NOVAS FUNÇÕES PARA VERIFICAR EMA 55 NO TIMEFRAME DE 3 MINUTOS
+
+// Função para buscar candles de 3 minutos e calcular EMA 55
+async function getEMA3m(symbol) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=3m&limit=100`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        const data = await res.json();
+        
+        if (data.length < 55) {
+            logToFile(`⚠️ Dados insuficientes para EMA 55 3m (${symbol})`);
+            return {
+                ema55: "N/A",
+                currentPrice: "N/A",
+                isAboveEMA: false,
+                isBelowEMA: false,
+                priceFormatted: "N/A",
+                emaFormatted: "N/A"
+            };
+        }
+        
+        const closes = data.map(c => +c[4]);
+        const currentPrice = closes[closes.length - 1];
+        
+        // Calcular EMA 55
+        const ema55 = calculateEMA(closes, 55);
+        
+        // Formatar os valores
+        const priceFormatted = formatNumber(currentPrice, symbol, true);
+        const emaFormatted = formatNumber(ema55, symbol, true);
+        
+        return {
+            ema55: ema55,
+            currentPrice: currentPrice,
+            isAboveEMA: currentPrice > ema55,
+            isBelowEMA: currentPrice < ema55,
+            priceFormatted: priceFormatted,
+            emaFormatted: emaFormatted
+        };
+        
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar EMA 55 3m (${symbol}): ${e.message}`);
+        return {
+            ema55: "N/A",
+            currentPrice: "N/A",
+            isAboveEMA: false,
+            isBelowEMA: false,
+            priceFormatted: "N/A",
+            emaFormatted: "N/A"
+        };
+    }
+}
+
+// Função para verificar critério EMA 55 3m para COMPRA
+async function checkBuyCriteriaEMA3m(symbol) {
+    try {
+        const ema3mData = await getEMA3m(symbol);
+        
+        if (ema3mData.ema55 === "N/A") {
+            logToFile(`⚠️ Não foi possível verificar EMA 55 3m para COMPRA (${symbol})`);
+            return {
+                isValid: false,
+                message: "Dados EMA 55 3m indisponíveis"
+            };
+        }
+        
+        // Para COMPRA: preço deve estar ACIMA da EMA 55 no 3m
+        const isValid = ema3mData.isAboveEMA;
+        
+        const message = `EMA 55 3m: $${ema3mData.emaFormatted}, Preço: $${ema3mData.priceFormatted}, ${isValid ? '✅ACIMA' : '❌ABAIXO'}`;
+        
+        logToFile(`📊 ${symbol} - ${message}`);
+        
+        return {
+            isValid: isValid,
+            message: message,
+            price: ema3mData.currentPrice,
+            ema55: ema3mData.ema55,
+            priceFormatted: ema3mData.priceFormatted,
+            emaFormatted: ema3mData.emaFormatted
+        };
+        
+    } catch (e) {
+        logToFile(`❌ Erro ao verificar critério COMPRA EMA 55 3m (${symbol}): ${e.message}`);
+        return {
+            isValid: false,
+            message: `Erro: ${e.message}`
+        };
+    }
+}
+
+// Função para verificar critério EMA 55 3m para VENDA
+async function checkSellCriteriaEMA3m(symbol) {
+    try {
+        const ema3mData = await getEMA3m(symbol);
+        
+        if (ema3mData.ema55 === "N/A") {
+            logToFile(`⚠️ Não foi possível verificar EMA 55 3m para VENDA (${symbol})`);
+            return {
+                isValid: false,
+                message: "Dados EMA 55 3m indisponíveis"
+            };
+        }
+        
+        // Para VENDA: preço deve estar ABAIXO da EMA 55 no 3m
+        const isValid = ema3mData.isBelowEMA;
+        
+        const message = `EMA 55 3m: $${ema3mData.emaFormatted}, Preço: $${ema3mData.priceFormatted}, ${isValid ? '✅ABAIXO' : '❌ACIMA'}`;
+        
+        logToFile(`📊 ${symbol} - ${message}`);
+        
+        return {
+            isValid: isValid,
+            message: message,
+            price: ema3mData.currentPrice,
+            ema55: ema3mData.ema55,
+            priceFormatted: ema3mData.priceFormatted,
+            emaFormatted: ema3mData.emaFormatted
+        };
+        
+    } catch (e) {
+        logToFile(`❌ Erro ao verificar critério VENDA EMA 55 3m (${symbol}): ${e.message}`);
+        return {
+            isValid: false,
+            message: `Erro: ${e.message}`
+        };
     }
 }
 
@@ -783,14 +918,31 @@ async function monitorSymbol(symbol) {
         // 🔴 ADICIONAR VERIFICAÇÕES DOS NOVOS CRITÉRIOS
         if (buySignal || sellSignal) {
             // Verificar volume anormal no 3m e volatilidade no 15m
-            const [volumeCheck, volatilityCheck] = await Promise.all([
+            const [volumeCheck, volatilityCheck, ema3mCheck] = await Promise.all([
                 checkAbnormalVolume(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5)
+                checkMinimumVolatility(symbol, 0.5),
+                buySignal ? checkBuyCriteriaEMA3m(symbol) : checkSellCriteriaEMA3m(symbol)
             ]);
             
+            // Log dos resultados dos critérios
+            logToFile(`📊 ${symbol} - Verificação de Critérios:`);
+            logToFile(`   • Volume 3m: ${volumeCheck.ratio}x (requerido: 2x) - ${volumeCheck.isAbnormal ? '✅' : '❌'}`);
+            logToFile(`   • Volatilidade 15m: ${volatilityCheck.volatility}% (requerido: 0.5%) - ${volatilityCheck.hasMinVolatility ? '✅' : '❌'}`);
+            logToFile(`   • EMA 55 3m: ${ema3mCheck.message}`);
+            
             // Se não passar nos novos critérios, não enviar alerta
-            if (!volumeCheck.isAbnormal || !volatilityCheck.hasMinVolatility) {
-                logToFile(`⚠️ ${symbol}: Sinal ignorado - Volume: ${volumeCheck.ratio}x (req: 2x), Volatilidade: ${volatilityCheck.volatility}% (req: 0.5%)`);
+            if (!volumeCheck.isAbnormal) {
+                logToFile(`⚠️ ${symbol}: Sinal ignorado - Volume insuficiente: ${volumeCheck.ratio}x (requerido: 2x)`);
+                return null;
+            }
+            
+            if (!volatilityCheck.hasMinVolatility) {
+                logToFile(`⚠️ ${symbol}: Sinal ignorado - Volatilidade insuficiente: ${volatilityCheck.volatility}% (requerido: 0.5%)`);
+                return null;
+            }
+            
+            if (!ema3mCheck.isValid) {
+                logToFile(`⚠️ ${symbol}: Sinal ignorado - Critério EMA 55 3m não atendido: ${ema3mCheck.message}`);
                 return null;
             }
 
@@ -815,7 +967,8 @@ async function monitorSymbol(symbol) {
             const bestBidFormatted = formatNumber(orderBook.bestBid, symbol, true);
             const bestAskFormatted = formatNumber(orderBook.bestAsk, symbol, true);
             
-            // 🔴 ADICIONAR INFORMAÇÕES DOS NOVOS CRITÉRIOS NA MENSAGEM
+            
+            
             const msg = `${emoji}<b>🤖 IA Titanium </b>\n` +
                       ` <b>${sellSignal ? '📛Zona de liquidez de Venda:' : '💹Zona de liquidez de Compra:'}</b>\n` +
                       ` <b>${sellSignal ? 'Avaliar Realizar Lucros...' : 'Avaliar ponto de Reversão...'}</b>\n` +
@@ -823,13 +976,13 @@ async function monitorSymbol(symbol) {
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
                        ` <b>${emaTrend}</b>\n` +
+                       `• ${ema3mStatus}\n` +
                        `• Force 15m: <b>${adx15m.value}</b>\n` +
                        `• Force 1h: <b>${adx1h.value}</b>\n` +
                        `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
                        `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                        `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                       `🔴 <b>Critérios Adicionais:</b>\n` +
                        `• Volume 3m: <b>${volumeCheck.ratio}x</b> da média\n` +
                        `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
@@ -847,7 +1000,8 @@ async function monitorSymbol(symbol) {
                 priceFormatted: priceFormatted,
                 fractalLevelFormatted: fractalLevelFormatted,
                 volumeInfo: volumeCheck,
-                volatilityInfo: volatilityCheck
+                volatilityInfo: volatilityCheck,
+                ema3mInfo: ema3mCheck
             };
         }
         
@@ -930,8 +1084,6 @@ async function mainBotLoop() {
         ' SISTEMA DE LOGS ATIVADO\n' +
         ' RECONEXÃO AUTOMÁTICA: ON\n' +
         ' CRITÉRIOS ADICIONAIS ATIVADOS:\n' +
-        '   • Volume anormal (3m): 2x da média\n' +
-        '   • Volatilidade mínima (15m): 0.5%\n' +
         ' AGUARDANDO SWEEP DE LIQUIDEZ...\n' +
         '='.repeat(50) + '\n';
     
@@ -958,13 +1110,8 @@ async function mainBotLoop() {
     const brDateTime = getBrazilianDateTime();
     await sendAlert(`🤖 <b>Titanium SMC Sentinel</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
-                    `Sistema de logs e reconexão automática ativados\n` +
-                    `Monitorando ${SYMBOLS.length} ativos em 1H...\n` +
-                    `\n<b>Novos Critérios Ativos:</b>\n` +
-                    `• Volume anormal 3m: 2x da média\n` +
-                    `• Volatilidade mínima 15m: 0.5%\n` +
-                    `\n<b>Ativos monitorados:</b>\n` +
-                    `55 ATIVOS...`);
+                    `Monitorando ${SYMBOLS.length} ativos\n` +
+                    `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
     let cycleCount = 0;
@@ -1001,26 +1148,23 @@ async function mainBotLoop() {
                     const result = await monitorSymbol(symbol);
                     
                     if (result) {
-                        if (result.message.includes("Critérios Adicionais")) {
-                            console.log(`\n🔔 ALERTA DETECTADO PARA ${symbol}!`);
-                            console.log(`📊 ${result.signal} - Preço: $${result.priceFormatted}`);
-                            console.log(`📈 Volume 3m: ${result.volumeInfo.ratio}x da média`);
-                            console.log(`📉 Volatilidade 15m: ${result.volatilityInfo.volatility}%`);
-                            logToFile(`ALERTA ${result.signal} - ${symbol} - Preço: $${result.price} - Volume: ${result.volumeInfo.ratio}x - Volatilidade: ${result.volatilityInfo.volatility}%`);
-                            
-                            await sendAlert(result.message);
-                            
-                            // Atualizar cooldown
-                            if (result.signal === 'Venda') {
-                                alertsCooldown[symbol].lastSellAlert = Date.now();
-                            } else {
-                                alertsCooldown[symbol].lastBuyAlert = Date.now();
-                            }
-                            
-                            alertsSent++;
+                        console.log(`\n🔔 ALERTA DETECTADO PARA ${symbol}!`);
+                        console.log(`📊 ${result.signal} - Preço: $${result.priceFormatted}`);
+                        console.log(`📈 Volume 3m: ${result.volumeInfo.ratio}x da média`);
+                        console.log(`📉 Volatilidade 15m: ${result.volatilityInfo.volatility}%`);
+                        console.log(`📊 EMA 55 3m: ${result.ema3mInfo.message}`);
+                        logToFile(`ALERTA ${result.signal} - ${symbol} - Preço: $${result.price} - Volume: ${result.volumeInfo.ratio}x - Volatilidade: ${result.volatilityInfo.volatility}% - EMA 55 3m: ${result.ema3mInfo.isValid ? 'ATENDIDO' : 'NÃO ATENDIDO'}`);
+                        
+                        await sendAlert(result.message);
+                        
+                        // Atualizar cooldown
+                        if (result.signal === 'Venda') {
+                            alertsCooldown[symbol].lastSellAlert = Date.now();
                         } else {
-                            signalsFiltered++;
+                            alertsCooldown[symbol].lastBuyAlert = Date.now();
                         }
+                        
+                        alertsSent++;
                         
                         // Pequena pausa entre alertas para não sobrecarregar
                         await new Promise(r => setTimeout(r, 1000));
@@ -1041,9 +1185,9 @@ async function mainBotLoop() {
                 console.log(`\n📊 Total de ${alertsSent} alerta(s) enviado(s) nesta verificação`);
             }
             if (signalsFiltered > 0) {
-                console.log(`🚫 ${signalsFiltered} sinal(is) filtrado(s) pelos novos critérios`);
+                console.log(`🚫 ${signalsFiltered} sinal(is) filtrado(s) pelos critérios`);
             }
-            if (alertsSent === 0 && signalsFiltered === 0) {
+            if (alertsSent === 0) {
                 console.log(' ✓ Nenhum alerta detectado');
             }
 
@@ -1108,9 +1252,10 @@ console.log('\n' + '='.repeat(60));
 console.log('🤖 BOT DE MONITORAMENTO SMC 1H');
 console.log('📈 Monitorando 55 ativos da Binance');
 console.log('🔧 Configuração SMC');
-console.log('🎯 Novos Critérios:');
+console.log('🎯 Critérios de Filtro:');
 console.log('   • Volume anormal 3m (2x média)');
 console.log('   • Volatilidade mínima 15m (0.5%)');
+console.log('   • EMA 55 3m: Preço acima (compra)/abaixo (venda)');
 console.log('='.repeat(60) + '\n');
 
 startBot();
