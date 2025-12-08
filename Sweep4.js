@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESq';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -21,6 +21,7 @@ const SYMBOLS = [
     'CHZUSDT', 'IOTAUSDT', 'ARBUSDT', 'BANDUSDT', 'C98USDT',
     'IOSTUSDT', 'LDOUSDT', 'ICPUSDT', 'ENAUSDT', 'DYDXUSDT',
     'SKLUSDT', 'TIAUSDT', 'VETUSDT', 'WLDUSDT', 'ZKUSDT',
+    'LINKUSDT', 'APTUSDT', 'ARUSDT', 'ONDOUSDT', 'VIRTUALUSDT',
     'FETUSDT', 'GMTUSDT', 'GRTUSDT', 'CKBUSDT', 'LTCUSDT',
     'SUSHIUSDT', '1INCHUSDT', 'MANAUSDT', 'SANDUSDT', 'ENJUSDT',
     'INJUSDT', 'RUNEUSDT', 'ONEUSDT', 'APEUSDT', 'FILUSDT'
@@ -82,7 +83,12 @@ const DECIMALS_CONFIG = {
     '1INCHUSDT': 4,    
     'MANAUSDT': 4,    
     'APEUSDT': 4,      
-    'FILUSDT': 4,     
+    'FILUSDT': 4,
+    'ARUSDT': 4,   
+    'LINKUSDT': 4,    
+    'ONDOUSDT': 4,    
+    'APTUSDT': 4,      
+    'VIRTUALUSDT': 4,     
     'AXSUSDT': 4,    
     'AAVEUSDT': 4,     
     'API3USDT': 4,      
@@ -927,9 +933,9 @@ async function monitorSymbolSweep(symbol) {
             const fractalLevelFormatted = formatNumber(fractalLevel, symbol, true);
             
             // 🔴 MENSAGEM SEM ADX
-            const msg = `${emoji}<b>🤖 IA SMC CAPTURA DE LIQUIDEZ</b>\n` +
-                       ` <b>${sellSignal ? '📛Região de Distribuição/Correção' : '💹Região de Compradores/Reversão'}</b>\n` +
-                       `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+            const msg = `${emoji}<b>🤖 IA SMC Automatic</b>\n` +
+                       ` <b>${sellSignal ? '📛Região de Distribuição/Exaustão' : '💹Região de Compradores/Reversão'}</b>\n` +
+                       `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
                        ` <b>${emaTrend}</b>\n` +
@@ -937,7 +943,7 @@ async function monitorSymbolSweep(symbol) {
                        `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                        `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                       `• Volume 3m: <b>${volumeCheck.ratio}x</b> da média (${volumeCheck.candleType})\n` +
+                       `• Vol 3m: <b>${volumeCheck.ratio}x</b> da média (${volumeCheck.candleType})\n` +
                        `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
                        `• Vol Bid(vendas): <b>${orderBook.bidVolume}</b>\n` +
@@ -1036,7 +1042,7 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, true, symbol);
                 
-                const msg = `✅ <b>🤖 COMPRA - Reversão </b>\n` +
+                const msg = `🟢 <b>🤖 COMPRA - Reversão </b>\n` +
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
@@ -1051,9 +1057,9 @@ async function monitorConfirmation(symbol) {
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Volume 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b> (comprador confirmado)\n` +
+                           `• Vol 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b> (comprador confirmado)\n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
-                           `• Liquidez Capturada: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
                           `        <b>SMC Tecnology by @J4Rviz</b>`;
                 
                 confirmationAlert = {
@@ -1102,7 +1108,7 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, false, symbol);
                 
-                const msg = `✅ <b>🤖 VENDA - Correação </b>\n` +
+                const msg = `🔴 <b>🤖 VENDA - Correção </b>\n` +
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
@@ -1117,7 +1123,7 @@ async function monitorConfirmation(symbol) {
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Volume 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> (vendedor confirmado)\n` +
+                           `• Vol 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> (vendedor confirmado)\n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
                            `       <b>SMC Tecnology by @J4Rviz</b>`;
