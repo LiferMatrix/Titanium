@@ -4,8 +4,9 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMq';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
+
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -934,7 +935,7 @@ async function monitorSymbolSweep(symbol) {
             
             // 🔴 MENSAGEM SEM ADX
             const msg = `${emoji}<b>🤖 IA SMC Automatic</b>\n` +
-                       ` <b>${sellSignal ? '📛Região de Distribuição/Exaustão' : '💹Região de Compradores/Reversão'}</b>\n` +
+                       ` <b>${sellSignal ? '📛Região de Distribuição/Exaustão' : '💹Demanda Compradora'}</b>\n` +
                        `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
@@ -946,8 +947,8 @@ async function monitorSymbolSweep(symbol) {
                        `• Vol 3m: <b>${volumeCheck.ratio}x</b> da média (${volumeCheck.candleType})\n` +
                        `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
-                       `• Vol Bid(vendas): <b>${orderBook.bidVolume}</b>\n` +
-                       `• Vol Ask(compras): <b>${orderBook.askVolume}</b>\n` +
+                       `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                       `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
                        `                    <b>SMC Tecnology by @J4Rviz</b>`;
             
             // Armazenar informação do sweep para possível confirmação
@@ -1060,6 +1061,8 @@ async function monitorConfirmation(symbol) {
                            `• Vol 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b> (comprador confirmado)\n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
                           `        <b>SMC Tecnology by @J4Rviz</b>`;
                 
                 confirmationAlert = {
@@ -1126,6 +1129,8 @@ async function monitorConfirmation(symbol) {
                            `• Vol 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> (vendedor confirmado)\n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
+                           `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
                            `       <b>SMC Tecnology by @J4Rviz</b>`;
             
                 confirmationAlert = {
