@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 
 // Configurações do estudo (iguais ao TV)
@@ -79,7 +79,6 @@ const DECIMALS_CONFIG = {
     '1000FLOKIUSDT': 6,
     'BTCDOMUSDT': 5, 
     'USDCUSDT': 5,
-    'MAGICUSDT': 5,    
     'MASKUSDT': 5,
     'GMTUSDT': 5,  
     'VETUSDT': 5,
@@ -538,7 +537,7 @@ async function getCandles(symbol, timeframe = '1h') {
     }
 }
 
-// 🔴 FUNÇÃO MELHORADA: Verificar volume anormal no timeframe de 3 minutos com direção
+// 🔴 FUNÇÃO MELHORADA: Verificar volume anormal no timeframe de 3 minutos
 async function checkAbnormalVolume(symbol, multiplier = 2) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=3m&limit=21`;
@@ -557,8 +556,6 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
                 currentVolume: 0, 
                 avgVolume: 0, 
                 ratio: 0,
-                isBullishCandle: false,
-                isBearishCandle: false,
                 open: 0,
                 close: 0,
                 high: 0,
@@ -586,22 +583,15 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
         // Verificar se é anormal (pelo menos 2x a média)
         const isAbnormal = ratio >= multiplier;
         
-        // Verificar direção do candle
-        const isBullishCandle = close > open;
-        const isBearishCandle = close < open;
-        
         return {
             isAbnormal: isAbnormal,
             currentVolume: currentVolume,
             avgVolume: avgVolume,
             ratio: ratio.toFixed(2),
-            isBullishCandle: isBullishCandle,
-            isBearishCandle: isBearishCandle,
             open: open,
             close: close,
             high: high,
-            low: low,
-            candleType: isBullishCandle ? '📈BULL' : (isBearishCandle ? '📉BEAR' : '🔘NEUTR0')
+            low: low
         };
         
     } catch (e) {
@@ -611,110 +601,31 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
             currentVolume: 0, 
             avgVolume: 0, 
             ratio: 0,
-            isBullishCandle: false,
-            isBearishCandle: false,
             open: 0,
             close: 0,
             high: 0,
-            low: 0,
-            candleType: 'NEUTRAL'
+            low: 0
         };
     }
 }
 
-// 🔴 NOVA FUNÇÃO: Verificar volume anormal comprador (para confirmação Bull)
-async function checkBullVolumeConfirmation(symbol, multiplier = 2) {
+// 🔴 FUNÇÃO SIMPLIFICADA: Verificar volume anormal (sem verificação de candle)
+async function checkVolumeConfirmation(symbol, multiplier = 2) {
     const volumeData = await checkAbnormalVolume(symbol, multiplier);
     
-    // Para confirmação Bull: volume anormal E candle bull (fechamento > abertura)
-    const isBullVolumeConfirmed = volumeData.isAbnormal;
+    // Apenas verifica se o volume é anormal (≥ 2x)
+    const isVolumeConfirmed = volumeData.isAbnormal;
     
     return {
-        isConfirmed: isBullVolumeConfirmed,
+        isConfirmed: isVolumeConfirmed,
         volumeData: volumeData,
-        message: isBullVolumeConfirmed ? 
-            `✅ Volume comprador confirmado (${volumeData.ratio}x, candle ${volumeData.candleType})` :
-            `❌ Volume comprador não confirmado (ratio: ${volumeData.ratio}x, candle: ${volumeData.candleType})`
+        message: isVolumeConfirmed ? 
+            `✅ Volume confirmado (${volumeData.ratio}x)` :
+            `❌ Volume não confirmado (ratio: ${volumeData.ratio}x)`
     };
 }
 
-// 🔴 NOVA FUNÇÃO: Verificar volume anormal vendedor (para confirmação Bear)
-async function checkBearVolumeConfirmation(symbol, multiplier = 2) {
-    const volumeData = await checkAbnormalVolume(symbol, multiplier);
-    
-    // Para confirmação Bear: volume anormal E candle bear (fechamento < abertura)
-    const isBearVolumeConfirmed = volumeData.isAbnormal;
-    
-    return {
-        isConfirmed: isBearVolumeConfirmed,
-        volumeData: volumeData,
-        message: isBearVolumeConfirmed ? 
-            `✅ Volume vendedor confirmado (${volumeData.ratio}x, candle ${volumeData.candleType})` :
-            `❌ Volume vendedor não confirmado (ratio: ${volumeData.ratio}x, candle: ${volumeData.candleType})`
-    };
-}
-
-// 🔴 NOVA FUNÇÃO: Verificar volatilidade mínima no timeframe de 15 minutos
-async function checkMinimumVolatility(symbol, minPercentage = 0.5) {
-    try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        const data = await res.json();
-        
-        if (data.length < 20) {
-            logToFile(`⚠️ Dados insuficientes para volatilidade 15m (${symbol})`);
-            return { 
-                hasMinVolatility: false, 
-                volatility: 0, 
-                priceRange: 0, 
-                minRequired: minPercentage,
-                message: "Dados insuficientes"
-            };
-        }
-        
-        // Calcular volatilidade como porcentagem da faixa de preço
-        const latestCandle = data[data.length - 1];
-        const high = +latestCandle[2];
-        const low = +latestCandle[3];
-        const close = +latestCandle[4];
-        
-        // Calcular volatilidade como (High-Low)/Close * 100%
-        const priceRange = high - low;
-        const volatility = (priceRange / close) * 100;
-        
-        // Verificar se atinge o mínimo requerido
-        const hasMinVolatility = volatility >= minPercentage;
-        
-        return {
-            hasMinVolatility: hasMinVolatility,
-            volatility: volatility.toFixed(2),
-            priceRange: priceRange,
-            minRequired: minPercentage,
-            message: hasMinVolatility ? 
-                `✅ Volatilidade OK (${volatility.toFixed(2)}% >= ${minPercentage}%)` :
-                `❌ Volatilidade baixa (${volatility.toFixed(2)}% < ${minPercentage}%)`
-        };
-        
-    } catch (e) {
-        logToFile(`⚠️ Erro ao verificar volatilidade 15m (${symbol}): ${e.message}`);
-        return { 
-            hasMinVolatility: false, 
-            volatility: 0, 
-            priceRange: 0, 
-            minRequired: minPercentage,
-            message: "Erro na verificação"
-        };
-    }
-}
-
-// 🔵 NOVAS FUNÇÕES PARA VERIFICAR EMA 55 NO TIMEFRAME DE 3 MINUTOS
-
-// Função para buscar candles de 3 minutos e calcular EMA 55
+// 🔵 NOVA FUNÇÃO: Buscar EMA 55 no timeframe de 3 minutos
 async function getEMA3m(symbol) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=3m&limit=100`;
@@ -917,14 +828,11 @@ async function monitorSymbolSweep(symbol) {
         // 🔴 ADICIONAR VERIFICAÇÕES DOS NOVOS CRITÉRIOS
         if (buySignal || sellSignal) {
             // Verificar volume anormal no 3m 
-            const [volumeCheck] = await Promise.all([
-                checkAbnormalVolume(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5)
-            ]);
+            const volumeCheck = await checkAbnormalVolume(symbol, 2);
             
             // Se não passar nos novos critérios, não enviar alerta
-            if (!volumeCheck.isAbnormal ) {
-                logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x), Volatilidade: ${volatilityCheck.volatility}% (req: 0.5%)`);
+            if (!volumeCheck.isAbnormal) {
+                logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x)`);
                 return null;
             }
 
@@ -956,8 +864,7 @@ async function monitorSymbolSweep(symbol) {
                        `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                        `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                       `• Vol 3m: <b>${volumeCheck.ratio}x</b>  (${volumeCheck.candleType})\n` +
-                       `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b>\n` +
+                       `• Vol 3m: <b>${volumeCheck.ratio}x</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
                        `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
                        `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
@@ -981,8 +888,7 @@ async function monitorSymbolSweep(symbol) {
                 brDateTime: brDateTime,
                 priceFormatted: priceFormatted,
                 fractalLevelFormatted: fractalLevelFormatted,
-                volumeInfo: volumeCheck,
-                
+                volumeInfo: volumeCheck
             };
         }
         
@@ -1033,22 +939,25 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            // 🔴 NOVOS CRITÉRIOS: Volume anormal comprador
-            const [bullVolumeCheck] = await Promise.all([
-                checkBullVolumeConfirmation(symbol, 2),
-                
-            ]);
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
             
             // Verificar se passa nos novos critérios
-            if (!bullVolumeCheck.isConfirmed) {
-                logToFile(`⚠️ ${symbol}: Confirmação Bull ignorada - ${bullVolumeCheck.message}`);
+            if (!volumeCheck.isConfirmed) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bull ignorada - ${volumeCheck.message}`);
                 return null;
             }
             
-        
-            
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
+                ]);
+                
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, true, symbol);
                 
@@ -1067,12 +976,11 @@ async function monitorConfirmation(symbol) {
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Vol 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b>\n` +
-                           `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
+                           `• Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
                            `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
                            `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
-                          `        <b>SMC Tecnology by @J4Rviz</b>`;
+                           `        <b>SMC Tecnology by @J4Rviz</b>`;
                 
                 confirmationAlert = {
                     symbol: symbol,
@@ -1082,8 +990,7 @@ async function monitorConfirmation(symbol) {
                     brDateTime: brDateTime,
                     priceFormatted: priceFormatted,
                     targetsAndStop: targetsAndStop,
-                    volumeConfirmation: bullVolumeCheck,
-                    
+                    volumeConfirmation: volumeCheck
                 };
                 
                 alertsCooldown[symbol].lastBuyConfirmation = now;
@@ -1098,21 +1005,25 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            // 🔴 NOVOS CRITÉRIOS: Volume anormal vendedor 
-            const [bearVolumeCheck] = await Promise.all([
-                checkBearVolumeConfirmation(symbol, 2),
-                
-            ]);
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
             
             // Verificar se passa nos novos critérios
-            if (!bearVolumeCheck.isConfirmed) {
-                logToFile(`⚠️ ${symbol}: Confirmação Bear ignorada - ${bearVolumeCheck.message}`);
+            if (!volumeCheck.isConfirmed) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bear ignorada - ${volumeCheck.message}`);
                 return null;
             }
             
-           
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
+                ]);
+                
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, false, symbol);
                 
@@ -1127,12 +1038,11 @@ async function monitorConfirmation(symbol) {
                            `• Alvo 2: $${targetsAndStop.targets[1].formatted}\n` +
                            `• Alvo 3: $${targetsAndStop.targets[2].formatted}\n` +
                            `• Alvo 4: $${targetsAndStop.targets[3].formatted}\n` +
-                           `• #RSI 1h: <b>${rsi1h.value}</b> \n` 
+                           `• #RSI 1h: <b>${rsi1h.value}</b> \n` +
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Vol 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> \n` +
-                           `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
+                           `• Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> \n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
                            `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
                            `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
@@ -1146,8 +1056,7 @@ async function monitorConfirmation(symbol) {
                     brDateTime: brDateTime,
                     priceFormatted: priceFormatted,
                     targetsAndStop: targetsAndStop,
-                    volumeConfirmation: bearVolumeCheck,
-                    
+                    volumeConfirmation: volumeCheck
                 };
                 
                 alertsCooldown[symbol].lastSellConfirmation = now;
@@ -1284,12 +1193,10 @@ async function mainBotLoop() {
     console.log(`Stop Dinâmico: ${STOP_PERCENTAGE}%`);
     console.log('Critérios Confirmação Bull:');
     console.log('  - RSI 1h < 60');
-    console.log('  - Volume anormal comprador (2x média + candle bull)');
-    console.log('  - Volatilidade mínima 0.5%');
+    console.log('  - Volume anormal (2x média)');
     console.log('Critérios Confirmação Bear:');
     console.log('  - RSI 1h > 60');
-    console.log('  - Volume anormal vendedor (2x média + candle bear)');
-    console.log('  - Volatilidade mínima 0.5%');
+    console.log('  - Volume anormal (2x média)');
     console.log('='.repeat(60) + '\n');
     
     const brDateTime = getBrazilianDateTime();
@@ -1325,7 +1232,6 @@ async function mainBotLoop() {
 
             let sweepAlertsSent = 0;
             let confirmationAlertsSent = 0;
-            let signalsFiltered = 0;
             
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
             
@@ -1338,8 +1244,7 @@ async function mainBotLoop() {
                         console.log(`\n🔔 SWEEP DETECTADO PARA ${symbol}!`);
                         console.log(`📊 ${sweepResult.signal} - Preço: $${sweepResult.priceFormatted}`);
                         console.log(`📈 Volume 3m: ${sweepResult.volumeInfo.ratio}x da média`);
-                        console.log(`📉 Volatilidade 15m: ${sweepResult.volatilityInfo.volatility}%`);
-                        logToFile(`ALERTA SWEEP ${sweepResult.signal} - ${symbol} - Preço: $${sweepResult.price} - Volume: ${sweepResult.volumeInfo.ratio}x - Volatilidade: ${sweepResult.volatilityInfo.volatility}%`);
+                        logToFile(`ALERTA SWEEP ${sweepResult.signal} - ${symbol} - Preço: $${sweepResult.price} - Volume: ${sweepResult.volumeInfo.ratio}x`);
                         
                         await sendAlert(sweepResult.message);
                         
@@ -1377,10 +1282,9 @@ async function mainBotLoop() {
                     if (confirmationResult) {
                         console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${symbol}!`);
                         console.log(`📊 ${confirmationResult.signal} - Preço: $${confirmationResult.priceFormatted}`);
-                        console.log(`📈 Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x (${confirmationResult.volumeConfirmation.volumeData.candleType})`);
-                        console.log(`📉 Volatilidade: ${confirmationResult.volatilityConfirmation.volatility}%`);
+                        console.log(`📈 Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x`);
                         console.log(`🎯 4 Alvos + Stop Dinâmico calculados`);
-                        logToFile(`ALERTA CONFIRMAÇÃO ${confirmationResult.signal} - ${symbol} - Preço: $${confirmationResult.price} - Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x - Volatilidade: ${confirmationResult.volatilityConfirmation.volatility}%`);
+                        logToFile(`ALERTA CONFIRMAÇÃO ${confirmationResult.signal} - ${symbol} - Preço: $${confirmationResult.price} - Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x`);
                         
                         await sendAlert(confirmationResult.message);
                         
@@ -1470,8 +1374,8 @@ async function startBot() {
         console.error(`\n${crashMsg}`);
         logToFile(`🚨 ${crashMsg}`);
         
-        console.log('🔄 Reiniciando bot em 30 segundos...');
-        logToFile('🔄 Reiniciando bot em 30 segundos...');
+        console.log('🔄 Reiniciando bot em 60 segundos...');
+        logToFile('🔄 Reiniciando bot em 60 segundos...');
         
         await new Promise(r => setTimeout(r, 30000));
         await startBot();
@@ -1486,8 +1390,8 @@ console.log('🔧 Configuração SMC');
 console.log('🎯 SISTEMA DE 4 ALERTAS:');
 console.log('   1. Sweep Compra (1H)');
 console.log('   2. Sweep Venda (1H)');
-console.log('   3. Confirmação Bull (EMA 55 3m + RSI < 60 + Volume Comprador + Volatilidade)');
-console.log('   4. Confirmação Bear (EMA 55 3m + RSI > 60 + Volume Vendedor + Volatilidade)');
+console.log('   3. Confirmação Bull (EMA 55 3m + RSI < 60 + Volume)');
+console.log('   4. Confirmação Bear (EMA 55 3m + RSI > 60 + Volume)');
 console.log('🎯 4 ALVOS + STOP DINÂMICO INCLUÍDOS');
 console.log('='.repeat(60) + '\n');
 
