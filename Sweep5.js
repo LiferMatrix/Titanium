@@ -627,7 +627,7 @@ async function checkBullVolumeConfirmation(symbol, multiplier = 2) {
     const volumeData = await checkAbnormalVolume(symbol, multiplier);
     
     // Para confirmação Bull: volume anormal E candle bull (fechamento > abertura)
-    const isBullVolumeConfirmed = volumeData.isAbnormal && volumeData.isBullishCandle;
+    const isBullVolumeConfirmed = volumeData.isAbnormal;
     
     return {
         isConfirmed: isBullVolumeConfirmed,
@@ -643,7 +643,7 @@ async function checkBearVolumeConfirmation(symbol, multiplier = 2) {
     const volumeData = await checkAbnormalVolume(symbol, multiplier);
     
     // Para confirmação Bear: volume anormal E candle bear (fechamento < abertura)
-    const isBearVolumeConfirmed = volumeData.isAbnormal && volumeData.isBearishCandle;
+    const isBearVolumeConfirmed = volumeData.isAbnormal;
     
     return {
         isConfirmed: isBearVolumeConfirmed,
@@ -916,19 +916,19 @@ async function monitorSymbolSweep(symbol) {
 
         // 🔴 ADICIONAR VERIFICAÇÕES DOS NOVOS CRITÉRIOS
         if (buySignal || sellSignal) {
-            // Verificar volume anormal no 3m e volatilidade no 15m
-            const [volumeCheck, volatilityCheck] = await Promise.all([
+            // Verificar volume anormal no 3m 
+            const [volumeCheck] = await Promise.all([
                 checkAbnormalVolume(symbol, 2),
                 checkMinimumVolatility(symbol, 0.5)
             ]);
             
             // Se não passar nos novos critérios, não enviar alerta
-            if (!volumeCheck.isAbnormal || !volatilityCheck.hasMinVolatility) {
+            if (!volumeCheck.isAbnormal ) {
                 logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x), Volatilidade: ${volatilityCheck.volatility}% (req: 0.5%)`);
                 return null;
             }
 
-            // Buscar dados adicionais (sem ADX)
+            // Buscar dados adicionais
             const [lsrData, orderBook, rsi1h, stoch4h, stochDaily] = await Promise.all([
                 getLSR(symbol, '15m'),
                 getOrderBook(symbol),
@@ -947,7 +947,7 @@ async function monitorSymbolSweep(symbol) {
             
             // 🔴 Alerta
             const msg = `${emoji}<b>🤖 IA SMC Automatic</b>\n` +
-                       ` <b>${sellSignal ? '📛Resistência/ FVG Bear' : '💹Suporte/ Reversão'}</b>\n` +
+                       ` <b>${sellSignal ? '📛Resistência/ FVG Bear' : '💹Suporte/ Aguardar Reversão'}</b>\n` +
                        `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
@@ -982,7 +982,7 @@ async function monitorSymbolSweep(symbol) {
                 priceFormatted: priceFormatted,
                 fractalLevelFormatted: fractalLevelFormatted,
                 volumeInfo: volumeCheck,
-                volatilityInfo: volatilityCheck
+                
             };
         }
         
@@ -1033,10 +1033,10 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            // 🔴 NOVOS CRITÉRIOS: Volume anormal comprador e volatilidade mínima
-            const [bullVolumeCheck, volatilityCheck] = await Promise.all([
+            // 🔴 NOVOS CRITÉRIOS: Volume anormal comprador
+            const [bullVolumeCheck] = await Promise.all([
                 checkBullVolumeConfirmation(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5)
+                
             ]);
             
             // Verificar se passa nos novos critérios
@@ -1045,10 +1045,7 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            if (!volatilityCheck.hasMinVolatility) {
-                logToFile(`⚠️ ${symbol}: Confirmação Bull ignorada - ${volatilityCheck.message}`);
-                return null;
-            }
+        
             
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
@@ -1086,7 +1083,7 @@ async function monitorConfirmation(symbol) {
                     priceFormatted: priceFormatted,
                     targetsAndStop: targetsAndStop,
                     volumeConfirmation: bullVolumeCheck,
-                    volatilityConfirmation: volatilityCheck
+                    
                 };
                 
                 alertsCooldown[symbol].lastBuyConfirmation = now;
@@ -1101,10 +1098,10 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            // 🔴 NOVOS CRITÉRIOS: Volume anormal vendedor e volatilidade mínima
-            const [bearVolumeCheck, volatilityCheck] = await Promise.all([
+            // 🔴 NOVOS CRITÉRIOS: Volume anormal vendedor 
+            const [bearVolumeCheck] = await Promise.all([
                 checkBearVolumeConfirmation(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5)
+                
             ]);
             
             // Verificar se passa nos novos critérios
@@ -1113,11 +1110,7 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            if (!volatilityCheck.hasMinVolatility) {
-                logToFile(`⚠️ ${symbol}: Confirmação Bear ignorada - ${volatilityCheck.message}`);
-                return null;
-            }
-            
+           
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
                 // Calcular alvos e stop dinâmico
@@ -1154,7 +1147,7 @@ async function monitorConfirmation(symbol) {
                     priceFormatted: priceFormatted,
                     targetsAndStop: targetsAndStop,
                     volumeConfirmation: bearVolumeCheck,
-                    volatilityConfirmation: volatilityCheck
+                    
                 };
                 
                 alertsCooldown[symbol].lastSellConfirmation = now;
@@ -1436,7 +1429,7 @@ async function mainBotLoop() {
 
             consecutiveErrors = 0;
             
-            console.log(`\n⏱️  Próxima verificação em 30 segundos...`);
+            console.log(`\n⏱️  Próxima verificação em 60 segundos...`);
             
             // Verificação estava 30000 a cada 30 segundos, ajustei para 60000 a cada 1 minuto
             await new Promise(r => setTimeout(r, 60000));
