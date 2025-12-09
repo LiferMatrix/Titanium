@@ -4,8 +4,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 
 // Configurações do estudo (iguais ao TV)
@@ -22,6 +22,7 @@ const SYMBOLS = [
     'CHZUSDT', 'IOTAUSDT', 'ARBUSDT', 'BANDUSDT', 'C98USDT',
     'IOSTUSDT', 'LDOUSDT', 'ICPUSDT', 'ENAUSDT', 'DYDXUSDT',
     'SKLUSDT', 'TIAUSDT', 'VETUSDT', 'WLDUSDT', 'ZKUSDT',
+    'BTCDOMUSDT', 'USDCUSDT', '1000FLOKIUSDT', 'MASKUSDT', 'THETAUSDT',
     'LINKUSDT', 'APTUSDT', 'ARUSDT', 'ONDOUSDT', 'VIRTUALUSDT',
     'OPUSDT', 'TRBUSDT', 'POLUSDT', 'ETCUSDT', 'HOTUSDT',
     'FETUSDT', 'GMTUSDT', 'GRTUSDT', 'CKBUSDT', 'LTCUSDT',
@@ -75,6 +76,11 @@ const DECIMALS_CONFIG = {
     'ICPUSDT': 5,
     'WLDUSDT': 5,    
     'FETUSDT': 5,
+    '1000FLOKIUSDT': 6,
+    'BTCDOMUSDT': 5, 
+    'USDCUSDT': 5,
+    'MAGICUSDT': 5,    
+    'MASKUSDT': 5,
     'GMTUSDT': 5,  
     'VETUSDT': 5,
     'TIAUSDT': 5,
@@ -941,7 +947,7 @@ async function monitorSymbolSweep(symbol) {
             
             // 🔴 Alerta
             const msg = `${emoji}<b>🤖 IA SMC Automatic</b>\n` +
-                       ` <b>${sellSignal ? '📛Região de Distribuição/Exaustão' : '💹Demanda Compradora'}</b>\n` +
+                       ` <b>${sellSignal ? '📛Resistência/ FVG Bear' : '💹Suporte/ Reversão'}</b>\n` +
                        `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
@@ -1049,22 +1055,22 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, true, symbol);
                 
-                const msg = `🟢 <b>🤖 COMPRA - Reversão </b>\n` +
+                const msg = `🟢 <b>🤖 COMPRA  </b>\n` +
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
                            ` <b>Entr:</b> $${priceFormatted}\n` +
                            ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
                            ` <b>Alvos:</b>\n` +
-                           `• Alvo 1 (0.5%): $${targetsAndStop.targets[0].formatted}\n` +
-                           `• Alvo 2 (1.0%): $${targetsAndStop.targets[1].formatted}\n` +
-                           `• Alvo 3 (1.5%): $${targetsAndStop.targets[2].formatted}\n` +
-                           `• Alvo 4 (2.0%): $${targetsAndStop.targets[3].formatted}\n` +
-                           `• #RSI 1h: <b>${rsi1h.value}</b> (OK: < 60)\n` +
+                           `• Alvo 1 : $${targetsAndStop.targets[0].formatted}\n` +
+                           `• Alvo 2 : $${targetsAndStop.targets[1].formatted}\n` +
+                           `• Alvo 3 : $${targetsAndStop.targets[2].formatted}\n` +
+                           `• Alvo 4 : $${targetsAndStop.targets[3].formatted}\n` +
+                           `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Vol 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b> (comprador confirmado)\n` +
+                           `• Vol 3m: <b>${bullVolumeCheck.volumeData.ratio}x</b>\n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
                            `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
@@ -1117,22 +1123,22 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(ema3mData.currentPrice, false, symbol);
                 
-                const msg = `🔴 <b>🤖 VENDA - Correção </b>\n` +
+                const msg = `🔴 <b>🤖 CORREÇÃO </b>\n` +
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
                            ` <b>Entr:</b> $${priceFormatted}\n` +
                            ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
                            ` <b>Alvos:</b>\n` +
-                           `• Alvo 1 (0.5%): $${targetsAndStop.targets[0].formatted}\n` +
-                           `• Alvo 2 (1.0%): $${targetsAndStop.targets[1].formatted}\n` +
-                           `• Alvo 3 (1.5%): $${targetsAndStop.targets[2].formatted}\n` +
-                           `• Alvo 4 (2.0%): $${targetsAndStop.targets[3].formatted}\n` +
-                           `• #RSI 1h: <b>${rsi1h.value}</b> (OK: > 60)\n` 
+                           `• Alvo 1: $${targetsAndStop.targets[0].formatted}\n` +
+                           `• Alvo 2: $${targetsAndStop.targets[1].formatted}\n` +
+                           `• Alvo 3: $${targetsAndStop.targets[2].formatted}\n` +
+                           `• Alvo 4: $${targetsAndStop.targets[3].formatted}\n` +
+                           `• #RSI 1h: <b>${rsi1h.value}</b> \n` 
                            `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                            `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                            `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                           `• Vol 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> (vendedor confirmado)\n` +
+                           `• Vol 3m: <b>${bearVolumeCheck.volumeData.ratio}x</b> \n` +
                            `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (OK: >= ${volatilityCheck.minRequired}%)\n` +
                            `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
                            `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
