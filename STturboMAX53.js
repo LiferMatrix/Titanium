@@ -581,7 +581,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
                  `Alvo 4: ${format(targetBuyLong3)}\n`;
   }
   
-  return `*❇️🤖 #IA Análise - ❇️COMPRA❇️ *\n` +
+  return `*❇️🤖 #IA Analisou - ❇️COMPRA❇️ *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Alerta - ${dataHora}\n` +
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
@@ -620,7 +620,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
                  `Alvo 4: ${format(targetSellShort3)}\n`;
   }
   
-  return `*🛑🤖 #IA Análise - 🛑CORREÇÃO🛑 *\n` +
+  return `*🛑🤖 #IA Analisou - 🛑CORREÇÃO🛑 *\n` +
          `Operação - ${signalStrength.level} (${signalStrength.leverage})\n` +
          `${count}º Alerta - ${dataHora}\n` +
          `#ATIVO: $${symbol.replace(/_/g, '\\_').replace(/-/g, '\\-')} [TV](${tradingViewLink})\n` +
