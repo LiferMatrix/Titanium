@@ -82,8 +82,8 @@ const DECIMALS_CONFIG = {
     'IOSTUSDT': 5,
     'LDOUSDT': 5, 
     'ICPUSDT': 5,
-    'ENAUSDT': 5,      // Adicionado - sugestão: 4 casas decimais
-    'DYDXUSDT': 5,     // Adicionado - sugestão: 4 casas decimais
+    'ENAUSDT': 5,      
+    'DYDXUSDT': 5,     
     'SKLUSDT': 5,      
     'TIAUSDT': 5,
     'VETUSDT': 5,
@@ -93,7 +93,7 @@ const DECIMALS_CONFIG = {
     'USDCUSDT': 6,
     '1000FLOKIUSDT': 6,
     'MASKUSDT': 5,
-    'THETAUSDT': 5,    // Adicionado - sugestão: 4 casas decimais
+    'THETAUSDT': 5,    
     'LINKUSDT': 4,    
     'APTUSDT': 4,      
     'ARUSDT': 3,   
@@ -1002,8 +1002,6 @@ async function monitorConfirmation(symbol) {
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
-                           ` <b>EMA 13/34 3m:</b> CRUZAMENTO BULL (${emas3mData.ema13Formatted} > ${emas3mData.ema34Formatted})\n` +
-                           ` <b>EMA 55 3m:</b> $${emas3mData.ema55Formatted}\n` +
                            ` <b>Entr:</b> $${priceFormatted}\n` +
                            ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
                            ` <b>Alvos:</b>\n` +
@@ -1074,8 +1072,6 @@ async function monitorConfirmation(symbol) {
                            `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
                            ` <b>Preço:</b> $${priceFormatted}\n` +
-                           ` <b>EMA 13/34 3m:</b> CRUZAMENTO BEAR (${emas3mData.ema13Formatted} < ${emas3mData.ema34Formatted})\n` +
-                           ` <b>EMA 55 3m:</b> $${emas3mData.ema55Formatted}\n` +
                            ` <b>Entr:</b> $${priceFormatted}\n` +
                            ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
                            ` <b>Alvos:</b>\n` +
