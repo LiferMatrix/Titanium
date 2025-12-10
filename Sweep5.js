@@ -125,8 +125,8 @@ const DECIMALS_CONFIG = {
 const DEFAULT_DECIMALS = 4;
 
 // Configurações para alvos e stop
-const TARGET_PERCENTAGES = [0.5, 1.0, 1.5, 2.0]; // 4 alvos: 0.5%, 1%, 1.5%, 2%
-const STOP_PERCENTAGE = 0.5; // Stop dinâmico de 0.5%
+const TARGET_PERCENTAGES = [1.0, 2.0, 3.0, 4.0]; 
+const STOP_PERCENTAGE = 1.0; 
 
 // Função para obter data e hora de Brasília
 function getBrazilianDateTime() {
