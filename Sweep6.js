@@ -1,11 +1,12 @@
-require('node-fetch');
+const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID   = '-10025';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6';
+const TELEGRAM_CHAT_ID   = '-100255';
+
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -21,6 +22,9 @@ const SYMBOLS = [
     'CHZUSDT', 'IOTAUSDT', 'ARBUSDT', 'BANDUSDT', 'C98USDT',
     'IOSTUSDT', 'LDOUSDT', 'ICPUSDT', 'ENAUSDT', 'DYDXUSDT',
     'SKLUSDT', 'TIAUSDT', 'VETUSDT', 'WLDUSDT', 'ZKUSDT',
+    'BTCDOMUSDT', 'USDCUSDT', '1000FLOKIUSDT', 'MASKUSDT', 'THETAUSDT',
+    'LINKUSDT', 'APTUSDT', 'ARUSDT', 'ONDOUSDT', 'VIRTUALUSDT',
+    'OPUSDT', 'TRBUSDT', 'POLUSDT', 'ETCUSDT', 'HOTUSDT',
     'FETUSDT', 'GMTUSDT', 'GRTUSDT', 'CKBUSDT', 'LTCUSDT',
     'SUSHIUSDT', '1INCHUSDT', 'MANAUSDT', 'SANDUSDT', 'ENJUSDT',
     'INJUSDT', 'RUNEUSDT', 'ONEUSDT', 'APEUSDT', 'FILUSDT'
@@ -55,52 +59,74 @@ const DECIMALS_CONFIG = {
     'DOTUSDT': 3,      
     'BCHUSDT': 2,      
     'SUIUSDT': 4,     
+    'AXSUSDT': 4,    
+    'AAVEUSDT': 4,     
+    'STGUSDT': 4,     
+    'COTIUSDT': 5,    
+    'API3USDT': 4,      
+    '1000PEPEUSDT': 6,
+    '1000SHIBUSDT': 6,
+    'GMXUSDT': 4,    
+    'HBARUSDT': 4,   
+    '1000BONKUSDT': 6,
     'SEIUSDT': 5,     
     'BNBUSDT': 2,     
     'SOLUSDT': 3,      
     'UNIUSDT': 3,      
     'GALAUSDT': 5,     
-    'COTIUSDT': 5,    
     'CHZUSDT': 5,     
-    'C98USDT': 5,     
     'IOTAUSDT': 5,     
+    'ARBUSDT': 3,   
     'BANDUSDT': 5,
+    'C98USDT': 5,     
+    'IOSTUSDT': 5,
+    'LDOUSDT': 5, 
+    'ICPUSDT': 5,
+    'ENAUSDT': 5,      // Adicionado - sugestão: 4 casas decimais
+    'DYDXUSDT': 5,     // Adicionado - sugestão: 4 casas decimais
+    'SKLUSDT': 5,      
+    'TIAUSDT': 5,
+    'VETUSDT': 5,
+    'WLDUSDT': 5,    
+    'ZKUSDT': 5,     
+    'BTCDOMUSDT': 5, 
+    'USDCUSDT': 6,
+    '1000FLOKIUSDT': 6,
+    'MASKUSDT': 5,
+    'THETAUSDT': 5,    // Adicionado - sugestão: 4 casas decimais
+    'LINKUSDT': 4,    
+    'APTUSDT': 4,      
+    'ARUSDT': 3,   
+    'ONDOUSDT': 4,    
+    'VIRTUALUSDT': 4,     
+    'OPUSDT': 5,    
+    'TRBUSDT': 5,
+    'POLUSDT': 5,  
+    'ETCUSDT': 5,     
+    'HOTUSDT': 5,
+    'FETUSDT': 5,
+    'GMTUSDT': 5,  
     'GRTUSDT': 5,     
     'CKBUSDT': 5,
     'LTCUSDT': 5,
-    'LDOUSDT': 5, 
-    'ICPUSDT': 5,
-    'WLDUSDT': 5,    
-    'FETUSDT': 5,
-    'GMTUSDT': 5,  
-    'VETUSDT': 5,
-    'TIAUSDT': 5,     
-    'ZKUSDT': 5,     
-    'IOSTUSDT': 5,
-    'SKLUSDT': 5,      
     'SUSHIUSDT': 4,   
     '1INCHUSDT': 4,    
     'MANAUSDT': 4,    
-    'APEUSDT': 4,      
-    'FILUSDT': 4,     
-    'AXSUSDT': 4,    
-    'AAVEUSDT': 4,     
-    'API3USDT': 4,      
-    'STGUSDT': 4,     
-    'GMXUSDT': 4,    
-    '1000BONKUSDT': 6,     
-    '1000SHIBUSDT': 6,     
-    '1000PEPEUSDT': 6,     
-    'HBARUSDT': 4,   
     'SANDUSDT': 4,   
     'ENJUSDT': 4,      
     'INJUSDT': 3,      
     'RUNEUSDT': 3,     
-    'ONEUSDT': 5       
+    'ONEUSDT': 5,
+    'APEUSDT': 4,      
+    'FILUSDT': 4
 };
 
 // Default se não encontrado
 const DEFAULT_DECIMALS = 4;
+
+// Configurações para alvos e stop
+const TARGET_PERCENTAGES = [1.0, 2.0, 3.0, 4.0]; 
+const STOP_PERCENTAGE = 1.0; 
 
 // Função para obter data e hora de Brasília
 function getBrazilianDateTime() {
@@ -248,98 +274,6 @@ function calculateEMA(data, period) {
     }
     
     return ema;
-}
-
-// 🔴 SUBSTITUA SUA FUNÇÃO getADX ANTIGA POR ESTA AQUI (ADX DE VERDADE)
-
-async function getADX(symbol, timeframe) {
-    try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=100`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        const data = await res.json();
-
-        if (data.length < 30) return { value: "N/A", plusDI: "N/A", minusDI: "N/A", timeframe };
-
-        const highs = data.map(c => +c[2]);
-        const lows  = data.map(c => +c[3]);
-        const closes = data.map(c => +c[4]);
-
-        // Calcula True Range e Directional Movement
-        const tr = [];
-        const plusDM = [];
-        const minusDM = [];
-
-        for (let i = 1; i < highs.length; i++) {
-            const upMove = highs[i] - highs[i-1];
-            const downMove = lows[i-1] - lows[i];
-
-            const plusDMval = upMove > downMove && upMove > 0 ? upMove : 0;
-            const minusDMval = downMove > upMove && downMove > 0 ? downMove : 0;
-
-            const tr1 = highs[i] - lows[i];
-            const tr2 = Math.abs(highs[i] - closes[i-1]);
-            const tr3 = Math.abs(lows[i] - closes[i-1]);
-            const trueRange = Math.max(tr1, tr2, tr3);
-
-            plusDM.push(plusDMval);
-            minusDM.push(minusDMval);
-            tr.push(trueRange);
-        }
-
-        // Suavização Wilder (período 14 padrão)
-        const period = 14;
-
-        let atr = tr.slice(0, period).reduce((a, b) => a + b, 0);
-        let plusDI = 100 * (plusDM.slice(0, period).reduce((a, b) => a + b, 0) / atr);
-        let minusDI = 100 * (minusDM.slice(0, period).reduce((a, b) => a + b, 0) / atr);
-
-        let dxValues = [];
-        if (plusDI + minusDI !== 0) {
-            dxValues.push(100 * Math.abs(plusDI - minusDI) / (plusDI + minusDI));
-        }
-
-        // Loop a partir do período 15 em diante (Wilder smoothing)
-        for (let i = period; i < tr.length; i++) {
-            atr = atr - (atr / period) + tr[i];
-
-            const currentPlusDM = plusDM[i] > minusDM[i] && plusDM[i] > 0 ? plusDM[i] : 0;
-            const currentMinusDM = minusDM[i] > plusDM[i] && minusDM[i] > 0 ? minusDM[i] : 0;
-
-            const smoothedPlusDM = (plusDM[period-1] * (period - 1) + currentPlusDM) / period;
-            const smoothedMinusDM = (minusDM[period-1] * (period - 1) + currentMinusDM) / period;
-
-            plusDI = 100 * (smoothedPlusDM / atr);
-            minusDI = 100 * (smoothedMinusDM / atr);
-
-            if (plusDI + minusDI !== 0) {
-                const dx = 100 * Math.abs(plusDI - minusDI) / (plusDI + minusDI);
-                dxValues.push(dx);
-            }
-        }
-
-        // ADX final = média dos últimos 14 DX
-        let adx = dxValues.slice(-period).reduce((a, b) => a + b, 0) / period;
-        adx = parseFloat(adx.toFixed(2));
-
-        const finalPlusDI = parseFloat(plusDI.toFixed(2));
-        const finalMinusDI = parseFloat(minusDI.toFixed(2));
-
-        return {
-            value: adx,
-            plusDI: finalPlusDI,
-            minusDI: finalMinusDI,
-            strength: adx >= 25 ? "Forte" : "Fraca",
-            timeframe
-        };
-
-    } catch (e) {
-        logToFile(`Erro ADX real (${symbol}, ${timeframe}): ${e.message}`);
-        return { value: "N/A", plusDI: "N/A", minusDI: "N/A", strength: "N/A", timeframe };
-    }
 }
 
 // Função para buscar RSI
@@ -607,7 +541,7 @@ async function getCandles(symbol, timeframe = '1h') {
     }
 }
 
-// 🔴 NOVA FUNÇÃO: Verificar volume anormal no timeframe de 3 minutos
+// 🔴 FUNÇÃO MELHORADA: Verificar volume anormal no timeframe de 3 minutos
 async function checkAbnormalVolume(symbol, multiplier = 2) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=3m&limit=21`;
@@ -621,13 +555,28 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
         
         if (data.length < 21) {
             logToFile(`⚠️ Dados insuficientes para volume 3m (${symbol})`);
-            return { isAbnormal: false, currentVolume: 0, avgVolume: 0, ratio: 0 };
+            return { 
+                isAbnormal: false, 
+                currentVolume: 0, 
+                avgVolume: 0, 
+                ratio: 0,
+                open: 0,
+                close: 0,
+                high: 0,
+                low: 0
+            };
         }
         
-        // Extrair volumes (últimos 20 candles para média, excluindo o atual)
-        const volumes = data.map(c => +c[5]);
-        const currentVolume = volumes[volumes.length - 1];
-        const previousVolumes = volumes.slice(0, volumes.length - 1);
+        // Extrair dados do último candle
+        const latestCandle = data[data.length - 1];
+        const open = +latestCandle[1];
+        const high = +latestCandle[2];
+        const low = +latestCandle[3];
+        const close = +latestCandle[4];
+        const currentVolume = +latestCandle[5];
+        
+        // Extrair volumes dos candles anteriores (últimos 20, excluindo o atual)
+        const previousVolumes = data.slice(0, data.length - 1).map(c => +c[5]);
         
         // Calcular média dos volumes anteriores
         const avgVolume = previousVolumes.reduce((sum, vol) => sum + vol, 0) / previousVolumes.length;
@@ -642,62 +591,46 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
             isAbnormal: isAbnormal,
             currentVolume: currentVolume,
             avgVolume: avgVolume,
-            ratio: ratio.toFixed(2)
+            ratio: ratio.toFixed(2),
+            open: open,
+            close: close,
+            high: high,
+            low: low
         };
         
     } catch (e) {
         logToFile(`⚠️ Erro ao verificar volume 3m (${symbol}): ${e.message}`);
-        return { isAbnormal: false, currentVolume: 0, avgVolume: 0, ratio: 0 };
-    }
-}
-
-// 🔴 NOVA FUNÇÃO: Verificar volatilidade mínima no timeframe de 15 minutos
-async function checkMinimumVolatility(symbol, minPercentage = 0.7) {
-    try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=15m&limit=20`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
-        const res = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        const data = await res.json();
-        
-        if (data.length < 20) {
-            logToFile(`⚠️ Dados insuficientes para volatilidade 15m (${symbol})`);
-            return { hasMinVolatility: false, volatility: 0, minRequired: minPercentage };
-        }
-        
-        // Calcular volatilidade como porcentagem da faixa de preço
-        const latestCandle = data[data.length - 1];
-        const high = +latestCandle[2];
-        const low = +latestCandle[3];
-        const close = +latestCandle[4];
-        
-        // Calcular volatilidade como (High-Low)/Close * 100%
-        const priceRange = high - low;
-        const volatility = (priceRange / close) * 100;
-        
-        // Verificar se atinge o mínimo requerido
-        const hasMinVolatility = volatility >= minPercentage;
-        
-        return {
-            hasMinVolatility: hasMinVolatility,
-            volatility: volatility.toFixed(2),
-            priceRange: priceRange,
-            minRequired: minPercentage
+        return { 
+            isAbnormal: false, 
+            currentVolume: 0, 
+            avgVolume: 0, 
+            ratio: 0,
+            open: 0,
+            close: 0,
+            high: 0,
+            low: 0
         };
-        
-    } catch (e) {
-        logToFile(`⚠️ Erro ao verificar volatilidade 15m (${symbol}): ${e.message}`);
-        return { hasMinVolatility: false, volatility: 0, priceRange: 0, minRequired: minPercentage };
     }
 }
 
-// 🔵 NOVAS FUNÇÕES PARA VERIFICAR EMA 55 NO TIMEFRAME DE 3 MINUTOS
+// 🔴 FUNÇÃO SIMPLIFICADA: Verificar volume anormal (sem verificação de candle)
+async function checkVolumeConfirmation(symbol, multiplier = 2) {
+    const volumeData = await checkAbnormalVolume(symbol, multiplier);
+    
+    // Apenas verifica se o volume é anormal (≥ 2x)
+    const isVolumeConfirmed = volumeData.isAbnormal;
+    
+    return {
+        isConfirmed: isVolumeConfirmed,
+        volumeData: volumeData,
+        message: isVolumeConfirmed ? 
+            `✅ Volume confirmado (${volumeData.ratio}x)` :
+            `❌ Volume não confirmado (ratio: ${volumeData.ratio}x)`
+    };
+}
 
-// Função para buscar candles de 3 minutos e calcular EMA 55
-async function getEMA3m(symbol) {
+// 🔵 FUNÇÃO ATUALIZADA: Buscar EMAs 13, 34 e 55 no timeframe de 3 minutos e verificar cruzamento
+async function getEMAs3m(symbol) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=3m&limit=100`;
         const controller = new AbortController();
@@ -709,45 +642,75 @@ async function getEMA3m(symbol) {
         const data = await res.json();
         
         if (data.length < 55) {
-            logToFile(`⚠️ Dados insuficientes para EMA 55 3m (${symbol})`);
+            logToFile(`⚠️ Dados insuficientes para EMAs 3m (${symbol})`);
             return {
+                ema13: "N/A",
+                ema34: "N/A",
                 ema55: "N/A",
                 currentPrice: "N/A",
-                isAboveEMA: false,
-                isBelowEMA: false,
+                isAboveEMA55: false,
+                isBelowEMA55: false,
+                isEMA13CrossingUp: false,
+                isEMA13CrossingDown: false,
                 priceFormatted: "N/A",
-                emaFormatted: "N/A"
+                ema13Formatted: "N/A",
+                ema34Formatted: "N/A",
+                ema55Formatted: "N/A"
             };
         }
         
         const closes = data.map(c => +c[4]);
         const currentPrice = closes[closes.length - 1];
         
-        // Calcular EMA 55
+        // Calcular EMAs
+        const ema13 = calculateEMA(closes.slice(-50), 13); // Usar últimos 50 candles para EMA13
+        const ema34 = calculateEMA(closes.slice(-50), 34); // Usar últimos 50 candles para EMA34
         const ema55 = calculateEMA(closes, 55);
+        
+        // Verificar cruzamento da EMA13 com EMA34
+        const previousCloses = data.slice(-55, -1).map(c => +c[4]); // Excluir o último candle
+        const previousEma13 = calculateEMA(previousCloses.slice(-49), 13); // EMA13 anterior
+        const previousEma34 = calculateEMA(previousCloses.slice(-49), 34); // EMA34 anterior
+        
+        const isEMA13CrossingUp = previousEma13 <= previousEma34 && ema13 > ema34;
+        const isEMA13CrossingDown = previousEma13 >= previousEma34 && ema13 < ema34;
         
         // Formatar os valores
         const priceFormatted = formatNumber(currentPrice, symbol, true);
-        const emaFormatted = formatNumber(ema55, symbol, true);
+        const ema13Formatted = formatNumber(ema13, symbol, true);
+        const ema34Formatted = formatNumber(ema34, symbol, true);
+        const ema55Formatted = formatNumber(ema55, symbol, true);
         
         return {
+            ema13: ema13,
+            ema34: ema34,
             ema55: ema55,
             currentPrice: currentPrice,
-            isAboveEMA: currentPrice > ema55,
-            isBelowEMA: currentPrice < ema55,
+            isAboveEMA55: currentPrice > ema55,
+            isBelowEMA55: currentPrice < ema55,
+            isEMA13CrossingUp: isEMA13CrossingUp,
+            isEMA13CrossingDown: isEMA13CrossingDown,
             priceFormatted: priceFormatted,
-            emaFormatted: emaFormatted
+            ema13Formatted: ema13Formatted,
+            ema34Formatted: ema34Formatted,
+            ema55Formatted: ema55Formatted
         };
         
     } catch (e) {
-        logToFile(`⚠️ Erro ao buscar EMA 55 3m (${symbol}): ${e.message}`);
+        logToFile(`⚠️ Erro ao buscar EMAs 3m (${symbol}): ${e.message}`);
         return {
+            ema13: "N/A",
+            ema34: "N/A",
             ema55: "N/A",
             currentPrice: "N/A",
-            isAboveEMA: false,
-            isBelowEMA: false,
+            isAboveEMA55: false,
+            isBelowEMA55: false,
+            isEMA13CrossingUp: false,
+            isEMA13CrossingDown: false,
             priceFormatted: "N/A",
-            emaFormatted: "N/A"
+            ema13Formatted: "N/A",
+            ema34Formatted: "N/A",
+            ema55Formatted: "N/A"
         };
     }
 }
@@ -783,6 +746,53 @@ function checkEMATrend(price, ema55) {
         return "🟢Tendência 💹 ema 55 1h";
     } else {
         return "🔴Tendência 📉 ema 55 1h";
+    }
+}
+
+// 🔴 NOVA FUNÇÃO: Calcular alvos e stop dinâmico
+function calculateTargetsAndStop(entryPrice, isBullish, symbol) {
+    const targets = [];
+    
+    if (isBullish) {
+        // Para bull: alvos acima do preço de entrada
+        for (const percentage of TARGET_PERCENTAGES) {
+            const targetPrice = entryPrice * (1 + percentage / 100);
+            targets.push({
+                percentage: percentage,
+                price: targetPrice,
+                formatted: formatNumber(targetPrice, symbol, true)
+            });
+        }
+        
+        // Stop dinâmico para bull: abaixo do preço de entrada
+        const stopPrice = entryPrice * (1 - STOP_PERCENTAGE / 100);
+        
+        return {
+            targets: targets,
+            stopPrice: stopPrice,
+            stopFormatted: formatNumber(stopPrice, symbol, true),
+            stopPercentage: STOP_PERCENTAGE
+        };
+    } else {
+        // Para bear: alvos abaixo do preço de entrada
+        for (const percentage of TARGET_PERCENTAGES) {
+            const targetPrice = entryPrice * (1 - percentage / 100);
+            targets.push({
+                percentage: percentage,
+                price: targetPrice,
+                formatted: formatNumber(targetPrice, symbol, true)
+            });
+        }
+        
+        // Stop dinâmico para bear: acima do preço de entrada
+        const stopPrice = entryPrice * (1 + STOP_PERCENTAGE / 100);
+        
+        return {
+            targets: targets,
+            stopPrice: stopPrice,
+            stopFormatted: formatNumber(stopPrice, symbol, true),
+            stopPercentage: STOP_PERCENTAGE
+        };
     }
 }
 
@@ -851,22 +861,17 @@ async function monitorSymbolSweep(symbol) {
 
         // 🔴 ADICIONAR VERIFICAÇÕES DOS NOVOS CRITÉRIOS
         if (buySignal || sellSignal) {
-            // Verificar volume anormal no 3m e volatilidade no 15m
-            const [volumeCheck, volatilityCheck] = await Promise.all([
-                checkAbnormalVolume(symbol, 2),
-                checkMinimumVolatility(symbol, 0.5)
-            ]);
+            // Verificar volume anormal no 3m 
+            const volumeCheck = await checkAbnormalVolume(symbol, 2);
             
             // Se não passar nos novos critérios, não enviar alerta
-            if (!volumeCheck.isAbnormal || !volatilityCheck.hasMinVolatility) {
-                logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x), Volatilidade: ${volatilityCheck.volatility}% (req: 0.5%)`);
+            if (!volumeCheck.isAbnormal) {
+                logToFile(`⚠️ ${symbol}: Sinal de SWEEP ignorado - Volume: ${volumeCheck.ratio}x (req: 2x)`);
                 return null;
             }
 
             // Buscar dados adicionais
-            const [adx15m, adx1h, lsrData, orderBook, rsi1h, stoch4h, stochDaily] = await Promise.all([
-                getADX(symbol, '15m'),
-                getADX(symbol, '1h'),
+            const [lsrData, orderBook, rsi1h, stoch4h, stochDaily] = await Promise.all([
                 getLSR(symbol, '15m'),
                 getOrderBook(symbol),
                 getRSI(symbol, '1h'),
@@ -881,28 +886,23 @@ async function monitorSymbolSweep(symbol) {
             // Usar formatação específica por ativo para preços
             const priceFormatted = formatNumber(price, symbol, true);
             const fractalLevelFormatted = formatNumber(fractalLevel, symbol, true);
-            const bestBidFormatted = formatNumber(orderBook.bestBid, symbol, true);
-            const bestAskFormatted = formatNumber(orderBook.bestAsk, symbol, true);
             
-            // 🔴 ADICIONAR INFORMAÇÕES DOS NOVOS CRITÉRIOS NA MENSAGEM
-            const msg = `${emoji}<b>🤖 IA SMC CAPTURA DE LIQUIDEZ</b>\n` +
-                       ` <b>${sellSignal ? '📛Região de Distribuição/Correção' : '💹Região de Compradores/Reversão'}</b>\n` +
-                       `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+            // 🔴 Alerta
+            const msg = `${emoji}<b>🤖 IA SMC Automatic</b>\n` +
+                       ` <b>${sellSignal ? '📛Resistência/ FVG Bear' : '💹Suporte/ Aguardar Reversão'}</b>\n` +
+                       `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                        ` <b>#Ativo:</b> #${symbol}\n` +
                        ` <b>Preço:</b> $${priceFormatted}\n` +
                        ` <b>${emaTrend}</b>\n` +
-                       `• Force 15m: <b>${adx15m.value}</b>\n` +
-                       `• Force 1h: <b>${adx1h.value}</b>\n` +
                        `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
                        `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
                        `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
                        `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
-                       `• Volume 3m: <b>${volumeCheck.ratio}x</b> da média\n` +
-                       `• Volatilidade 15m: <b>${volatilityCheck.volatility}%</b>\n` +
+                       `• Vol 3m: <b>${volumeCheck.ratio}x</b>\n` +
                        ` <b>Livro de Ordens:</b>\n` +
-                       `• Vol Bid(vendas): <b>${orderBook.bidVolume}</b>\n` +
-                       `• Vol Ask(compras): <b>${orderBook.askVolume}</b>\n` +
-                       `                    <b>SMC Tecnology by @J4Rviz</b>`;
+                       `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                       `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
+                       `              <b>SMC Tecnology by @J4Rviz</b>`;
             
             // Armazenar informação do sweep para possível confirmação
             if (buySignal) {
@@ -922,8 +922,7 @@ async function monitorSymbolSweep(symbol) {
                 brDateTime: brDateTime,
                 priceFormatted: priceFormatted,
                 fractalLevelFormatted: fractalLevelFormatted,
-                volumeInfo: volumeCheck,
-                volatilityInfo: volatilityCheck
+                volumeInfo: volumeCheck
             };
         }
         
@@ -934,7 +933,7 @@ async function monitorSymbolSweep(symbol) {
     }
 }
 
-// 🔵 NOVA FUNÇÃO: Monitorar confirmações de reversão via EMA 55 3m
+// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão via EMA 13, 34 e 55 3m
 async function monitorConfirmation(symbol) {
     try {
         // Verificar se houve um sweep recente (últimas 6 horas)
@@ -950,80 +949,160 @@ async function monitorConfirmation(symbol) {
             return null; // Não houve sweep recente
         }
         
-        // Obter dados da EMA 55 no timeframe de 3 minutos
-        const ema3mData = await getEMA3m(symbol);
+        // Obter dados das EMAs 13, 34 e 55 no timeframe de 3 minutos
+        const emas3mData = await getEMAs3m(symbol);
         
-        if (ema3mData.ema55 === "N/A") {
+        if (emas3mData.ema55 === "N/A" || emas3mData.ema13 === "N/A" || emas3mData.ema34 === "N/A") {
             return null;
         }
         
+        // Buscar RSI 1h para verificar critérios
+        const rsi1h = await getRSI(symbol, '1h');
+        const rsiValue = parseFloat(rsi1h.value);
+        
         const brDateTime = getBrazilianDateTime();
-        const priceFormatted = formatNumber(ema3mData.currentPrice, symbol, true);
+        const priceFormatted = formatNumber(emas3mData.currentPrice, symbol, true);
         
         let confirmationAlert = null;
         
-        // 🔵 CONFIRMAÇÃO BULL: Preço fechou ACIMA da EMA 55 no 3m após sweep de compra
-        if (hadBuySweep && ema3mData.isAboveEMA) {
+        // 🔵 CONFIRMAÇÃO BULL: 
+        // 1. EMA 13 cruzando para cima a EMA 34 no 3m
+        // 2. Preço fechando acima da EMA 55 no 3m
+        // 3. Após sweep de compra
+        if (hadBuySweep && emas3mData.isAboveEMA55 && emas3mData.isEMA13CrossingUp) {
+            // 🔴 CRITÉRIO: RSI 1h deve ser menor que 60
+            if (rsiValue >= 60) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bull ignorada - RSI 1h (${rsiValue}) >= 60`);
+                return null;
+            }
+            
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
+            
+            // Verificar se passa nos novos critérios
+            if (!volumeCheck.isConfirmed) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bull ignorada - ${volumeCheck.message}`);
+                return null;
+            }
+            
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
-                // Buscar dados adicionais para a confirmação
-                const [adx15m, adx1h, rsi1h] = await Promise.all([
-                    getADX(symbol, '15m'),
-                    getADX(symbol, '1h'),
-                    getRSI(symbol, '1h')
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
                 ]);
                 
-                const msg = `✅ <b>🤖 Compra </b>\n` +
-                           `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                // Calcular alvos e stop dinâmico
+                const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, true, symbol);
+                
+                const msg = `🟢 <b>🤖 COMPRA  </b>\n` +
+                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
-                           ` <b>Preço atual:</b> $${priceFormatted}\n` +
-                           `• Force 15m: <b>${adx15m.value}</b>\n` +
-                           `• Force 1h: <b>${adx1h.value}</b>\n` +
+                           ` <b>Preço:</b> $${priceFormatted}\n` +
+                           ` <b>EMA 13/34 3m:</b> CRUZAMENTO BULL (${emas3mData.ema13Formatted} > ${emas3mData.ema34Formatted})\n` +
+                           ` <b>EMA 55 3m:</b> $${emas3mData.ema55Formatted}\n` +
+                           ` <b>Entr:</b> $${priceFormatted}\n` +
+                           ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
+                           ` <b>Alvos:</b>\n` +
+                           `• Alvo 1 : $${targetsAndStop.targets[0].formatted}\n` +
+                           `• Alvo 2 : $${targetsAndStop.targets[1].formatted}\n` +
+                           `• Alvo 3 : $${targetsAndStop.targets[2].formatted}\n` +
+                           `• Alvo 4 : $${targetsAndStop.targets[3].formatted}\n` +
                            `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
-                           `• Liquidez Capturada: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                           `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                           `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
+                           `• Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n` +
+                           `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
                            `        <b>SMC Tecnology by @J4Rviz</b>`;
                 
                 confirmationAlert = {
                     symbol: symbol,
                     signal: 'Confirmação Bull',
                     message: msg,
-                    price: ema3mData.currentPrice,
+                    price: emas3mData.currentPrice,
                     brDateTime: brDateTime,
-                    priceFormatted: priceFormatted
+                    priceFormatted: priceFormatted,
+                    targetsAndStop: targetsAndStop,
+                    volumeConfirmation: volumeCheck,
+                    emas3mData: emas3mData
                 };
                 
                 alertsCooldown[symbol].lastBuyConfirmation = now;
             }
         }
         
-        // 🔴 CONFIRMAÇÃO BEAR: Preço fechou ABAIXO da EMA 55 no 3m após sweep de venda
-        if (hadSellSweep && ema3mData.isBelowEMA) {
+        // 🔴 CONFIRMAÇÃO BEAR:
+        // 1. EMA 13 cruzando para baixo a EMA 34 no 3m
+        // 2. Preço fechando abaixo da EMA 55 no 3m
+        // 3. Após sweep de venda
+        if (hadSellSweep && emas3mData.isBelowEMA55 && emas3mData.isEMA13CrossingDown) {
+            // 🔴 CRITÉRIO: RSI 1h deve ser maior que 60
+            if (rsiValue <= 60) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bear ignorada - RSI 1h (${rsiValue}) <= 60`);
+                return null;
+            }
+            
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
+            
+            // Verificar se passa nos novos critérios
+            if (!volumeCheck.isConfirmed) {
+                logToFile(`⚠️ ${symbol}: Confirmação Bear ignorada - ${volumeCheck.message}`);
+                return null;
+            }
+            
             const now = Date.now();
             if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
-                // Buscar dados adicionais para a confirmação
-                const [adx15m, adx1h, rsi1h] = await Promise.all([
-                    getADX(symbol, '15m'),
-                    getADX(symbol, '1h'),
-                    getRSI(symbol, '1h')
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
                 ]);
                 
-                const msg = `✅ <b>🤖 Correção </b>\n` +
-                            `⏰<b>Data/Hora:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                // Calcular alvos e stop dinâmico
+                const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, false, symbol);
+                
+                const msg = `🔴 <b>🤖 CORREÇÃO </b>\n` +
+                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
                            ` <b>#Ativo:</b> #${symbol}\n` +
-                           ` <b>Preço atual:</b> $${priceFormatted}\n` +
-                           `• Force 15m: <b>${adx15m.value}</b>\n` +
-                           `• Force 1h: <b>${adx1h.value}</b>\n` +
-                           `• #RSI 1h: <b>${rsi1h.value}</b>\n` +
-                           `• Liquidez Capturada: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
+                           ` <b>Preço:</b> $${priceFormatted}\n` +
+                           ` <b>EMA 13/34 3m:</b> CRUZAMENTO BEAR (${emas3mData.ema13Formatted} < ${emas3mData.ema34Formatted})\n` +
+                           ` <b>EMA 55 3m:</b> $${emas3mData.ema55Formatted}\n` +
+                           ` <b>Entr:</b> $${priceFormatted}\n` +
+                           ` <b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
+                           ` <b>Alvos:</b>\n` +
+                           `• Alvo 1: $${targetsAndStop.targets[0].formatted}\n` +
+                           `• Alvo 2: $${targetsAndStop.targets[1].formatted}\n` +
+                           `• Alvo 3: $${targetsAndStop.targets[2].formatted}\n` +
+                           `• Alvo 4: $${targetsAndStop.targets[3].formatted}\n` +
+                           `• #RSI 1h: <b>${rsi1h.value}</b> \n` +
+                           `• #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                           `• #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                           `• #LSR : <b>${lsrData.lsrRatio}</b>\n` +
+                           `• Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> \n` +
+                           `• Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
+                           `• Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           `• Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
                            `       <b>SMC Tecnology by @J4Rviz</b>`;
             
                 confirmationAlert = {
                     symbol: symbol,
                     signal: 'Confirmação Bear',
                     message: msg,
-                    price: ema3mData.currentPrice,
+                    price: emas3mData.currentPrice,
                     brDateTime: brDateTime,
-                    priceFormatted: priceFormatted
+                    priceFormatted: priceFormatted,
+                    targetsAndStop: targetsAndStop,
+                    volumeConfirmation: volumeCheck,
+                    emas3mData: emas3mData
                 };
                 
                 alertsCooldown[symbol].lastSellConfirmation = now;
@@ -1131,7 +1210,6 @@ async function mainBotLoop() {
         '='.repeat(50) + '\n' +
         ' BOT DO SWEEP 1H INICIADO\n' +
         ` MONITORANDO ${SYMBOLS.length} ATIVOS\n` +
-       
         '='.repeat(50) + '\n';
     
     console.log(initMsg);
@@ -1154,12 +1232,28 @@ async function mainBotLoop() {
     }
     console.log('='.repeat(60) + '\n');
     
+    // Mostrar configuração de alvos e stop
+    console.log('🎯 CONFIGURAÇÃO DE ALVOS E STOP:');
+    console.log('='.repeat(60));
+    console.log(`Alvos: ${TARGET_PERCENTAGES.map(p => p + '%').join(', ')}`);
+    console.log(`Stop Dinâmico: ${STOP_PERCENTAGE}%`);
+    console.log('Critérios Confirmação Bull:');
+    console.log('  - EMA 13 cruzando para cima EMA 34 (3m)');
+    console.log('  - Preço acima EMA 55 (3m)');
+    console.log('  - RSI 1h < 60');
+    console.log('  - Volume anormal (2x média)');
+    console.log('Critérios Confirmação Bear:');
+    console.log('  - EMA 13 cruzando para baixo EMA 34 (3m)');
+    console.log('  - Preço abaixo EMA 55 (3m)');
+    console.log('  - RSI 1h > 60');
+    console.log('  - Volume anormal (2x média)');
+    console.log('='.repeat(60) + '\n');
+    
     const brDateTime = getBrazilianDateTime();
     await sendAlert(`🤖 <b>Titanium SMC Sentinel</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `Monitorando ${SYMBOLS.length} ativos\n` +
-                    `Sistema de 4 alertas ativado:\n` +
-                   
+                    `Sistema ativado:\n` +
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
@@ -1188,7 +1282,6 @@ async function mainBotLoop() {
 
             let sweepAlertsSent = 0;
             let confirmationAlertsSent = 0;
-            let signalsFiltered = 0;
             
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
             
@@ -1201,8 +1294,7 @@ async function mainBotLoop() {
                         console.log(`\n🔔 SWEEP DETECTADO PARA ${symbol}!`);
                         console.log(`📊 ${sweepResult.signal} - Preço: $${sweepResult.priceFormatted}`);
                         console.log(`📈 Volume 3m: ${sweepResult.volumeInfo.ratio}x da média`);
-                        console.log(`📉 Volatilidade 15m: ${sweepResult.volatilityInfo.volatility}%`);
-                        logToFile(`ALERTA SWEEP ${sweepResult.signal} - ${symbol} - Preço: $${sweepResult.price} - Volume: ${sweepResult.volumeInfo.ratio}x - Volatilidade: ${sweepResult.volatilityInfo.volatility}%`);
+                        logToFile(`ALERTA SWEEP ${sweepResult.signal} - ${symbol} - Preço: $${sweepResult.price} - Volume: ${sweepResult.volumeInfo.ratio}x`);
                         
                         await sendAlert(sweepResult.message);
                         
@@ -1232,7 +1324,7 @@ async function mainBotLoop() {
             
             console.log('\n🔍 Verificando confirmações de reversão...');
             
-            // Monitorar cada ativo sequencialmente - DEPOIS CONFIRMAÇÕES
+            // Monitorar cada ativo sequencialmente 
             for (const symbol of SYMBOLS) {
                 try {
                     const confirmationResult = await monitorConfirmation(symbol);
@@ -1240,7 +1332,10 @@ async function mainBotLoop() {
                     if (confirmationResult) {
                         console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${symbol}!`);
                         console.log(`📊 ${confirmationResult.signal} - Preço: $${confirmationResult.priceFormatted}`);
-                        logToFile(`ALERTA CONFIRMAÇÃO ${confirmationResult.signal} - ${symbol} - Preço: $${confirmationResult.price}`);
+                        console.log(`📈 EMA 13/34: ${confirmationResult.emas3mData.isEMA13CrossingUp ? 'Cruzamento Bull' : 'Cruzamento Bear'}`);
+                        console.log(`📈 Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x`);
+                        console.log(`🎯 4 Alvos + Stop Dinâmico calculados`);
+                        logToFile(`ALERTA CONFIRMAÇÃO ${confirmationResult.signal} - ${symbol} - Preço: $${confirmationResult.price} - Volume: ${confirmationResult.volumeConfirmation.volumeData.ratio}x`);
                         
                         await sendAlert(confirmationResult.message);
                         
@@ -1289,10 +1384,10 @@ async function mainBotLoop() {
 
             consecutiveErrors = 0;
             
-            console.log(`\n⏱️  Próxima verificação em 30 segundos...`);
+            console.log(`\n⏱️  Próxima verificação em 60 segundos...`);
             
-            // Aguardar 30 segundos antes da próxima verificação
-            await new Promise(r => setTimeout(r, 30000));
+            // Verificação estava 30000 a cada 30 segundos, ajustei para 60000 a cada 1 minuto
+            await new Promise(r => setTimeout(r, 60000));
 
         } catch (e) {
             consecutiveErrors++;
@@ -1330,8 +1425,8 @@ async function startBot() {
         console.error(`\n${crashMsg}`);
         logToFile(`🚨 ${crashMsg}`);
         
-        console.log('🔄 Reiniciando bot em 30 segundos...');
-        logToFile('🔄 Reiniciando bot em 30 segundos...');
+        console.log('🔄 Reiniciando bot em 60 segundos...');
+        logToFile('🔄 Reiniciando bot em 60 segundos...');
         
         await new Promise(r => setTimeout(r, 30000));
         await startBot();
@@ -1346,8 +1441,9 @@ console.log('🔧 Configuração SMC');
 console.log('🎯 SISTEMA DE 4 ALERTAS:');
 console.log('   1. Sweep Compra (1H)');
 console.log('   2. Sweep Venda (1H)');
-console.log('   3. Confirmação Bull (EMA 55 3m)');
-console.log('   4. Confirmação Bear (EMA 55 3m)');
+console.log('   3. Confirmação Bull (EMA 13/34/55 3m + RSI < 60 + Volume)');
+console.log('   4. Confirmação Bear (EMA 13/34/55 3m + RSI > 60 + Volume)');
+console.log('🎯 4 ALVOS + STOP DINÂMICO INCLUÍDOS');
 console.log('='.repeat(60) + '\n');
 
 startBot();
