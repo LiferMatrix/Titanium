@@ -1,0 +1,1523 @@
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+if (!globalThis.fetch) globalThis.fetch = fetch;
+
+// === CONFIGURE AQUI SEU BOT E CHAT ===
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID   = '-1001990889297';
+
+// Configurações do estudo (iguais ao TV)
+const FRACTAL_BARS = 3;
+const N = 2;
+
+// ATIVOS PARA MONITORAR 
+const SYMBOLS = [
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
+    'ADAUSDT', 'DOGEUSDT', 'TONUSDT', 'NEARUSDT', 'AVAXUSDT',
+    'DOTUSDT', 'SUIUSDT', 'LINKUSDT', 'BCHUSDT', 'APTUSDT',
+    'ARBUSDT', 'ONDOUSDT', 'INJUSDT', 'RUNEUSDT', 'FILUSDT',
+    'LTCUSDT', 'FETUSDT', 'GRTUSDT', 'UNIUSDT', 'AAVEUSDT',
+    'OPUSDT', 'LDOUSDT', 'ICPUSDT', 'HBARUSDT', 'VETUSDT', 'IOTAUSDT',
+    'THETAUSDT', 'ETCUSDT', 'CKBUSDT', '1000FLOKIUSDT', 'VANRYUSDT',
+    '1000PEPEUSDT', '1000SHIBUSDT', '1000BONKUSDT', 'GMTUSDT',
+    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT', 'YGGUSDT',
+    'ENAUSDT', 'TIAUSDT', 'SEIUSDT', 'ZKUSDT', 'GALAUSDT',
+    'CHZUSDT', 'HOTUSDT', 'MASKUSDT', 'PIXELUSDT', 'API3USDT',
+    'NEIROUSDT', 'MEMEUSDT', 'JTOUSDT', 'ONEUSDT', 'BTCDOMUSDT',
+    'DYDXUSDT', 'GMXUSDT', 'AXSUSDT', 'ARUSDT', 'APEUSDT',
+    'TRBUSDT', 'POLUSDT', 'STGUSDT', 'COTIUSDT', '1INCHUSDT',
+    'BANDUSDT', 'C98USDT', 'IOSTUSDT', 'SKLUSDT', 'ENJUSDT',
+    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'PORTALUSDT', 'SANDUSDT',  
+    'DYMUSDT', 'ZILUSDT', 'CTSIUSDT', 'VIRTUALUSDT', 'MANAUSDT',
+    'PAXGUSDT', 'RSRUSDT', 'XVGUSDT', 'ATAUSDT',  'ATOMUSDT',
+    'USDCUSDT'
+];
+
+// Configurações de Logs
+const LOG_DIR = './logs';
+const MAX_LOG_FILES = 10;
+const MAX_LOG_SIZE = 10 * 1024 * 1024;
+
+// Configurações de Reconexão
+const INITIAL_RETRY_DELAY = 5000;
+const MAX_RETRY_DELAY = 60000;
+const MAX_RETRY_ATTEMPTS = 10;
+
+// Objeto para armazenar alertas por ativo
+const alertsCooldown = {};
+const COOLDOWN = 30 * 60 * 1000; // 30 minutos
+
+// Objeto para rastrear sweeps recentes para confirmações
+const recentSweeps = {};
+
+const DECIMALS_CONFIG = {
+    'BTCUSDT': 2,
+    'ETHUSDT': 2,
+    'SOLUSDT': 3,
+    'XRPUSDT': 4,
+    'BNBUSDT': 2,
+    'ADAUSDT': 3,          
+    'DOGEUSDT': 6,
+    'TONUSDT': 4,
+    'NEARUSDT': 4,
+    'AVAXUSDT': 3,
+    'DOTUSDT': 3,
+    'SUIUSDT': 4,
+    'LINKUSDT': 4,
+    'BCHUSDT': 2,
+    'APTUSDT': 4,
+    'ARBUSDT': 3,
+    'ONDOUSDT': 4,
+    'INJUSDT': 3,
+    'RUNEUSDT': 3,
+    'FILUSDT': 4,
+    'LTCUSDT': 2,
+    'FETUSDT': 5,
+    'GRTUSDT': 5,
+    'UNIUSDT': 3,
+    'AAVEUSDT': 4,
+    'OPUSDT': 5,
+    'LDOUSDT': 5,
+    'ICPUSDT': 5,
+    'HBARUSDT': 4,
+    'VETUSDT': 5,
+    'THETAUSDT': 5,
+    'ETCUSDT': 5,
+    'CKBUSDT': 5,
+    '1000FLOKIUSDT': 6,
+    '1000PEPEUSDT': 6,
+    '1000SHIBUSDT': 6,
+    '1000BONKUSDT': 6,
+    'GMTUSDT': 5,
+    'TURBOUSDT': 6,
+    'NOTUSDT': 6,
+    'WLDUSDT': 5,
+    'SUSHIUSDT': 4,
+    'YGGUSDT': 5,
+    'ENAUSDT': 5,
+    'TIAUSDT': 5,
+    'SEIUSDT': 5,
+    'ZKUSDT': 5,
+    'GALAUSDT': 5,
+    'CHZUSDT': 5,
+    'HOTUSDT': 5,
+    'MASKUSDT': 5,
+    'PIXELUSDT': 6,
+    'API3USDT': 4,
+    'NEIROUSDT': 6,
+    'VANRYUSDT': 6,
+    'IOTAUSDT': 6,
+    'MEMEUSDT': 6,
+    'JTOUSDT': 5,
+    'ONEUSDT': 5,
+    'BTCDOMUSDT': 5,
+    'DYDXUSDT': 5,
+    'GMXUSDT': 4,
+    'AXSUSDT': 4,
+    'ARUSDT': 3,
+    'APEUSDT': 4,
+    'TRBUSDT': 5,
+    'POLUSDT': 5,
+    'STGUSDT': 4,
+    'COTIUSDT': 5,
+    '1INCHUSDT': 4,
+    'BANDUSDT': 5,
+    'C98USDT': 5,
+    'IOSTUSDT': 5,
+    'SKLUSDT': 5,
+    'ENJUSDT': 4,
+    'MANTAUSDT': 5,
+    'ILVUSDT': 4,
+    'MAGICUSDT': 5,
+    'PORTALUSDT': 5,
+    'SANDUSDT': 4,
+    'DYMUSDT': 5,
+    'ZILUSDT': 6,
+    'CTSIUSDT': 5,
+    'VIRTUALUSDT': 4,
+    'MANAUSDT': 4,
+    'PAXGUSDT': 3,
+    'RSRUSDT': 6,
+    'XVGUSDT': 7,
+    'ATAUSDT': 6,
+    'ATOMUSDT': 3,
+    'USDCUSDT': 6
+};
+// Default (nunca vai ser usado com essa lista completa)
+const DEFAULT_DECIMALS = 4;
+
+// Configurações para alvos e stop
+const TARGET_PERCENTAGES = [2.0, 4.0, 6.0, 8.0];
+const STOP_PERCENTAGE    = 2.0;
+
+// 🔵 OTIMIZAÇÕES ADICIONADAS
+const BATCH_SIZE = 15; 
+const candleCache = {}; 
+
+// 🔵 FUNÇÃO ATUALIZADA E MAIS CONFIÁVEL: Calcular EMA
+function calculateEMA(data, period) {
+    if (!data || data.length < period) return null;
+
+    const k = 2 / (period + 1);
+    let ema = typeof data[0] === 'object' ? data[0].close : data[0]; // Funciona com número ou objeto
+
+    for (let i = 1; i < data.length; i++) {
+        const price = typeof data[i] === 'object' ? data[i].close : data[i];
+        ema = price * k + ema * (1 - k);
+    }
+    return ema;
+}
+
+// Função para obter data e hora de Brasília
+function getBrazilianDateTime() {
+    const now = new Date();
+    const brasiliaTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+    
+    const day = String(brasiliaTime.getDate()).padStart(2, '0');
+    const month = String(brasiliaTime.getMonth() + 1).padStart(2, '0');
+    const year = brasiliaTime.getFullYear();
+    const hours = String(brasiliaTime.getHours()).padStart(2, '0');
+    const minutes = String(brasiliaTime.getMinutes()).padStart(2, '0');
+    const seconds = String(brasiliaTime.getSeconds()).padStart(2, '0');
+    
+    return {
+        date: `${day}/${month}/${year}`,
+        time: `${hours}:${minutes}:${seconds}`,
+        full: `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`
+    };
+}
+
+// Função para inicializar sistema de logs
+function initLogSystem() {
+    if (!fs.existsSync(LOG_DIR)) {
+        fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+    cleanupOldLogs();
+}
+
+// Função para limpar logs antigos
+function cleanupOldLogs() {
+    try {
+        const files = fs.readdirSync(LOG_DIR)
+            .filter(file => file.startsWith('bot_') && file.endsWith('.log'))
+            .map(file => ({
+                name: file,
+                path: path.join(LOG_DIR, file),
+                time: fs.statSync(path.join(LOG_DIR, file)).mtime.getTime()
+            }))
+            .sort((a, b) => b.time - a.time);
+
+        if (files.length > MAX_LOG_FILES) {
+            files.slice(MAX_LOG_FILES).forEach(file => {
+                try {
+                    fs.unlinkSync(file.path);
+                    logToFile(`🗑️ Log antigo removido: ${file.name}`);
+                } catch (e) {
+                    console.error(`Erro ao remover log: ${e.message}`);
+                }
+            });
+        }
+    } catch (e) {
+        console.error(`Erro na limpeza de logs: ${e.message}`);
+    }
+}
+
+// Função para logar em arquivo
+function logToFile(message) {
+    try {
+        const timestamp = new Date().toISOString();
+        const logDate = new Date().toISOString().split('T')[0];
+        const logFile = path.join(LOG_DIR, `bot_${logDate}.log`);
+        
+        if (fs.existsSync(logFile)) {
+            const stats = fs.statSync(logFile);
+            if (stats.size > MAX_LOG_SIZE) {
+                const rotatedFile = path.join(LOG_DIR, `bot_${logDate}_${Date.now()}.log`);
+                fs.renameSync(logFile, rotatedFile);
+            }
+        }
+        
+        const logMessage = `[${timestamp}] ${message}\n`;
+        fs.appendFileSync(logFile, logMessage);
+    } catch (e) {
+        console.error(`Erro ao escrever log: ${e.message}`);
+    }
+}
+
+// 🔵 FUNÇÃO OTIMIZADA: fetch com tratamento de rate limit e retry
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            // Verificar rate limit (429 Too Many Requests)
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After') || 60;
+                const waitTime = parseInt(retryAfter) * 1000 + 2000;
+                
+                logToFile(`⚠️ Rate limit atingido (429). Tentativa ${attempt}/${maxRetries}. Aguardando ${retryAfter}s...`);
+                console.log(`⚠️ Rate limit atingido. Aguardando ${retryAfter}s...`);
+                
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue;
+            }
+            
+            return response;
+            
+        } catch (error) {
+            lastError = error;
+            
+            if (error.name === 'AbortError') {
+                logToFile(`⏱️ Timeout na tentativa ${attempt}/${maxRetries}`);
+                console.log(`⏱️ Timeout na tentativa ${attempt}/${maxRetries}`);
+            } else {
+                logToFile(`⚠️ Erro na tentativa ${attempt}/${maxRetries}: ${error.message}`);
+            }
+            
+            // Aguardar antes da próxima tentativa (exponencial backoff)
+            if (attempt < maxRetries) {
+                const delay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    
+    throw lastError || new Error(`Falha após ${maxRetries} tentativas`);
+}
+
+// Função para verificar conexão
+async function checkInternetConnection() {
+    try {
+        await fetchWithRetry('https://api.binance.com/api/v3/ping', {}, 1);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Função para reconexão
+async function reconnectWithBackoff(attempt = 1) {
+    const delay = Math.min(INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1), MAX_RETRY_DELAY);
+    
+    logToFile(`🔌 Tentativa ${attempt} de reconexão em ${delay/1000} segundos...`);
+    console.log(`🔌 Tentativa ${attempt} de reconexão em ${delay/1000} segundos...`);
+    
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    const isConnected = await checkInternetConnection();
+    if (isConnected) {
+        logToFile('✅ Conexão restaurada!');
+        console.log('✅ Conexão restaurada!');
+        return true;
+    }
+    
+    if (attempt >= MAX_RETRY_ATTEMPTS) {
+        logToFile('❌ Máximo de tentativas de reconexão atingido');
+        console.log('❌ Máximo de tentativas de reconexão atingido');
+        return false;
+    }
+    
+    return await reconnectWithBackoff(attempt + 1);
+}
+
+// Função para formatar números com base no ativo
+function formatNumber(num, symbol = null, isPrice = true) {
+    if (num === "N/A" || num === undefined || num === null) return "N/A";
+    
+    if (isPrice && symbol && DECIMALS_CONFIG[symbol]) {
+        return parseFloat(num).toLocaleString('en-US', {
+            minimumFractionDigits: DECIMALS_CONFIG[symbol],
+            maximumFractionDigits: DECIMALS_CONFIG[symbol]
+        });
+    }
+    
+    // Para outros números (indicadores, volumes, etc.) usar 2 casas
+    return parseFloat(num).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+// 🔵 NOVA FUNÇÃO: Buscar Funding Rate
+async function getFundingRate(symbol) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        
+        if (data && data.lastFundingRate !== undefined) {
+            const rate = parseFloat(data.lastFundingRate) * 100; // Converter para porcentagem
+            
+            // Determinar emojis conforme especificação
+            let fundingRateEmoji = '';
+            if (rate <= -0.2) fundingRateEmoji = '🟢🟢🟢🟢';
+            else if (rate <= -0.1) fundingRateEmoji = '🟢🟢🟢';
+            else if (rate <= -0.05) fundingRateEmoji = '🟢🟢';
+            else if (rate >= 0.1) fundingRateEmoji = '🔴🔴🔴🔴';
+            else if (rate >= 0.03) fundingRateEmoji = '🔴🔴🔴';
+            else if (rate >= 0.02) fundingRateEmoji = '🔴🔴';
+            
+            return {
+                rate: rate.toFixed(4),
+                emoji: fundingRateEmoji,
+                raw: rate
+            };
+        }
+        return { 
+            rate: "N/A", 
+            emoji: "", 
+            raw: null
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar Funding Rate(${symbol}): ${e.message}`);
+        return { 
+            rate: "N/A", 
+            emoji: "", 
+            raw: null
+        };
+    }
+}
+
+// 🔵 FUNÇÃO OTIMIZADA: Buscar candles com cache
+async function getCandlesCached(symbol, timeframe = '1h', limit = 200) {
+    const key = `${symbol}_${timeframe}_${limit}`;
+    const now = Date.now();
+    
+    // Verificar se temos dados em cache (válidos por 50 segundos)
+    if (candleCache[key] && now - candleCache[key].ts < 50000) {
+        return candleCache[key].data;
+    }
+    
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        const candles = data.map(c => ({
+            time: c[0],
+            open: +c[1],
+            high: +c[2],
+            low: +c[3],
+            close: +c[4],
+            volume: +c[5]
+        }));
+        
+        // Armazenar no cache
+        candleCache[key] = { data: candles, ts: now };
+        return candles;
+        
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar candles(${symbol}): ${e.message}`);
+        return [];
+    }
+}
+
+// Função para buscar RSI
+async function getRSI(symbol, timeframe, period = 14) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${period + 50}`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        const closes = data.map(c => +c[4]);
+        
+        if (closes.length < period + 1) {
+            return { value: "N/A", timeframe: timeframe };
+        }
+        
+        let gains = 0;
+        let losses = 0;
+        
+        for (let i = 1; i <= period; i++) {
+            const difference = closes[i] - closes[i - 1];
+            if (difference >= 0) {
+                gains += difference;
+            } else {
+                losses -= difference;
+            }
+        }
+        
+        let avgGain = gains / period;
+        let avgLoss = losses / period;
+        
+        for (let i = period + 1; i < closes.length; i++) {
+            const difference = closes[i] - closes[i - 1];
+            const currentGain = difference >= 0 ? difference : 0;
+            const currentLoss = difference < 0 ? -difference : 0;
+            
+            avgGain = (avgGain * (period - 1) + currentGain) / period;
+            avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
+        }
+        
+        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+        const rsi = 100 - (100 / (1 + rs));
+        
+        return {
+            value: rsi.toFixed(2),
+            timeframe: timeframe
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar RSI(${symbol}, ${timeframe}): ${e.message}`);
+        return { value: "N/A", timeframe: timeframe };
+    }
+}
+
+// Função para buscar Estocástico
+async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth = 3) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${kPeriod + dPeriod + smooth + 20}`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        
+        const highs = data.map(c => +c[2]);
+        const lows = data.map(c => +c[3]);
+        const closes = data.map(c => +c[4]);
+        
+        if (closes.length < kPeriod + dPeriod + smooth) {
+            return { 
+                k: "N/A", 
+                d: "N/A", 
+                kDirection: "➡️", 
+                dDirection: "➡️", 
+                timeframe: timeframe 
+            };
+        }
+        
+        const kValues = [];
+        for (let i = 0; i <= closes.length - kPeriod; i++) {
+            const periodHighs = highs.slice(i, i + kPeriod);
+            const periodLows = lows.slice(i, i + kPeriod);
+            const currentClose = closes[i + kPeriod - 1];
+            
+            const highestHigh = Math.max(...periodHighs);
+            const lowestLow = Math.min(...periodLows);
+            
+            const kValue = lowestLow === highestHigh ? 50 : 
+                          ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kValues.push(kValue);
+        }
+        
+        const smoothedK = [];
+        for (let i = 0; i <= kValues.length - smooth; i++) {
+            const sum = kValues.slice(i, i + smooth).reduce((a, b) => a + b, 0);
+            smoothedK.push(sum / smooth);
+        }
+        
+        const dValues = [];
+        for (let i = 0; i <= smoothedK.length - dPeriod; i++) {
+            const sum = smoothedK.slice(i, i + dPeriod).reduce((a, b) => a + b, 0);
+            dValues.push(sum / dPeriod);
+        }
+        
+        const currentK = smoothedK[smoothedK.length - 1];
+        const currentD = dValues[dValues.length - 1];
+        
+        const previousK = smoothedK[smoothedK.length - 2] || currentK;
+        const previousD = dValues[dValues.length - 2] || currentD;
+        
+        const kDirection = currentK > previousK ? "⬆️" : 
+                          currentK < previousK ? "⬇️" : "➡️";
+        const dDirection = currentD > previousD ? "⬆️" : 
+                          currentD < previousD ? "⬇️" : "➡️";
+        
+        return {
+            k: currentK.toFixed(2),
+            d: currentD.toFixed(2),
+            kDirection: kDirection,
+            dDirection: dDirection,
+            timeframe: timeframe
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar Estocástico(${symbol}, ${timeframe}): ${e.message}`);
+        return { 
+            k: "N/A", 
+            d: "N/A", 
+            kDirection: "➡️", 
+            dDirection: "➡️", 
+            timeframe: timeframe 
+        };
+    }
+}
+
+// Função para buscar Long/Short Ratio
+async function getLSR(symbol, period = '15m') {
+    try {
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=1`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+            const latest = data[0];
+            const longAccount = parseFloat(latest.longAccount);
+            const shortAccount = parseFloat(latest.shortAccount);
+            const lsrRatio = longAccount / shortAccount;
+            
+            return {
+                longAccount: longAccount.toFixed(4),
+                shortAccount: shortAccount.toFixed(4),
+                lsrRatio: lsrRatio.toFixed(4),
+                period: period
+            };
+        }
+        return { 
+            longAccount: "N/A", 
+            shortAccount: "N/A", 
+            lsrRatio: "N/A", 
+            period: period 
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${e.message}`);
+        return { 
+            longAccount: "N/A", 
+            shortAccount: "N/A", 
+            lsrRatio: "N/A", 
+            period: period 
+        };
+    }
+}
+
+// Função para buscar livro de ordens
+async function getOrderBook(symbol) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/depth?symbol=${symbol}&limit=10`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        
+        const bestBid = data.bids[0] ? +data.bids[0][0] : 0;
+        const bestAsk = data.asks[0] ? +data.asks[0][0] : 0;
+        
+        const bidVolume = data.bids.slice(0, 5).reduce((sum, bid) => sum + +bid[1], 0);
+        const askVolume = data.asks.slice(0, 5).reduce((sum, ask) => sum + +ask[1], 0);
+        
+        return {
+            bestBid: bestBid,
+            bestAsk: bestAsk,
+            bidVolume: bidVolume.toFixed(2),
+            askVolume: askVolume.toFixed(2),
+            spread: bestBid > 0 ? ((bestAsk - bestBid) / bestBid * 10000).toFixed(2) : "N/A"
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar Order Book(${symbol}): ${e.message}`);
+        return {
+            bestBid: "N/A",
+            bestAsk: "N/A",
+            bidVolume: "N/A",
+            askVolume: "N/A",
+            spread: "N/A"
+        };
+    }
+}
+
+// Função para enviar alerta
+async function sendAlert(text) {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: text,
+                parse_mode: 'HTML'
+            }),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+    } catch (e) {
+        logToFile(`❌ Erro ao enviar Telegram: ${e.message}`);
+        console.log('❌ Erro ao enviar Telegram:', e.message);
+    }
+}
+
+// 🔴 FUNÇÃO MELHORADA: Verificar volume anormal no timeframe de 3 minutos
+async function checkAbnormalVolume(symbol, multiplier = 2) {
+    try {
+        const candles = await getCandlesCached(symbol, '3m', 21);
+        
+        if (candles.length < 21) {
+            logToFile(`⚠️ Dados insuficientes para volume 3m (${symbol})`);
+            return { 
+                isAbnormal: false, 
+                currentVolume: 0, 
+                avgVolume: 0, 
+                ratio: 0,
+                open: 0,
+                close: 0,
+                high: 0,
+                low: 0
+            };
+        }
+        
+        // Extrair dados do último candle
+        const latestCandle = candles[candles.length - 1];
+        const open = latestCandle.open;
+        const high = latestCandle.high;
+        const low = latestCandle.low;
+        const close = latestCandle.close;
+        const currentVolume = latestCandle.volume;
+        
+        // Extrair volumes dos candles anteriores (últimos 20, excluindo o atual)
+        const previousVolumes = candles.slice(0, candles.length - 1).map(c => c.volume);
+        
+        // Calcular média dos volumes anteriores
+        const avgVolume = previousVolumes.reduce((sum, vol) => sum + vol, 0) / previousVolumes.length;
+        
+        // Calcular ratio
+        const ratio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+        
+        // Verificar se é anormal (pelo menos 2x a média)
+        const isAbnormal = ratio >= multiplier;
+        
+        return {
+            isAbnormal: isAbnormal,
+            currentVolume: currentVolume,
+            avgVolume: avgVolume,
+            ratio: ratio.toFixed(2),
+            open: open,
+            close: close,
+            high: high,
+            low: low
+        };
+        
+    } catch (e) {
+        logToFile(`⚠️ Erro ao verificar volume 3m (${symbol}): ${e.message}`);
+        return { 
+            isAbnormal: false, 
+            currentVolume: 0, 
+            avgVolume: 0, 
+            ratio: 0,
+            open: 0,
+            close: 0,
+            high: 0,
+            low: 0
+        };
+    }
+}
+
+// 🔴 FUNÇÃO SIMPLIFICADA: Verificar volume anormal (sem verificação de candle)
+async function checkVolumeConfirmation(symbol, multiplier = 2) {
+    const volumeData = await checkAbnormalVolume(symbol, multiplier);
+    
+    // Apenas verifica se o volume é anormal (≥ 2x)
+    const isVolumeConfirmed = volumeData.isAbnormal;
+    
+    return {
+        isConfirmed: isVolumeConfirmed,
+        volumeData: volumeData,
+        message: isVolumeConfirmed ? 
+            `✅ Volume confirmado (${volumeData.ratio}x)` :
+            `❌ Volume não confirmado (ratio: ${volumeData.ratio}x)`
+    };
+}
+
+// 🔵 FUNÇÃO ATUALIZADA: Buscar EMAs 13, 34 e 55 no timeframe de 3 minutos e verificar cruzamento
+async function getEMAs3m(symbol) {
+    try {
+        const candles = await getCandlesCached(symbol, '3m', 100);
+        
+        if (candles.length < 55) {
+            logToFile(`⚠️ Dados insuficientes para EMAs 3m (${symbol})`);
+            return {
+                ema13: "N/A",
+                ema34: "N/A",
+                ema55: "N/A",
+                currentPrice: "N/A",
+                isAboveEMA55: false,
+                isBelowEMA55: false,
+                isEMA13CrossingUp: false,
+                isEMA13CrossingDown: false,
+                priceFormatted: "N/A",
+                ema13Formatted: "N/A",
+                ema34Formatted: "N/A",
+                ema55Formatted: "N/A"
+            };
+        }
+        
+        const closes = candles.map(c => c.close);
+        const currentPrice = closes[closes.length - 1];
+        
+        // Calcular EMAs usando a função atualizada
+        const ema13 = calculateEMA(closes.slice(-50), 13);
+        const ema34 = calculateEMA(closes.slice(-50), 34);
+        const ema55 = calculateEMA(closes, 55);
+        
+        // Verificar se os cálculos foram bem-sucedidos
+        if (ema13 === null || ema34 === null || ema55 === null) {
+            logToFile(`⚠️ Erro ao calcular EMAs para ${symbol}`);
+            return {
+                ema13: "N/A",
+                ema34: "N/A",
+                ema55: "N/A",
+                currentPrice: "N/A",
+                isAboveEMA55: false,
+                isBelowEMA55: false,
+                isEMA13CrossingUp: false,
+                isEMA13CrossingDown: false,
+                priceFormatted: "N/A",
+                ema13Formatted: "N/A",
+                ema34Formatted: "N/A",
+                ema55Formatted: "N/A"
+            };
+        }
+        
+        // Verificar cruzamento da EMA13 com EMA34
+        const previousCloses = candles.slice(-55, -1).map(c => c.close); // Excluir o último candle
+        const previousEma13 = calculateEMA(previousCloses.slice(-49), 13); // EMA13 anterior
+        const previousEma34 = calculateEMA(previousCloses.slice(-49), 34); // EMA34 anterior
+        
+        const isEMA13CrossingUp = previousEma13 !== null && previousEma34 !== null && 
+                                 previousEma13 <= previousEma34 && ema13 > ema34;
+        const isEMA13CrossingDown = previousEma13 !== null && previousEma34 !== null && 
+                                   previousEma13 >= previousEma34 && ema13 < ema34;
+        
+        // Formatar os valores
+        const priceFormatted = formatNumber(currentPrice, symbol, true);
+        const ema13Formatted = formatNumber(ema13, symbol, true);
+        const ema34Formatted = formatNumber(ema34, symbol, true);
+        const ema55Formatted = formatNumber(ema55, symbol, true);
+        
+        return {
+            ema13: ema13,
+            ema34: ema34,
+            ema55: ema55,
+            currentPrice: currentPrice,
+            isAboveEMA55: currentPrice > ema55,
+            isBelowEMA55: currentPrice < ema55,
+            isEMA13CrossingUp: isEMA13CrossingUp,
+            isEMA13CrossingDown: isEMA13CrossingDown,
+            priceFormatted: priceFormatted,
+            ema13Formatted: ema13Formatted,
+            ema34Formatted: ema34Formatted,
+            ema55Formatted: ema55Formatted
+        };
+        
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar EMAs 3m (${symbol}): ${e.message}`);
+        return {
+            ema13: "N/A",
+            ema34: "N/A",
+            ema55: "N/A",
+            currentPrice: "N/A",
+            isAboveEMA55: false,
+            isBelowEMA55: false,
+            isEMA13CrossingUp: false,
+            isEMA13CrossingDown: false,
+            priceFormatted: "N/A",
+            ema13Formatted: "N/A",
+            ema34Formatted: "N/A",
+            ema55Formatted: "N/A"
+        };
+    }
+}
+
+// Funções de detecção de fractal (mantidas do original)
+function isUpFractal(lows, index) {
+    if (FRACTAL_BARS === 5) {
+        return lows[index-N-2] > lows[index-N] &&
+               lows[index-N-1] > lows[index-N] &&
+               lows[index-N+1] > lows[index-N] &&
+               lows[index-N+2] > lows[index-N];
+    } else {
+        return lows[index-N-1] > lows[index-N] &&
+               lows[index-N+1] > lows[index-N];
+    }
+}
+
+function isDnFractal(highs, index) {
+    if (FRACTAL_BARS === 5) {
+        return highs[index-N-2] < highs[index-N] &&
+               highs[index-N-1] < highs[index-N] &&
+               highs[index-N+1] < highs[index-N] &&
+               highs[index-N+2] < highs[index-N];
+    } else {
+        return highs[index-N-1] < highs[index-N] &&
+               highs[index-N+1] < highs[index-N];
+    }
+}
+
+// Função para verificar tendência EMA 55 (atualizada para lidar com null)
+function checkEMATrend(price, ema55) {
+    if (ema55 === null || ema55 === undefined) {
+        return "EMA 55 não disponível";
+    }
+    if (price > ema55) {
+        return "🟢Tendência 💹 ema 55 1h";
+    } else {
+        return "🔴Tendência 📉 ema 55 1h";
+    }
+}
+
+// 🔴 NOVA FUNÇÃO: Calcular alvos e stop dinâmico
+function calculateTargetsAndStop(entryPrice, isBullish, symbol) {
+    const targets = [];
+    
+    if (isBullish) {
+        // Para bull: alvos acima do preço de entrada
+        for (const percentage of TARGET_PERCENTAGES) {
+            const targetPrice = entryPrice * (1 + percentage / 100);
+            targets.push({
+                percentage: percentage,
+                price: targetPrice,
+                formatted: formatNumber(targetPrice, symbol, true)
+            });
+        }
+        
+        // Stop dinâmico para bull: abaixo do preço de entrada
+        const stopPrice = entryPrice * (1 - STOP_PERCENTAGE / 100);
+        
+        return {
+            targets: targets,
+            stopPrice: stopPrice,
+            stopFormatted: formatNumber(stopPrice, symbol, true),
+            stopPercentage: STOP_PERCENTAGE
+        };
+    } else {
+        // Para bear: alvos abaixo do preço de entrada
+        for (const percentage of TARGET_PERCENTAGES) {
+            const targetPrice = entryPrice * (1 - percentage / 100);
+            targets.push({
+                percentage: percentage,
+                price: targetPrice,
+                formatted: formatNumber(targetPrice, symbol, true)
+            });
+        }
+        
+        // Stop dinâmico para bear: acima do preço de entrada
+        const stopPrice = entryPrice * (1 + STOP_PERCENTAGE / 100);
+        
+        return {
+            targets: targets,
+            stopPrice: stopPrice,
+            stopFormatted: formatNumber(stopPrice, symbol, true),
+            stopPercentage: STOP_PERCENTAGE
+        };
+    }
+}
+
+// Função para determinar o símbolo do LSR com base no valor
+function getLsrSymbol(lsrValue) {
+    if (lsrValue === null || lsrValue === "N/A") return '🔘Consol.';
+    const value = parseFloat(lsrValue);
+    return value <= 1.4 ? '✅Baixo' : value >= 2.8 ? '📛Alto' : '🔘Consol.';
+}
+
+// Inicializar cooldown para cada ativo
+function initAlertsCooldown() {
+    SYMBOLS.forEach(symbol => {
+        alertsCooldown[symbol] = {
+            lastBuyConfirmation: 0,
+            lastSellConfirmation: 0
+        };
+        recentSweeps[symbol] = {
+            lastBuySweep: null,
+            lastSellSweep: null,
+            buySweepPrice: 0,
+            sellSweepPrice: 0
+        };
+    });
+}
+
+// 🔵 FUNÇÃO MODIFICADA: Apenas detectar sweeps (sem enviar alertas)
+async function detectSweeps(symbol) {
+    try {
+        const candles = await getCandlesCached(symbol, '1h', 100);
+        if (candles.length < 100) {
+            return null;
+        }
+
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        const currentIndex = candles.length - 1;
+        const price = closes[currentIndex];
+
+        let buySweepDetected = false;
+        let sellSweepDetected = false;
+        let fractalLevel = 0;
+
+        // Sweep BEAR - para detecção apenas
+        if (isDnFractal(highs, currentIndex - N)) {
+            fractalLevel = highs[currentIndex - N];
+            if (price > fractalLevel) {
+                sellSweepDetected = true;
+            }
+        }
+
+        // Sweep BULL - para detecção apenas
+        if (isUpFractal(lows, currentIndex - N)) {
+            fractalLevel = lows[currentIndex - N];
+            if (price < fractalLevel) {
+                buySweepDetected = true;
+            }
+        }
+
+        // 🔴 VERIFICAÇÃO DE CRITÉRIOS PARA SWEEP
+        if (buySweepDetected || sellSweepDetected) {
+            // Verificar volume anormal no 3m 
+            const volumeCheck = await checkAbnormalVolume(symbol, 2);
+            
+            // Se não passar nos critérios, não armazenar
+            if (!volumeCheck.isAbnormal) {
+                return null;
+            }
+
+            // Armazenar informação do sweep para possível confirmação
+            if (buySweepDetected) {
+                recentSweeps[symbol].lastBuySweep = Date.now();
+                recentSweeps[symbol].buySweepPrice = price;
+                logToFile(`✅ Sweep Compra detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x`);
+            } else if (sellSweepDetected) {
+                recentSweeps[symbol].lastSellSweep = Date.now();
+                recentSweeps[symbol].sellSweepPrice = price;
+                logToFile(`✅ Sweep Venda detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x`);
+            }
+            
+            return {
+                symbol: symbol,
+                sweepType: buySweepDetected ? 'Compra' : 'Venda',
+                price: price,
+                volumeRatio: volumeCheck.ratio
+            };
+        }
+        
+        return null;
+    } catch (e) {
+        logToFile(`❌ Erro ao detectar sweep ${symbol}: ${e.message}`);
+        return null;
+    }
+}
+
+// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão via EMA 13, 34 e 55 3m
+async function monitorConfirmation(symbol) {
+    try {
+        // Verificar se houve um sweep recente (últimas 6 horas)
+        const now = Date.now();
+        const sixHoursAgo = now - (6 * 60 * 60 * 1000);
+        
+        const hadBuySweep = recentSweeps[symbol].lastBuySweep && 
+                           recentSweeps[symbol].lastBuySweep > sixHoursAgo;
+        const hadSellSweep = recentSweeps[symbol].lastSellSweep && 
+                            recentSweeps[symbol].lastSellSweep > sixHoursAgo;
+        
+        if (!hadBuySweep && !hadSellSweep) {
+            return null; // Não houve sweep recente
+        }
+        
+        // Obter dados das EMAs 13, 34 e 55 no timeframe de 3 minutos
+        const emas3mData = await getEMAs3m(symbol);
+        
+        if (emas3mData.ema55 === "N/A" || emas3mData.ema13 === "N/A" || emas3mData.ema34 === "N/A") {
+            return null;
+        }
+        
+        // Buscar RSI 1h para verificar critérios
+        const rsi1h = await getRSI(symbol, '1h');
+        const rsiValue = parseFloat(rsi1h.value);
+        
+        // 🔵 ADICIONAR FUNDING RATE
+        const fundingRate = await getFundingRate(symbol);
+        
+        const brDateTime = getBrazilianDateTime();
+        const priceFormatted = formatNumber(emas3mData.currentPrice, symbol, true);
+        
+        let confirmationAlert = null;
+        
+        // 🔵 CONFIRMAÇÃO BULL: 
+        // 1. EMA 13 cruzando para cima a EMA 34 no 3m
+        // 2. Preço fechando acima da EMA 55 no 3m
+        // 3. Após sweep de compra
+        if (hadBuySweep && emas3mData.isAboveEMA55 && emas3mData.isEMA13CrossingUp) {
+            // 🔴 CRITÉRIO: RSI 1h deve ser menor que 60
+            if (rsiValue >= 60) {
+                return null;
+            }
+            
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
+            
+            // Verificar se passa nos novos critérios
+            if (!volumeCheck.isConfirmed) {
+                return null;
+            }
+            
+            const now = Date.now();
+            if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
+                ]);
+                
+                // Calcular alvos e stop dinâmico
+                const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, true, symbol);
+                
+                const msg = `🟢 <b>🤖 COMPRA  </b>\n` +
+                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                           `<b>#Ativo:</b> #${symbol}\n` +
+                           `<b>$Preço:</b> $${priceFormatted}\n` +
+                           `<b>Entr:</b> $${priceFormatted}\n` +
+                           `<b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
+                           `<b>Alvos:</b>\n` +
+                           ` Alvo 1 : $${targetsAndStop.targets[0].formatted}\n` +
+                           ` Alvo 2 : $${targetsAndStop.targets[1].formatted}\n` +
+                           ` Alvo 3 : $${targetsAndStop.targets[2].formatted}\n` +
+                           ` Alvo 4 : $${targetsAndStop.targets[3].formatted}\n` +
+                           ` #RSI 1h: <b>${rsi1h.value}</b>\n` +
+                           ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                           ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                           ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n` +
+                           ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n` +
+                           ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n` +
+                           ` Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
+                           ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
+                           `        <b>SMC Tecnology by @J4Rviz</b>`;
+                
+                confirmationAlert = {
+                    symbol: symbol,
+                    signal: 'Confirmação Bull',
+                    message: msg,
+                    price: emas3mData.currentPrice,
+                    brDateTime: brDateTime,
+                    priceFormatted: priceFormatted,
+                    targetsAndStop: targetsAndStop,
+                    volumeConfirmation: volumeCheck,
+                    emas3mData: emas3mData
+                };
+                
+                alertsCooldown[symbol].lastBuyConfirmation = now;
+            }
+        }
+        
+        // 🔴 CONFIRMAÇÃO BEAR:
+        // 1. EMA 13 cruzando para baixo a EMA 34 no 3m
+        // 2. Preço fechando abaixo da EMA 55 no 3m
+        // 3. Após sweep de venda
+        if (hadSellSweep && emas3mData.isBelowEMA55 && emas3mData.isEMA13CrossingDown) {
+            // 🔴 CRITÉRIO: RSI 1h deve ser maior que 60
+            if (rsiValue <= 60) {
+                return null;
+            }
+            
+            // 🔴 CRITÉRIO: Volume anormal (2x média)
+            const volumeCheck = await checkVolumeConfirmation(symbol, 2);
+            
+            // Verificar se passa nos novos critérios
+            if (!volumeCheck.isConfirmed) {
+                return null;
+            }
+            
+            const now = Date.now();
+            if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
+                // Buscar dados adicionais para a mensagem
+                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
+                    getLSR(symbol, '15m'),
+                    getOrderBook(symbol),
+                    getStochastic(symbol, '4h'),
+                    getStochastic(symbol, '1d')
+                ]);
+                
+                // Calcular alvos e stop dinâmico
+                const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, false, symbol);
+                
+                const msg = `🔴 <b>🤖 CORREÇÃO </b>\n` +
+                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+                           `<b>#Ativo:</b> #${symbol}\n` +
+                           `<b>$Preço:</b> $${priceFormatted}\n` +
+                           `<b>Entr:</b> $${priceFormatted}\n` +
+                           `<b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
+                           `<b>Alvos:</b>\n` +
+                           ` Alvo 1: $${targetsAndStop.targets[0].formatted}\n` +
+                           ` Alvo 2: $${targetsAndStop.targets[1].formatted}\n` +
+                           ` Alvo 3: $${targetsAndStop.targets[2].formatted}\n` +
+                           ` Alvo 4: $${targetsAndStop.targets[3].formatted}\n` +
+                           ` #RSI 1h: <b>${rsi1h.value}</b> \n` +
+                           ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
+                           ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
+                           ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n` +
+                           ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n` +
+                           ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> \n` +
+                           ` Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
+                           ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
+                           ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
+                           `       <b>SMC Tecnology by @J4Rviz</b>`;
+            
+                confirmationAlert = {
+                    symbol: symbol,
+                    signal: 'Confirmação Bear',
+                    message: msg,
+                    price: emas3mData.currentPrice,
+                    brDateTime: brDateTime,
+                    priceFormatted: priceFormatted,
+                    targetsAndStop: targetsAndStop,
+                    volumeConfirmation: volumeCheck,
+                    emas3mData: emas3mData
+                };
+                
+                alertsCooldown[symbol].lastSellConfirmation = now;
+            }
+        }
+        
+        return confirmationAlert;
+        
+    } catch (e) {
+        logToFile(`❌ Erro ao monitorar confirmação ${symbol}: ${e.message}`);
+        return null;
+    }
+}
+
+// Função para mostrar status do monitoramento
+function showMonitoringStatus() {
+    const now = Date.now();
+    let status = "\n📊 STATUS DO MONITORAMENTO:\n";
+    status += "=".repeat(50) + "\n";
+    
+    // Agrupar ativos em colunas para melhor visualização
+    const symbolsPerColumn = Math.ceil(SYMBOLS.length / 3);
+    
+    for (let i = 0; i < symbolsPerColumn; i++) {
+        let line = "";
+        
+        // Coluna 1
+        if (i < SYMBOLS.length) {
+            const symbol1 = SYMBOLS[i];
+            const lastBuyConf1 = alertsCooldown[symbol1].lastBuyConfirmation;
+            const lastSellConf1 = alertsCooldown[symbol1].lastSellConfirmation;
+            
+            const buyConfCooldown1 = lastBuyConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf1)) : 0;
+            const sellConfCooldown1 = lastSellConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf1)) : 0;
+            
+            const buyConfStatus1 = buyConfCooldown1 > 0 ? `⏳${Math.round(buyConfCooldown1/60000)}m` : '✅';
+            const sellConfStatus1 = sellConfCooldown1 > 0 ? `⏳${Math.round(sellConfCooldown1/60000)}m` : '✅';
+            
+            const hadBuySweep1 = recentSweeps[symbol1].lastBuySweep ? '🟢' : '⚪';
+            const hadSellSweep1 = recentSweeps[symbol1].lastSellSweep ? '🔴' : '⚪';
+            
+            line += `${symbol1.padEnd(10)} S:${hadBuySweep1}/${hadSellSweep1} | C-B:${buyConfStatus1} C-V:${sellConfStatus1} | `;
+        }
+        
+        // Coluna 2
+        if (i + symbolsPerColumn < SYMBOLS.length) {
+            const symbol2 = SYMBOLS[i + symbolsPerColumn];
+            const lastBuyConf2 = alertsCooldown[symbol2].lastBuyConfirmation;
+            const lastSellConf2 = alertsCooldown[symbol2].lastSellConfirmation;
+            
+            const buyConfCooldown2 = lastBuyConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf2)) : 0;
+            const sellConfCooldown2 = lastSellConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf2)) : 0;
+            
+            const buyConfStatus2 = buyConfCooldown2 > 0 ? `⏳${Math.round(buyConfCooldown2/60000)}m` : '✅';
+            const sellConfStatus2 = sellConfCooldown2 > 0 ? `⏳${Math.round(sellConfCooldown2/60000)}m` : '✅';
+            
+            const hadBuySweep2 = recentSweeps[symbol2].lastBuySweep ? '🟢' : '⚪';
+            const hadSellSweep2 = recentSweeps[symbol2].lastSellSweep ? '🔴' : '⚪';
+            
+            line += `${symbol2.padEnd(10)} S:${hadBuySweep2}/${hadSellSweep2} | C-B:${buyConfStatus2} C-V:${sellConfStatus2} | `;
+        }
+        
+        // Coluna 3
+        if (i + symbolsPerColumn * 2 < SYMBOLS.length) {
+            const symbol3 = SYMBOLS[i + symbolsPerColumn * 2];
+            const lastBuyConf3 = alertsCooldown[symbol3].lastBuyConfirmation;
+            const lastSellConf3 = alertsCooldown[symbol3].lastSellConfirmation;
+            
+            const buyConfCooldown3 = lastBuyConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf3)) : 0;
+            const sellConfCooldown3 = lastSellConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf3)) : 0;
+            
+            const buyConfStatus3 = buyConfCooldown3 > 0 ? `⏳${Math.round(buyConfCooldown3/60000)}m` : '✅';
+            const sellConfStatus3 = sellConfCooldown3 > 0 ? `⏳${Math.round(sellConfCooldown3/60000)}m` : '✅';
+            
+            const hadBuySweep3 = recentSweeps[symbol3].lastBuySweep ? '🟢' : '⚪';
+            const hadSellSweep3 = recentSweeps[symbol3].lastSellSweep ? '🔴' : '⚪';
+            
+            line += `${symbol3.padEnd(10)} S:${hadBuySweep3}/${hadSellSweep3} | C-B:${buyConfStatus3} C-V:${sellConfStatus3}`;
+        }
+        
+        status += line + "\n";
+    }
+    
+    status += "=".repeat(50) + "\n";
+    status += "Legenda: S=Sweep (🟢=Compra, 🔴=Venda, ⚪=Nenhum), C-B=Confirmação Bull, C-V=Confirmação Bear\n";
+    status += "✅=Pronto, ⏳=Cooldown (minutos)\n";
+    console.log(status);
+}
+
+// 🔵 FUNÇÃO OTIMIZADA: Processar múltiplos ativos em paralelo
+async function processBatch(batch, processFunction) {
+    const results = await Promise.allSettled(
+        batch.map(symbol => processFunction(symbol))
+    );
+    
+    const alerts = [];
+    results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+            alerts.push(result.value);
+        } else if (result.status === 'rejected') {
+            const symbol = batch[index];
+            logToFile(`❌ Erro no processamento de ${symbol}: ${result.reason.message}`);
+        }
+    });
+    
+    return alerts;
+}
+
+// Loop principal do bot OTIMIZADO
+async function mainBotLoop() {
+    // Inicializar sistema de cooldown
+    initAlertsCooldown();
+    
+    const initMsg = '\n' +
+        '='.repeat(50) + '\n' +
+        ' 🤖 BOT DE CONFIRMAÇÕES SMC 1H INICIADO\n' +
+        ` 📊 MONITORANDO ${SYMBOLS.length} ATIVOS\n` +
+        ` ⚡ PROCESSAMENTO EM LOTE (${BATCH_SIZE} ATIVOS EM PARALELO)\n` +
+        ` 🚫 ALERTAS DE SWEEP DESATIVADOS\n` +
+        ` ✅ APENAS CONFIRMAÇÕES BULL/BEAR\n` +
+        '='.repeat(50) + '\n';
+    
+    console.log(initMsg);
+    logToFile(`🤖 Bot iniciado - Monitorando ${SYMBOLS.length} ativos (apenas confirmações)`);
+    
+    // Mostrar configuração de casas decimais
+    console.log('\n🔧 CONFIGURAÇÃO DE CASAS DECIMAIS:');
+    console.log('='.repeat(60));
+    
+    // Mostrar em colunas
+    const symbolsPerRow = 4;
+    for (let i = 0; i < SYMBOLS.length; i += symbolsPerRow) {
+        let line = "";
+        for (let j = 0; j < symbolsPerRow && i + j < SYMBOLS.length; j++) {
+            const symbol = SYMBOLS[i + j];
+            const decimals = DECIMALS_CONFIG[symbol] || DEFAULT_DECIMALS;
+            line += `${symbol}: ${decimals}c `.padEnd(20);
+        }
+        console.log(line);
+    }
+    console.log('='.repeat(60) + '\n');
+    
+    // Mostrar configuração de alvos e stop
+    console.log('🎯 CONFIGURAÇÃO DE ALVOS E STOP:');
+    console.log('='.repeat(60));
+    console.log(`Alvos: ${TARGET_PERCENTAGES.map(p => p + '%').join(', ')}`);
+    console.log(`Stop Dinâmico: ${STOP_PERCENTAGE}%`);
+    console.log('Critérios Confirmação Bull:');
+    console.log('  - Sweep de compra detectado (1H)');
+    console.log('  - EMA 13 cruzando para cima EMA 34 (3m)');
+    console.log('  - Preço acima EMA 55 (3m)');
+    console.log('  - RSI 1h < 60');
+    console.log('  - Volume anormal (2x média)');
+    console.log('Critérios Confirmação Bear:');
+    console.log('  - Sweep de venda detectado (1H)');
+    console.log('  - EMA 13 cruzando para baixo EMA 34 (3m)');
+    console.log('  - Preço abaixo EMA 55 (3m)');
+    console.log('  - RSI 1h > 60');
+    console.log('  - Volume anormal (2x média)');
+    console.log('='.repeat(60) + '\n');
+    
+    const brDateTime = getBrazilianDateTime();
+    await sendAlert(`🤖 <b>SMC Confirmation Bot (Versão Limpa)</b>\n` +
+                    `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
+                    `📊 Monitorando ${SYMBOLS.length} ativos\n` +
+                    `⚡ Apenas alertas de confirmação\n` +
+                    `🚫 Alertas de sweep desativados\n` +
+                    `✅ Canal mais limpo e focado\n` +
+                    `🎯 4 alvos + stop dinâmico\n` +
+                    `by @J4Rviz.`);
+
+    let consecutiveErrors = 0;
+    let cycleCount = 0;
+
+    while (true) {
+        try {
+            cycleCount++;
+            
+            // Verificar conexão periodicamente
+            if (consecutiveErrors > 3) {
+                logToFile('⚠️ Muitos erros consecutivos, verificando conexão...');
+                const isConnected = await checkInternetConnection();
+                if (!isConnected) {
+                    logToFile('🌐 Sem conexão com internet, tentando reconectar...');
+                    console.log('🌐 Sem conexão com internet, tentando reconectar...');
+                    const reconnected = await reconnectWithBackoff();
+                    if (!reconnected) {
+                        logToFile('❌ Falha na reconexão, reiniciando bot em 30 segundos...');
+                        await new Promise(r => setTimeout(r, 30000));
+                        continue;
+                    }
+                }
+                consecutiveErrors = 0;
+            }
+
+            let sweepsDetected = 0;
+            let confirmationAlertsSent = 0;
+            
+            console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
+            
+            // 🔵 PROCESSAR DETECÇÃO DE SWEEPS (SILENCIOSA)
+            console.log('🔍 Detectando sweeps (sem alertas)...');
+            for (let i = 0; i < SYMBOLS.length; i += BATCH_SIZE) {
+                const batch = SYMBOLS.slice(i, i + BATCH_SIZE);
+                const batchResults = await processBatch(batch, detectSweeps);
+                
+                sweepsDetected += batchResults.length;
+                
+                // Pequena pausa entre lotes
+                if (i + BATCH_SIZE < SYMBOLS.length) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+            
+            // 🔵 PROCESSAR CONFIRMAÇÕES EM LOTES
+            console.log('\n🔍 Verificando confirmações de reversão...');
+            for (let i = 0; i < SYMBOLS.length; i += BATCH_SIZE) {
+                const batch = SYMBOLS.slice(i, i + BATCH_SIZE);
+                const batchAlerts = await processBatch(batch, monitorConfirmation);
+                
+                // Enviar alertas do batch
+                for (const alert of batchAlerts) {
+                    console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${alert.symbol}!`);
+                    console.log(`📊 ${alert.signal} - Preço: $${alert.priceFormatted}`);
+                    console.log(`📈 EMA 13/34: ${alert.emas3mData.isEMA13CrossingUp ? 'Cruzamento Bull' : 'Cruzamento Bear'}`);
+                    console.log(`📈 Volume: ${alert.volumeConfirmation.volumeData.ratio}x`);
+                    console.log(`🎯 4 Alvos + Stop Dinâmico calculados`);
+                    logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price} - Volume: ${alert.volumeConfirmation.volumeData.ratio}x`);
+                    
+                    await sendAlert(alert.message);
+                    
+                    confirmationAlertsSent++;
+                    
+                    // Pequena pausa entre alertas para não sobrecarregar
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                
+                // Pequena pausa entre lotes
+                if (i + BATCH_SIZE < SYMBOLS.length) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+
+            if (sweepsDetected > 0) {
+                console.log(`\n🔍 ${sweepsDetected} sweep(s) detectado(s) (sem alerta)`);
+            }
+            if (confirmationAlertsSent > 0) {
+                console.log(`📊 Total de ${confirmationAlertsSent} alerta(s) de CONFIRMAÇÃO enviado(s) nesta verificação`);
+            }
+            if (sweepsDetected === 0 && confirmationAlertsSent === 0) {
+                console.log(' ✓ Nenhuma confirmação detectada');
+            }
+
+            // Mostrar status a cada 10 ciclos
+            if (cycleCount % 10 === 0) {
+                showMonitoringStatus();
+                
+                // Limpar sweeps muito antigos (mais de 12 horas)
+                const twelveHoursAgo = Date.now() - (12 * 60 * 60 * 1000);
+                for (const symbol of SYMBOLS) {
+                    if (recentSweeps[symbol].lastBuySweep && recentSweeps[symbol].lastBuySweep < twelveHoursAgo) {
+                        recentSweeps[symbol].lastBuySweep = null;
+                        recentSweeps[symbol].buySweepPrice = 0;
+                    }
+                    if (recentSweeps[symbol].lastSellSweep && recentSweeps[symbol].lastSellSweep < twelveHoursAgo) {
+                        recentSweeps[symbol].lastSellSweep = null;
+                        recentSweeps[symbol].sellSweepPrice = 0;
+                    }
+                }
+                
+                // Limpar cache de candles antigo (mais de 5 minutos)
+                const cacheCutoff = Date.now() - 300000; // 5 minutos
+                Object.keys(candleCache).forEach(key => {
+                    if (candleCache[key].ts < cacheCutoff) {
+                        delete candleCache[key];
+                    }
+                });
+            }
+
+            consecutiveErrors = 0;
+            
+            console.log(`\n⏱️  Próxima verificação em 60 segundos...`);
+            
+            // Verificação a cada 1 minuto
+            await new Promise(r => setTimeout(r, 60000));
+
+        } catch (e) {
+            consecutiveErrors++;
+            const errorMsg = `Erro no loop principal (${consecutiveErrors}): ${e.message}`;
+            console.log(`\n❌ ${errorMsg}`);
+            logToFile(`❌ ${errorMsg}`);
+            
+            const waitTime = Math.min(10000 * consecutiveErrors, 60000);
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+    }
+}
+
+// Função principal com sistema de recuperação
+async function startBot() {
+    try {
+        initLogSystem();
+        
+        logToFile('🔍 Verificando conexão inicial...');
+        console.log('🔍 Verificando conexão inicial...');
+        
+        const isConnected = await checkInternetConnection();
+        if (!isConnected) {
+            console.log('🌐 Sem conexão inicial, tentando reconectar...');
+            const reconnected = await reconnectWithBackoff();
+            if (!reconnected) {
+                throw new Error('Não foi possível estabelecer conexão inicial');
+            }
+        }
+        
+        await mainBotLoop();
+        
+    } catch (error) {
+        const crashMsg = `🚨 BOT CRASHED: ${error.message}`;
+        console.error(`\n${crashMsg}`);
+        logToFile(`🚨 ${crashMsg}`);
+        
+        console.log('🔄 Reiniciando bot em 60 segundos...');
+        logToFile('🔄 Reiniciando bot em 60 segundos...');
+        
+        await new Promise(r => setTimeout(r, 30000));
+        await startBot();
+    }
+}
+
+// Iniciar o bot
+console.log('\n' + '='.repeat(60));
+console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (VERSÃO LIMPA)');
+console.log('📈 Monitorando 55 ativos da Binance');
+console.log('🔧 Configuração SMC - Canal Limpo');
+console.log('⚡ OTIMIZAÇÕES IMPLEMENTADAS:');
+console.log('   1. Cache de candles (50 segundos)');
+console.log('   2. Processamento em lote (15 ativos em paralelo)');
+console.log('   3. Tratamento de rate limit (retry automático)');
+console.log('   4. EMA cálculo otimizado (mais confiável)');
+console.log('🚫 SISTEMA DE ALERTAS:');
+console.log('   - Sweeps detectados mas sem alertas');
+console.log('   - Apenas alertas de confirmação BULL/BEAR');
+console.log('🎯 4 ALVOS + STOP DINÂMICO INCLUÍDOS');
+console.log('💰 FUNDING RATE COM EMOJIS ADICIONADO');
+console.log('='.repeat(60) + '\n');
+
+startBot();
