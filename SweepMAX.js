@@ -1,11 +1,13 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const { SMA, EMA, RSI, Stochastic } = require('technicalindicators');
+
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o';
-const TELEGRAM_CHAT_ID   = '-100199';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -14,23 +16,23 @@ const N = 2;
 // ATIVOS PARA MONITORAR 
 const SYMBOLS = [
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
-    'ADAUSDT', 'DOGEUSDT', 'NEARUSDT', 'AVAXUSDT',
+    'ADAUSDT', 'DOGEUSDT', 'TONUSDT', 'NEARUSDT', 'AVAXUSDT',
     'DOTUSDT', 'SUIUSDT', 'LINKUSDT', 'BCHUSDT', 'APTUSDT',
     'ARBUSDT', 'ONDOUSDT', 'INJUSDT', 'RUNEUSDT', 'FILUSDT',
     'LTCUSDT', 'FETUSDT', 'GRTUSDT', 'UNIUSDT', 'AAVEUSDT',
-    'OPUSDT', 'LDOUSDT', 'ICPUSDT', 'HBARUSDT', 'VETUSDT', 'IOTAUSDT',
-    'THETAUSDT', 'ETCUSDT', 'CKBUSDT', '1000FLOKIUSDT', 'VANRYUSDT',
+    'OPUSDT', 'LDOUSDT', 'ICPUSDT', 'HBARUSDT', 'VETUSDT',
+    'THETAUSDT', 'ETCUSDT', 'CKBUSDT', '1000FLOKIUSDT',
     '1000PEPEUSDT', '1000SHIBUSDT', '1000BONKUSDT', 'GMTUSDT',
-    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT',
+    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT', 
     'ENAUSDT', 'TIAUSDT', 'SEIUSDT', 'ZKUSDT', 'GALAUSDT',
     'CHZUSDT', 'HOTUSDT', 'MASKUSDT', 'API3USDT',
-    'NEIROUSDT', 'ONEUSDT', 'BTCDOMUSDT',
-    'DYDXUSDT', 'GMXUSDT', 'AXSUSDT',  'APEUSDT',
+    'NEIROUSDT', 'VANRYUSDT', 'ONEUSDT', 'BTCDOMUSDT',
+    'DYDXUSDT', 'GMXUSDT', 'AXSUSDT', 'ARUSDT', 'APEUSDT',
     'TRBUSDT', 'POLUSDT', 'STGUSDT', 'COTIUSDT', '1INCHUSDT',
     'BANDUSDT', 'C98USDT', 'IOSTUSDT', 'SKLUSDT', 'ENJUSDT',
-    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT',  'SANDUSDT',  
+    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'SANDUSDT',  
     'DYMUSDT', 'ZILUSDT', 'CTSIUSDT', 'VIRTUALUSDT', 'MANAUSDT',
-    'RSRUSDT', 'XVGUSDT', 'ATAUSDT',  'ATOMUSDT',
+    'RSRUSDT', 'XVGUSDT', 'ATAUSDT', 'ATOMUSDT',
     'USDCUSDT'
 ];
 
@@ -94,7 +96,6 @@ const DECIMALS_CONFIG = {
     'NOTUSDT': 6,
     'WLDUSDT': 5,
     'SUSHIUSDT': 4,
-    'YGGUSDT': 5,
     'ENAUSDT': 5,
     'TIAUSDT': 5,
     'SEIUSDT': 5,
@@ -103,13 +104,8 @@ const DECIMALS_CONFIG = {
     'CHZUSDT': 5,
     'HOTUSDT': 5,
     'MASKUSDT': 5,
-    'PIXELUSDT': 6,
     'API3USDT': 4,
     'NEIROUSDT': 6,
-    'VANRYUSDT': 6,
-    'IOTAUSDT': 6,
-    'MEMEUSDT': 6,
-    'JTOUSDT': 5,
     'ONEUSDT': 5,
     'BTCDOMUSDT': 5,
     'DYDXUSDT': 5,
@@ -130,20 +126,19 @@ const DECIMALS_CONFIG = {
     'MANTAUSDT': 5,
     'ILVUSDT': 4,
     'MAGICUSDT': 5,
-    'PORTALUSDT': 5,
     'SANDUSDT': 4,
     'DYMUSDT': 5,
     'ZILUSDT': 6,
     'CTSIUSDT': 5,
     'VIRTUALUSDT': 4,
     'MANAUSDT': 4,
-    'PAXGUSDT': 3,
     'RSRUSDT': 6,
     'XVGUSDT': 7,
     'ATAUSDT': 6,
     'ATOMUSDT': 3,
     'USDCUSDT': 6
 };
+
 // Default (nunca vai ser usado com essa lista completa)
 const DEFAULT_DECIMALS = 4;
 
@@ -154,19 +149,57 @@ const STOP_PERCENTAGE    = 2.0;
 // 🔵 OTIMIZAÇÕES ADICIONADAS
 const BATCH_SIZE = 15; 
 const candleCache = {}; 
+const CANDLE_CACHE_TTL = 50000; // 50 segundos
+const SWEEP_CLEANUP_INTERVAL = 10; // Limpar sweeps a cada 10 ciclos
+const MAX_SWEEP_AGE = 6 * 60 * 60 * 1000; // 6 horas
+const MAX_CACHE_AGE = 5 * 60 * 1000; // 5 minutos
 
-// 🔵 FUNÇÃO ATUALIZADA E MAIS CONFIÁVEL: Calcular EMA
-function calculateEMA(data, period) {
-    if (!data || data.length < period) return null;
-
-    const k = 2 / (period + 1);
-    let ema = typeof data[0] === 'object' ? data[0].close : data[0]; // Funciona com número ou objeto
-
-    for (let i = 1; i < data.length; i++) {
-        const price = typeof data[i] === 'object' ? data[i].close : data[i];
-        ema = price * k + ema * (1 - k);
+// 🔵 FUNÇÃO MELHORADA: Calcular EMA com SMA inicial
+function calculateEMA(prices, period) {
+    if (!prices || prices.length < period) return null;
+    
+    // Calcular SMA inicial para os primeiros 'period' períodos
+    let sma = 0;
+    for (let i = 0; i < period; i++) {
+        sma += prices[i];
     }
+    sma = sma / period;
+    
+    // Calcular multiplier
+    const multiplier = 2 / (period + 1);
+    
+    // Iniciar EMA com SMA
+    let ema = sma;
+    
+    // Calcular EMA para os períodos restantes
+    for (let i = period; i < prices.length; i++) {
+        ema = (prices[i] - ema) * multiplier + ema;
+    }
+    
     return ema;
+}
+
+// 🔵 FUNÇÃO MELHORADA: Calcular EMA para array de candles
+function calculateEMAFromCandles(candles, period, priceType = 'close') {
+    if (!candles || candles.length < period) return null;
+    
+    const prices = candles.map(c => c[priceType]);
+    return calculateEMA(prices, period);
+}
+
+// 🔵 FUNÇÃO MELHORADA: Usar technicalindicators para EMA
+function calculateEMATechnical(prices, period) {
+    if (!prices || prices.length < period) return null;
+    
+    try {
+        return EMA.calculate({
+            values: prices,
+            period: period
+        }).pop();
+    } catch (error) {
+        // Fallback para cálculo manual
+        return calculateEMA(prices, period);
+    }
 }
 
 // Função para obter data e hora de Brasília
@@ -184,7 +217,8 @@ function getBrazilianDateTime() {
     return {
         date: `${day}/${month}/${year}`,
         time: `${hours}:${minutes}:${seconds}`,
-        full: `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`
+        full: `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`,
+        timestamp: brasiliaTime.getTime()
     };
 }
 
@@ -331,6 +365,33 @@ async function reconnectWithBackoff(attempt = 1) {
     return await reconnectWithBackoff(attempt + 1);
 }
 
+// 🔵 FUNÇÃO MELHORADA: Limpar caches periodicamente
+function cleanupCaches() {
+    const now = Date.now();
+    
+    // Limpar candleCache antigo
+    Object.keys(candleCache).forEach(key => {
+        if (now - candleCache[key].ts > MAX_CACHE_AGE) {
+            delete candleCache[key];
+        }
+    });
+    
+    // Limpar sweeps muito antigos
+    Object.keys(recentSweeps).forEach(symbol => {
+        if (recentSweeps[symbol].lastBuySweep && 
+            now - recentSweeps[symbol].lastBuySweep > MAX_SWEEP_AGE) {
+            recentSweeps[symbol].lastBuySweep = null;
+            recentSweeps[symbol].buySweepPrice = 0;
+        }
+        
+        if (recentSweeps[symbol].lastSellSweep && 
+            now - recentSweeps[symbol].lastSellSweep > MAX_SWEEP_AGE) {
+            recentSweeps[symbol].lastSellSweep = null;
+            recentSweeps[symbol].sellSweepPrice = 0;
+        }
+    });
+}
+
 // Função para formatar números com base no ativo
 function formatNumber(num, symbol = null, isPrice = true) {
     if (num === "N/A" || num === undefined || num === null) return "N/A";
@@ -390,13 +451,13 @@ async function getFundingRate(symbol) {
     }
 }
 
-// 🔵 FUNÇÃO OTIMIZADA: Buscar candles com cache
+// 🔵 FUNÇÃO OTIMIZADA: Buscar candles com cache e TTL
 async function getCandlesCached(symbol, timeframe = '1h', limit = 200) {
     const key = `${symbol}_${timeframe}_${limit}`;
     const now = Date.now();
     
-    // Verificar se temos dados em cache (válidos por 50 segundos)
-    if (candleCache[key] && now - candleCache[key].ts < 50000) {
+    // Verificar se temos dados em cache válidos
+    if (candleCache[key] && now - candleCache[key].ts < CANDLE_CACHE_TTL) {
         return candleCache[key].data;
     }
     
@@ -414,7 +475,7 @@ async function getCandlesCached(symbol, timeframe = '1h', limit = 200) {
             volume: +c[5]
         }));
         
-        // Armazenar no cache
+        // Armazenar no cache com timestamp
         candleCache[key] = { data: candles, ts: now };
         return candles;
         
@@ -424,69 +485,46 @@ async function getCandlesCached(symbol, timeframe = '1h', limit = 200) {
     }
 }
 
-// Função para buscar RSI
+// 🔵 FUNÇÃO MELHORADA: Buscar RSI usando technicalindicators
 async function getRSI(symbol, timeframe, period = 14) {
     try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${period + 50}`;
-        const res = await fetchWithRetry(url);
+        const candles = await getCandlesCached(symbol, timeframe, period + 50);
         
-        const data = await res.json();
-        const closes = data.map(c => +c[4]);
-        
-        if (closes.length < period + 1) {
+        if (candles.length < period + 1) {
             return { value: "N/A", timeframe: timeframe };
         }
         
-        let gains = 0;
-        let losses = 0;
+        const closes = candles.map(c => c.close);
         
-        for (let i = 1; i <= period; i++) {
-            const difference = closes[i] - closes[i - 1];
-            if (difference >= 0) {
-                gains += difference;
-            } else {
-                losses -= difference;
-            }
+        // Usar technicalindicators para cálculo mais preciso
+        const rsiValues = RSI.calculate({
+            values: closes,
+            period: period
+        });
+        
+        if (!rsiValues || rsiValues.length === 0) {
+            return { value: "N/A", timeframe: timeframe };
         }
         
-        let avgGain = gains / period;
-        let avgLoss = losses / period;
-        
-        for (let i = period + 1; i < closes.length; i++) {
-            const difference = closes[i] - closes[i - 1];
-            const currentGain = difference >= 0 ? difference : 0;
-            const currentLoss = difference < 0 ? -difference : 0;
-            
-            avgGain = (avgGain * (period - 1) + currentGain) / period;
-            avgLoss = (avgLoss * (period - 1) + currentLoss) / period;
-        }
-        
-        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-        const rsi = 100 - (100 / (1 + rs));
+        const currentRSI = rsiValues[rsiValues.length - 1];
         
         return {
-            value: rsi.toFixed(2),
-            timeframe: timeframe
+            value: currentRSI.toFixed(2),
+            timeframe: timeframe,
+            raw: currentRSI
         };
     } catch (e) {
         logToFile(`⚠️ Erro ao buscar RSI(${symbol}, ${timeframe}): ${e.message}`);
-        return { value: "N/A", timeframe: timeframe };
+        return { value: "N/A", timeframe: timeframe, raw: null };
     }
 }
 
-// Função para buscar Estocástico
+// 🔵 FUNÇÃO MELHORADA: Buscar Estocástico usando technicalindicators
 async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth = 3) {
     try {
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${kPeriod + dPeriod + smooth + 20}`;
-        const res = await fetchWithRetry(url);
+        const candles = await getCandlesCached(symbol, timeframe, kPeriod + dPeriod + smooth + 20);
         
-        const data = await res.json();
-        
-        const highs = data.map(c => +c[2]);
-        const lows = data.map(c => +c[3]);
-        const closes = data.map(c => +c[4]);
-        
-        if (closes.length < kPeriod + dPeriod + smooth) {
+        if (candles.length < kPeriod + dPeriod + smooth) {
             return { 
                 k: "N/A", 
                 d: "N/A", 
@@ -496,49 +534,45 @@ async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth
             };
         }
         
-        const kValues = [];
-        for (let i = 0; i <= closes.length - kPeriod; i++) {
-            const periodHighs = highs.slice(i, i + kPeriod);
-            const periodLows = lows.slice(i, i + kPeriod);
-            const currentClose = closes[i + kPeriod - 1];
-            
-            const highestHigh = Math.max(...periodHighs);
-            const lowestLow = Math.min(...periodLows);
-            
-            const kValue = lowestLow === highestHigh ? 50 : 
-                          ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
-            kValues.push(kValue);
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        // Usar technicalindicators para cálculo mais preciso
+        const stochValues = Stochastic.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: kPeriod,
+            signalPeriod: dPeriod
+        });
+        
+        if (!stochValues || stochValues.length === 0) {
+            return { 
+                k: "N/A", 
+                d: "N/A", 
+                kDirection: "➡️", 
+                dDirection: "➡️", 
+                timeframe: timeframe 
+            };
         }
         
-        const smoothedK = [];
-        for (let i = 0; i <= kValues.length - smooth; i++) {
-            const sum = kValues.slice(i, i + smooth).reduce((a, b) => a + b, 0);
-            smoothedK.push(sum / smooth);
-        }
+        const currentStoch = stochValues[stochValues.length - 1];
+        const previousStoch = stochValues.length > 1 ? stochValues[stochValues.length - 2] : currentStoch;
         
-        const dValues = [];
-        for (let i = 0; i <= smoothedK.length - dPeriod; i++) {
-            const sum = smoothedK.slice(i, i + dPeriod).reduce((a, b) => a + b, 0);
-            dValues.push(sum / dPeriod);
-        }
-        
-        const currentK = smoothedK[smoothedK.length - 1];
-        const currentD = dValues[dValues.length - 1];
-        
-        const previousK = smoothedK[smoothedK.length - 2] || currentK;
-        const previousD = dValues[dValues.length - 2] || currentD;
-        
-        const kDirection = currentK > previousK ? "⬆️" : 
-                          currentK < previousK ? "⬇️" : "➡️";
-        const dDirection = currentD > previousD ? "⬆️" : 
-                          currentD < previousD ? "⬇️" : "➡️";
+        const kDirection = currentStoch.k > previousStoch.k ? "⬆️" : 
+                          currentStoch.k < previousStoch.k ? "⬇️" : "➡️";
+        const dDirection = currentStoch.d > previousStoch.d ? "⬆️" : 
+                          currentStoch.d < previousStoch.d ? "⬇️" : "➡️";
         
         return {
-            k: currentK.toFixed(2),
-            d: currentD.toFixed(2),
+            k: currentStoch.k.toFixed(2),
+            d: currentStoch.d.toFixed(2),
             kDirection: kDirection,
             dDirection: dDirection,
-            timeframe: timeframe
+            timeframe: timeframe,
+            rawK: currentStoch.k,
+            rawD: currentStoch.d
         };
     } catch (e) {
         logToFile(`⚠️ Erro ao buscar Estocástico(${symbol}, ${timeframe}): ${e.message}`);
@@ -547,7 +581,9 @@ async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth
             d: "N/A", 
             kDirection: "➡️", 
             dDirection: "➡️", 
-            timeframe: timeframe 
+            timeframe: timeframe,
+            rawK: null,
+            rawD: null
         };
     }
 }
@@ -570,14 +606,16 @@ async function getLSR(symbol, period = '15m') {
                 longAccount: longAccount.toFixed(4),
                 shortAccount: shortAccount.toFixed(4),
                 lsrRatio: lsrRatio.toFixed(4),
-                period: period
+                period: period,
+                raw: lsrRatio
             };
         }
         return { 
             longAccount: "N/A", 
             shortAccount: "N/A", 
             lsrRatio: "N/A", 
-            period: period 
+            period: period,
+            raw: null
         };
     } catch (e) {
         logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${e.message}`);
@@ -585,7 +623,8 @@ async function getLSR(symbol, period = '15m') {
             longAccount: "N/A", 
             shortAccount: "N/A", 
             lsrRatio: "N/A", 
-            period: period 
+            period: period,
+            raw: null
         };
     }
 }
@@ -695,7 +734,8 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
             open: open,
             close: close,
             high: high,
-            low: low
+            low: low,
+            rawRatio: ratio
         };
         
     } catch (e) {
@@ -708,7 +748,8 @@ async function checkAbnormalVolume(symbol, multiplier = 2) {
             open: 0,
             close: 0,
             high: 0,
-            low: 0
+            low: 0,
+            rawRatio: 0
         };
     }
 }
@@ -729,7 +770,7 @@ async function checkVolumeConfirmation(symbol, multiplier = 2) {
     };
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Buscar EMAs 13, 34 e 55 no timeframe de 3 minutos e verificar cruzamento
+// 🔵 FUNÇÃO ATUALIZADA: Buscar EMAs 13, 34 e 55 no timeframe de 3 minutos usando cálculo correto
 async function getEMAs3m(symbol) {
     try {
         const candles = await getCandlesCached(symbol, '3m', 100);
@@ -755,10 +796,11 @@ async function getEMAs3m(symbol) {
         const closes = candles.map(c => c.close);
         const currentPrice = closes[closes.length - 1];
         
-        // Calcular EMAs usando a função atualizada
-        const ema13 = calculateEMA(closes.slice(-50), 13);
-        const ema34 = calculateEMA(closes.slice(-50), 34);
-        const ema55 = calculateEMA(closes, 55);
+        // 🔴 CALCULAR EMA CORRETAMENTE COM SMA INICIAL
+        // Para calcular EMA13, precisamos de pelo menos 13 períodos + dados extras para suavização
+        const ema13 = calculateEMATechnical(closes, 13);
+        const ema34 = calculateEMATechnical(closes, 34);
+        const ema55 = calculateEMATechnical(closes, 55);
         
         // Verificar se os cálculos foram bem-sucedidos
         if (ema13 === null || ema34 === null || ema55 === null) {
@@ -780,9 +822,10 @@ async function getEMAs3m(symbol) {
         }
         
         // Verificar cruzamento da EMA13 com EMA34
-        const previousCloses = candles.slice(-55, -1).map(c => c.close); // Excluir o último candle
-        const previousEma13 = calculateEMA(previousCloses.slice(-49), 13); // EMA13 anterior
-        const previousEma34 = calculateEMA(previousCloses.slice(-49), 34); // EMA34 anterior
+        // Para isso, precisamos calcular EMAs do candle anterior
+        const previousCloses = closes.slice(0, -1);
+        const previousEma13 = calculateEMATechnical(previousCloses, 13);
+        const previousEma34 = calculateEMATechnical(previousCloses, 34);
         
         const isEMA13CrossingUp = previousEma13 !== null && previousEma34 !== null && 
                                  previousEma13 <= previousEma34 && ema13 > ema34;
@@ -854,18 +897,6 @@ function isDnFractal(highs, index) {
     }
 }
 
-// Função para verificar tendência EMA 55 (atualizada para lidar com null)
-function checkEMATrend(price, ema55) {
-    if (ema55 === null || ema55 === undefined) {
-        return "EMA 55 não disponível";
-    }
-    if (price > ema55) {
-        return "🟢Tendência 💹 ema 55 1h";
-    } else {
-        return "🔴Tendência 📉 ema 55 1h";
-    }
-}
-
 // 🔴 NOVA FUNÇÃO: Calcular alvos e stop dinâmico
 function calculateTargetsAndStop(entryPrice, isBullish, symbol) {
     const targets = [];
@@ -911,6 +942,49 @@ function calculateTargetsAndStop(entryPrice, isBullish, symbol) {
             stopPercentage: STOP_PERCENTAGE
         };
     }
+}
+
+// 🔵 NOVA FUNÇÃO: Construir mensagem de alerta (remove duplicação)
+function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, targetsAndStop, 
+                          rsi1h, stoch4h, stochDaily, lsrData, fundingRate, 
+                          volumeCheck, orderBook, sweepTime, emas3mData) {
+    
+    const title = isBullish ? '🟢 <b>🤖 COMPRA  </b>' : '🔴 <b>🤖 CORREÇÃO </b>';
+    const trend = isBullish ? '🟢Tendência 💹 ema 55 1h' : '🔴Tendência 📉 ema 55 1h';
+    const sweepMinutes = sweepTime ? Math.round((Date.now() - sweepTime) / 60000) : 0;
+    
+    let message = `${title}\n`;
+    message += `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
+    message += `<b>#Ativo:</b> #${symbol}\n`;
+    message += `<b>$Preço:</b> $${priceFormatted}\n`;
+    message += `<b>Entr:</b> $${priceFormatted}\n`;
+    message += `<b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
+    message += `<b>Alvos:</b>\n`;
+    
+    // Adicionar alvos
+    targetsAndStop.targets.forEach((target, index) => {
+        message += isBullish ? 
+            ` Alvo ${index + 1} : $${target.formatted}\n` :
+            ` Alvo ${index + 1}: $${target.formatted}\n`;
+    });
+    
+    // Adicionar indicadores
+    if (isBullish) {
+        message += ` ${trend}\n`;
+    }
+    
+    message += ` #RSI 1h: <b>${rsi1h.value}</b>\n`;
+    message += ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n`;
+    message += ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n`;
+    message += ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n`;
+    message += ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n`;
+    message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n`;
+    message += ` Liquidez Cap: ${sweepMinutes} minutos\n`;
+    message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
+    message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
+    message += `        <b>SMC Tecnology by @J4Rviz</b>`;
+    
+    return message;
 }
 
 // Função para determinar o símbolo do LSR com base no valor
@@ -981,12 +1055,13 @@ async function detectSweeps(symbol) {
             }
 
             // Armazenar informação do sweep para possível confirmação
+            const now = Date.now();
             if (buySweepDetected) {
-                recentSweeps[symbol].lastBuySweep = Date.now();
+                recentSweeps[symbol].lastBuySweep = now;
                 recentSweeps[symbol].buySweepPrice = price;
                 logToFile(`✅ Sweep Compra detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x`);
             } else if (sellSweepDetected) {
-                recentSweeps[symbol].lastSellSweep = Date.now();
+                recentSweeps[symbol].lastSellSweep = now;
                 recentSweeps[symbol].sellSweepPrice = price;
                 logToFile(`✅ Sweep Venda detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x`);
             }
@@ -995,7 +1070,8 @@ async function detectSweeps(symbol) {
                 symbol: symbol,
                 sweepType: buySweepDetected ? 'Compra' : 'Venda',
                 price: price,
-                volumeRatio: volumeCheck.ratio
+                volumeRatio: volumeCheck.ratio,
+                timestamp: now
             };
         }
         
@@ -1011,7 +1087,7 @@ async function monitorConfirmation(symbol) {
     try {
         // Verificar se houve um sweep recente (últimas 6 horas)
         const now = Date.now();
-        const sixHoursAgo = now - (6 * 60 * 60 * 1000);
+        const sixHoursAgo = now - MAX_SWEEP_AGE;
         
         const hadBuySweep = recentSweeps[symbol].lastBuySweep && 
                            recentSweeps[symbol].lastBuySweep > sixHoursAgo;
@@ -1047,7 +1123,7 @@ async function monitorConfirmation(symbol) {
         // 3. Após sweep de compra
         if (hadBuySweep && emas3mData.isAboveEMA55 && emas3mData.isEMA13CrossingUp) {
             // 🔴 CRITÉRIO: RSI 1h deve ser menor que 60
-            if (rsiValue >= 60) {
+            if (rsiValue >= 60 || isNaN(rsiValue)) {
                 return null;
             }
             
@@ -1059,7 +1135,6 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            const now = Date.now();
             if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
                 // Buscar dados adicionais para a mensagem
                 const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
@@ -1072,27 +1147,23 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, true, symbol);
                 
-                const msg = `🟢 <b>🤖 COMPRA  </b>\n` +
-                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
-                           `<b>#Ativo:</b> #${symbol}\n` +
-                           `<b>$Preço:</b> $${priceFormatted}\n` +
-                           `<b>Entr:</b> $${priceFormatted}\n` +
-                           `<b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
-                           `<b>Alvos:</b>\n` +
-                           ` Alvo 1 : $${targetsAndStop.targets[0].formatted}\n` +
-                           ` Alvo 2 : $${targetsAndStop.targets[1].formatted}\n` +
-                           ` Alvo 3 : $${targetsAndStop.targets[2].formatted}\n` +
-                           ` Alvo 4 : $${targetsAndStop.targets[3].formatted}\n` +
-                           ` #RSI 1h: <b>${rsi1h.value}</b>\n` +
-                           ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
-                           ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
-                           ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n` +
-                           ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n` +
-                           ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n` +
-                           ` Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastBuySweep) / 60000)} minutos\n` +
-                           ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
-                           ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
-                           `        <b>SMC Tecnology by @J4Rviz</b>`;
+                // 🔵 USAR FUNÇÃO buildAlertMessage PARA REMOVER DUPLICAÇÃO
+                const msg = buildAlertMessage(
+                    true, // isBullish
+                    symbol,
+                    priceFormatted,
+                    brDateTime,
+                    targetsAndStop,
+                    rsi1h,
+                    stoch4h,
+                    stochDaily,
+                    lsrData,
+                    fundingRate,
+                    volumeCheck,
+                    orderBook,
+                    recentSweeps[symbol].lastBuySweep,
+                    emas3mData
+                );
                 
                 confirmationAlert = {
                     symbol: symbol,
@@ -1116,7 +1187,7 @@ async function monitorConfirmation(symbol) {
         // 3. Após sweep de venda
         if (hadSellSweep && emas3mData.isBelowEMA55 && emas3mData.isEMA13CrossingDown) {
             // 🔴 CRITÉRIO: RSI 1h deve ser maior que 60
-            if (rsiValue <= 60) {
+            if (rsiValue <= 60 || isNaN(rsiValue)) {
                 return null;
             }
             
@@ -1128,7 +1199,6 @@ async function monitorConfirmation(symbol) {
                 return null;
             }
             
-            const now = Date.now();
             if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
                 // Buscar dados adicionais para a mensagem
                 const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
@@ -1141,28 +1211,24 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, false, symbol);
                 
-                const msg = `🔴 <b>🤖 CORREÇÃO </b>\n` +
-                           `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
-                           `<b>#Ativo:</b> #${symbol}\n` +
-                           `<b>$Preço:</b> $${priceFormatted}\n` +
-                           `<b>Entr:</b> $${priceFormatted}\n` +
-                           `<b>Stop:</b> $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
-                           `<b>Alvos:</b>\n` +
-                           ` Alvo 1: $${targetsAndStop.targets[0].formatted}\n` +
-                           ` Alvo 2: $${targetsAndStop.targets[1].formatted}\n` +
-                           ` Alvo 3: $${targetsAndStop.targets[2].formatted}\n` +
-                           ` Alvo 4: $${targetsAndStop.targets[3].formatted}\n` +
-                           ` #RSI 1h: <b>${rsi1h.value}</b> \n` +
-                           ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n` +
-                           ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n` +
-                           ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n` +
-                           ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n` +
-                           ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> \n` +
-                           ` Liquidez Cap: ${Math.round((now - recentSweeps[symbol].lastSellSweep) / 60000)} minutos\n` +
-                           ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n` +
-                           ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n` +
-                           `       <b>SMC Tecnology by @J4Rviz</b>`;
-            
+                // 🔵 USAR FUNÇÃO buildAlertMessage PARA REMOVER DUPLICAÇÃO
+                const msg = buildAlertMessage(
+                    false, // isBullish
+                    symbol,
+                    priceFormatted,
+                    brDateTime,
+                    targetsAndStop,
+                    rsi1h,
+                    stoch4h,
+                    stochDaily,
+                    lsrData,
+                    fundingRate,
+                    volumeCheck,
+                    orderBook,
+                    recentSweeps[symbol].lastSellSweep,
+                    emas3mData
+                );
+                
                 confirmationAlert = {
                     symbol: symbol,
                     signal: 'Confirmação Bear',
@@ -1426,30 +1492,12 @@ async function mainBotLoop() {
                 console.log(' ✓ Nenhuma confirmação detectada');
             }
 
+            // 🔵 LIMPEZA AGREGADA DE CACHES E SWEEPS
+            cleanupCaches();
+            
             // Mostrar status a cada 10 ciclos
             if (cycleCount % 10 === 0) {
                 showMonitoringStatus();
-                
-                // Limpar sweeps muito antigos (mais de 12 horas)
-                const twelveHoursAgo = Date.now() - (12 * 60 * 60 * 1000);
-                for (const symbol of SYMBOLS) {
-                    if (recentSweeps[symbol].lastBuySweep && recentSweeps[symbol].lastBuySweep < twelveHoursAgo) {
-                        recentSweeps[symbol].lastBuySweep = null;
-                        recentSweeps[symbol].buySweepPrice = 0;
-                    }
-                    if (recentSweeps[symbol].lastSellSweep && recentSweeps[symbol].lastSellSweep < twelveHoursAgo) {
-                        recentSweeps[symbol].lastSellSweep = null;
-                        recentSweeps[symbol].sellSweepPrice = 0;
-                    }
-                }
-                
-                // Limpar cache de candles antigo (mais de 5 minutos)
-                const cacheCutoff = Date.now() - 300000; // 5 minutos
-                Object.keys(candleCache).forEach(key => {
-                    if (candleCache[key].ts < cacheCutoff) {
-                        delete candleCache[key];
-                    }
-                });
             }
 
             consecutiveErrors = 0;
@@ -1509,15 +1557,24 @@ console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (VERSÃO LIMPA)');
 console.log('📈 Monitorando 55 ativos da Binance');
 console.log('🔧 Configuração SMC - Canal Limpo');
 console.log('⚡ OTIMIZAÇÕES IMPLEMENTADAS:');
-console.log('   1. Cache de candles (50 segundos)');
-console.log('   2. Processamento em lote (15 ativos em paralelo)');
-console.log('   3. Tratamento de rate limit (retry automático)');
-console.log('   4. EMA cálculo otimizado (mais confiável)');
+console.log('   1. Cálculo EMA correto (SMA inicial + fórmula)');
+console.log('   2. technicalindicators para RSI e Estocástico');
+console.log('   3. Gerenciamento de memória otimizado');
+console.log('   4. Função buildAlertMessage para remover duplicação');
+console.log('   5. Cache com TTL e limpeza automática');
 console.log('🚫 SISTEMA DE ALERTAS:');
 console.log('   - Sweeps detectados mas sem alertas');
 console.log('   - Apenas alertas de confirmação BULL/BEAR');
 console.log('🎯 4 ALVOS + STOP DINÂMICO INCLUÍDOS');
 console.log('💰 FUNDING RATE COM EMOJIS ADICIONADO');
 console.log('='.repeat(60) + '\n');
+
+// Instalar dependência se necessário
+try {
+    require('technicalindicators');
+} catch (e) {
+    console.log('⚠️ technicalindicators n');
+    process.exit(1);
+}
 
 startBot();
