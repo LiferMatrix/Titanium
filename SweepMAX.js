@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -33,7 +33,7 @@ const SYMBOLS = [
     'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'SANDUSDT',  
     'DYMUSDT', 'ZILUSDT', 'CTSIUSDT', 'VIRTUALUSDT', 'MANAUSDT',
     'RSRUSDT', 'XVGUSDT', 'ATAUSDT', 'ATOMUSDT',
-    'USDCUSDT'
+    'COOKIEUSDT'
 ];
 
 // Configurações de Logs
@@ -59,7 +59,7 @@ const DECIMALS_CONFIG = {
     'SOLUSDT': 3,
     'XRPUSDT': 4,
     'BNBUSDT': 2,
-    'ADAUSDT': 3,          
+    'ADAUSDT': 3,
     'DOGEUSDT': 6,
     'TONUSDT': 4,
     'NEARUSDT': 4,
@@ -106,28 +106,29 @@ const DECIMALS_CONFIG = {
     'MASKUSDT': 5,
     'API3USDT': 4,
     'NEIROUSDT': 6,
+    'VANRYUSDT': 6,        
     'ONEUSDT': 5,
-    'BTCDOMUSDT': 5,
-    'DYDXUSDT': 5,
-    'GMXUSDT': 4,
+    'BTCDOMUSDT': 2,       
+    'DYDXUSDT': 4,         
+    'GMXUSDT': 3,          
     'AXSUSDT': 4,
     'ARUSDT': 3,
     'APEUSDT': 4,
     'TRBUSDT': 5,
-    'POLUSDT': 5,
-    'STGUSDT': 4,
-    'COTIUSDT': 5,
-    '1INCHUSDT': 4,
-    'BANDUSDT': 5,
+    'POLUSDT': 5,          // (ex-MATIC)
+    'STGUSDT': 5,
+    'COTIUSDT': 6,
+    '1INCHUSDT': 5,
+    'BANDUSDT': 4,
     'C98USDT': 5,
-    'IOSTUSDT': 5,
+    'IOSTUSDT': 6,
     'SKLUSDT': 5,
     'ENJUSDT': 4,
     'MANTAUSDT': 5,
-    'ILVUSDT': 4,
+    'ILVUSDT': 3,
     'MAGICUSDT': 5,
     'SANDUSDT': 4,
-    'DYMUSDT': 5,
+    'DYMUSDT': 4,
     'ZILUSDT': 6,
     'CTSIUSDT': 5,
     'VIRTUALUSDT': 4,
@@ -136,15 +137,15 @@ const DECIMALS_CONFIG = {
     'XVGUSDT': 7,
     'ATAUSDT': 6,
     'ATOMUSDT': 3,
-    'USDCUSDT': 6
+    'COOKIEUSDT': 6
 };
 
 // Default (nunca vai ser usado com essa lista completa)
 const DEFAULT_DECIMALS = 4;
 
 // Configurações para alvos e stop
-const TARGET_PERCENTAGES = [2.0, 4.0, 6.0, 8.0];
-const STOP_PERCENTAGE    = 2.0;
+const TARGET_PERCENTAGES = [2.5, 5.0, 8.0, 12.0];
+const STOP_PERCENTAGE = 3.0;
 
 // 🔵 OTIMIZAÇÕES ADICIONADAS
 const BATCH_SIZE = 15; 
