@@ -141,7 +141,7 @@ const DECIMALS_CONFIG = {
 };
 
 // Default (nunca vai ser usado com essa lista completa)
-const DEFAULT_DECIMALS = 4;
+const DEFAULT_DECIMALS = 6;
 
 // Configurações para alvos e stop
 const TARGET_PERCENTAGES = [2.5, 5.0, 8.0, 12.0];
