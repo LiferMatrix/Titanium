@@ -38,7 +38,7 @@ const config = {
   VOLUME_LOOKBACK: 35,
   VOLUME_MULTIPLIER: 2.0,
   VOLUME_Z_THRESHOLD: 2.5,
-  MIN_ATR_PERCENT: 0.5,
+  MIN_ATR_PERCENT: 0.2,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
@@ -912,8 +912,8 @@ async function checkConditions() {
         const previousVol = volumes3m[4];
 
         // Volume tem que estar subindo + ser MUITO acima da média recente
-        const volumeSurge = currentVol > avgVol5 * 2.5 &&     // aumentei um pouco (3.5 → 3.8)
-                           currentVol > previousVol * 1.4;   // candle atual > 40% do anterior
+        const volumeSurge = currentVol > avgVol5 * 2.0 &&     // aumentei um pouco (3.5 → 3.8)
+                           currentVol > previousVol * 1.3;   // candle atual > 40% do anterior
 
         // Manter o volumeData antigo (z-score, buy/sell volume, etc)
         const volumeData = await fetchVolumeData(symbol);
