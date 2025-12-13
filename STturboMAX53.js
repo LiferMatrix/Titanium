@@ -28,21 +28,21 @@ const config = {
   CACHE_TTL_DEFAULT: 15 * 60 * 1000,
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
-  BUY_TOLERANCE_PERCENT: 0.015,
+  BUY_TOLERANCE_PERCENT: 0.020,
   ATR_MULTIPLIER_BUY: 1.5,
   ATR_MULTIPLIER_SELL: 1.5,
   TARGET_MULTIPLIER: 1.5,
   LOG_MAX_SIZE: '100m',
   LOG_MAX_FILES: 2,
   LOG_CLEANUP_INTERVAL_MS: 2 * 24 * 60 * 60 * 1000,
-  VOLUME_LOOKBACK: 35,
+  VOLUME_LOOKBACK: 45,
   VOLUME_MULTIPLIER: 2.0,
-  VOLUME_Z_THRESHOLD: 2.5,
-  MIN_ATR_PERCENT: 0.2,
+  VOLUME_Z_THRESHOLD: 2.0,
+  MIN_ATR_PERCENT: 0.5,
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
-  MIN_VOLUME_THRESHOLD: 300000, // FILTRO DE VOLUME MÍNIMO
+  MIN_VOLUME_THRESHOLD: 400000, // FILTRO DE VOLUME MÍNIMO
   
 };
 
@@ -912,7 +912,7 @@ async function checkConditions() {
         const previousVol = volumes3m[4];
 
         // Volume tem que estar subindo + ser MUITO acima da média recente
-        const volumeSurge = currentVol > avgVol5 * 2.0 &&     // aumentei um pouco (3.5 → 3.8)
+        const volumeSurge = currentVol > avgVol5 * 2.3 &&     // aumentei um pouco (3.5 → 3.8)
                            currentVol > previousVol * 1.3;   // candle atual > 40% do anterior
 
         // Manter o volumeData antigo (z-score, buy/sell volume, etc)
