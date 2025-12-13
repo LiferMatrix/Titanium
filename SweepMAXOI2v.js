@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
-const TELEGRAM_CHAT_ID   = '-1002554953979';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5O';
+const TELEGRAM_CHAT_ID   = '-10025';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
