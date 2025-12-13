@@ -6,12 +6,17 @@ const { SMA, EMA, RSI, Stochastic } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5O';
-const TELEGRAM_CHAT_ID   = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID   = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
+
+// === CONFIGURAÇÕES DE VOLATILIDADE ===
+const VOLATILITY_PERIOD = 20; // Número de velas para cálculo da volatilidade
+const VOLATILITY_TIMEFRAME = '15m'; // Alterado para 15 minutos
+const VOLATILITY_THRESHOLD = 0.5; // 0.5% de volatilidade mínima
 
 // ATIVOS PARA MONITORAR 
 const SYMBOLS = [
@@ -188,6 +193,70 @@ function calculateEMACompleteSeries(prices, period) {
     } catch (error) {
         console.error(`Erro ao calcular série EMA: ${error.message}`);
         return null;
+    }
+}
+
+// 🔵 NOVA FUNÇÃO: Calcular volatilidade (ATR percentual) em 15 minutos
+async function checkVolatility(symbol, timeframe = VOLATILITY_TIMEFRAME, period = VOLATILITY_PERIOD, threshold = VOLATILITY_THRESHOLD) {
+    try {
+        const candles = await getCandlesCached(symbol, timeframe, period + 1);
+        
+        if (candles.length < period) {
+            return {
+                isValid: true, // Se não tem dados suficientes, não bloquear
+                volatility: 0,
+                message: "Vol: ⚪ Dados insuficientes",
+                threshold: threshold,
+                timeframe: timeframe
+            };
+        }
+        
+        // Calcular ATR (Average True Range) percentual
+        let totalATR = 0;
+        let count = 0;
+        
+        for (let i = 1; i < candles.length; i++) {
+            const current = candles[i];
+            const previous = candles[i-1];
+            
+            // True Range
+            const highLow = current.high - current.low;
+            const highClose = Math.abs(current.high - previous.close);
+            const lowClose = Math.abs(current.low - previous.close);
+            
+            const trueRange = Math.max(highLow, highClose, lowClose);
+            const atrPercent = (trueRange / previous.close) * 100;
+            
+            totalATR += atrPercent;
+            count++;
+        }
+        
+        const avgVolatility = count > 0 ? totalATR / count : 0;
+        
+        // Verificar se atinge o limite mínimo
+        const isValid = avgVolatility >= threshold;
+        
+        return {
+            isValid: isValid,
+            volatility: avgVolatility.toFixed(2),
+            rawVolatility: avgVolatility,
+            message: isValid ? 
+                `✅ Vol: ${avgVolatility.toFixed(2)}% (≥ ${threshold}%)` :
+                `❌ Vol: ${avgVolatility.toFixed(2)}% (< ${threshold}%)`,
+            threshold: threshold,
+            candlesUsed: count,
+            timeframe: timeframe
+        };
+        
+    } catch (error) {
+        logToFile(`⚠️ Erro ao calcular volatilidade(${symbol}, ${timeframe}): ${error.message}`);
+        return {
+            isValid: true, // Em caso de erro, não bloquear
+            volatility: 0,
+            message: "Vol: ⚪ Erro no cálculo",
+            threshold: threshold,
+            timeframe: timeframe
+        };
     }
 }
 
@@ -1205,10 +1274,10 @@ function calculateTargetsAndStop(entryPrice, isBullish, symbol) {
     }
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Construir mensagem de alerta com Open Interest
+// 🔵 FUNÇÃO ATUALIZADA: Construir mensagem de alerta com Open Interest e Volatilidade (15m)
 function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, targetsAndStop, 
                           rsi1h, stoch4h, stochDaily, lsrData, fundingRate, 
-                          volumeCheck, orderBook, sweepTime, emas3mData, oiCheck) {
+                          volumeCheck, orderBook, sweepTime, emas3mData, oiCheck, volatilityCheck) {
     
     const title = isBullish ? '🟢 <b>🤖 COMPRA  </b>' : '🔴 <b>🤖 CORREÇÃO </b>';
     const trend = isBullish ? '🟢Tendência 💹 ema 55 1h' : '🔴Tendência 📉 ema 55 1h';
@@ -1246,6 +1315,9 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     
     // 🔵 ADICIONAR OPEN INTEREST À MENSAGEM
     message += ` #OI 5m: ${oiCheck.trend} <b>${oiCheck.oiFormatted}</b> (${oiCheck.historySize} pts)\n`;
+    
+    // 🔵 ADICIONAR VOLATILIDADE À MENSAGEM (15m)
+    message += ` #Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (limite: ${volatilityCheck.threshold}%)\n`;
     
     message += `        <b>✔︎SMC Tecnology by @J4Rviz</b>`;
     
@@ -1347,7 +1419,7 @@ async function detectSweeps(symbol) {
     }
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão com Open Interest
+// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão com Open Interest e Volatilidade (15m)
 async function monitorConfirmation(symbol) {
     try {
         // Verificar se houve um sweep recente (últimas 6 horas)
@@ -1398,9 +1470,12 @@ async function monitorConfirmation(symbol) {
             // 🔴 NOVO CRITÉRIO: Open Interest deve estar subindo (5 minutos)
             const oiCheck = await checkOpenInterestCriteria(symbol, true);
             
-            // Verificar se passa nos novos critérios
-            if (!volumeCheck.isConfirmed || !oiCheck.isValid) {
-                logToFile(`❌ Confirmação Bull rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed}, OI=${oiCheck.isValid} (${oiCheck.message})`);
+            // 🔴 NOVO CRITÉRIO: Volatilidade mínima (15 minutos)
+            const volatilityCheck = await checkVolatility(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD, VOLATILITY_THRESHOLD);
+            
+            // Verificar se passa em TODOS os novos critérios
+            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid) {
+                logToFile(`❌ Confirmação Bull rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed}, OI=${oiCheck.isValid}, Vol=${volatilityCheck.isValid} (${volatilityCheck.message})`);
                 return null;
             }
             
@@ -1416,7 +1491,7 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, true, symbol);
                 
-                // 🔵 USAR FUNÇÃO buildAlertMessage ATUALIZADA COM OPEN INTEREST
+                // 🔵 ATUALIZAR FUNÇÃO buildAlertMessage para incluir volatilidade
                 const msg = buildAlertMessage(
                     true, // isBullish
                     symbol,
@@ -1432,7 +1507,8 @@ async function monitorConfirmation(symbol) {
                     orderBook,
                     recentSweeps[symbol].lastBuySweep,
                     emas3mData,
-                    oiCheck
+                    oiCheck,
+                    volatilityCheck // 🔵 NOVO PARÂMETRO
                 );
                 
                 confirmationAlert = {
@@ -1445,6 +1521,7 @@ async function monitorConfirmation(symbol) {
                     targetsAndStop: targetsAndStop,
                     volumeConfirmation: volumeCheck,
                     oiCheck: oiCheck,
+                    volatilityCheck: volatilityCheck, // 🔵 NOVO
                     emas3mData: emas3mData
                 };
                 
@@ -1468,9 +1545,12 @@ async function monitorConfirmation(symbol) {
             // 🔴 NOVO CRITÉRIO: Open Interest deve estar caindo (5 minutos)
             const oiCheck = await checkOpenInterestCriteria(symbol, false);
             
-            // Verificar se passa nos novos critérios
-            if (!volumeCheck.isConfirmed || !oiCheck.isValid) {
-                logToFile(`❌ Confirmação Bear rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed}, OI=${oiCheck.isValid} (${oiCheck.message})`);
+            // 🔴 NOVO CRITÉRIO: Volatilidade mínima (15 minutos)
+            const volatilityCheck = await checkVolatility(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD, VOLATILITY_THRESHOLD);
+            
+            // Verificar se passa em TODOS os novos critérios
+            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid) {
+                logToFile(`❌ Confirmação Bear rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed}, OI=${oiCheck.isValid}, Vol=${volatilityCheck.isValid} (${volatilityCheck.message})`);
                 return null;
             }
             
@@ -1486,7 +1566,7 @@ async function monitorConfirmation(symbol) {
                 // Calcular alvos e stop dinâmico
                 const targetsAndStop = calculateTargetsAndStop(emas3mData.currentPrice, false, symbol);
                 
-                // 🔵 USAR FUNÇÃO buildAlertMessage ATUALIZADA COM OPEN INTEREST
+                // 🔵 ATUALIZAR FUNÇÃO buildAlertMessage para incluir volatilidade
                 const msg = buildAlertMessage(
                     false, // isBullish
                     symbol,
@@ -1502,7 +1582,8 @@ async function monitorConfirmation(symbol) {
                     orderBook,
                     recentSweeps[symbol].lastSellSweep,
                     emas3mData,
-                    oiCheck
+                    oiCheck,
+                    volatilityCheck // 🔵 NOVO PARÂMETRO
                 );
                 
                 confirmationAlert = {
@@ -1515,6 +1596,7 @@ async function monitorConfirmation(symbol) {
                     targetsAndStop: targetsAndStop,
                     volumeConfirmation: volumeCheck,
                     oiCheck: oiCheck,
+                    volatilityCheck: volatilityCheck, // 🔵 NOVO
                     emas3mData: emas3mData
                 };
                 
@@ -1637,6 +1719,7 @@ async function mainBotLoop() {
         ` 🚫 ALERTAS DE SWEEP DESATIVADOS\n` +
         ` ✅ APENAS CONFIRMAÇÕES BULL/BEAR\n` +
         ` 🔵 OPEN INTEREST APERFEIÇOADO\n` +
+        ` 📈 VOLATILIDADE MÍNIMA DE ${VOLATILITY_THRESHOLD}% (${VOLATILITY_TIMEFRAME}, ${VOLATILITY_PERIOD} períodos)\n` +
         '='.repeat(50) + '\n';
     
     console.log(initMsg);
@@ -1671,6 +1754,7 @@ async function mainBotLoop() {
     console.log('  - RSI 1h < 60');
     console.log('  - Volume anormal (2x média)');
     console.log('  - 🔵 Open Interest subindo (5 minutos) - SMA(10)');
+    console.log(`  - 📈 Volatilidade mínima ${VOLATILITY_THRESHOLD}% (${VOLATILITY_TIMEFRAME}, ${VOLATILITY_PERIOD} períodos)`);
     console.log('Critérios Confirmação Bear:');
     console.log('  - Sweep de venda detectado (1H)');
     console.log('  - EMA 13 cruzando para baixo EMA 34 (3m)');
@@ -1678,6 +1762,7 @@ async function mainBotLoop() {
     console.log('  - RSI 1h > 60');
     console.log('  - Volume anormal (2x média)');
     console.log('  - 🔵 Open Interest caindo (5 minutos) - SMA(10)');
+    console.log(`  - 📈 Volatilidade mínima ${VOLATILITY_THRESHOLD}% (${VOLATILITY_TIMEFRAME}, ${VOLATILITY_PERIOD} períodos)`);
     console.log('='.repeat(60) + '\n');
     
     const brDateTime = getBrazilianDateTime();
@@ -1690,6 +1775,9 @@ async function mainBotLoop() {
                     `   • COMPRA: OI 5m subindo 🟢⬆️ (SMA 10)\n` +
                     `   • VENDA: OI 5m caindo 🔴⬇️ (SMA 10)\n` +
                     `   • Histórico: até 30 pontos\n` +
+                    `📈 VOLATILIDADE MÍNIMA (${VOLATILITY_TIMEFRAME}):\n` +
+                    `   • Mínimo: ${VOLATILITY_THRESHOLD}% (${VOLATILITY_PERIOD} períodos)\n` +
+                    `   • Timeframe: ${VOLATILITY_TIMEFRAME}\n` +
                     `✅ Canal mais limpo e focado\n` +
                     `🎯 4 alvos + stop dinâmico\n` +
                     `by @J4Rviz.`);
@@ -1750,8 +1838,9 @@ async function mainBotLoop() {
                     console.log(`📈 EMA 13/34: ${alert.emas3mData.isEMA13CrossingUp ? 'Cruzamento Bull' : 'Cruzamento Bear'}`);
                     console.log(`📈 Volume: ${alert.volumeConfirmation.volumeData.ratio}x`);
                     console.log(`🔵 Open Interest: ${alert.oiCheck.trend} ${alert.oiCheck.message} (${alert.oiCheck.historySize} pontos históricos)`);
+                    console.log(`📊 Volatilidade (${alert.volatilityCheck.timeframe}): ${alert.volatilityCheck.volatility}% (limite: ${alert.volatilityCheck.threshold}%)`);
                     console.log(`🎯 4 Alvos + Stop Dinâmico calculados`);
-                    logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price} - Volume: ${alert.volumeConfirmation.volumeData.ratio}x - OI: ${alert.oiCheck.trend} (${alert.oiCheck.historySize} pts)`);
+                    logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price} - Volume: ${alert.volumeConfirmation.volumeData.ratio}x - OI: ${alert.oiCheck.trend} (${alert.oiCheck.historySize} pts) - Volatilidade: ${alert.volatilityCheck.volatility}% (${alert.volatilityCheck.timeframe})`);
                     
                     await sendAlert(alert.message);
                     
@@ -1813,7 +1902,17 @@ async function mainBotLoop() {
                 oiStats += `Tamanho histórico: ${OI_HISTORY_SIZE} pontos\n`;
                 oiStats += `SMA: ${OI_SMA_PERIOD} períodos\n`;
                 oiStats += "=".repeat(60) + "\n";
-                console.log(oiStats);
+                
+                // MOSTRAR ESTATÍSTICAS DE VOLATILIDADE
+                let volStats = "\n📊 ESTATÍSTICAS VOLATILIDADE:\n";
+                volStats += "=".repeat(60) + "\n";
+                volStats += `Timeframe analisado: ${VOLATILITY_TIMEFRAME}\n`;
+                volStats += `Período analisado: ${VOLATILITY_PERIOD} velas\n`;
+                volStats += `Limite mínimo: ${VOLATILITY_THRESHOLD}%\n`;
+                volStats += `Cálculo: ATR percentual médio\n`;
+                volStats += "=".repeat(60) + "\n";
+                
+                console.log(oiStats + volStats);
             }
 
             consecutiveErrors = 0;
@@ -1872,25 +1971,6 @@ console.log('\n' + '='.repeat(60));
 console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (VERSÃO MELHORADA)');
 console.log('📈 Monitorando 55 ativos da Binance');
 console.log('🔧 Configuração SMC - Canal Limpo');
-console.log('⚡ OTIMIZAÇÕES IMPLEMENTADAS:');
-console.log('   1. Cálculo EMA mais eficiente (série completa)');
-console.log('   2. technicalindicators para todas as médias');
-console.log('   3. Gerenciamento de memória otimizado');
-console.log('   4. Função buildAlertMessage para remover duplicação');
-console.log('   5. Cache com TTL e limpeza automática');
-console.log('🔵 OPEN INTEREST APERFEIÇOADO:');
-console.log('   • COMPRA: OI 5m subindo 🟢⬆️ (SMA 10)');
-console.log('   • VENDA: OI 5m caindo 🔴⬇️ (SMA 10)');
-console.log('   • Histórico: até 30 pontos');
-console.log('   • Tenta API histórica, fallback para em memória');
-console.log('🔴 TELEGRAM COM RETRY:');
-console.log('   • 3 tentativas com backoff exponencial');
-console.log('   • Tratamento de rate limit do Telegram');
-console.log('🚫 SISTEMA DE ALERTAS:');
-console.log('   - Sweeps detectados mas sem alertas');
-console.log('   - Apenas alertas de confirmação BULL/BEAR');
-console.log('🎯 4 ALVOS + STOP DINÂMICO INCLUÍDOS');
-console.log('💰 FUNDING RATE COM EMOJIS ADICIONADO');
 console.log('='.repeat(60) + '\n');
 
 // Instalar dependência se necessário
