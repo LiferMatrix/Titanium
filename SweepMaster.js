@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJM';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -1967,28 +1967,6 @@ async function mainBotLoop() {
     await sendAlert(`🤖 <b>SMC Confirmation Bot (ENTRADAS COM RETRAÇÃO ATR)</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `📊 Monitorando ${SYMBOLS.length} ativos\n` +
-                    `⚡ Apenas alertas de confirmação\n` +
-                    `🚫 Alertas de sweep desativados\n` +
-                    `🔵 OPEN INTEREST APERFEIÇOADO:\n` +
-                    `   • COMPRA: OI 5m subindo 🟢⬆️ (SMA 10)\n` +
-                    `   • VENDA: OI 5m caindo 🔴⬇️ (SMA 10)\n` +
-                    `   • Histórico: até 30 pontos\n` +
-                    `📈 VOLATILIDADE MÍNIMA (${VOLATILITY_TIMEFRAME}):\n` +
-                    `   • Mínimo: ${VOLATILITY_THRESHOLD}% (${VOLATILITY_PERIOD} períodos)\n` +
-                    `   • Timeframe: ${VOLATILITY_TIMEFRAME}\n` +
-                    `🔴 STOP ATR AVANÇADO:\n` +
-                    `   • Multiplicador: ${ATR_MULTIPLIER}x o ATR\n` +
-                    `   • Timeframe: ${ATR_TIMEFRAME}\n` +
-                    `   • Período: ${ATR_PERIOD} velas\n` +
-                    `   • Limite mínimo: ${MIN_ATR_PERCENTAGE}%\n` +
-                    `   • Limite máximo: ${MAX_ATR_PERCENTAGE}%\n` +
-                    `🎯 ENTRADAS COM RETRAÇÃO ATR:\n` +
-                    `   • Retração ideal: ${ENTRY_RETRACTION_MULTIPLIER}x ATR\n` +
-                    `   • Máximo entrada: ${ENTRY_MAX_DISTANCE_MULTIPLIER}x ATR\n` +
-                    `   • Retração: ${ENTRY_MIN_RETRACTION_PERCENT}% - ${ENTRY_MAX_RETRACTION_PERCENT}%\n` +
-                    `   • 3 níveis de entrada para escala\n` +
-                    `✅ Canal mais limpo e focado\n` +
-                    `📊 4 alvos + stop ATR + entradas otimizadas\n` +
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
