@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5O';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -27,14 +27,14 @@ const SYMBOLS = [
     'OPUSDT', 'LDOUSDT', 'ICPUSDT', 'HBARUSDT', 'VETUSDT',
     'THETAUSDT', 'ETCUSDT', 'CKBUSDT', '1000FLOKIUSDT',
     '1000PEPEUSDT', '1000SHIBUSDT', '1000BONKUSDT', 'GMTUSDT',
-    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT', 
+    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT', 'XAUUSDT',
     'ENAUSDT', 'TIAUSDT', 'SEIUSDT', 'ZKUSDT', 'GALAUSDT',
-    'CHZUSDT', 'HOTUSDT', 'MASKUSDT', 'API3USDT',
+    'CHZUSDT', 'HOTUSDT', 'MASKUSDT', 'API3USDT', 'USDCUSDT',
     'NEIROUSDT', 'VANRYUSDT', 'ONEUSDT', 'BTCDOMUSDT',
     'DYDXUSDT', 'GMXUSDT', 'AXSUSDT', 'ARUSDT', 'APEUSDT',
     'TRBUSDT', 'POLUSDT', 'STGUSDT', 'COTIUSDT', '1INCHUSDT',
     'BANDUSDT', 'C98USDT', 'IOSTUSDT', 'SKLUSDT', 'ENJUSDT',
-    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'SANDUSDT',  
+    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'SANDUSDT', 'BTCDOMUSDT',  
     'DYMUSDT', 'ZILUSDT', 'CTSIUSDT', 'VIRTUALUSDT', 'MANAUSDT',
     'RSRUSDT', 'XVGUSDT', 'ATAUSDT', 'ATOMUSDT',
     'COOKIEUSDT'
@@ -125,10 +125,13 @@ const DECIMALS_CONFIG = {
     'ARUSDT': 3,
     'APEUSDT': 4,
     'TRBUSDT': 5,
-    'POLUSDT': 5,          // (ex-MATIC)
+    'POLUSDT': 5,          
     'STGUSDT': 5,
     'COTIUSDT': 6,
     '1INCHUSDT': 5,
+    'USDCUSDT': 6,
+    'BTCDOMUSDT': 4,
+    'XAUUSDT': 4,
     'BANDUSDT': 4,
     'C98USDT': 5,
     'IOSTUSDT': 6,
@@ -1451,13 +1454,13 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     
     // 🔴 ADICIONAR INFORMAÇÕES DO STOP ATR
     const stopInfo = targetsAndStop.stopType === "ATR" ? 
-        `🔰 Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
-        `   📊 ATR: ${targetsAndStop.atrData.atrFormatted} × ${targetsAndStop.atrMultiplier}\n` +
-        `   🎯 Melhor R/R: ${targetsAndStop.bestRiskReward}:1\n` :
-        `🔰 Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
+        `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
+        `    ATR: ${targetsAndStop.atrData.atrFormatted} × ${targetsAndStop.atrMultiplier}\n` +
+        `    Melhor R/R: ${targetsAndStop.bestRiskReward}:1\n` :
+        `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
     
     let message = `${title}\n`;
-    message += `⏰<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
+    message += `<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
     message += `<b>#Ativo:</b> #${symbol}\n`;
     message += `<b>$Preço atual:</b> $${priceFormatted}\n`;
     
@@ -1465,19 +1468,13 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     if (targetsAndStop.entryLevels) {
         const entry = targetsAndStop.entryLevels;
         if (isBullish) {
-            message += `<b>🎯 Entrada Ideal (Retração ${entry.retractionPercent}%):</b> $${entry.idealEntryFormatted}\n`;
-            message += `<b>📈 Entrada Máxima (${entry.maxDistancePercent}% acima):</b> $${entry.maxEntryFormatted}\n`;
-            message += `<b>🎪 Entrada em 3 níveis:</b>\n`;
-            message += `   1️⃣ $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
-            message += `   2️⃣ $${formatNumber(entry.levels[1].price, symbol, true)} (Ideal - Retração)\n`;
-            message += `   3️⃣ $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
+            message += `<b>  Entrada Sugerida:</b>\n`;
+            message += `    $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
+            message += `    $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
         } else {
-            message += `<b>🎯 Entrada Ideal (Retração ${entry.retractionPercent}%):</b> $${entry.idealEntryFormatted}\n`;
-            message += `<b>📉 Entrada Mínima (${entry.maxDistancePercent}% abaixo):</b> $${entry.maxEntryFormatted}\n`;
-            message += `<b>🎪 Entrada em 3 níveis:</b>\n`;
-            message += `   1️⃣ $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
-            message += `   2️⃣ $${formatNumber(entry.levels[1].price, symbol, true)} (Ideal - Retração)\n`;
-            message += `   3️⃣ $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
+            message += `<b>  Entrada em 3 níveis:</b>\n`;
+            message += `    $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
+            message += `    $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
         }
     } else {
         message += `<b>Entrada:</b> $${priceFormatted}\n`;
@@ -1503,23 +1500,13 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n`;
     message += ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n`;
     message += ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n`;
+    message += ` #OI 5m: ${oiCheck.trend} <b>${oiCheck.oiFormatted}</b> (${oiCheck.historySize} pts)\n`;
+    message += ` #Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> \n`;
     message += ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n`;
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b>\n`;
     message += ` Liquidez Cap: ${sweepMinutes} minutos\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    
-    // 🔵 ADICIONAR OPEN INTEREST À MENSAGEM
-    message += ` #OI 5m: ${oiCheck.trend} <b>${oiCheck.oiFormatted}</b> (${oiCheck.historySize} pts)\n`;
-    
-    // 🔵 ADICIONAR VOLATILIDADE À MENSAGEM (15m)
-    message += ` #Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> (limite: ${volatilityCheck.threshold}%)\n`;
-    
-    // 🔴 ADICIONAR INFORMAÇÃO DO ATR
-    if (targetsAndStop.atrData && targetsAndStop.atrData.atr) {
-        message += ` #ATR ${ATR_TIMEFRAME}: <b>${targetsAndStop.atrData.atrFormatted}</b> (${targetsAndStop.atrData.atrPercentFormatted}%)\n`;
-    }
-    
     message += `        <b>✔︎SMC Tecnology by @J4Rviz</b>`;
     
     return message;
@@ -1964,9 +1951,10 @@ async function mainBotLoop() {
     console.log('='.repeat(80) + '\n');
     
     const brDateTime = getBrazilianDateTime();
-    await sendAlert(`🤖 <b>SMC Confirmation Bot (ENTRADAS COM RETRAÇÃO ATR)</b>\n` +
+    await sendAlert(`🤖 <b>SMC Confirmation Bot </b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `📊 Monitorando ${SYMBOLS.length} ativos\n` +
+                   
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
