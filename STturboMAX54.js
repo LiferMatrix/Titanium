@@ -15,8 +15,8 @@ const config = {
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
   PARES_MONITORADOS: (process.env.COINS || "BTCUSDT,ETHUSDT,BNBUSDT").split(","),
   INTERVALO_ALERTA_4H_MS: 15 * 60 * 1000,
-  TEMPO_COOLDOWN_MS: 20 * 60 * 1000,
-  TEMPO_COOLDOWN_SAME_DIR_MS: 30 * 60 * 1000,
+  TEMPO_COOLDOWN_MS: 15 * 60 * 1000,
+  TEMPO_COOLDOWN_SAME_DIR_MS: 20 * 60 * 1000,
   RSI_PERIOD: 14,
   STOCHASTIC_PERIOD_K: 5,
   STOCHASTIC_SMOOTH_K: 3,
@@ -29,7 +29,7 @@ const config = {
   CACHE_TTL_DEFAULT: 15 * 60 * 1000,
   MAX_CACHE_SIZE: 4000,
   MAX_HISTORICO_ALERTAS: 10,
-  BUY_TOLERANCE_PERCENT: 0.020,
+  BUY_TOLERANCE_PERCENT: 0.015,
   ATR_MULTIPLIER_BUY: 1.5,
   ATR_MULTIPLIER_SELL: 1.5,
   TARGET_MULTIPLIER: 1.5,
@@ -43,7 +43,7 @@ const config = {
   ADX_PERIOD: process.env.ADX_PERIOD ? parseInt(process.env.ADX_PERIOD) : 14,
   ADX_MIN_TREND: process.env.ADX_MIN_TREND ? parseFloat(process.env.ADX_MIN_TREND) : 25,
   LSR_PERIOD: '15m',
-  MIN_VOLUME_THRESHOLD: 400000, // FILTRO DE VOLUME MÍNIMO
+  MIN_VOLUME_THRESHOLD: 100000, // FILTRO DE VOLUME MÍNIMO
   
 };
 
@@ -601,7 +601,7 @@ function buildBuyAlertMessage(symbol, data, count, dataHora, format, tradingView
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Sniper by @J4Rviz`;
+         `Tecnology Titanium by @J4Rviz`;
 }
 function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingViewLink, classificacao, ratio, reward10x, targetPct, targetShort1Pct, targetShort2Pct, targetShort3Pct, sellEntryHigh, targetSell, targetSellShort1, targetSellShort2, targetSellShort3, zonas, price, rsi1hEmoji, lsr, lsrSymbol, fundingRateText, vwap1hText, estocasticoD, stochDEmoji, direcaoD, estocastico4h, stoch4hEmoji, direcao4h, adx1h, volumeZScore, signalStrength, tag, atr, dynamicTargets) {
   const stopLoss = calcularStopDinamico('sell', sellEntryHigh, atr);
@@ -640,7 +640,7 @@ function buildSellAlertMessage(symbol, data, count, dataHora, format, tradingVie
          `#Vol: ${volumeZScore.toFixed(2)}\n` +
          `#Suporte: ${format(zonas.suporte)} \n` +
          `#Resistência: ${format(zonas.resistencia)}\n` +
-         `Titanium Sniper by @J4Rviz`;
+         `Tecnology Titanium by @J4Rviz`;
 }
 async function sendDailyStats() {
   const { signals, longs, shorts, avgRR, targetsHit, estimatedProfit } = state.dailyStats;
@@ -916,7 +916,7 @@ async function checkConditions() {
         const previousVol = volumes3m[4];
 
         // Volume tem que estar subindo + ser MUITO acima da média recente
-        const volumeSurge = currentVol > avgVol5 * 2.3 &&     // aumentei um pouco (3.5 → 3.8)
+        const volumeSurge = currentVol > avgVol5 * 1.8 &&     // aumentei um pouco (3.5 → 3.8)
                            currentVol > previousVol * 1.3;   // candle atual > 40% do anterior
 
         // Manter o volumeData antigo (z-score, buy/sell volume, etc)
@@ -956,7 +956,7 @@ async function main() {
   try {
     await fs.mkdir(path.join(__dirname, 'logs'), { recursive: true });
     await cleanupOldLogs();
-    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium V5.3!'));
+    await withRetry(() => bot.api.sendMessage(config.TELEGRAM_CHAT_ID, '🤖 Titanium 54'));
     await checkConditions();
     setInterval(checkConditions, config.INTERVALO_ALERTA_4H_MS);
     setInterval(cleanupOldLogs, config.LOG_CLEANUP_INTERVAL_MS);
