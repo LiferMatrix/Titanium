@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -20,28 +20,35 @@ const VOLUME_RELATIVE_THRESHOLD = 1.3; // 30% acima da média
 const VOLATILITY_PERIOD = 20; // Número de velas para cálculo da volatilidade
 const VOLATILITY_TIMEFRAME = '15m'; // Alterado para 15 minutos
 const VOLATILITY_THRESHOLD = 0.5; // 0.5% de volatilidade mínima
-// ATIVOS PARA MONITORAR 
-const SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
-    'ADAUSDT', 'DOGEUSDT', 'TONUSDT', 'NEARUSDT', 'AVAXUSDT',
-    'DOTUSDT', 'SUIUSDT', 'LINKUSDT', 'BCHUSDT', 'APTUSDT',
-    'ARBUSDT', 'ONDOUSDT', 'INJUSDT', 'RUNEUSDT', 'FILUSDT',
-    'LTCUSDT', 'FETUSDT', 'GRTUSDT', 'UNIUSDT', 'AAVEUSDT',
-    'OPUSDT', 'LDOUSDT', 'ICPUSDT', 'HBARUSDT', 'VETUSDT',
-    'THETAUSDT', 'ETCUSDT', 'CKBUSDT', '1000FLOKIUSDT',
-    '1000PEPEUSDT', '1000SHIBUSDT', '1000BONKUSDT', 'GMTUSDT',
-    'TURBOUSDT', 'NOTUSDT', 'WLDUSDT', 'SUSHIUSDT', 'XAUUSDT',
-    'ENAUSDT', 'TIAUSDT', 'SEIUSDT', 'ZKUSDT', 'GALAUSDT',
-    'CHZUSDT', 'HOTUSDT', 'MASKUSDT', 'API3USDT', 'USDCUSDT',
-    'NEIROUSDT', 'VANRYUSDT', 'ONEUSDT', 'BTCDOMUSDT',
-    'DYDXUSDT', 'GMXUSDT', 'AXSUSDT', 'ARUSDT', 'APEUSDT',
-    'TRBUSDT', 'POLUSDT', 'STGUSDT', 'COTIUSDT', '1INCHUSDT',
-    'BANDUSDT', 'C98USDT', 'IOSTUSDT', 'SKLUSDT', 'ENJUSDT',
-    'MANTAUSDT', 'ILVUSDT', 'MAGICUSDT', 'SANDUSDT', 'BTCDOMUSDT',  
-    'DYMUSDT', 'ZILUSDT', 'CTSIUSDT', 'VIRTUALUSDT', 'MANAUSDT',
-    'RSRUSDT', 'XVGUSDT', 'ATAUSDT', 'ATOMUSDT',
-    'COOKIEUSDT'
-];
+
+// === FILTRO DO LSR RATIO ===
+const LSR_TIMEFRAME = '15m'; // Timeframe para LSR
+const LSR_BUY_THRESHOLD = 2.5; // Para compra LSR menor que 2.5
+const LSR_SELL_THRESHOLD = 2.5; // Para sinal de correção LSR maior que 2.5
+
+// 🔵 CONFIGURAÇÃO DINÂMICA - Buscar todos os ativos automaticamente
+let SYMBOLS = []; // Será preenchido dinamicamente
+let DECIMALS_CONFIG = {}; // Será preenchido dinamicamente
+
+// 🔵 CONFIGURAÇÕES DE RATE LIMIT
+const BINANCE_RATE_LIMIT = {
+    requestsPerMinute: 1200, // Limite da Binance Futures API
+    weightPerRequest: {
+        exchangeInfo: 10,
+        klines: 2,
+        openInterest: 1,
+        fundingRate: 1,
+        orderBook: 2,
+        lsr: 1
+    }
+};
+
+// Contador de rate limit
+let rateLimitCounter = {
+    windowStart: Date.now(),
+    usedWeight: 0,
+    remainingWeight: 1200
+};
 
 // Configurações de Logs
 const LOG_DIR = './logs';
@@ -60,103 +67,12 @@ const COOLDOWN = 30 * 60 * 1000; // 30 minutos
 // Objeto para rastrear sweeps recentes para confirmações
 const recentSweeps = {};
 
-// 🔵 NOVO: Cache para Open Interest com histórico aprimorado
+// 🔵 Cache para Open Interest com histórico aprimorado
 const oiCache = {};
 const OI_CACHE_TTL = 1 * 60 * 1000; // 1 minuto de cache para OI
 const OI_HISTORY_SIZE = 30; // Manter 30 pontos históricos
 const OI_SMA_PERIOD = 10; // Período da SMA para suavização do OI
 
-const DECIMALS_CONFIG = {
-    'BTCUSDT': 2,
-    'ETHUSDT': 2,
-    'SOLUSDT': 3,
-    'XRPUSDT': 4,
-    'BNBUSDT': 2,
-    'ADAUSDT': 3,
-    'DOGEUSDT': 6,
-    'TONUSDT': 4,
-    'NEARUSDT': 4,
-    'AVAXUSDT': 3,
-    'DOTUSDT': 3,
-    'SUIUSDT': 4,
-    'LINKUSDT': 4,
-    'BCHUSDT': 2,
-    'APTUSDT': 4,
-    'ARBUSDT': 3,
-    'ONDOUSDT': 4,
-    'INJUSDT': 3,
-    'RUNEUSDT': 3,
-    'FILUSDT': 4,
-    'LTCUSDT': 2,
-    'FETUSDT': 5,
-    'GRTUSDT': 5,
-    'UNIUSDT': 3,
-    'AAVEUSDT': 4,
-    'OPUSDT': 5,
-    'LDOUSDT': 5,
-    'ICPUSDT': 5,
-    'HBARUSDT': 4,
-    'VETUSDT': 5,
-    'THETAUSDT': 5,
-    'ETCUSDT': 5,
-    'CKBUSDT': 5,
-    '1000FLOKIUSDT': 6,
-    '1000PEPEUSDT': 6,
-    '1000SHIBUSDT': 6,
-    '1000BONKUSDT': 6,
-    'GMTUSDT': 5,
-    'TURBOUSDT': 6,
-    'NOTUSDT': 6,
-    'WLDUSDT': 5,
-    'SUSHIUSDT': 4,
-    'ENAUSDT': 5,
-    'TIAUSDT': 5,
-    'SEIUSDT': 5,
-    'ZKUSDT': 5,
-    'GALAUSDT': 5,
-    'CHZUSDT': 5,
-    'HOTUSDT': 5,
-    'MASKUSDT': 5,
-    'API3USDT': 4,
-    'NEIROUSDT': 6,
-    'VANRYUSDT': 6,        
-    'ONEUSDT': 5,
-    'BTCDOMUSDT': 2,       
-    'DYDXUSDT': 4,         
-    'GMXUSDT': 3,          
-    'AXSUSDT': 4,
-    'ARUSDT': 3,
-    'APEUSDT': 4,
-    'TRBUSDT': 5,
-    'POLUSDT': 5,          
-    'STGUSDT': 5,
-    'COTIUSDT': 6,
-    '1INCHUSDT': 5,
-    'USDCUSDT': 6,
-    'BTCDOMUSDT': 4,
-    'XAUUSDT': 4,
-    'BANDUSDT': 4,
-    'C98USDT': 5,
-    'IOSTUSDT': 6,
-    'SKLUSDT': 5,
-    'ENJUSDT': 4,
-    'MANTAUSDT': 5,
-    'ILVUSDT': 3,
-    'MAGICUSDT': 5,
-    'SANDUSDT': 4,
-    'DYMUSDT': 4,
-    'ZILUSDT': 6,
-    'CTSIUSDT': 5,
-    'VIRTUALUSDT': 4,
-    'MANAUSDT': 4,
-    'RSRUSDT': 6,
-    'XVGUSDT': 7,
-    'ATAUSDT': 6,
-    'ATOMUSDT': 3,
-    'COOKIEUSDT': 6
-};
-
-// Default
 const DEFAULT_DECIMALS = 4;
 
 // 🔴 CONFIGURAÇÕES AVANÇADAS PARA STOP ATR E ENTRADAS
@@ -180,6 +96,154 @@ const CANDLE_CACHE_TTL = 50000; // 50 segundos
 const SWEEP_CLEANUP_INTERVAL = 10; // Limpar sweeps a cada 10 ciclos
 const MAX_SWEEP_AGE = 6 * 60 * 60 * 1000; // 6 horas
 const MAX_CACHE_AGE = 5 * 60 * 1000; // 5 minutos
+
+// 🔵 NOVA FUNÇÃO: Controlar Rate Limit da Binance
+async function checkRateLimit(weight = 1) {
+    const now = Date.now();
+    const windowSize = 60 * 1000; // 1 minuto em milissegundos
+    
+    // Resetar contador se a janela expirou
+    if (now - rateLimitCounter.windowStart >= windowSize) {
+        rateLimitCounter.windowStart = now;
+        rateLimitCounter.usedWeight = 0;
+        rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute;
+    }
+    
+    // Verificar se podemos fazer a requisição
+    if (rateLimitCounter.usedWeight + weight > BINANCE_RATE_LIMIT.requestsPerMinute) {
+        const waitTime = windowSize - (now - rateLimitCounter.windowStart) + 1000;
+        logToFile(`⏳ Rate limit próximo: ${rateLimitCounter.usedWeight}/${BINANCE_RATE_LIMIT.requestsPerMinute}. Aguardando ${Math.ceil(waitTime/1000)}s`);
+        console.log(`⏳ Rate limit próximo. Aguardando ${Math.ceil(waitTime/1000)}s...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Resetar após espera
+        rateLimitCounter.windowStart = Date.now();
+        rateLimitCounter.usedWeight = 0;
+        rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute;
+    }
+    
+    // Atualizar contador
+    rateLimitCounter.usedWeight += weight;
+    rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute - rateLimitCounter.usedWeight;
+    
+    // Pequeno delay entre requisições
+    await new Promise(resolve => setTimeout(resolve, 100));
+}
+
+// 🔵 NOVA FUNÇÃO: Buscar todos os símbolos da Binance Futures
+async function fetchAllFuturesSymbols() {
+    try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.exchangeInfo);
+        
+        const url = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
+        const response = await fetchWithRetry(url);
+        
+        if (!response.ok) {
+            throw new Error(`Falha ao buscar exchangeInfo: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Filtrar apenas símbolos USDT e ativos tradáveis
+        const symbols = data.symbols
+            .filter(symbol => 
+                symbol.quoteAsset === 'USDT' && 
+                symbol.status === 'TRADING' &&
+                symbol.contractType === 'PERPETUAL'
+            )
+            .map(symbol => symbol.symbol);
+        
+        console.log(`✅ Encontrados ${symbols.length} símbolos USDT PERPETUAL na Binance Futures`);
+        
+        // Obter informações de decimais para cada símbolo
+        await fetchSymbolsDecimals(data.symbols);
+        
+        return symbols;
+        
+    } catch (error) {
+        console.error(`❌ Erro ao buscar símbolos: ${error.message}`);
+        logToFile(`❌ Erro ao buscar símbolos: ${error.message}`);
+        
+        // Fallback para lista básica se a API falhar
+        return [
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+            'ADAUSDT', 'DOGEUSDT', 'MATICUSDT', 'DOTUSDT', 'LTCUSDT',
+            'AVAXUSDT', 'LINKUSDT', 'TRXUSDT', 'UNIUSDT', 'ATOMUSDT'
+        ];
+    }
+}
+
+// 🔵 NOVA FUNÇÃO: Buscar informações de decimais dos símbolos
+async function fetchSymbolsDecimals(symbolsData) {
+    try {
+        for (const symbolInfo of symbolsData) {
+            if (symbolInfo.quoteAsset !== 'USDT' || symbolInfo.status !== 'TRADING') {
+                continue;
+            }
+            
+            // Encontrar filtro de preço
+            const priceFilter = symbolInfo.filters.find(f => f.filterType === 'PRICE_FILTER');
+            const lotSizeFilter = symbolInfo.filters.find(f => f.filterType === 'LOT_SIZE');
+            
+            if (priceFilter && priceFilter.tickSize) {
+                // Calcular casas decimais baseado no tickSize
+                const tickSize = parseFloat(priceFilter.tickSize);
+                let decimals = 0;
+                
+                if (tickSize < 1) {
+                    const decimalStr = tickSize.toString();
+                    const decimalIndex = decimalStr.indexOf('.');
+                    if (decimalIndex !== -1) {
+                        // Contar zeros após o ponto decimal
+                        const parts = decimalStr.split('.')[1];
+                        let count = 0;
+                        for (let char of parts) {
+                            if (char === '0') count++;
+                            else break;
+                        }
+                        decimals = count + 1;
+                    }
+                } else if (tickSize >= 1) {
+                    decimals = 0;
+                }
+                
+                // Ajustar decimais baseado no símbolo
+                const symbol = symbolInfo.symbol;
+                
+                // Regras específicas para certos símbolos
+                if (symbol.includes('1000') || symbol.includes('BONK') || symbol.includes('PEPE') || symbol.includes('SHIB')) {
+                    decimals = Math.max(decimals, 6);
+                } else if (symbol.includes('USDT') && !symbol.includes('1000')) {
+                    // Para a maioria dos pares USDT
+                    if (symbol === 'BTCUSDT' || symbol === 'ETHUSDT' || symbol === 'BNBUSDT') {
+                        decimals = 2;
+                    } else if (parseFloat(priceFilter.minPrice) < 0.01) {
+                        decimals = Math.max(decimals, 4);
+                    } else if (parseFloat(priceFilter.minPrice) < 1) {
+                        decimals = Math.max(decimals, 3);
+                    } else {
+                        decimals = Math.max(decimals, 2);
+                    }
+                }
+                
+                DECIMALS_CONFIG[symbol] = decimals;
+            }
+        }
+        
+        console.log(`✅ Configuração de decimais carregada para ${Object.keys(DECIMALS_CONFIG).length} símbolos`);
+        
+    } catch (error) {
+        console.error(`❌ Erro ao buscar decimais: ${error.message}`);
+        logToFile(`❌ Erro ao buscar decimais: ${error.message}`);
+        
+        // Fallback para configuração básica
+        DECIMALS_CONFIG['BTCUSDT'] = 2;
+        DECIMALS_CONFIG['ETHUSDT'] = 2;
+        DECIMALS_CONFIG['BNBUSDT'] = 2;
+        DECIMALS_CONFIG['SOLUSDT'] = 3;
+        DECIMALS_CONFIG['XRPUSDT'] = 4;
+    }
+}
 
 // 🔵 NOVA FUNÇÃO: Calcular série completa de EMA para detectar cruzamentos
 function calculateEMACompleteSeries(prices, period) {
@@ -337,6 +401,8 @@ async function getOpenInterestWithSMA(symbol) {
     }
     
     try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.openInterest);
+        
         // Buscar o Open Interest atual
         const currentOIUrl = `https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`;
         const currentRes = await fetchWithRetry(currentOIUrl);
@@ -355,6 +421,7 @@ async function getOpenInterestWithSMA(symbol) {
         
         try {
             // Tentar API de histórico
+            await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.openInterest);
             const historicalUrl = `https://fapi.binance.com/futures/data/openInterestHist?symbol=${symbol}&period=5m&limit=30`;
             const historicalRes = await fetchWithRetry(historicalUrl, {}, 1);
             
@@ -383,12 +450,10 @@ async function getOpenInterestWithSMA(symbol) {
                     }
                     
                     useHistoricalAPI = true;
-                    console.log(`✅ Usando API histórica para OI de ${symbol} (${oiHistory.length} pontos)`);
                 }
             }
         } catch (historicalError) {
             // API histórica não disponível
-            console.log(`⚠️ API histórica não disponível para ${symbol}, usando método em memória`);
         }
         
         // Se não usou API histórica, usar método em memória
@@ -557,6 +622,63 @@ async function checkOpenInterestCriteria(symbol, isBullishSignal) {
     }
 }
 
+// 🔵 NOVA FUNÇÃO: Verificar critério do LSR ratio
+async function checkLSRCriteria(symbol, isBullishSignal) {
+    try {
+        const lsrData = await getLSR(symbol, LSR_TIMEFRAME);
+        
+        // Se não temos dados do LSR, retornar verdadeiro (não bloquear)
+        if (lsrData.raw === null || lsrData.raw === undefined) {
+            return {
+                isValid: true,
+                lsrRatio: "N/A",
+                message: "LSR: ⚪ Dados insuficientes",
+                threshold: isBullishSignal ? LSR_BUY_THRESHOLD : LSR_SELL_THRESHOLD
+            };
+        }
+        
+        const lsrValue = lsrData.raw;
+        
+        // Para sinal de COMPRA: LSR deve ser menor que 2.5
+        // Para sinal de VENDA: LSR deve ser maior que 2.5
+        if (isBullishSignal) {
+            const isValid = lsrValue < LSR_BUY_THRESHOLD;
+            return {
+                isValid: isValid,
+                lsrRatio: lsrData.lsrRatio,
+                raw: lsrValue,
+                message: isValid ? 
+                    `✅ LSR: ${lsrData.lsrRatio} (< ${LSR_BUY_THRESHOLD})` : 
+                    `❌ LSR: ${lsrData.lsrRatio} (≥ ${LSR_BUY_THRESHOLD} - requerido < ${LSR_BUY_THRESHOLD} para COMPRA)`,
+                threshold: LSR_BUY_THRESHOLD,
+                timeframe: LSR_TIMEFRAME
+            };
+        } else {
+            const isValid = lsrValue > LSR_SELL_THRESHOLD;
+            return {
+                isValid: isValid,
+                lsrRatio: lsrData.lsrRatio,
+                raw: lsrValue,
+                message: isValid ? 
+                    `✅ LSR: ${lsrData.lsrRatio} (> ${LSR_SELL_THRESHOLD})` : 
+                    `❌ LSR: ${lsrData.lsrRatio} (≤ ${LSR_SELL_THRESHOLD} - requerido > ${LSR_SELL_THRESHOLD} para VENDA)`,
+                threshold: LSR_SELL_THRESHOLD,
+                timeframe: LSR_TIMEFRAME
+            };
+        }
+        
+    } catch (error) {
+        logToFile(`⚠️ Erro ao verificar critério LSR(${symbol}): ${error.message}`);
+        return {
+            isValid: true,
+            lsrRatio: "N/A",
+            message: "LSR: ⚪ Erro na verificação",
+            threshold: isBullishSignal ? LSR_BUY_THRESHOLD : LSR_SELL_THRESHOLD,
+            timeframe: LSR_TIMEFRAME
+        };
+    }
+}
+
 // Função para obter data e hora de Brasília
 function getBrazilianDateTime() {
     const now = new Date();
@@ -640,6 +762,9 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            // Verificar rate limit antes de fazer a requisição
+            await checkRateLimit(1);
+            
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
             
@@ -660,6 +785,13 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
                 
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 continue;
+            }
+            
+            // Verificar headers de rate limit da Binance
+            const usedWeight = response.headers.get('X-MBX-USED-WEIGHT-1M');
+            if (usedWeight) {
+                rateLimitCounter.usedWeight = parseInt(usedWeight);
+                rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute - rateLimitCounter.usedWeight;
             }
             
             return response;
@@ -688,6 +820,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 // Função para verificar conexão
 async function checkInternetConnection() {
     try {
+        await checkRateLimit(1);
         await fetchWithRetry('https://api.binance.com/api/v3/ping', {}, 1);
         return true;
     } catch (error) {
@@ -781,6 +914,8 @@ function formatNumber(num, symbol = null, isPrice = true) {
 // 🔵 NOVA FUNÇÃO: Buscar Funding Rate
 async function getFundingRate(symbol) {
     try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.fundingRate);
+        
         const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
         const res = await fetchWithRetry(url);
         
@@ -830,6 +965,8 @@ async function getCandlesCached(symbol, timeframe = '1h', limit = 200) {
     }
     
     try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.klines);
+        
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${timeframe}&limit=${limit}`;
         const res = await fetchWithRetry(url);
         
@@ -959,6 +1096,8 @@ async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth
 // Função para buscar Long/Short Ratio
 async function getLSR(symbol, period = '15m') {
     try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.lsr);
+        
         const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=1`;
         const res = await fetchWithRetry(url);
         
@@ -1000,6 +1139,8 @@ async function getLSR(symbol, period = '15m') {
 // Função para buscar livro de ordens
 async function getOrderBook(symbol) {
     try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.orderBook);
+        
         const url = `https://fapi.binance.com/fapi/v1/depth?symbol=${symbol}&limit=10`;
         const res = await fetchWithRetry(url);
         
@@ -1389,8 +1530,6 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
             stopPrice = entryPrice * (1 + finalStopPercentage / 100);
         }
         
-        console.log(`🎯 ${symbol} - Stop ATR: ${atrData.atr.toFixed(6)} × ${ATR_MULTIPLIER} = ${atrValueUsed.toFixed(6)} (${finalStopPercentage.toFixed(2)}%)`);
-        
     } else {
         // Fallback para stop percentual fixo
         stopType = "Fixo";
@@ -1402,8 +1541,6 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
         } else {
             stopPrice = entryPrice * (1 + stopPercentage / 100);
         }
-        
-        console.log(`⚠️ ${symbol} - ATR não disponível, usando stop fixo de ${stopPercentage}%`);
     }
     
     // 🔴 CALCULAR NÍVEIS DE ENTRADA BASEADOS EM RETRAÇÃO ATR
@@ -1453,7 +1590,7 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
 // 🔵 FUNÇÃO ATUALIZADA: Construir mensagem de alerta
 function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, targetsAndStop, 
                           rsi1h, stoch4h, stochDaily, lsrData, fundingRate, 
-                          volumeCheck, orderBook, sweepTime, emas3mData, oiCheck, volatilityCheck) {
+                          volumeCheck, orderBook, sweepTime, emas3mData, oiCheck, volatilityCheck, lsrCheck) {
     
     const title = isBullish ? '🟢 <b>🤖 COMPRA  </b>' : '🔴 <b>🤖 CORREÇÃO </b>';
     const trend = isBullish ? '🟢Tendência 💹 ema 55 1h' : '🔴Tendência 📉 ema 55 1h';
@@ -1462,7 +1599,6 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     // 🔴 ADICIONAR INFORMAÇÕES DO STOP ATR
     const stopInfo = targetsAndStop.stopType === "ATR" ? 
         `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n` +
-        `    ATR: ${targetsAndStop.atrData.atrFormatted} × ${targetsAndStop.atrMultiplier}\n` +
         `    Melhor R/R: ${targetsAndStop.bestRiskReward}:1\n` :
         `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
     
@@ -1492,10 +1628,10 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     // Adicionar alvos com Risk/Reward
     targetsAndStop.targets.forEach((target, index) => {
         const rr = target.riskReward;
-        const rrEmoji = parseFloat(rr) >= 3 ? '🎯' : parseFloat(rr) >= 2 ? '✅' : '📊';
+        const rrEmoji = parseFloat(rr) >= 3 ? '🎯' : parseFloat(rr) >= 2 ? '✅' : '⚠️';
         message += isBullish ? 
-            ` ${rrEmoji} Alvo ${index + 1} : $${target.formatted} (R/R: ${rr}:1)\n` :
-            ` ${rrEmoji} Alvo ${index + 1}: $${target.formatted} (R/R: ${rr}:1)\n`;
+            ` ${rrEmoji} Alvo ${index + 1} : $${target.formatted}\n` :
+            ` ${rrEmoji} Alvo ${index + 1}: $${target.formatted} \n`;
     });
     
     // Adicionar indicadores
@@ -1506,29 +1642,22 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` #RSI 1h: <b>${rsi1h.value}</b>\n`;
     message += ` #Stoch 4h: K=${stoch4h.k} ${stoch4h.kDirection} D=${stoch4h.d} ${stoch4h.dDirection}\n`;
     message += ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n`;
-    message += ` #LSR : <b>${lsrData.lsrRatio}</b> ${getLsrSymbol(lsrData.lsrRatio)}\n`;
+    message += ` #LSR : <b>${lsrCheck.lsrRatio}</b> ${lsrCheck.message.includes('✅') ? '✅' : lsrCheck.message.includes('❌') ? '❌' : '⚪'}\n`;
     message += ` #OI 5m: ${oiCheck.trend} <b>${oiCheck.oiFormatted}</b> (${oiCheck.historySize} pts)\n`;
-    message += ` #Volatilidade 15m: <b>${volatilityCheck.volatility}%</b> \n`;
+    message += ` #Volatilidade: <b>${volatilityCheck.volatility}%</b> \n`;
     message += ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n`;
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> (≥ ${VOLUME_RELATIVE_THRESHOLD}x)\n`;
     message += ` Liquidez Cap: ${sweepMinutes} minutos\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    message += `        <b>✔︎SMC Tecnology by @J4Rviz</b>`;
+    message += `        <b>✔︎SMC4 Tecnology by @J4Rviz</b>`;
     
     return message;
 }
 
-// Função para determinar o símbolo do LSR com base no valor
-function getLsrSymbol(lsrValue) {
-    if (lsrValue === null || lsrValue === "N/A") return '🔘Consol.';
-    const value = parseFloat(lsrValue);
-    return value <= 1.4 ? '✅Baixo' : value >= 2.8 ? '📛Alto' : '🔘Consol.';
-}
-
-// Inicializar cooldown para cada ativo
-function initAlertsCooldown() {
-    SYMBOLS.forEach(symbol => {
+// 🔵 FUNÇÃO MODIFICADA: Inicializar cooldown para todos os símbolos
+function initAlertsCooldown(symbols) {
+    symbols.forEach(symbol => {
         alertsCooldown[symbol] = {
             lastBuyConfirmation: 0,
             lastSellConfirmation: 0
@@ -1583,7 +1712,6 @@ async function detectSweeps(symbol) {
             
             // Se não passar no critério de volume, não armazenar
             if (!volumeCheck.isAboveThreshold) {
-                logToFile(`❌ Sweep rejeitado - Volume insuficiente para ${symbol}: ${volumeCheck.ratio}x < ${VOLUME_RELATIVE_THRESHOLD}x`);
                 return null;
             }
 
@@ -1592,11 +1720,9 @@ async function detectSweeps(symbol) {
             if (buySweepDetected) {
                 recentSweeps[symbol].lastBuySweep = now;
                 recentSweeps[symbol].buySweepPrice = price;
-                logToFile(`✅ Sweep Compra detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x (≥ ${VOLUME_RELATIVE_THRESHOLD}x)`);
             } else if (sellSweepDetected) {
                 recentSweeps[symbol].lastSellSweep = now;
                 recentSweeps[symbol].sellSweepPrice = price;
-                logToFile(`✅ Sweep Venda detectado para ${symbol} - Preço: $${price} - Volume: ${volumeCheck.ratio}x (≥ ${VOLUME_RELATIVE_THRESHOLD}x)`);
             }
             
             return {
@@ -1611,7 +1737,6 @@ async function detectSweeps(symbol) {
         
         return null;
     } catch (e) {
-        logToFile(`❌ Erro ao detectar sweep ${symbol}: ${e.message}`);
         return null;
     }
 }
@@ -1670,16 +1795,17 @@ async function monitorConfirmation(symbol) {
             // 🔴 NOVO CRITÉRIO: Volatilidade mínima (15 minutos)
             const volatilityCheck = await checkVolatility(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD, VOLATILITY_THRESHOLD);
             
+            // 🔴 NOVO CRITÉRIO: LSR ratio menor que 2.5 (15 minutos)
+            const lsrCheck = await checkLSRCriteria(symbol, true);
+            
             // Verificar se passa em TODOS os novos critérios
-            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid) {
-                logToFile(`❌ Confirmação Bull rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed} (${volumeCheck.volumeData.ratio}x), OI=${oiCheck.isValid}, Vol=${volatilityCheck.isValid} (${volatilityCheck.message})`);
+            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid || !lsrCheck.isValid) {
                 return null;
             }
             
             if (now - alertsCooldown[symbol].lastBuyConfirmation > COOLDOWN) {
                 // Buscar dados adicionais para a mensagem
-                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
-                    getLSR(symbol, '15m'),
+                const [orderBook, stoch4h, stochDaily] = await Promise.all([
                     getOrderBook(symbol),
                     getStochastic(symbol, '4h'),
                     getStochastic(symbol, '1d')
@@ -1698,14 +1824,15 @@ async function monitorConfirmation(symbol) {
                     rsi1h,
                     stoch4h,
                     stochDaily,
-                    lsrData,
+                    { lsrRatio: lsrCheck.lsrRatio },
                     fundingRate,
                     volumeCheck,
                     orderBook,
                     recentSweeps[symbol].lastBuySweep,
                     emas3mData,
                     oiCheck,
-                    volatilityCheck
+                    volatilityCheck,
+                    lsrCheck
                 );
                 
                 confirmationAlert = {
@@ -1719,6 +1846,7 @@ async function monitorConfirmation(symbol) {
                     volumeConfirmation: volumeCheck,
                     oiCheck: oiCheck,
                     volatilityCheck: volatilityCheck,
+                    lsrCheck: lsrCheck,
                     emas3mData: emas3mData
                 };
                 
@@ -1745,16 +1873,17 @@ async function monitorConfirmation(symbol) {
             // 🔴 NOVO CRITÉRIO: Volatilidade mínima (15 minutos)
             const volatilityCheck = await checkVolatility(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD, VOLATILITY_THRESHOLD);
             
+            // 🔴 NOVO CRITÉRIO: LSR ratio maior que 2.5 (15 minutos)
+            const lsrCheck = await checkLSRCriteria(symbol, false);
+            
             // Verificar se passa em TODOS os novos critérios
-            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid) {
-                logToFile(`❌ Confirmação Bear rejeitada para ${symbol}: Volume=${volumeCheck.isConfirmed} (${volumeCheck.volumeData.ratio}x), OI=${oiCheck.isValid}, Vol=${volatilityCheck.isValid} (${volatilityCheck.message})`);
+            if (!volumeCheck.isConfirmed || !oiCheck.isValid || !volatilityCheck.isValid || !lsrCheck.isValid) {
                 return null;
             }
             
             if (now - alertsCooldown[symbol].lastSellConfirmation > COOLDOWN) {
                 // Buscar dados adicionais
-                const [lsrData, orderBook, stoch4h, stochDaily] = await Promise.all([
-                    getLSR(symbol, '15m'),
+                const [orderBook, stoch4h, stochDaily] = await Promise.all([
                     getOrderBook(symbol),
                     getStochastic(symbol, '4h'),
                     getStochastic(symbol, '1d')
@@ -1772,14 +1901,15 @@ async function monitorConfirmation(symbol) {
                     rsi1h,
                     stoch4h,
                     stochDaily,
-                    lsrData,
+                    { lsrRatio: lsrCheck.lsrRatio },
                     fundingRate,
                     volumeCheck,
                     orderBook,
                     recentSweeps[symbol].lastSellSweep,
                     emas3mData,
                     oiCheck,
-                    volatilityCheck
+                    volatilityCheck,
+                    lsrCheck
                 );
                 
                 confirmationAlert = {
@@ -1793,6 +1923,7 @@ async function monitorConfirmation(symbol) {
                     volumeConfirmation: volumeCheck,
                     oiCheck: oiCheck,
                     volatilityCheck: volatilityCheck,
+                    lsrCheck: lsrCheck,
                     emas3mData: emas3mData
                 };
                 
@@ -1803,84 +1934,8 @@ async function monitorConfirmation(symbol) {
         return confirmationAlert;
         
     } catch (e) {
-        logToFile(`❌ Erro ao monitorar confirmação ${symbol}: ${e.message}`);
         return null;
     }
-}
-
-// Função para mostrar status do monitoramento
-function showMonitoringStatus() {
-    const now = Date.now();
-    let status = "\n📊 STATUS DO MONITORAMENTO:\n";
-    status += "=".repeat(50) + "\n";
-    
-    // Agrupar ativos em colunas
-    const symbolsPerColumn = Math.ceil(SYMBOLS.length / 3);
-    
-    for (let i = 0; i < symbolsPerColumn; i++) {
-        let line = "";
-        
-        // Coluna 1
-        if (i < SYMBOLS.length) {
-            const symbol1 = SYMBOLS[i];
-            const lastBuyConf1 = alertsCooldown[symbol1].lastBuyConfirmation;
-            const lastSellConf1 = alertsCooldown[symbol1].lastSellConfirmation;
-            
-            const buyConfCooldown1 = lastBuyConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf1)) : 0;
-            const sellConfCooldown1 = lastSellConf1 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf1)) : 0;
-            
-            const buyConfStatus1 = buyConfCooldown1 > 0 ? `⏳${Math.round(buyConfCooldown1/60000)}m` : '✅';
-            const sellConfStatus1 = sellConfCooldown1 > 0 ? `⏳${Math.round(sellConfCooldown1/60000)}m` : '✅';
-            
-            const hadBuySweep1 = recentSweeps[symbol1].lastBuySweep ? '🟢' : '⚪';
-            const hadSellSweep1 = recentSweeps[symbol1].lastSellSweep ? '🔴' : '⚪';
-            
-            line += `${symbol1.padEnd(10)} S:${hadBuySweep1}/${hadSellSweep1} | C-B:${buyConfStatus1} C-V:${sellConfStatus1} | `;
-        }
-        
-        // Coluna 2
-        if (i + symbolsPerColumn < SYMBOLS.length) {
-            const symbol2 = SYMBOLS[i + symbolsPerColumn];
-            const lastBuyConf2 = alertsCooldown[symbol2].lastBuyConfirmation;
-            const lastSellConf2 = alertsCooldown[symbol2].lastSellConfirmation;
-            
-            const buyConfCooldown2 = lastBuyConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf2)) : 0;
-            const sellConfCooldown2 = lastSellConf2 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf2)) : 0;
-            
-            const buyConfStatus2 = buyConfCooldown2 > 0 ? `⏳${Math.round(buyConfCooldown2/60000)}m` : '✅';
-            const sellConfStatus2 = sellConfCooldown2 > 0 ? `⏳${Math.round(sellConfCooldown2/60000)}m` : '✅';
-            
-            const hadBuySweep2 = recentSweeps[symbol2].lastBuySweep ? '🟢' : '⚪';
-            const hadSellSweep2 = recentSweeps[symbol2].lastSellSweep ? '🔴' : '⚪';
-            
-            line += `${symbol2.padEnd(10)} S:${hadBuySweep2}/${hadSellSweep2} | C-B:${buyConfStatus2} C-V:${sellConfStatus2} | `;
-        }
-        
-        // Coluna 3
-        if (i + symbolsPerColumn * 2 < SYMBOLS.length) {
-            const symbol3 = SYMBOLS[i + symbolsPerColumn * 2];
-            const lastBuyConf3 = alertsCooldown[symbol3].lastBuyConfirmation;
-            const lastSellConf3 = alertsCooldown[symbol3].lastSellConfirmation;
-            
-            const buyConfCooldown3 = lastBuyConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastBuyConf3)) : 0;
-            const sellConfCooldown3 = lastSellConf3 > 0 ? Math.max(0, COOLDOWN - (now - lastSellConf3)) : 0;
-            
-            const buyConfStatus3 = buyConfCooldown3 > 0 ? `⏳${Math.round(buyConfCooldown3/60000)}m` : '✅';
-            const sellConfStatus3 = sellConfCooldown3 > 0 ? `⏳${Math.round(sellConfCooldown3/60000)}m` : '✅';
-            
-            const hadBuySweep3 = recentSweeps[symbol3].lastBuySweep ? '🟢' : '⚪';
-            const hadSellSweep3 = recentSweeps[symbol3].lastSellSweep ? '🔴' : '⚪';
-            
-            line += `${symbol3.padEnd(10)} S:${hadBuySweep3}/${hadSellSweep3} | C-B:${buyConfStatus3} C-V:${sellConfStatus3}`;
-        }
-        
-        status += line + "\n";
-    }
-    
-    status += "=".repeat(50) + "\n";
-    status += "Legenda: S=Sweep (🟢=Compra, 🔴=Venda, ⚪=Nenhum), C-B=Confirmação Bull, C-V=Confirmação Bear\n";
-    status += "✅=Pronto, ⏳=Cooldown (minutos)\n";
-    console.log(status);
 }
 
 // 🔵 FUNÇÃO OTIMIZADA: Processar múltiplos ativos em paralelo
@@ -1893,24 +1948,33 @@ async function processBatch(batch, processFunction) {
     results.forEach((result, index) => {
         if (result.status === 'fulfilled' && result.value) {
             alerts.push(result.value);
-        } else if (result.status === 'rejected') {
-            const symbol = batch[index];
-            logToFile(`❌ Erro no processamento de ${symbol}: ${result.reason.message}`);
         }
     });
     
     return alerts;
 }
 
-// Loop principal do bot
+// 🔵 FUNÇÃO ATUALIZADA: Loop principal do bot
 async function mainBotLoop() {
-    // Inicializar sistema de cooldown
-    initAlertsCooldown();
+    // Buscar símbolos dinamicamente
+    console.log('\n🔍 Buscando todos os pares USDT da Binance Futures...');
+    SYMBOLS = await fetchAllFuturesSymbols();
+    
+    if (SYMBOLS.length === 0) {
+        console.log('❌ Não foi possível encontrar símbolos. Usando lista fallback.');
+        SYMBOLS = [
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+            'ADAUSDT', 'DOGEUSDT', 'MATICUSDT', 'DOTUSDT', 'LTCUSDT'
+        ];
+    }
+    
+    // Inicializar sistema de cooldown com símbolos dinâmicos
+    initAlertsCooldown(SYMBOLS);
     
     const initMsg = '\n' +
         '='.repeat(70) + '\n' +
-        ' 🤖 BOT DE CONFIRMAÇÕES SMC 1H INICIADO (ENTRADAS COM RETRAÇÃO ATR)\n' +
-        ` 📊 MONITORANDO ${SYMBOLS.length} ATIVOS\n` +
+        ' 🤖 BOT DE CONFIRMAÇÕES SMC 1H (TODOS OS PARES BINANCE FUTURES)\n' +
+        ` 📊 MONITORANDO ${SYMBOLS.length} ATIVOS DINAMICAMENTE\n` +
         ` ⚡ PROCESSAMENTO EM LOTE (${BATCH_SIZE} ATIVOS EM PARALELO)\n` +
         ` 🚫 ALERTAS DE SWEEP DESATIVADOS\n` +
         ` ✅ APENAS CONFIRMAÇÕES BULL/BEAR\n` +
@@ -1921,54 +1985,16 @@ async function mainBotLoop() {
         ` 🔰 STOP LIMITES: Mínimo ${MIN_ATR_PERCENTAGE}%, Máximo ${MAX_ATR_PERCENTAGE}%\n` +
         ` 🎯 ENTRADAS COM RETRAÇÃO ATR: Multiplicador ${ENTRY_RETRACTION_MULTIPLIER}x\n` +
         ` 📊 NÍVEIS DE ENTRADA: ${ENTRY_MIN_RETRACTION_PERCENT}% - ${ENTRY_MAX_RETRACTION_PERCENT}% retração\n` +
+        ` 🔵 FILTRO LSR: Compra < ${LSR_BUY_THRESHOLD}, Venda > ${LSR_SELL_THRESHOLD} (${LSR_TIMEFRAME})\n` +
         '='.repeat(70) + '\n';
     
     console.log(initMsg);
-    logToFile(`🤖 Bot iniciado - Monitorando ${SYMBOLS.length} ativos (entradas com retração ATR)`);
-    
-    // Mostrar configuração de casas decimais
-    console.log('\n🔧 CONFIGURAÇÃO DE CASAS DECIMAIS:');
-    console.log('='.repeat(60));
-    
-    // Mostrar em colunas
-    const symbolsPerRow = 4;
-    for (let i = 0; i < SYMBOLS.length; i += symbolsPerRow) {
-        let line = "";
-        for (let j = 0; j < symbolsPerRow && i + j < SYMBOLS.length; j++) {
-            const symbol = SYMBOLS[i + j];
-            const decimals = DECIMALS_CONFIG[symbol] || DEFAULT_DECIMALS;
-            line += `${symbol}: ${decimals}c `.padEnd(20);
-        }
-        console.log(line);
-    }
-    console.log('='.repeat(60) + '\n');
-    
-    // Mostrar configuração completa
-    console.log('🎯 CONFIGURAÇÃO COMPLETA:');
-    console.log('='.repeat(80));
-    console.log(`Alvos: ${TARGET_PERCENTAGES.map(p => p + '%').join(', ')}`);
-    console.log(`\n🔴 STOP DINÂMICO:`);
-    console.log(`  • Timeframe: ${ATR_TIMEFRAME}`);
-    console.log(`  • Período: ${ATR_PERIOD} velas`);
-    console.log(`  • Multiplicador: ${ATR_MULTIPLIER}x`);
-    console.log(`  • Stop: ${MIN_ATR_PERCENTAGE}%`);
-    console.log(`  • Stop máximo limite: ${MAX_ATR_PERCENTAGE}%`);
-    console.log(`\n📊 FILTRO DE VOLUME RELATIVO:`);
-    console.log(`  • Timeframe: 3 minutos`);
-    console.log(`  • Período: 20 velas`);
-    console.log(`  • Threshold: ${VOLUME_RELATIVE_THRESHOLD}x (≥ ${VOLUME_RELATIVE_THRESHOLD * 100 - 100}% acima da média)`);
-    console.log(`\n🎯 ENTR.RETRAÇÃO :`);
-    console.log(`  • Retração ideal: ${ENTRY_RETRACTION_MULTIPLIER}x ATR`);
-    console.log(`  • Máximo entrada: ${ENTRY_MAX_DISTANCE_MULTIPLIER}x ATR`);
-    console.log(`  • Retração: ${ENTRY_MIN_RETRACTION_PERCENT}% - ${ENTRY_MAX_RETRACTION_PERCENT}%`);
-    console.log(`  • 3 níveis de entrada para escala`);
-    console.log('='.repeat(80) + '\n');
+    logToFile(`🤖 Bot iniciado - Monitorando ${SYMBOLS.length} ativos dinamicamente`);
     
     const brDateTime = getBrazilianDateTime();
-    await sendAlert(`🤖 <b>SMC Confirmation Bot </b>\n` +
+    await sendAlert(`🤖 <b>SMC Confirmation Bot (Todos os pares Binance Futures)</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
-                    `📊 Monitorando ${SYMBOLS.length} ativos\n` +
-                    `📈 Filtro Volume: ≥ ${VOLUME_RELATIVE_THRESHOLD}x (3m)\n` +
+                    `📊 <b>Ativos monitorados:</b> ${SYMBOLS.length} pares USDT\n` +
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
@@ -1999,6 +2025,7 @@ async function mainBotLoop() {
             let confirmationAlertsSent = 0;
             
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
+            console.log(`📊 Rate Limit: ${rateLimitCounter.usedWeight}/${BINANCE_RATE_LIMIT.requestsPerMinute} (${rateLimitCounter.remainingWeight} restantes)`);
             
             // 🔵 PROCESSAR DETECÇÃO DE SWEEPS (SILENCIOSA)
             console.log('🔍 Detectando sweeps (sem alertas)...');
@@ -2024,21 +2051,8 @@ async function mainBotLoop() {
                 for (const alert of batchAlerts) {
                     console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${alert.symbol}!`);
                     console.log(`📊 ${alert.signal} - Preço: $${alert.priceFormatted}`);
-                    console.log(`📈 Volume: ${alert.volumeConfirmation.volumeData.ratio}x (≥ ${VOLUME_RELATIVE_THRESHOLD}x)`);
-                    console.log(`🔵 Open Interest: ${alert.oiCheck.trend}`);
-                    console.log(`📊 Volatilidade: ${alert.volatilityCheck.volatility}%`);
                     
-                    // 🔴 MOSTRAR NÍVEIS DE ENTRADA
-                    if (alert.targetsAndStop.entryLevels) {
-                        const entry = alert.targetsAndStop.entryLevels;
-                        console.log(`🎯 Entrada Ideal: $${entry.idealEntryFormatted} (retração ${entry.retractionPercent}%)`);
-                        console.log(`🎪 3 Níveis de Entrada:`);
-                        console.log(`   1. $${formatNumber(entry.levels[0].price, alert.symbol, true)} (Imediata)`);
-                        console.log(`   2. $${formatNumber(entry.levels[1].price, alert.symbol, true)} (Ideal)`);
-                        console.log(`   3. $${formatNumber(entry.levels[2].price, alert.symbol, true)} (Agressiva)`);
-                    }
-                    
-                    logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price} - Volume: ${alert.volumeConfirmation.volumeData.ratio}x - OI: ${alert.oiCheck.trend} - Volatilidade: ${alert.volatilityCheck.volatility}%`);
+                    logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price}`);
                     
                     await sendAlert(alert.message);
                     
@@ -2067,9 +2081,11 @@ async function mainBotLoop() {
             // 🔵 LIMPEZA DE CACHES
             cleanupCaches();
             
-            // Mostrar status a cada 10 ciclos
-            if (cycleCount % 10 === 0) {
-                showMonitoringStatus();
+            // Resetar rate limit counter se passou um minuto
+            if (Date.now() - rateLimitCounter.windowStart >= 60000) {
+                rateLimitCounter.windowStart = Date.now();
+                rateLimitCounter.usedWeight = 0;
+                rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute;
             }
 
             consecutiveErrors = 0;
@@ -2091,7 +2107,7 @@ async function mainBotLoop() {
     }
 }
 
-// Função principal com sistema de recuperação
+// 🔵 FUNÇÃO ATUALIZADA: Iniciar bot
 async function startBot() {
     try {
         initLogSystem();
@@ -2118,19 +2134,14 @@ async function startBot() {
         console.log('🔄 Reiniciando bot em 60 segundos...');
         logToFile('🔄 Reiniciando bot em 60 segundos...');
         
-        await new Promise(r => setTimeout(r, 30000));
+        await new Promise(r => setTimeout(r, 60000));
         await startBot();
     }
 }
 
 // Iniciar o bot
 console.log('\n' + '='.repeat(80));
-console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (ENTRADAS COM RETRAÇÃO ATR)');
-console.log('📈 Monitorando 76 ativos da Binance');
-console.log('🔧 Configuração SMC - Canal Limpo');
-console.log('🔴 STOP ATR AVANÇADO');
-console.log('🎯 ENTRADAS OTIMIZADAS COM RETRAÇÃO ATR - 3 NÍVEIS');
-console.log('📊 FILTRO DE VOLUME RELATIVO: ≥ 1.3x (3m, 20 períodos)');
+console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (TODOS OS PARES BINANCE FUTURES)');
 console.log('='.repeat(80) + '\n');
 
 // Verificar dependências
