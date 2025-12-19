@@ -1514,7 +1514,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` Liquidez Cap: ${sweepMinutes} minutos\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    message += `        <b>✔︎SMC2 Tecnology by @J4Rviz</b>`;
+    message += `        <b>✔︎SMC Tecnology by @J4Rviz</b>`;
     
     return message;
 }
