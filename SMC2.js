@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o';
-const TELEGRAM_CHAT_ID = '-1001';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -43,21 +43,11 @@ const BINANCE_RATE_LIMIT = {
     }
 };
 
-// 🔵 CONFIGURAÇÕES DE RISCO E POSITION SIZING
-const RISK_CONFIG = {
-    accountBalance: 1000, // Saldo da conta em USDT (ajustável)
-    riskPerTradePercent: 2, // Risco por operação (2%)
-    maxPositionSizePercent: 15, // Tamanho máximo da posição (15% do capital)
-    minRiskReward: 1.5, // Risk/Reward mínimo aceitável
-    maxRiskPerDayPercent: 5, // Risco máximo diário (5%)
+// 🔵 CONFIGURAÇÕES DE POSITION SIZING (APENAS PARA REFERÊNCIA)
+const POSITION_CONFIG = {
+    riskPerTradePercent: 2, // Risco por operação (2%) - APENAS PARA CÁLCULO REFERENCIAL
+    minRiskReward: 1.5, // Risk/Reward mínimo para referência
     kellyFraction: 0.5 // Fração do Kelly Criterion (0.5 = metade)
-};
-
-// Contador de risk daily
-const dailyRiskTracker = {
-    date: new Date().toDateString(),
-    totalRiskToday: 0,
-    tradesToday: 0
 };
 
 // Contador de rate limit
@@ -1365,7 +1355,7 @@ async function checkAbnormalVolume(symbol, multiplier = VOLUME_RELATIVE_THRESHOL
         };
         
     } catch (e) {
-        logToFile(`⚠️ Erro ao verificar volume 3m (${symbol}): ${e.message}`);
+        logToFile(`⚠️ Erro ao verificar volume 3m (${symbol}): ${error.message}`);
         return { 
             isAbnormal: false, 
             currentVolume: 0, 
@@ -1677,31 +1667,8 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
     };
 }
 
-// 🔵 NOVA FUNÇÃO: Sistema de Position Sizing Dinâmico
+// 🔵 NOVA FUNÇÃO: Sistema de Position Sizing (APENAS PARA REFERÊNCIA)
 function calculatePositionSize(entryPrice, stopPrice, isBullish, symbol) {
-    // Atualizar tracker diário
-    const today = new Date().toDateString();
-    if (today !== dailyRiskTracker.date) {
-        dailyRiskTracker.date = today;
-        dailyRiskTracker.totalRiskToday = 0;
-        dailyRiskTracker.tradesToday = 0;
-    }
-    
-    // Verificar limite diário
-    const maxDailyRisk = RISK_CONFIG.accountBalance * (RISK_CONFIG.maxRiskPerDayPercent / 100);
-    if (dailyRiskTracker.totalRiskToday >= maxDailyRisk) {
-        return {
-            size: 0,
-            riskAmount: 0,
-            positionValue: 0,
-            riskPercent: 0,
-            message: "❌ Limite diário de risco atingido",
-            canTrade: false,
-            dailyRiskUsed: dailyRiskTracker.totalRiskToday,
-            dailyRiskLimit: maxDailyRisk
-        };
-    }
-    
     // Calcular distância do stop
     const stopDistance = isBullish ? 
         entryPrice - stopPrice : 
@@ -1713,62 +1680,32 @@ function calculatePositionSize(entryPrice, stopPrice, isBullish, symbol) {
             riskAmount: 0,
             positionValue: 0,
             riskPercent: 0,
-            message: "❌ Stop inválido",
-            canTrade: false
+            message: "❌ Stop inválido para cálculo",
+            canTrade: true, // SEMPRE TRUE AGORA - SEM LIMITES
+            stopDistance: stopDistance
         };
     }
     
-    // Calcular risco por operação (Fixed Fractional)
-    const riskPerTrade = RISK_CONFIG.accountBalance * (RISK_CONFIG.riskPerTradePercent / 100);
-    
-    // Ajustar risco baseado no Kelly Criterion (simplificado)
-    const winRate = 0.55; // Supondo 55% de win rate (pode ser ajustado com histórico)
-    const avgWin = 2.0; // R:R médio de 2:1 (pode ser ajustado)
-    const kelly = winRate - ((1 - winRate) / avgWin);
-    const adjustedRisk = riskPerTrade * Math.min(kelly * RISK_CONFIG.kellyFraction, 1);
+    // 🔴 ALTERAÇÃO: SEM LIMITES - SEM VERIFICAÇÃO DE CONTA
+    // Calcular tamanho da posição baseado em 2% de risco (apenas para referência)
+    const riskPerTrade = 10000 * (POSITION_CONFIG.riskPerTradePercent / 100); // Valor fixo apenas para cálculo
     
     // Calcular tamanho da posição
-    const positionSize = adjustedRisk / stopDistance;
+    const positionSize = riskPerTrade / stopDistance;
     
     // Calcular valor da posição
     const positionValue = positionSize * entryPrice;
     
-    // Verificar limite máximo da posição
-    const maxPositionValue = RISK_CONFIG.accountBalance * (RISK_CONFIG.maxPositionSizePercent / 100);
-    
-    if (positionValue > maxPositionValue) {
-        // Ajustar para o máximo permitido
-        const adjustedSize = maxPositionValue / entryPrice;
-        const adjustedRiskAmount = adjustedSize * stopDistance;
-        
-        return {
-            size: adjustedSize,
-            riskAmount: adjustedRiskAmount,
-            positionValue: maxPositionValue,
-            riskPercent: (adjustedRiskAmount / RISK_CONFIG.accountBalance * 100).toFixed(2),
-            message: `⚠️ Posição ajustada para limite máximo (${RISK_CONFIG.maxPositionSizePercent}%)`,
-            canTrade: true,
-            stopDistance: stopDistance,
-            dailyRiskTracker: dailyRiskTracker
-        };
-    }
-    
-    // Atualizar tracker
-    dailyRiskTracker.totalRiskToday += adjustedRisk;
-    dailyRiskTracker.tradesToday += 1;
-    
     return {
         size: positionSize,
-        riskAmount: adjustedRisk,
+        riskAmount: riskPerTrade,
         positionValue: positionValue,
-        riskPercent: (adjustedRisk / RISK_CONFIG.accountBalance * 100).toFixed(2),
-        message: `✅ Position sizing calculado (${RISK_CONFIG.riskPerTradePercent}% risco)`,
-        canTrade: true,
+        riskPercent: POSITION_CONFIG.riskPerTradePercent,
+        message: `✅ Position sizing calculado (${POSITION_CONFIG.riskPerTradePercent}% risco - APENAS REFERÊNCIA)`,
+        canTrade: true, // 🔴 SEMPRE TRUE - SEM LIMITES
         stopDistance: stopDistance,
-        riskReward: avgWin,
-        dailyRiskUsed: dailyRiskTracker.totalRiskToday,
-        dailyRiskLimit: maxDailyRisk,
-        dailyRiskRemaining: maxDailyRisk - dailyRiskTracker.totalRiskToday
+        riskReward: 2.0,
+        isReferenceOnly: true // Indica que é apenas para referência
     };
 }
 
@@ -1950,14 +1887,11 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
         `    Melhor R/R: ${targetsAndStop.bestRiskReward}:1\n` :
         `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
     
-    // 🔵 ADICIONAR POSITION SIZING
-    const positionInfo = positionSize.canTrade ? 
-        `💰 <b>Position Sizing:</b>\n` +
+    // 🔵 ADICIONAR POSITION SIZING (APENAS REFERÊNCIA)
+    const positionInfo = `💰 <b>Position Sizing (REFERÊNCIA):</b>\n` +
         `    Tamanho: ${positionSize.size.toFixed(4)} contratos\n` +
-        `    Valor: $${positionSize.positionValue.toFixed(2)}\n` +
-        `    Risco: $${positionSize.riskAmount.toFixed(2)} (${positionSize.riskPercent}%)\n` +
-        `    Risco diário: ${((positionSize.dailyRiskUsed / positionSize.dailyRiskLimit) * 100).toFixed(1)}% usado\n` :
-        `⚠️ <b>Position Sizing:</b> ${positionSize.message}\n`;
+        `    Valor posição: $${positionSize.positionValue.toFixed(2)}\n` +
+        `    Risco referência: $${positionSize.riskAmount.toFixed(2)} (${positionSize.riskPercent}%)\n`;
     
     let message = `${title}\n`;
     message += `<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
@@ -1994,7 +1928,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
             ` ${rrEmoji} Alvo ${index + 1}: $${target.formatted} \n`;
     });
     
-    // Adicionar position sizing
+    // Adicionar position sizing (apenas referência)
     message += positionInfo;
     
     // Adicionar indicadores
@@ -2182,7 +2116,7 @@ async function monitorConfirmation(symbol) {
                 // 🔴 CALCULAR ALVOS E STOP DINÂMICO
                 const targetsAndStop = await calculateTargetsAndStopATR(emas3mData.currentPrice, true, symbol);
                 
-                // 🔵 CALCULAR POSITION SIZING
+                // 🔵 CALCULAR POSITION SIZING (APENAS REFERÊNCIA)
                 const positionSize = calculatePositionSize(
                     emas3mData.currentPrice, 
                     targetsAndStop.stopPrice, 
@@ -2190,11 +2124,8 @@ async function monitorConfirmation(symbol) {
                     symbol
                 );
                 
-                // Verificar se pode operar com position sizing
-                if (!positionSize.canTrade) {
-                    console.log(`⚠️ ${symbol}: ${positionSize.message}`);
-                    return null;
-                }
+                // 🔴 ALTERAÇÃO: SEM VERIFICAÇÃO DE LIMITES - SEMPRE ENVIA ALERTA
+                // O position sizing agora é apenas para referência
                 
                 // 🔵 ATUALIZAR FUNÇÃO buildAlertMessage
                 const msg = buildAlertMessage(
@@ -2283,7 +2214,7 @@ async function monitorConfirmation(symbol) {
                 // 🔴 CALCULAR ALVOS E STOP DINÂMICO
                 const targetsAndStop = await calculateTargetsAndStopATR(emas3mData.currentPrice, false, symbol);
                 
-                // 🔵 CALCULAR POSITION SIZING
+                // 🔵 CALCULAR POSITION SIZING (APENAS REFERÊNCIA)
                 const positionSize = calculatePositionSize(
                     emas3mData.currentPrice, 
                     targetsAndStop.stopPrice, 
@@ -2291,11 +2222,7 @@ async function monitorConfirmation(symbol) {
                     symbol
                 );
                 
-                // Verificar se pode operar com position sizing
-                if (!positionSize.canTrade) {
-                    console.log(`⚠️ ${symbol}: ${positionSize.message}`);
-                    return null;
-                }
+                // 🔴 ALTERAÇÃO: SEM VERIFICAÇÃO DE LIMITES - SEMPRE ENVIA ALERTA
                 
                 const msg = buildAlertMessage(
                     false,
@@ -2396,8 +2323,9 @@ async function mainBotLoop() {
         ` 📊 NÍVEIS DE ENTRADA: ${ENTRY_MIN_RETRACTION_PERCENT}% - ${ENTRY_MAX_RETRACTION_PERCENT}% retração\n` +
         ` 🔵 FILTRO LSR: Compra < ${LSR_BUY_THRESHOLD}, Venda > ${LSR_SELL_THRESHOLD} (${LSR_TIMEFRAME})\n` +
         ` 📦 COMPRESSÃO DE CACHE: ${COMPRESS_CANDLES ? 'ATIVADA' : 'DESATIVADA'}\n` +
-        ` 💰 POSITION SIZING: Risco ${RISK_CONFIG.riskPerTradePercent}% por trade\n` +
+        ` 💰 POSITION SIZING: Apenas referência (${POSITION_CONFIG.riskPerTradePercent}% risco)\n` +
         ` 📊 FILTRO DE QUALIDADE: Score mínimo ${QUALITY_THRESHOLD}/100\n` +
+        ` 🚫 SEM LIMITES DE RISCO DIÁRIO - TODOS OS ALERTAS SERÃO ENVIADOS\n` +
         '='.repeat(70) + '\n';
     
     console.log(initMsg);
@@ -2407,9 +2335,8 @@ async function mainBotLoop() {
     await sendAlert(`🤖 <b>SMC Confirmation Bot (Todos os pares Binance Futures)</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `📊 <b>Ativos monitorados:</b> ${SYMBOLS.length} pares USDT\n` +
-                    `💰 <b>Capital:</b> $${RISK_CONFIG.accountBalance}\n` +
-                    `📈 <b>Risco por trade:</b> ${RISK_CONFIG.riskPerTradePercent}%\n` +
-                    `📊 <b>Filtro de qualidade:</b> ${QUALITY_THRESHOLD}/100\n` +
+                    `📈 <b>Filtro de qualidade:</b> ${QUALITY_THRESHOLD}/100\n` +
+                    `⚠️ <b>ATENÇÃO:</b> Sem limites de risco - todos os alertas serão enviados\n` +
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
@@ -2441,8 +2368,6 @@ async function mainBotLoop() {
             
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
             console.log(`📊 Rate Limit: ${rateLimitCounter.usedWeight}/${BINANCE_RATE_LIMIT.requestsPerMinute} (${rateLimitCounter.remainingWeight} restantes)`);
-            console.log(`💰 Risco diário: $${dailyRiskTracker.totalRiskToday.toFixed(2)}/${
-                (RISK_CONFIG.accountBalance * (RISK_CONFIG.maxRiskPerDayPercent / 100)).toFixed(2)}`);
             
             // 🔵 PROCESSAR DETECÇÃO DE SWEEPS (SILENCIOSA)
             console.log('🔍 Detectando sweeps (sem alertas)...');
@@ -2469,7 +2394,7 @@ async function mainBotLoop() {
                     console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${alert.symbol}!`);
                     console.log(`📊 ${alert.signal} - Preço: $${alert.priceFormatted}`);
                     console.log(`📈 Score: ${alert.qualityScore.grade} (${alert.qualityScore.score}/100)`);
-                    console.log(`💰 Position Size: ${alert.positionSize.size.toFixed(4)} contratos`);
+                    console.log(`💰 Position Size (ref): ${alert.positionSize.size.toFixed(4)} contratos`);
                     
                     logToFile(`ALERTA CONFIRMAÇÃO ${alert.signal} - ${alert.symbol} - Preço: $${alert.price} - Score: ${alert.qualityScore.score}`);
                     
