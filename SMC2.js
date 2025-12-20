@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_';
-const TELEGRAM_CHAT_ID = '-1001990';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -45,7 +45,7 @@ const BINANCE_RATE_LIMIT = {
 
 // 🔵 CONFIGURAÇÕES DE RISCO E POSITION SIZING
 const RISK_CONFIG = {
-    accountBalance: 10000, // Saldo da conta em USDT (ajustável)
+    accountBalance: 1000, // Saldo da conta em USDT (ajustável)
     riskPerTradePercent: 2, // Risco por operação (2%)
     maxPositionSizePercent: 15, // Tamanho máximo da posição (15% do capital)
     minRiskReward: 1.5, // Risk/Reward mínimo aceitável
