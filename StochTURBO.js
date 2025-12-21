@@ -6,15 +6,15 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // Configurações do estudo
 const FRACTAL_BARS = 3;
 const N = 2;
 
 // === FILTRO DE VOLUME RELATIVO ===
-const VOLUME_RELATIVE_THRESHOLD = 1.3; // 30% acima da média
+const VOLUME_RELATIVE_THRESHOLD = 1.5; // 30% acima da média
 
 // === CONFIGURAÇÕES DE VOLATILIDADE ===
 const VOLATILITY_PERIOD = 20; // Número de velas para cálculo da volatilidade
@@ -77,7 +77,7 @@ const TARGET_PERCENTAGES = [2.5, 5.0, 8.0, 12.0];
 const ATR_PERIOD = 14; // Período para cálculo do ATR
 const ATR_MULTIPLIER = 2.5; // Multiplicador do ATR para stop mais largo
 const ATR_TIMEFRAME = '15m'; // Timeframe para cálculo do ATR
-const MIN_ATR_PERCENTAGE = 1.5; // Stop mínimo em porcentagem
+const MIN_ATR_PERCENTAGE = 2.0; // Stop mínimo em porcentagem
 const MAX_ATR_PERCENTAGE = 6.0; // Stop máximo em porcentagem
 
 // 🔴 CONFIGURAÇÕES PARA ENTRADAS COM RETRAÇÃO ATR
@@ -1963,7 +1963,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> (≥ ${VOLUME_RELATIVE_THRESHOLD}x)\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    message += `        <b>✔︎SMC VIP Tecnology by @J4Rviz</b>`;
+    message += `   <b>✔︎IA Titanium VIP Tecnology by @J4Rviz</b>`;
     
     return message;
 }
