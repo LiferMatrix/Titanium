@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_';
-const TELEGRAM_CHAT_ID = '-1001990';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // Configurações do estudo
 const FRACTAL_BARS = 3;
@@ -699,9 +699,10 @@ async function calculateATR(symbol, timeframe = ATR_TIMEFRAME, period = ATR_PERI
 
 async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
     try {
-        const candles = await getCandlesCached(symbol, ADX_1H_SETTINGS.timeframe, period + 50);
+        // O ADX precisa de mais dados para calcular corretamente
+        const candles = await getCandlesCached(symbol, ADX_1H_SETTINGS.timeframe, period * 3);
         
-        if (candles.length < period) {
+        if (candles.length < period * 2) {
             return {
                 adx: "N/A",
                 isStrongTrend: false,
@@ -714,12 +715,16 @@ async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
         const lows = candles.map(c => c.low);
         const closes = candles.map(c => c.close);
         
-        const adxValues = ADX.calculate({
+        // A função ADX.calculate retorna um array com valores ADX
+        // Precisamos garantir que temos dados suficientes
+        const adxInput = {
             high: highs,
             low: lows,
             close: closes,
             period: period
-        });
+        };
+        
+        const adxValues = ADX.calculate(adxInput);
         
         if (!adxValues || adxValues.length === 0) {
             return {
@@ -731,6 +736,17 @@ async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
         }
         
         const currentADX = adxValues[adxValues.length - 1];
+        
+        // Verificar se o valor é válido
+        if (typeof currentADX !== 'number' || isNaN(currentADX)) {
+            return {
+                adx: "N/A",
+                isStrongTrend: false,
+                message: "ADX 1h: ⚪ Valor inválido",
+                raw: null
+            };
+        }
+        
         const isStrongTrend = currentADX > ADX_1H_SETTINGS.strongTrendThreshold;
         
         return {
@@ -2131,13 +2147,12 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     
     let message = `${title}\n`;
     message += `<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
-    message += `<b>#Ativo:</b> #${symbol}\n`;
+    message += `<b>#ATIVO:</b> ${symbol}\n`;
     message += `<b>$Preço atual:</b> $${priceFormatted}\n`;
     
     message += `${qualityScore.message}\n`;
     message += `${cciTrend.message}\n`;
-    message += `${adx1h.message}\n`;
-    message += `${fundingCheck.message}\n`;
+   
     
     if (targetsAndStop.entryLevels) {
         const entry = targetsAndStop.entryLevels;
@@ -2175,7 +2190,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> (≥ ${VOLUME_RELATIVE_THRESHOLD}x)\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    message += `   <b>✔︎IA Titanium VIP Tecnology by @J4Rviz</b>`;
+    message += `   <b>✔︎IA Tecnology by @J4Rviz</b>`;
     
     return message;
 }
