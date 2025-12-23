@@ -14,7 +14,7 @@ const FRACTAL_BARS = 3;
 const N = 2;
 
 // === FILTRO DE VOLUME RELATIVO ===
-const VOLUME_RELATIVE_THRESHOLD = 1.5; // 30% acima da média
+const VOLUME_RELATIVE_THRESHOLD = 1.3; // 30% acima da média
 
 // === CONFIGURAÇÕES DE VOLATILIDADE ===
 const VOLATILITY_PERIOD = 20; // Número de velas para cálculo da volatilidade
@@ -2078,18 +2078,18 @@ async function analyzeMarketStructure(symbol) {
             orderBlocks.bullishBlocks.length > 0 &&
             fairValueGaps.bullishGaps.length > 0) {
             bias = 'bullish';
-            confluenceMessage = 'Confluence BULLISH forte';
+            confluenceMessage = 'BULLISH';
         } else if (marketStructure.structure === 'bearish' && 
                    orderBlocks.bearishBlocks.length > 0 &&
                    fairValueGaps.bearishGaps.length > 0) {
             bias = 'bearish';
-            confluenceMessage = 'Confluence BEARISH forte';
+            confluenceMessage = 'BEARISH';
         } else if (confluenceScore >= 50) {
             bias = marketStructure.structure === 'bullish' ? 'bullish' : 
                    marketStructure.structure === 'bearish' ? 'bearish' : 'neutral';
-            confluenceMessage = `Confluence ${bias.toUpperCase()} moderado`;
+            confluenceMessage = `${bias.toUpperCase()} Moderado`;
         } else {
-            confluenceMessage = 'Confluence fraco ou neutro';
+            confluenceMessage = 'Fraco/Neutro';
         }
         
         return {
@@ -2336,7 +2336,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     
     // 🔵 ADICIONAR MARKET STRUCTURE SE DISPONÍVEL
     if (msAnalysis && msAnalysis.hasValidData) {
-        message += `🏛️ ${msAnalysis.summary}\n`;
+        message += `Estrutura ${msAnalysis.summary}\n`;
     }
     
     // 🔴 ADICIONAR NÍVEIS DE ENTRADA COM RETRAÇÃO ATR
