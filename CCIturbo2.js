@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // Configurações do estudo
 const FRACTAL_BARS = 3;
@@ -699,9 +699,10 @@ async function calculateATR(symbol, timeframe = ATR_TIMEFRAME, period = ATR_PERI
 
 async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
     try {
-        const candles = await getCandlesCached(symbol, ADX_1H_SETTINGS.timeframe, period + 50);
-        
-        if (candles.length < period) {
+        // Precisamos de mais candles para o ADX calcular corretamente
+        const candles = await getCandlesCached(symbol, ADX_1H_SETTINGS.timeframe, period * 3 + 10);
+
+        if (candles.length < period * 2) {
             return {
                 adx: "N/A",
                 isStrongTrend: false,
@@ -709,18 +710,20 @@ async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
                 raw: null
             };
         }
-        
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
-        
-        const adxValues = ADX.calculate({
+
+        const highs = candles.map(c => parseFloat(c.high));
+        const lows = candles.map(c => parseFloat(c.low));
+        const closes = candles.map(c => parseFloat(c.close));
+
+        const adxInput = {
             high: highs,
             low: lows,
             close: closes,
             period: period
-        });
-        
+        };
+
+        const adxValues = ADX.calculate(adxInput);
+
         if (!adxValues || adxValues.length === 0) {
             return {
                 adx: "N/A",
@@ -729,19 +732,31 @@ async function getADX1h(symbol, period = ADX_1H_SETTINGS.period) {
                 raw: null
             };
         }
-        
-        const currentADX = adxValues[adxValues.length - 1];
+
+        // CORREÇÃO PRINCIPAL: Acessar .adx do último objeto
+        const lastResult = adxValues[adxValues.length - 1];
+        const currentADX = lastResult.adx;
+
+        if (typeof currentADX !== 'number' || isNaN(currentADX) || currentADX < 0) {
+            return {
+                adx: "N/A",
+                isStrongTrend: false,
+                message: "ADX 1h: ⚪ Valor inválido",
+                raw: null
+            };
+        }
+
         const isStrongTrend = currentADX > ADX_1H_SETTINGS.strongTrendThreshold;
-        
+
         return {
             adx: currentADX.toFixed(2),
             isStrongTrend: isStrongTrend,
             raw: currentADX,
-            message: isStrongTrend ? 
-                `✅ ADX 1h: ${currentADX.toFixed(2)} (tendência forte)` : 
+            message: isStrongTrend ?
+                `✅ ADX 1h: ${currentADX.toFixed(2)} (tendência forte)` :
                 `⚠️ ADX 1h: ${currentADX.toFixed(2)} (tendência fraca)`
         };
-        
+
     } catch (error) {
         logToFile(`⚠️ Erro ao calcular ADX 1h(${symbol}): ${error.message}`);
         return {
@@ -1044,6 +1059,48 @@ async function checkOpenInterestCriteria(symbol, isBullishSignal) {
             oiFormatted: "N/A",
             historySize: 0,
             message: "OI: ⚪ Erro na verificação"
+        };
+    }
+}
+
+async function getLSR(symbol, period = '15m') {
+    try {
+        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.lsr);
+        
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=1`;
+        const res = await fetchWithRetry(url);
+        
+        const data = await res.json();
+        
+        if (data && data.length > 0) {
+            const latest = data[0];
+            const longAccount = parseFloat(latest.longAccount);
+            const shortAccount = parseFloat(latest.shortAccount);
+            const lsrRatio = longAccount / shortAccount;
+            
+            return {
+                longAccount: longAccount.toFixed(4),
+                shortAccount: shortAccount.toFixed(4),
+                lsrRatio: lsrRatio.toFixed(4),
+                period: period,
+                raw: lsrRatio
+            };
+        }
+        return { 
+            longAccount: "N/A", 
+            shortAccount: "N/A", 
+            lsrRatio: "N/A", 
+            period: period,
+            raw: null
+        };
+    } catch (e) {
+        logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${e.message}`);
+        return { 
+            longAccount: "N/A", 
+            shortAccount: "N/A", 
+            lsrRatio: "N/A", 
+            period: period,
+            raw: null
         };
     }
 }
@@ -1465,48 +1522,6 @@ async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth
             timeframe: timeframe,
             rawK: null,
             rawD: null
-        };
-    }
-}
-
-async function getLSR(symbol, period = '15m') {
-    try {
-        await checkRateLimit(BINANCE_RATE_LIMIT.weightPerRequest.lsr);
-        
-        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=1`;
-        const res = await fetchWithRetry(url);
-        
-        const data = await res.json();
-        
-        if (data && data.length > 0) {
-            const latest = data[0];
-            const longAccount = parseFloat(latest.longAccount);
-            const shortAccount = parseFloat(latest.shortAccount);
-            const lsrRatio = longAccount / shortAccount;
-            
-            return {
-                longAccount: longAccount.toFixed(4),
-                shortAccount: shortAccount.toFixed(4),
-                lsrRatio: lsrRatio.toFixed(4),
-                period: period,
-                raw: lsrRatio
-            };
-        }
-        return { 
-            longAccount: "N/A", 
-            shortAccount: "N/A", 
-            lsrRatio: "N/A", 
-            period: period,
-            raw: null
-        };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${e.message}`);
-        return { 
-            longAccount: "N/A", 
-            shortAccount: "N/A", 
-            lsrRatio: "N/A", 
-            period: period,
-            raw: null
         };
     }
 }
@@ -2131,13 +2146,12 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     
     let message = `${title}\n`;
     message += `<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
-    message += `<b>#Ativo:</b> #${symbol}\n`;
+    message += `<b>#ATIVO:</b> ${symbol}\n`;
     message += `<b>$Preço atual:</b> $${priceFormatted}\n`;
     
     message += `${qualityScore.message}\n`;
     message += `${cciTrend.message}\n`;
-    message += `${adx1h.message}\n`;
-    message += `${fundingCheck.message}\n`;
+   
     
     if (targetsAndStop.entryLevels) {
         const entry = targetsAndStop.entryLevels;
@@ -2175,7 +2189,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> (≥ ${VOLUME_RELATIVE_THRESHOLD}x)\n`;
     message += ` Vol Bid(Compras): <b>${orderBook.bidVolume}</b>\n`;
     message += ` Vol Ask(Vendas): <b>${orderBook.askVolume}</b>\n`;
-    message += `   <b>✔︎IA Titanium VIP Tecnology by @J4Rviz</b>`;
+    message += `   <b>✔︎IA Tecnology by @J4Rviz</b>`;
     
     return message;
 }
