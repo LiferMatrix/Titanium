@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE VOLUME ADAPTATIVO ===
 const VOLUME_SETTINGS = {
@@ -56,9 +56,9 @@ const QUALITY_WEIGHTS = {
     volatility: 15,
     lsr: 15,
     rsi: 10,
-    emaAlignment: 15,     // Aumentado de 10 para 15
+    emaAlignment: 15,
     adx: 10,
-    adx1h: 15            // ADX 1h agora tem peso próprio
+    adx1h: 15
 };
 
 // 🔵 CONFIGURAÇÃO DINÂMICA
@@ -712,8 +712,8 @@ async function getADX(symbol, period = ADX_SETTINGS.period) {
             isStrongTrend: isStrongTrend,
             raw: currentADX,
             message: isStrongTrend ?
-                `✅ ADX ${ADX_SETTINGS.timeframe}: ${currentADX.toFixed(2)} (tendência forte)` :
-                `⚠️ ADX ${ADX_SETTINGS.timeframe}: ${currentADX.toFixed(2)} (tendência fraca)`
+                `✅ ADX ${ADX_SETTINGS.timeframe}: ${currentADX.toFixed(2)} (Forte)` :
+                `⚠️ ADX ${ADX_SETTINGS.timeframe}: ${currentADX.toFixed(2)} (Regular)`
         };
 
     } catch (error) {
@@ -836,8 +836,8 @@ async function getFundingRate(symbol) {
             raw: null,
             formatted: "N/A"
         };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar Funding Rate(${symbol}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar Funding Rate(${symbol}): ${error.message}`);
         return { 
             rate: "N/A", 
             emoji: "", 
@@ -949,6 +949,7 @@ async function getOpenInterestWithSMA(symbol) {
                 }
             }
         } catch (historicalError) {
+            // Ignora erro da API histórica
         }
         
         if (!useHistoricalAPI) {
@@ -1127,8 +1128,8 @@ async function getLSR(symbol, period = '15m') {
             period: period,
             raw: null
         };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar LSR(${symbol}, ${period}): ${error.message}`);
         return { 
             longAccount: "N/A", 
             shortAccount: "N/A", 
@@ -1234,13 +1235,13 @@ function cleanupOldLogs() {
                 try {
                     fs.unlinkSync(file.path);
                     logToFile(`🗑️ Log antigo removido: ${file.name}`);
-                } catch (e) {
-                    console.error(`Erro ao remover log: ${e.message}`);
+                } catch (error) {
+                    console.error(`Erro ao remover log: ${error.message}`);
                 }
             });
         }
-    } catch (e) {
-        console.error(`Erro na limpeza de logs: ${e.message}`);
+    } catch (error) {
+        console.error(`Erro na limpeza de logs: ${error.message}`);
     }
 }
 
@@ -1260,8 +1261,8 @@ function logToFile(message) {
         
         const logMessage = `[${timestamp}] ${message}\n`;
         fs.appendFileSync(logFile, logMessage);
-    } catch (e) {
-        console.error(`Erro ao escrever log: ${e.message}`);
+    } catch (error) {
+        console.error(`Erro ao escrever log: ${error.message}`);
     }
 }
 
@@ -1455,8 +1456,8 @@ async function getCandlesCached(symbol, timeframe = '15m', limit = 200) {
         
         return candles;
         
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar candles(${symbol}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar candles(${symbol}): ${error.message}`);
         return [];
     }
 }
@@ -1487,8 +1488,8 @@ async function getRSI(symbol, timeframe, period = 14) {
             timeframe: timeframe,
             raw: currentRSI
         };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar RSI(${symbol}, ${timeframe}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar RSI(${symbol}, ${timeframe}): ${error.message}`);
         return { value: "N/A", timeframe: timeframe, raw: null };
     }
 }
@@ -1546,8 +1547,8 @@ async function getStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, smooth
             rawK: currentStoch.k,
             rawD: currentStoch.d
         };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar Estocástico(${symbol}, ${timeframe}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar Estocástico(${symbol}, ${timeframe}): ${error.message}`);
         return { 
             k: "N/A", 
             d: "N/A", 
@@ -1582,8 +1583,8 @@ async function getOrderBook(symbol) {
             askVolume: formatNumber(askVolume, symbol, false),
             spread: bestBid > 0 ? ((bestAsk - bestBid) / bestBid * 10000).toFixed(2) : "N/A"
         };
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar Order Book(${symbol}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar Order Book(${symbol}): ${error.message}`);
         return {
             bestBid: "N/A",
             bestAsk: "N/A",
@@ -1628,8 +1629,8 @@ async function sendAlert(text, maxRetries = 3) {
             console.log('✅ Alerta enviado com sucesso para Telegram');
             return true;
             
-        } catch (e) {
-            logToFile(`❌ Erro ao enviar Telegram (tentativa ${attempt}/${maxRetries}): ${e.message}`);
+        } catch (error) {
+            logToFile(`❌ Erro ao enviar Telegram (tentativa ${attempt}/${maxRetries}): ${error.message}`);
             
             if (attempt < maxRetries) {
                 const delay = 2000 * Math.pow(2, attempt - 1);
@@ -1690,13 +1691,13 @@ async function checkAbnormalVolume(symbol, multiplier = VOLUME_SETTINGS.baseThre
             isAboveThreshold: ratio >= multiplier
         };
         
-    } catch (e) {
+    } catch (error) {
         logToFile(`⚠️ Erro ao verificar volume 3m (${symbol}): ${error.message}`);
         return { 
             isAbnormal: false, 
             currentVolume: 0, 
             avgVolume: 0, 
-                ratio: 0,
+            ratio: 0,
             open: 0,
             close: 0,
             high: 0,
@@ -1790,8 +1791,8 @@ async function getEMAs3m(symbol) {
             previousEma34: previousEma34
         };
         
-    } catch (e) {
-        logToFile(`⚠️ Erro ao buscar EMAs 3m (${symbol}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro ao buscar EMAs 3m (${symbol}): ${error.message}`);
         return {
             ema13: "N/A",
             ema34: "N/A",
@@ -2555,8 +2556,8 @@ async function monitorSignals(symbol) {
         
         return signalAlert;
         
-    } catch (e) {
-        logToFile(`⚠️ Erro no monitorSignals(${symbol}): ${e.message}`);
+    } catch (error) {
+        logToFile(`⚠️ Erro no monitorSignals(${symbol}): ${error.message}`);
         return null;
     }
 }
@@ -2592,27 +2593,28 @@ async function mainBotLoop() {
     
     const initMsg = '\n' +
         '='.repeat(70) + '\n' +
-        ` 🤖 BOT DE SINAIS SMC - VERSÃO FINAL\n` +
+        ` 🤖 BOT DE SINAIS SMC - VERSÃO FINAL (BUG FIXED)\n` +
         ` 📊 MONITORANDO ${SYMBOLS.length} ATIVOS DINAMICAMENTE\n` +
         ` ⚡ PROCESSAMENTO EM LOTE (${BATCH_SIZE} ATIVOS EM PARALELO)\n` +
         ` 🎯 MODIFICAÇÕES APLICADAS:\n` +
         `   1. ✅ REMOVIDO: Todos os critérios RSI Trigger 15min\n` +
         `   2. ✅ ADICIONADO: Critério ADX 1h obrigatório (≥ ${ADX_1H_SETTINGS.minStrength})\n` +
-        `   3. ✅ Volume Adaptativo: ${VOLUME_SETTINGS.baseThreshold}x base\n` +
-        `   4. ✅ Cooldown Diferenciado: ${COOLDOWN_SETTINGS.sameDirection/60000}min mesma direção\n` +
-        `   5. ✅ Alertas Quase Sinal: ${DEBUG_SETTINGS.enableNearSignals ? 'ATIVADO' : 'DESATIVADO'}\n` +
+        `   3. ✅ BUG FIXED: Todos os catch(error) corrigidos para usar error.message\n` +
+        `   4. ✅ Volume Adaptativo: ${VOLUME_SETTINGS.baseThreshold}x base\n` +
+        `   5. ✅ Cooldown Diferenciado: ${COOLDOWN_SETTINGS.sameDirection/60000}min mesma direção\n` +
         '='.repeat(70) + '\n';
     
     console.log(initMsg);
-    logToFile(`🤖 Bot iniciado com critérios finais - Monitorando ${SYMBOLS.length} ativos`);
+    logToFile(`🤖 Bot iniciado com critérios finais e bug fix - Monitorando ${SYMBOLS.length} ativos`);
     
     const brDateTime = getBrazilianDateTime();
-    await sendAlert(`🤖 <b>SMC BOT - VERSÃO FINAL</b>\n` +
+    await sendAlert(`🤖 <b>SMC BOT - VERSÃO FINAL (BUG FIXED)</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `📊 <b>Ativos monitorados:</b> ${SYMBOLS.length} pares USDT\n` +
                     `🎯 <b>Modificações aplicadas:</b>\n` +
                     `   • ❌ REMOVIDO: Todos os critérios RSI Trigger 15min\n` +
                     `   • ✅ ADICIONADO: Critério ADX 1h obrigatório (≥ ${ADX_1H_SETTINGS.minStrength})\n` +
+                    `   • 🐛 BUG FIXED: Todos os erros de catch corrigidos\n` +
                     `   • 📊 Volume threshold adaptativo (${VOLUME_SETTINGS.baseThreshold}x base)\n` +
                     `   • ⏱️ Cooldown diferenciado por direção\n` +
                     `⚠️ <b>ATENÇÃO:</b> Testar em conta demo primeiro\n` +
@@ -2693,9 +2695,9 @@ async function mainBotLoop() {
             
             await new Promise(r => setTimeout(r, 60000));
 
-        } catch (e) {
+        } catch (error) {
             consecutiveErrors++;
-            const errorMsg = `Erro no loop principal (${consecutiveErrors}): ${e.message}`;
+            const errorMsg = `Erro no loop principal (${consecutiveErrors}): ${error.message}`;
             console.log(`\n❌ ${errorMsg}`);
             logToFile(`❌ ${errorMsg}`);
             
@@ -2737,17 +2739,17 @@ async function startBot() {
 }
 
 console.log('\n' + '='.repeat(80));
-console.log(`🤖 BOT DE SINAIS SMC - VERSÃO FINAL`);
+console.log(`🤖 BOT DE SINAIS SMC - VERSÃO FINAL (BUG FIXED)`);
 console.log(`❌ REMOVIDO: Todos os critérios RSI Trigger 15min`);
 console.log(`✅ ADICIONADO: Critério ADX 1h obrigatório (≥ ${ADX_1H_SETTINGS.minStrength})`);
+console.log(`🐛 BUG FIXED: Todos os catch(error) corrigidos para usar error.message`);
 console.log(`📊 VOLUME ADAPTATIVO: ${VOLUME_SETTINGS.baseThreshold}x base (${VOLUME_SETTINGS.minThreshold}-${VOLUME_SETTINGS.maxThreshold}x)`);
 console.log(`⏱️ COOLDOWN DIFERENCIADO: ${COOLDOWN_SETTINGS.sameDirection/60000}min mesma direção, ${COOLDOWN_SETTINGS.oppositeDirection/60000}min oposta`);
-console.log(`🔔 ALERTAS QUASE SINAL: ${DEBUG_SETTINGS.enableNearSignals ? 'ATIVADO' : 'DESATIVADO'}`);
 console.log('='.repeat(80) + '\n');
 
 try {
     require('technicalindicators');
-} catch (e) {
+} catch (error) {
     console.log('⚠️ technicalindicators não encontrado. Instale com: npm install technicalindicators');
     process.exit(1);
 }
