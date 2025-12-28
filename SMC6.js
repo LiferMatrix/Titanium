@@ -6,20 +6,20 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
 const N = 2;
 
 // === FILTRO DE VOLUME RELATIVO ===
-const VOLUME_RELATIVE_THRESHOLD = 1.3; // 30% acima da média
+const VOLUME_RELATIVE_THRESHOLD = 1.5; // 30% acima da média
 
 // === CONFIGURAÇÕES DE VOLATILIDADE ===
 const VOLATILITY_PERIOD = 20; // Número de velas para cálculo da volatilidade
 const VOLATILITY_TIMEFRAME = '15m'; // Alterado para 15 minutos
-const VOLATILITY_THRESHOLD = 0.5; // 0.5% de volatilidade mínima
+const VOLATILITY_THRESHOLD = 0.7; // 0.5% de volatilidade mínima
 
 // === FILTRO DO LSR RATIO ===
 const LSR_TIMEFRAME = '15m'; // Timeframe para LSR
@@ -189,10 +189,10 @@ async function getADX(symbol, timeframe = '15m', period = 14) {
         
         // Determinar força do ADX
         let strength = "";
-        if (latestADX.adx >= 40) strength = "Muito Forte 📈";
-        else if (latestADX.adx >= 25) strength = "Forte ✅";
-        else if (latestADX.adx >= 20) strength = "Moderada ⚠️";
-        else strength = "Fraca ❌";
+        if (latestADX.adx >= 40) strength = "Forte 📈";
+        else if (latestADX.adx >= 25) strength = "Bom ✅";
+        else if (latestADX.adx >= 20) strength = "Regular ⚠️";
+        else strength = "Fraco ❌";
         
         return {
             adx: latestADX.adx.toFixed(2),
@@ -1936,7 +1936,7 @@ async function calculateSignalQuality(symbol, isBullish, volumeCheck, oiCheck, v
         details: details,
         isAcceptable: score >= QUALITY_THRESHOLD,
         threshold: QUALITY_THRESHOLD,
-        message: `${emoji} Probabilidade: ${grade} (${Math.round(score)}/100) ${score >= QUALITY_THRESHOLD ? '✅' : '❌'}`
+        message: `${emoji} SCORE Classe: ${grade} (${Math.round(score)}/100) ${score >= QUALITY_THRESHOLD ? '✅' : '❌'}`
     };
 }
 
@@ -1946,7 +1946,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
                           volumeCheck, orderBook, sweepTime, emas3mData, oiCheck, volatilityCheck, lsrCheck,
                           qualityScore, adx15m, adx1h) {
     
-    const title = isBullish ? '🟢 <b>🤖 COMPRA  </b>' : '🔴 <b>🤖 CORREÇÃO </b>';
+    const title = isBullish ? '🤖IA Análise <b>🟢COMPRA🟢  </b>' : '🤖IA Análise <b>🔴CORREÇÃO🔴 </b>';
     const trend = isBullish ? '🟢Tendência 💹 ema 55 1h' : '🔴Tendência 📉 ema 55 1h';
     const sweepMinutes = sweepTime ? Math.round((Date.now() - sweepTime) / 60000) : 0;
     
@@ -1957,7 +1957,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
         `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)\n`;
     
     let message = `${title}\n`;
-    message += `<b>Alertou:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
+    message += `<b>Operação:</b> ${brDateTime.date} - ${brDateTime.time}\n`;
     message += `<b>#Ativo:</b> #${symbol}\n`;
     message += `<b>$Preço atual:</b> $${priceFormatted}\n`;
     
@@ -1968,11 +1968,11 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     if (targetsAndStop.entryLevels) {
         const entry = targetsAndStop.entryLevels;
         if (isBullish) {
-            message += `<b>  Entrada Sugerida:</b>\n`;
+            message += `<b>  🔹Entrada Sugerida:</b>\n`;
             message += `    $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
             message += `    $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
         } else {
-            message += `<b>  Entrada Sugerida:</b>\n`;
+            message += `<b>  🔹Entrada Sugerida:</b>\n`;
             message += `    $${formatNumber(entry.levels[0].price, symbol, true)} (Imediata)\n`;
             message += `    $${formatNumber(entry.levels[2].price, symbol, true)} (Agressiva)\n`;
         }
@@ -1985,7 +1985,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     // Adicionar alvos com Risk/Reward
     targetsAndStop.targets.forEach((target, index) => {
         const rr = target.riskReward;
-        const rrEmoji = parseFloat(rr) >= 3 ? '🎯' : parseFloat(rr) >= 2 ? '✅' : '⚠️';
+        const rrEmoji = parseFloat(rr) >= 3 ? '' : parseFloat(rr) >= 2 ? '' : '';
         message += isBullish ? 
             ` ${rrEmoji} Alvo ${index + 1} : $${target.formatted}\n` :
             ` ${rrEmoji} Alvo ${index + 1}: $${target.formatted} \n`;
@@ -2005,7 +2005,7 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     message += ` #Stoch 1D: K=${stochDaily.k} ${stochDaily.kDirection} D=${stochDaily.d} ${stochDaily.dDirection}\n`;
     message += ` #LSR : <b>${lsrCheck.lsrRatio}</b> ${lsrCheck.message.includes('✅') ? '✅' : lsrCheck.message.includes('❌') ? '❌' : '⚪'}\n`;
     message += ` #OI 5m: ${oiCheck.trend} <b>${oiCheck.oiFormatted}</b> (${oiCheck.historySize} pts)\n`;
-    message += ` #Volatilidade: <b>${volatilityCheck.volatility}%</b> \n`;
+    message += ` 💥VOLATILIDADE: <b>${volatilityCheck.volatility}%</b> \n`;
     message += ` #Fund.R: ${fundingRate.emoji} <b>${fundingRate.rate}%</b>\n`;
     message += ` Vol 3m: <b>${volumeCheck.volumeData.ratio}x</b> (≥ ${VOLUME_RELATIVE_THRESHOLD}x)\n`;
     message += ` Liquidez Cap: ${sweepMinutes} minutos\n`;
