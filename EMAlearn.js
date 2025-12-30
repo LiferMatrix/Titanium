@@ -6,12 +6,12 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
-const LIVE_MODE = true; // 🔥 AGORA É TRUE - MODO REAL ATIVADO
-const DRY_RUN_PREFIX = '[TESTE] '; // Prefixo mantido para logs
+const LIVE_MODE = true; // 
+const DRY_RUN_PREFIX = ' '; 
 
 // === CONFIGURAÇÕES OTIMIZADAS ===
 const VOLUME_SETTINGS = {
@@ -41,9 +41,9 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 70;
+const QUALITY_THRESHOLD = 65;
 const QUALITY_WEIGHTS = {
-    volume: 20,           // Reduzido de 25 para 20
+    volume: 20,           
     oi: 10,
     volatility: 10,
     lsr: 10,
@@ -52,8 +52,8 @@ const QUALITY_WEIGHTS = {
     adx: 5,
     adx1h: 15,
     stoch1h: 5,
-    stoch4h: 10,          // NOVO: Stochastic 4h
-    cci4h: 15             // NOVO: CCI 4h
+    stoch4h: 10,          
+    cci4h: 15             
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -649,7 +649,7 @@ class AdvancedLearningSystem {
             }
             
             const message = `
-🧠 <b>RELATÓRIO DE PERFORMANCE - APRENDIZADO</b>
+🧠 <b>RELATÓRIO DE PERFORMANCE</b>
 
 📊 <b>ESTATÍSTICAS:</b>
 • Trades Fechados: <b>${report.totalTrades}</b>
@@ -670,7 +670,7 @@ ${report.worstPatterns.map(([pattern, count]) => `• ${pattern}: ${count} trade
 • ADX Mínimo: <b>${ADX_1H_SETTINGS.minStrength.toFixed(1)}</b>
 • Quality Threshold: <b>${QUALITY_THRESHOLD}</b>
 
-🔧 <i>Sistema em aprendizado contínuo</i>
+🔧 <i>IA em aprendizado contínuo</i>
 🔔 by @J4Rviz.
             `;
             
@@ -1464,15 +1464,15 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume, 
             QUALITY_WEIGHTS.volume * (marketData.volume.rawRatio / 2.0));
         score += volumeScore;
-        details.push(`📊 Volume 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${marketData.volume.rawRatio.toFixed(2)}x)`);
+        details.push(` Vol 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${marketData.volume.rawRatio.toFixed(2)}x)`);
     } else {
-        failedChecks.push(`Volume 3m: ${marketData.volume?.rawRatio.toFixed(2) || 0}x < ${VOLUME_SETTINGS.baseThreshold}x`);
+        failedChecks.push(`Vol 3m: ${marketData.volume?.rawRatio.toFixed(2) || 0}x < ${VOLUME_SETTINGS.baseThreshold}x`);
     }
     
     if (marketData.volatility && marketData.volatility.isValid) {
         const volScore = QUALITY_WEIGHTS.volatility;
         score += volScore;
-        details.push(`📊 Volatilidade 15m: ${volScore}/${QUALITY_WEIGHTS.volatility} (${marketData.volatility.rawVolatility.toFixed(2)}%)`);
+        details.push(` Volatilidade 15m: ${volScore}/${QUALITY_WEIGHTS.volatility} (${marketData.volatility.rawVolatility.toFixed(2)}%)`);
     } else {
         failedChecks.push(`Volatilidade 15m: ${marketData.volatility?.rawVolatility.toFixed(2) || 0}% < ${VOLATILITY_THRESHOLD}%`);
     }
@@ -1480,9 +1480,9 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.lsr && marketData.lsr.isValid) {
         const lsrScore = QUALITY_WEIGHTS.lsr;
         score += lsrScore;
-        details.push(`📊 LSR 15m: ${lsrScore}/${QUALITY_WEIGHTS.lsr} (${marketData.lsr.lsrRatio.toFixed(2)} ratio)`);
+        details.push(` LSR : ${lsrScore}/${QUALITY_WEIGHTS.lsr} (${marketData.lsr.lsrRatio.toFixed(2)} `);
     } else {
-        failedChecks.push(`LSR 15m: ${marketData.lsr?.lsrRatio.toFixed(2) || 0} ${isBullish ? '>' : '<='} ${LSR_BUY_THRESHOLD}`);
+        failedChecks.push(`LSR : ${marketData.lsr?.lsrRatio.toFixed(2) || 0} ${isBullish ? '>' : '<='} ${LSR_BUY_THRESHOLD}`);
     }
     
     // ALTERADO: RSI < 60 para compra, > 60 para venda
@@ -1492,12 +1492,12 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         
         if (isBullish && rsiValue < 60) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(`📊 RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} < 60 ideal para compra)`);
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrevendido)`);
         } else if (!isBullish && rsiValue > 60) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(`📊 RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} > 60 ideal para venda)`);
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrecomprado`);
         } else {
-            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 60'} (${isBullish ? 'compra precisa RSI < 60' : 'venda precisa RSI > 60'})`);
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 60'} (${isBullish ? 'RSI < 60' : ' RSI > 60'})`);
         }
         score += rsiScore;
     }
@@ -1505,7 +1505,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.adx1h && marketData.adx1h.raw >= ADX_1H_SETTINGS.minStrength) {
         const adxScore = QUALITY_WEIGHTS.adx1h;
         score += adxScore;
-        details.push(`📊 ADX 1h: ${adxScore}/${QUALITY_WEIGHTS.adx1h} (${marketData.adx1h.raw.toFixed(2)} ≥ ${ADX_1H_SETTINGS.minStrength})`);
+        details.push(` ADX 1h: ${adxScore}/${QUALITY_WEIGHTS.adx1h} (${marketData.adx1h.raw.toFixed(2)} ≥ ${ADX_1H_SETTINGS.minStrength})`);
     } else {
         failedChecks.push(`ADX 1h: ${marketData.adx1h?.raw?.toFixed(2) || 0} < ${ADX_1H_SETTINGS.minStrength}`);
     }
@@ -1517,7 +1517,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         if (isEmaValid) {
             const emaScore = QUALITY_WEIGHTS.emaAlignment;
             score += emaScore;
-            details.push(`📊 EMA 3m: ${emaScore}/${QUALITY_WEIGHTS.emaAlignment} (alinhamento ${isBullish ? 'bullish' : 'bearish'})`);
+            details.push(` EMA 3m: ${emaScore}/${QUALITY_WEIGHTS.emaAlignment}  ${isBullish ? 'bullish' : 'bearish'})`);
         } else {
             failedChecks.push(`EMA 3m: Alinhamento incorreto`);
         }
@@ -1526,7 +1526,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.stoch && marketData.stoch.isValid) {
         const stochScore = QUALITY_WEIGHTS.stoch1h;
         score += stochScore;
-        details.push(`📊 Stoch 1h: ${stochScore}/${QUALITY_WEIGHTS.stoch1h} (cruzamento confirmado)`);
+        details.push(` Stoch 1h: ${stochScore}/${QUALITY_WEIGHTS.stoch1h} (cruzamento confirmado)`);
     } else {
         failedChecks.push(`Stoch 1h: Sem cruzamento`);
     }
@@ -1535,9 +1535,9 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.stoch4h && marketData.stoch4h.isValid) {
         const stoch4hScore = QUALITY_WEIGHTS.stoch4h;
         score += stoch4hScore;
-        details.push(`📊 Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h} (cruzamento ${isBullish ? 'bullish' : 'bearish'} confirmado)`);
+        details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h}  ${isBullish ? 'bullish' : 'bearish'} `);
     } else {
-        failedChecks.push(`Stoch 4h: Sem cruzamento ${isBullish ? 'bullish' : 'bearish'} no 4h`);
+        failedChecks.push(`Stoch 4h:  ${isBullish ? 'bullish' : 'bearish'} `);
     }
     
     // NOVO: CCI 4H
@@ -1545,7 +1545,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         const cci4hScore = QUALITY_WEIGHTS.cci4h;
         score += cci4hScore;
         const deviation = marketData.cci4h.deviation.toFixed(2);
-        details.push(`📈 CCI 4h: ${cci4hScore}/${QUALITY_WEIGHTS.cci4h} (${marketData.cci4h.value.toFixed(2)} ${isBullish ? '>' : '<'} ${marketData.cci4h.maValue.toFixed(2)} MMS, dev: ${deviation})`);
+        details.push(` CCI 4h: ${cci4hScore}/${QUALITY_WEIGHTS.cci4h} (${marketData.cci4h.value.toFixed(2)} ${isBullish ? '>' : '<'} ${marketData.cci4h.maValue.toFixed(2)} MMS, dev: ${deviation})`);
     } else {
         failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
     }
@@ -1553,14 +1553,14 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.oi && marketData.oi.isValid) {
         const oiScore = QUALITY_WEIGHTS.oi;
         score += oiScore;
-        details.push(`📊 OI: ${oiScore}/${QUALITY_WEIGHTS.oi} (${marketData.oi.trend} tendência)`);
+        details.push(` OI: ${oiScore}/${QUALITY_WEIGHTS.oi} (${marketData.oi.trend} tendência)`);
     } else {
         failedChecks.push(`OI: Tendência ${marketData.oi?.trend || 'indefinida'} não confirma`);
     }
     
     if (marketData.funding && marketData.funding.isValid) {
         score += 5;
-        details.push(`💰 Funding: +5/${5} (${(marketData.funding.raw * 100).toFixed(4)}% ${isBullish ? 'negativo' : 'positivo'})`);
+        details.push(` Fund. Rate: +5/${5} (${(marketData.funding.raw * 100).toFixed(4)}% ${isBullish ? 'negativo' : 'positivo'})`);
     }
     
     let grade, emoji;
@@ -1586,7 +1586,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks: failedChecks,
         isAcceptable: score >= QUALITY_THRESHOLD,
         threshold: QUALITY_THRESHOLD,
-        message: `${emoji} Score: ${grade} (${Math.round(score)}/100)`
+        message: `${emoji} SCORE: ${grade} (${Math.round(score)}/100)`
     };
 }
 
@@ -1779,19 +1779,19 @@ async function monitorSymbol(symbol) {
         
         if (!isBullish && !isBearish) return null;
         
-        // ALTERADO: RSI < 60 para compra, > 60 para venda
-        if (isBullish && rsiData.value >= 60) return null;      // RSI ≥ 60 não é bom para compra
-        if (isBearish && rsiData.value <= 60) return null;      // RSI ≤ 60 não é bom para venda
+        
+        if (isBullish && rsiData.value >= 60) return null;      
+        if (isBearish && rsiData.value <= 60) return null;      
         
         // ADICIONADOS NOVOS INDICADORES: Stochastic 4h e CCI 4h
         const [volumeData, volatilityData, lsrData, adx1hData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
-            checkVolume(symbol),      // AGORA EM 3m
-            checkVolatility(symbol),  // MANTIDO EM 15m
+            checkVolume(symbol),      
+            checkVolatility(symbol),  
             checkLSR(symbol, isBullish),
             getADX1h(symbol),
             checkStochastic(symbol, isBullish),
-            checkStochastic4h(symbol, isBullish),  // NOVO: Stochastic 4h
-            checkCCI4h(symbol, isBullish),         // NOVO: CCI 4h
+            checkStochastic4h(symbol, isBullish),  
+            checkCCI4h(symbol, isBullish),         
             checkOpenInterest(symbol, isBullish),
             checkFundingRate(symbol, isBullish)
         ]);
@@ -1805,8 +1805,8 @@ async function monitorSymbol(symbol) {
             rsi: rsiData,
             adx1h: adx1hData,
             stoch: stochData,
-            stoch4h: stoch4hData,  // NOVO
-            cci4h: cci4hData,      // NOVO
+            stoch4h: stoch4hData, 
+            cci4h: cci4hData,     
             oi: oiData,
             funding: fundingData,
             ema: {
@@ -1880,37 +1880,32 @@ function cleanupCaches() {
 async function sendSignalAlert(signal) {
     try {
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
-        const directionEmoji = signal.isBullish ? '📈' : '📉';
+        const directionEmoji = signal.isBullish ? '🟢' : '🔴';
+        const stopPrice = signal.targetsData.stopPrice; 
         
-        // Mensagem atualizada com os novos indicadores
+        
         const message = `
-${directionEmoji} <b>SINAL DE ${direction} DETECTADO - ${signal.symbol}</b>
+${directionEmoji} <b>🤖 IA Análise ${direction} - ${signal.symbol}</b>
 
-💰 <b>Preço Atual:</b> $${signal.price.toFixed(4)}
-🎯 <b>Qualidade:</b> ${signal.qualityScore.grade} (${signal.qualityScore.score}/100)
+ <b>Preço Atual:</b> $${signal.price.toFixed(4)}
+ <b>SCORE:</b> ${signal.qualityScore.grade} (${signal.qualityScore.score}/100)
+ <b>Operação:</b> ${getBrazilianDateTime().full}
 
-📊 <b>Indicadores:</b>
+ <b>Indicadores/Sentimento:</b>
 ${signal.qualityScore.details.join('\n')}
 
-🛑 <b>Stop Loss:</b> ${signal.targetsData.stopPercentage}%
-🎯 <b>Melhor Risk/Reward:</b> ${signal.targetsData.bestRiskReward}:1
+🛑 <b>Stop:</b> $${stopPrice.toFixed(4)} (${signal.targetsData.stopPercentage}%)
+ <b>Risco/Retorno:</b> ${signal.targetsData.bestRiskReward}:1
 
-🎯 <b>Alvos Sugeridos:</b>
+ <b>Alvos Sugeridos:</b>
 ${signal.targetsData.targets.slice(0, 3).map((target, index) => 
-    `• Target ${index + 1}: $${target.price} (${target.target}%) | R/R: ${target.riskReward}:1`
+    `• Target ${index + 1}: $${target.price} (${target.target}%)`
 ).join('\n')}
 
-📅 <b>Horário BR:</b> ${getBrazilianDateTime().full}
-🧠 <b>Sistema com Aprendizado Automático</b>
-📈 <b>Indicadores 4h Ativos:</b> Stochastic e CCI
+🧠 <b> Trade Aprendizado Automático</b>
 
-⚠️ <b>Gestão de Risco:</b>
-• Sempre use stop loss
-• Gerenciar alvos progressivamente
-• Ajustar tamanho da posição
-
-${LIVE_MODE ? '🚀 **MODO REAL ATIVO**' : '🧪 **MODO DRY-RUN (TESTE)**'}
-🔔 by @J4Rviz.
+${LIVE_MODE ? ' System Titanium' : '🧪 **MODO DRY-RUN **'}
+ by @J4Rviz.
         `;
         
         await sendTelegramAlert(message, !LIVE_MODE);
