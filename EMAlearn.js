@@ -10,8 +10,8 @@ const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
 const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
-const LIVE_MODE = false; // false = dry-run (apenas logs), true = envia alertas reais
-const DRY_RUN_PREFIX = '[DRY-RUN] '; // Prefixo para alerts em modo teste
+const LIVE_MODE = true; // 🔥 AGORA É TRUE - MODO REAL ATIVADO
+const DRY_RUN_PREFIX = '[TESTE] '; // Prefixo mantido para logs
 
 // === CONFIGURAÇÕES OTIMIZADAS ===
 const VOLUME_SETTINGS = {
@@ -41,7 +41,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 65;
+const QUALITY_THRESHOLD = 70;
 const QUALITY_WEIGHTS = {
     volume: 20,           // Reduzido de 25 para 20
     oi: 10,
