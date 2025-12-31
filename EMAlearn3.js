@@ -5,9 +5,10 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-// === CONFIGURE AQUI SEU BOT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID = '-100255';
+// === CONFIGURE AQUI SEU BOT E CHAT ===
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
+
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -39,7 +40,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 50;
+const QUALITY_THRESHOLD = 70;
 const QUALITY_WEIGHTS = {
     volume: 15,           
     oi: 8,
@@ -2964,8 +2965,8 @@ async function sendSignalAlert(signal) {
             
             const confirmedText = divergenceData.confirmed ? '✅ CONFIRMADA' : '⚠️ NÃO CONFIRMADA';
             divergenceInfo = `${divergenceEmoji} <b>Divergência 15m:</b> ${divergenceText}\n`;
-            divergenceInfo += `   • Status: ${confirmedText}\n`;
-            divergenceInfo += `   • RSI Atual: ${divergenceData.currentRSI?.toFixed(2) || 'N/A'}\n`;
+            divergenceInfo += `   • Divergência info.: ${confirmedText}\n`;
+            divergenceInfo += `   • RSI: ${divergenceData.currentRSI?.toFixed(2) || 'N/A'}\n`;
         }
         
         // Informações de Suporte/Resistência
@@ -2977,42 +2978,39 @@ async function sendSignalAlert(signal) {
         
         if (srData && !srData.error) {
             if (srData.nearestSupport) {
-                srAnalysis += ` <b>Suporte:</b> $${srData.nearestSupport.price.toFixed(6)} (${srData.nearestSupport.distancePercent.toFixed(2)}%)\n`;
+                srAnalysis += ` <b>🔹Suporte:</b> $${srData.nearestSupport.price.toFixed(6)} (${srData.nearestSupport.distancePercent.toFixed(2)}%)\n`;
             }
             
             if (srData.nearestResistance) {
-                srAnalysis += ` <b>Resistência:</b> $${srData.nearestResistance.price.toFixed(6)} (${srData.nearestResistance.distancePercent.toFixed(2)}%)\n`;
+                srAnalysis += ` <b>🔹Resistência:</b> $${srData.nearestResistance.price.toFixed(6)} (${srData.nearestResistance.distancePercent.toFixed(2)}%)\n`;
             }
             
             if (breakoutRisk) {
                 let riskEmoji = '🟢';
-                if (breakoutRisk.level === 'high') riskEmoji = '🔴';
-                else if (breakoutRisk.level === 'medium') riskEmoji = '🟡';
+                if (breakoutRisk.level === 'Alto') riskEmoji = '🔴';
+                else if (breakoutRisk.level === 'Médio') riskEmoji = '🟡';
                 
-                riskAnalysis = `${riskEmoji} <b>Risco:</b> ${breakoutRisk.level.toUpperCase()}\n`;
+                riskAnalysis = `${riskEmoji} <b>Risco da Operação:</b> ${breakoutRisk.level.toUpperCase()}\n`;
             }
         }
         
         const message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 <b>Preço:</b> $${signal.price.toFixed(6)}
-<b>Score:</b> ${signal.qualityScore.score}/100
-<b>Stop:</b> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
+<b>🔹Score:</b> ${signal.qualityScore.score}/100
+<b>⛔Stop:</b> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
 <b>RR:</b> ${signal.targetsData.bestRiskReward}:1
-
 ${divergenceInfo ? divergenceInfo + '\n' : ''}
 ${srAnalysis ? '<b>S/R:</b>\n' + srAnalysis : ''}
 ${riskAnalysis ? riskAnalysis + '\n' : ''}
-<b>Entrada Ideal:</b> $${signal.price.toFixed(6)}
-<b>Retração Mín:</b> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-<b>Retração Máx:</b> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
-
+<b>Entrada:</b> $${signal.price.toFixed(6)}
+<b>Entrada Mín:</b> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+<b>Entrada Máx:</b> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 <b>Alvos:</b>
 ${signal.targetsData.targets.slice(0, 4).map((target, index) => 
     `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`
 ).join('\n')}
-
-<b>System Titanium - by @J4Rviz.</b>
+<b>IA Titanium - by @J4Rviz.</b>
  
         `;
         
