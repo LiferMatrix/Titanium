@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
-const { createCanvas } = require('canvas');
+
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
