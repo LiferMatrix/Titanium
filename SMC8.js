@@ -3,13 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
 
-
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
 const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
 const TELEGRAM_CHAT_ID = '-1002554953979';
-
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -1118,41 +1116,8 @@ class AdvancedLearningSystem {
     
     generatePerformanceChart() {
         try {
-            const canvas = createCanvas(800, 400);
-            const ctx = canvas.getContext('2d');
-            
-            // Fundo
-            ctx.fillStyle = '#1e1e1e';
-            ctx.fillRect(0, 0, 800, 400);
-            
-            // Título
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 20px Arial';
-            ctx.fillText('Sistema de Aprendizado SMC - Performance', 20, 30);
-            
-            // Dados de performance
-            const report = this.getPerformanceReport();
-            
-            ctx.font = '14px Arial';
-            ctx.fillText(`Win Rate: ${report.winRate}%`, 20, 60);
-            ctx.fillText(`Total Trades: ${report.totalTrades}`, 20, 85);
-            ctx.fillText(`Risk/Reward: ${report.riskReward}`, 20, 110);
-            ctx.fillText(`Melhor Hora: ${report.bestHour} (${report.bestHourWinRate}%)`, 20, 135);
-            
-            // Top símbolos
-            ctx.fillText('Top Símbolos:', 20, 170);
-            let yPos = 195;
-            report.topSymbols.forEach((symbol, index) => {
-                ctx.fillText(`${index + 1}. ${symbol.symbol}: ${symbol.winRate}% (${symbol.totalSignals} ops)`, 
-                    40, yPos);
-                yPos += 25;
-            });
-            
-            // Salvar imagem
-            const buffer = canvas.toBuffer('image/png');
-            const imagePath = path.join(this.analyticsDir, `performance_${Date.now()}.png`);
-            fs.writeFileSync(imagePath, buffer);
-            
+            // Função removida completamente pois dependia do canvas
+            console.log('📊 Geração de gráfico desativada (canvas removido)');
         } catch (error) {
             console.error('Erro ao gerar gráfico:', error);
         }
@@ -3721,10 +3686,9 @@ console.log('='.repeat(80) + '\n');
 // Verificar dependências
 try {
     require('technicalindicators');
-    require('canvas');
 } catch (e) {
     console.log('⚠️ Dependências não encontradas. Instale com:');
-    console.log('npm install technicalindicators canvas');
+    console.log('npm install technicalindicators');
     process.exit(1);
 }
 
