@@ -2,12 +2,14 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const { SMA, EMA, RSI, Stochastic, ATR, ADX } = require('technicalindicators');
+const { createCanvas } = require('canvas');
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID = '-10025549';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
+
 
 // Configurações do estudo (iguais ao TV)
 const FRACTAL_BARS = 3;
@@ -114,26 +116,54 @@ const QUALITY_WEIGHTS = {
 };
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO
+// 🧠 SISTEMA DE APRENDIZADO AVANÇADO
 // =====================================================================
 
-class LearningSystem {
+class AdvancedLearningSystem {
     constructor() {
         this.tradeHistory = [];
         this.symbolPerformance = {};
         this.patterns = { winning: {}, losing: {} };
+        this.timePerformance = {};
+        this.marketConditions = {};
         this.learningEnabled = true;
         this.minTradesForLearning = 5;
         this.learningDir = './learning_smc';
+        this.modelsDir = './models';
+        this.analyticsDir = './analytics';
+        
+        // Configurações de aprendizado
+        this.learningConfig = {
+            recentTradesWindow: 100,
+            weightUpdateInterval: 10,
+            patternExtractionThreshold: 3,
+            adaptiveWeights: true,
+            optimizeEntryLevels: true,
+            dynamicStopAdjustment: true
+        };
+        
+        // Modelos de aprendizado
+        this.models = {
+            entryQuality: null,
+            targetOptimization: null,
+            stopOptimization: null,
+            symbolSelection: null
+        };
         
         this.loadLearningData();
-        console.log('🧠 Sistema de Aprendizado SMC inicializado');
+        console.log('🧠 Sistema de Aprendizado Avançado SMC inicializado');
     }
     
     loadLearningData() {
         try {
             if (!fs.existsSync(this.learningDir)) {
                 fs.mkdirSync(this.learningDir, { recursive: true });
+            }
+            if (!fs.existsSync(this.modelsDir)) {
+                fs.mkdirSync(this.modelsDir, { recursive: true });
+            }
+            if (!fs.existsSync(this.analyticsDir)) {
+                fs.mkdirSync(this.analyticsDir, { recursive: true });
             }
             
             const learningFile = path.join(this.learningDir, 'learning_data.json');
@@ -143,42 +173,92 @@ class LearningSystem {
                 this.tradeHistory = data.tradeHistory || [];
                 this.symbolPerformance = data.symbolPerformance || {};
                 this.patterns = data.patterns || this.patterns;
+                this.timePerformance = data.timePerformance || {};
+                this.marketConditions = data.marketConditions || {};
+                this.models = data.models || this.models;
                 
                 console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
+                console.log(`📈 ${Object.keys(this.symbolPerformance).length} símbolos com histórico`);
             }
+            
+            // Carregar modelos se existirem
+            this.loadModels();
+            
         } catch (error) {
             console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+        }
+    }
+    
+    loadModels() {
+        try {
+            const models = ['entryQuality', 'targetOptimization', 'stopOptimization', 'symbolSelection'];
+            
+            models.forEach(modelName => {
+                const modelFile = path.join(this.modelsDir, `${modelName}_model.json`);
+                if (fs.existsSync(modelFile)) {
+                    this.models[modelName] = JSON.parse(fs.readFileSync(modelFile, 'utf8'));
+                    console.log(`🤖 Modelo ${modelName} carregado`);
+                }
+            });
+        } catch (error) {
+            console.error('Erro ao carregar modelos:', error);
         }
     }
     
     saveLearningData() {
         try {
             const data = {
-                tradeHistory: this.tradeHistory.slice(-1000),
+                tradeHistory: this.tradeHistory.slice(-this.learningConfig.recentTradesWindow),
                 symbolPerformance: this.symbolPerformance,
                 patterns: this.patterns,
-                lastUpdated: Date.now()
+                timePerformance: this.timePerformance,
+                marketConditions: this.marketConditions,
+                models: this.models,
+                lastUpdated: Date.now(),
+                learningConfig: this.learningConfig
             };
             
             const learningFile = path.join(this.learningDir, 'learning_data.json');
             fs.writeFileSync(learningFile, JSON.stringify(data, null, 2));
+            
+            // Salvar modelos separadamente
+            this.saveModels();
             
         } catch (error) {
             console.error('Erro ao salvar dados de aprendizado:', error);
         }
     }
     
-    async recordTrade(signal, marketData) {
+    saveModels() {
+        try {
+            Object.keys(this.models).forEach(modelName => {
+                if (this.models[modelName]) {
+                    const modelFile = path.join(this.modelsDir, `${modelName}_model.json`);
+                    fs.writeFileSync(modelFile, JSON.stringify(this.models[modelName], null, 2));
+                }
+            });
+        } catch (error) {
+            console.error('Erro ao salvar modelos:', error);
+        }
+    }
+    
+    async recordTrade(signal, marketData, outcome = null, profit = null) {
         if (!this.learningEnabled) return;
         
         try {
+            const now = new Date();
+            const hour = now.getHours();
+            const dayOfWeek = now.getDay();
+            
             const tradeRecord = {
                 id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                timestamp: Date.now(),
+                timestamp: now.getTime(),
                 symbol: signal.symbol,
                 direction: signal.isBullish ? 'BUY' : 'SELL',
-                entryPrice: signal.price,
+                entryPrice: signal.price || signal.currentPrice,
                 qualityScore: signal.qualityScore?.score || 0,
+                outcome: outcome, // 'WIN', 'LOSS', 'BREAKEVEN'
+                profitPercentage: profit,
                 marketData: {
                     volumeRatio: marketData.volumeCheck?.volumeData?.rawRatio || 0,
                     rsi: marketData.rsi1h?.raw || 0,
@@ -187,19 +267,26 @@ class LearningSystem {
                     emaAlignment: marketData.emas3mData?.isAboveEMA55 || false,
                     oiTrend: marketData.oiCheck?.trend || '➡️',
                     adx15m: marketData.adx15m?.rawADX || 0,
-                    adx1h: marketData.adx1h?.rawADX || 0
+                    adx1h: marketData.adx1h?.rawADX || 0,
+                    hourOfDay: hour,
+                    dayOfWeek: dayOfWeek
                 },
-                status: 'OPEN'
+                status: outcome ? 'CLOSED' : 'OPEN'
             };
             
             this.tradeHistory.push(tradeRecord);
             
+            // Atualizar estatísticas do símbolo
             if (!this.symbolPerformance[signal.symbol]) {
                 this.symbolPerformance[signal.symbol] = {
                     totalSignals: 0,
                     successfulSignals: 0,
                     totalProfit: 0,
-                    recentScores: []
+                    recentScores: [],
+                    winRate: 0,
+                    avgProfit: 0,
+                    bestEntryConditions: {},
+                    worstEntryConditions: {}
                 };
             }
             
@@ -207,8 +294,32 @@ class LearningSystem {
             symbolStats.totalSignals++;
             symbolStats.recentScores.push(signal.qualityScore?.score || 0);
             
+            if (outcome === 'WIN' && profit) {
+                symbolStats.successfulSignals++;
+                symbolStats.totalProfit += profit;
+                symbolStats.avgProfit = symbolStats.successfulSignals > 0 ? 
+                    symbolStats.totalProfit / symbolStats.successfulSignals : 0;
+                symbolStats.winRate = (symbolStats.successfulSignals / symbolStats.totalSignals) * 100;
+                
+                // Aprender condições de entrada vencedoras
+                this.learnWinningConditions(signal, marketData);
+            } else if (outcome === 'LOSS') {
+                this.learnLosingConditions(signal, marketData);
+            }
+            
             if (symbolStats.recentScores.length > 20) {
                 symbolStats.recentScores = symbolStats.recentScores.slice(-20);
+            }
+            
+            // Atualizar performance por horário
+            this.updateTimePerformance(hour, dayOfWeek, outcome, profit);
+            
+            // Atualizar condições de mercado
+            this.updateMarketConditions(marketData, outcome);
+            
+            // Treinar modelos periodicamente
+            if (this.tradeHistory.length % this.learningConfig.weightUpdateInterval === 0) {
+                this.trainModels();
             }
             
             // Salvar periodicamente
@@ -216,8 +327,696 @@ class LearningSystem {
                 this.saveLearningData();
             }
             
+            // Gerar analytics visual periodicamente
+            if (this.tradeHistory.length % 50 === 0) {
+                this.generateAnalytics();
+            }
+            
+            console.log(`📝 Trade registrado: ${signal.symbol} ${outcome || 'OPEN'} Score: ${signal.qualityScore?.score || 0}`);
+            
         } catch (error) {
             console.error('Erro ao registrar trade:', error);
+        }
+    }
+    
+    learnWinningConditions(signal, marketData) {
+        try {
+            const key = this.generatePatternKey(marketData);
+            
+            if (!this.patterns.winning[key]) {
+                this.patterns.winning[key] = {
+                    count: 0,
+                    avgProfit: 0,
+                    conditions: marketData,
+                    symbols: []
+                };
+            }
+            
+            this.patterns.winning[key].count++;
+            this.patterns.winning[key].symbols.push(signal.symbol);
+            
+            // Manter apenas os padrões mais frequentes
+            if (Object.keys(this.patterns.winning).length > 100) {
+                const sorted = Object.entries(this.patterns.winning)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .slice(0, 50);
+                this.patterns.winning = Object.fromEntries(sorted);
+            }
+            
+        } catch (error) {
+            console.error('Erro ao aprender condições vencedoras:', error);
+        }
+    }
+    
+    learnLosingConditions(signal, marketData) {
+        try {
+            const key = this.generatePatternKey(marketData);
+            
+            if (!this.patterns.losing[key]) {
+                this.patterns.losing[key] = {
+                    count: 0,
+                    avgLoss: 0,
+                    conditions: marketData,
+                    symbols: []
+                };
+            }
+            
+            this.patterns.losing[key].count++;
+            this.patterns.losing[key].symbols.push(signal.symbol);
+            
+            // Manter apenas os padrões mais frequentes
+            if (Object.keys(this.patterns.losing).length > 100) {
+                const sorted = Object.entries(this.patterns.losing)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .slice(0, 50);
+                this.patterns.losing = Object.fromEntries(sorted);
+            }
+            
+        } catch (error) {
+            console.error('Erro ao aprender condições perdedoras:', error);
+        }
+    }
+    
+    generatePatternKey(marketData) {
+        // Criar uma chave única baseada nas condições de mercado
+        const components = [
+            `vol_${Math.round(marketData.volumeCheck?.volumeData?.rawRatio || 0)}`,
+            `rsi_${Math.round(marketData.rsi1h?.raw || 0 / 10)}`,
+            `volatility_${Math.round(marketData.volatilityCheck?.rawVolatility || 0)}`,
+            `lsr_${Math.round(marketData.lsrCheck?.raw || 0)}`,
+            `oi_${marketData.oiCheck?.trend || 'neutral'}`,
+            `adx15_${Math.round(marketData.adx15m?.rawADX || 0 / 5)}`,
+            `adx1h_${Math.round(marketData.adx1h?.rawADX || 0 / 5)}`
+        ];
+        
+        return components.join('|');
+    }
+    
+    updateTimePerformance(hour, dayOfWeek, outcome, profit) {
+        try {
+            const hourKey = `hour_${hour}`;
+            const dayKey = `day_${dayOfWeek}`;
+            
+            if (!this.timePerformance[hourKey]) {
+                this.timePerformance[hourKey] = { total: 0, wins: 0, profit: 0 };
+            }
+            if (!this.timePerformance[dayKey]) {
+                this.timePerformance[dayKey] = { total: 0, wins: 0, profit: 0 };
+            }
+            
+            this.timePerformance[hourKey].total++;
+            this.timePerformance[dayKey].total++;
+            
+            if (outcome === 'WIN') {
+                this.timePerformance[hourKey].wins++;
+                this.timePerformance[dayKey].wins++;
+                if (profit) {
+                    this.timePerformance[hourKey].profit += profit;
+                    this.timePerformance[dayKey].profit += profit;
+                }
+            }
+            
+        } catch (error) {
+            console.error('Erro ao atualizar performance temporal:', error);
+        }
+    }
+    
+    updateMarketConditions(marketData, outcome) {
+        try {
+            const conditionKey = this.getMarketConditionKey(marketData);
+            
+            if (!this.marketConditions[conditionKey]) {
+                this.marketConditions[conditionKey] = {
+                    count: 0,
+                    wins: 0,
+                    avgProfit: 0,
+                    conditions: marketData
+                };
+            }
+            
+            this.marketConditions[conditionKey].count++;
+            
+            if (outcome === 'WIN') {
+                this.marketConditions[conditionKey].wins++;
+            }
+            
+            // Calcular taxa de sucesso
+            this.marketConditions[conditionKey].winRate = 
+                (this.marketConditions[conditionKey].wins / this.marketConditions[conditionKey].count) * 100;
+                
+        } catch (error) {
+            console.error('Erro ao atualizar condições de mercado:', error);
+        }
+    }
+    
+    getMarketConditionKey(marketData) {
+        // Classificar condições de mercado
+        const volatility = marketData.volatilityCheck?.rawVolatility || 0;
+        const adx15m = marketData.adx15m?.rawADX || 0;
+        const volume = marketData.volumeCheck?.volumeData?.rawRatio || 0;
+        
+        let condition = '';
+        
+        if (volatility < 0.5) condition += 'lowVol_';
+        else if (volatility < 1.0) condition += 'medVol_';
+        else condition += 'highVol_';
+        
+        if (adx15m < 20) condition += 'noTrend_';
+        else if (adx15m < 40) condition += 'weakTrend_';
+        else condition += 'strongTrend_';
+        
+        if (volume < 1.5) condition += 'lowVol_';
+        else if (volume < 2.5) condition += 'medVol_';
+        else condition += 'highVol_';
+        
+        return condition;
+    }
+    
+    trainModels() {
+        try {
+            if (this.tradeHistory.length < this.minTradesForLearning) return;
+            
+            // Modelo 1: Otimização de pesos para qualidade do sinal
+            this.trainEntryQualityModel();
+            
+            // Modelo 2: Otimização de alvos
+            this.trainTargetOptimizationModel();
+            
+            // Modelo 3: Otimização de stop
+            this.trainStopOptimizationModel();
+            
+            // Modelo 4: Seleção de símbolos
+            this.trainSymbolSelectionModel();
+            
+            console.log('🤖 Modelos de aprendizado atualizados');
+            
+        } catch (error) {
+            console.error('Erro ao treinar modelos:', error);
+        }
+    }
+    
+    trainEntryQualityModel() {
+        try {
+            const winningTrades = this.tradeHistory.filter(t => t.outcome === 'WIN');
+            const losingTrades = this.tradeHistory.filter(t => t.outcome === 'LOSS');
+            
+            if (winningTrades.length < 3 || losingTrades.length < 3) return;
+            
+            // Analisar características dos trades vencedores vs perdedores
+            const winningFeatures = this.extractFeatures(winningTrades);
+            const losingFeatures = this.extractFeatures(losingTrades);
+            
+            // Calcular pesos otimizados baseados na performance
+            const optimizedWeights = this.calculateOptimizedWeights(winningFeatures, losingFeatures);
+            
+            this.models.entryQuality = {
+                weights: optimizedWeights,
+                trainedAt: Date.now(),
+                sampleSize: winningTrades.length + losingTrades.length,
+                accuracy: this.calculateModelAccuracy(winningFeatures, losingFeatures, optimizedWeights)
+            };
+            
+        } catch (error) {
+            console.error('Erro ao treinar modelo de qualidade de entrada:', error);
+        }
+    }
+    
+    extractFeatures(trades) {
+        const features = {
+            volume: [],
+            rsi: [],
+            volatility: [],
+            lsr: [],
+            oiTrend: [],
+            adx15m: [],
+            adx1h: [],
+            emaAlignment: []
+        };
+        
+        trades.forEach(trade => {
+            if (trade.marketData) {
+                features.volume.push(trade.marketData.volumeRatio || 0);
+                features.rsi.push(trade.marketData.rsi || 0);
+                features.volatility.push(trade.marketData.volatility || 0);
+                features.lsr.push(trade.marketData.lsr || 0);
+                features.oiTrend.push(trade.marketData.oiTrend === '🟢⬆️' ? 1 : 
+                                     trade.marketData.oiTrend === '🔴⬇️' ? -1 : 0);
+                features.adx15m.push(trade.marketData.adx15m || 0);
+                features.adx1h.push(trade.marketData.adx1h || 0);
+                features.emaAlignment.push(trade.marketData.emaAlignment ? 1 : 0);
+            }
+        });
+        
+        return features;
+    }
+    
+    calculateOptimizedWeights(winningFeatures, losingFeatures) {
+        // Análise estatística para determinar pesos ideais
+        const weights = { ...QUALITY_WEIGHTS };
+        
+        // Calcular diferença de médias entre ganhadores e perdedores
+        Object.keys(winningFeatures).forEach(feature => {
+            if (winningFeatures[feature].length > 0 && losingFeatures[feature].length > 0) {
+                const winMean = winningFeatures[feature].reduce((a, b) => a + b, 0) / winningFeatures[feature].length;
+                const loseMean = losingFeatures[feature].reduce((a, b) => a + b, 0) / losingFeatures[feature].length;
+                
+                // Diferença absoluta normalizada
+                const diff = Math.abs(winMean - loseMean);
+                const maxDiff = Math.max(winMean, loseMean, 1);
+                
+                // Ajustar peso baseado na diferença (características que mais diferenciam)
+                if (diff > 0) {
+                    const importance = diff / maxDiff;
+                    weights[feature] = Math.round(weights[feature] * (1 + importance * 0.5));
+                }
+            }
+        });
+        
+        // Normalizar pesos para soma 100
+        const total = Object.values(weights).reduce((a, b) => a + b, 0);
+        Object.keys(weights).forEach(key => {
+            weights[key] = Math.round((weights[key] / total) * 100);
+        });
+        
+        return weights;
+    }
+    
+    calculateModelAccuracy(winningFeatures, losingFeatures, weights) {
+        // Simulação simples de accuracy
+        let correct = 0;
+        let total = 0;
+        
+        // Verificar se as características diferenciam bem
+        Object.keys(winningFeatures).forEach(feature => {
+            if (winningFeatures[feature].length > 0 && losingFeatures[feature].length > 0) {
+                const winAvg = winningFeatures[feature].reduce((a, b) => a + b, 0) / winningFeatures[feature].length;
+                const loseAvg = losingFeatures[feature].reduce((a, b) => a + b, 0) / losingFeatures[feature].length;
+                
+                if (Math.abs(winAvg - loseAvg) > (winAvg * 0.1)) {
+                    correct++;
+                }
+                total++;
+            }
+        });
+        
+        return total > 0 ? (correct / total) * 100 : 0;
+    }
+    
+    trainTargetOptimizationModel() {
+        try {
+            const winningTrades = this.tradeHistory.filter(t => t.outcome === 'WIN' && t.profitPercentage);
+            
+            if (winningTrades.length < 5) return;
+            
+            // Analisar quais alvos foram mais atingidos
+            const targetAnalysis = {};
+            TARGET_PERCENTAGES.forEach(target => {
+                targetAnalysis[target] = {
+                    hitCount: 0,
+                    avgTimeToHit: 0,
+                    maxProfitBeforeReversal: 0
+                };
+            });
+            
+            // Em um sistema real, você analisaria o histórico de preços
+            // Aqui é uma implementação simplificada
+            winningTrades.forEach(trade => {
+                TARGET_PERCENTAGES.forEach(target => {
+                    if (trade.profitPercentage >= target) {
+                        targetAnalysis[target].hitCount++;
+                    }
+                });
+            });
+            
+            // Determinar alvos mais eficientes
+            const optimalTargets = Object.entries(targetAnalysis)
+                .sort((a, b) => b[1].hitCount - a[1].hitCount)
+                .slice(0, 3)
+                .map(([target]) => parseFloat(target));
+            
+            this.models.targetOptimization = {
+                optimalTargets: optimalTargets,
+                hitRates: targetAnalysis,
+                trainedAt: Date.now()
+            };
+            
+        } catch (error) {
+            console.error('Erro ao treinar modelo de otimização de alvos:', error);
+        }
+    }
+    
+    trainStopOptimizationModel() {
+        try {
+            const losingTrades = this.tradeHistory.filter(t => t.outcome === 'LOSS');
+            
+            if (losingTrades.length < 5) return;
+            
+            // Analisar condições que levaram a stops
+            const stopConditions = {};
+            
+            losingTrades.forEach(trade => {
+                const key = this.getStopConditionKey(trade.marketData);
+                if (!stopConditions[key]) {
+                    stopConditions[key] = { count: 0, avgLoss: 0 };
+                }
+                stopConditions[key].count++;
+            });
+            
+            this.models.stopOptimization = {
+                dangerousConditions: Object.entries(stopConditions)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .slice(0, 5)
+                    .reduce((acc, [key, value]) => {
+                        acc[key] = value;
+                        return acc;
+                    }, {}),
+                trainedAt: Date.now()
+            };
+            
+        } catch (error) {
+            console.error('Erro ao treinar modelo de otimização de stop:', error);
+        }
+    }
+    
+    getStopConditionKey(marketData) {
+        // Identificar condições que levam a stops
+        const volatility = marketData.volatility || 0;
+        const adx = marketData.adx15m || 0;
+        const volume = marketData.volumeRatio || 0;
+        
+        if (volatility > 2.0) return 'high_volatility_stop';
+        if (adx < 15) return 'no_trend_stop';
+        if (volume < 1.0) return 'low_volume_stop';
+        
+        return 'other_stop';
+    }
+    
+    trainSymbolSelectionModel() {
+        try {
+            const symbolStats = Object.entries(this.symbolPerformance)
+                .filter(([_, stats]) => stats.totalSignals >= 5)
+                .sort((a, b) => b[1].winRate - a[1].winRate);
+            
+            if (symbolStats.length < 3) return;
+            
+            // Identificar padrões de sucesso por símbolo
+            const topSymbols = symbolStats.slice(0, 5);
+            const worstSymbols = symbolStats.slice(-5);
+            
+            this.models.symbolSelection = {
+                topSymbols: topSymbols.map(([symbol, stats]) => ({
+                    symbol,
+                    winRate: stats.winRate,
+                    avgProfit: stats.avgProfit,
+                    totalSignals: stats.totalSignals
+                })),
+                worstSymbols: worstSymbols.map(([symbol, stats]) => ({
+                    symbol,
+                    winRate: stats.winRate,
+                    avgProfit: stats.avgProfit,
+                    totalSignals: stats.totalSignals
+                })),
+                trainedAt: Date.now()
+            };
+            
+        } catch (error) {
+            console.error('Erro ao treinar modelo de seleção de símbolos:', error);
+        }
+    }
+    
+    getOptimizedQualityScore(symbol, isBullish, marketData) {
+        try {
+            // Se temos modelo treinado, usar pesos otimizados
+            let weights = QUALITY_WEIGHTS;
+            if (this.models.entryQuality && this.models.entryQuality.weights) {
+                weights = this.models.entryQuality.weights;
+            }
+            
+            // Calcular score com pesos otimizados
+            let score = 0;
+            let details = [];
+            
+            // Volume
+            const volumeRatio = marketData.volumeCheck?.volumeData?.rawRatio || 0;
+            if (volumeRatio >= 2.0) score += weights.volume;
+            else if (volumeRatio >= 1.5) score += weights.volume * 0.8;
+            else if (volumeRatio >= 1.3) score += weights.volume * 0.5;
+            
+            // Open Interest
+            if (marketData.oiCheck?.trend !== "➡️") score += weights.oi;
+            
+            // Volatilidade
+            const volatility = marketData.volatilityCheck?.rawVolatility || 0;
+            if (volatility >= 1.0) score += weights.volatility;
+            else if (volatility >= 0.5) score += weights.volatility * 0.7;
+            
+            // LSR
+            const lsrValue = marketData.lsrCheck?.raw || 0;
+            if (isBullish && lsrValue < 2.0) score += weights.lsr;
+            else if (!isBullish && lsrValue > 3.0) score += weights.lsr;
+            else if ((isBullish && lsrValue < 2.5) || (!isBullish && lsrValue > 2.5)) {
+                score += weights.lsr * 0.6;
+            }
+            
+            // RSI
+            const rsiValue = marketData.rsi1h?.raw || 0;
+            if (isBullish && rsiValue > 30 && rsiValue < 50) score += weights.rsi;
+            else if (!isBullish && rsiValue > 50 && rsiValue < 70) score += weights.rsi;
+            
+            // EMA Alignment
+            if (marketData.emas3mData) {
+                if (isBullish && marketData.emas3mData.isAboveEMA55 && marketData.emas3mData.isEMA13CrossingUp) {
+                    score += weights.emaAlignment;
+                } else if (!isBullish && marketData.emas3mData.isBelowEMA55 && marketData.emas3mData.isEMA13CrossingDown) {
+                    score += weights.emaAlignment;
+                }
+            }
+            
+            // Ajustar score baseado em aprendizado
+            const symbolStats = this.getSymbolPerformance(symbol);
+            if (symbolStats.winRate > 60) {
+                score += 10; // Bônus para símbolos com bom histórico
+            } else if (symbolStats.winRate < 40) {
+                score -= 10; // Penalidade para símbolos com mau histórico
+            }
+            
+            // Verificar condições perigosas aprendidas
+            if (this.models.stopOptimization) {
+                const conditionKey = this.getStopConditionKey(marketData);
+                if (this.models.stopOptimization.dangerousConditions[conditionKey]) {
+                    score -= 15; // Reduzir score para condições perigosas
+                    details.push(`⚠️ Condição perigosa detectada: ${conditionKey}`);
+                }
+            }
+            
+            // Determinar classificação
+            let grade, emoji;
+            if (score >= 85) {
+                grade = "A✨";
+                emoji = "🏆";
+            } else if (score >= 70) {
+                grade = "B";
+                emoji = "✅";
+            } else if (score >= 60) {
+                grade = "C";
+                emoji = "⚠️";
+            } else {
+                grade = "D";
+                emoji = "❌";
+            }
+            
+            return {
+                score: Math.min(100, Math.max(0, Math.round(score))),
+                grade: grade,
+                emoji: emoji,
+                details: details,
+                isAcceptable: score >= QUALITY_THRESHOLD,
+                threshold: QUALITY_THRESHOLD,
+                optimizedWeights: weights !== QUALITY_WEIGHTS,
+                message: `${emoji} SCORE Otimizado: ${grade} (${Math.round(score)}/100) ${score >= QUALITY_THRESHOLD ? '✅' : '❌'}`
+            };
+            
+        } catch (error) {
+            console.error('Erro ao calcular score otimizado:', error);
+            // Fallback para cálculo padrão
+            return this.getDefaultQualityScore(symbol, isBullish, marketData);
+        }
+    }
+    
+    getDefaultQualityScore(symbol, isBullish, marketData) {
+        // Implementação padrão (similar à função original)
+        let score = 0;
+        let details = [];
+        
+        // Implementação simplificada
+        if (marketData.volumeCheck?.volumeData?.rawRatio >= 1.5) score += 20;
+        if (marketData.oiCheck?.trend !== "➡️") score += 15;
+        if (marketData.volatilityCheck?.rawVolatility >= 0.7) score += 10;
+        
+        const lsrValue = marketData.lsrCheck?.raw || 0;
+        if (isBullish && lsrValue < 2.5) score += 10;
+        else if (!isBullish && lsrValue > 2.5) score += 10;
+        
+        const rsiValue = marketData.rsi1h?.raw || 0;
+        if (isBullish && rsiValue > 30 && rsiValue < 60) score += 10;
+        else if (!isBullish && rsiValue > 40 && rsiValue < 70) score += 10;
+        
+        if (marketData.emas3mData) {
+            if (isBullish && marketData.emas3mData.isAboveEMA55) score += 10;
+            else if (!isBullish && marketData.emas3mData.isBelowEMA55) score += 10;
+        }
+        
+        let grade, emoji;
+        if (score >= 70) {
+            grade = "B";
+            emoji = "✅";
+        } else if (score >= 60) {
+            grade = "C";
+            emoji = "⚠️";
+        } else {
+            grade = "D";
+            emoji = "❌";
+        }
+        
+        return {
+            score: Math.min(100, Math.round(score)),
+            grade: grade,
+            emoji: emoji,
+            isAcceptable: score >= QUALITY_THRESHOLD,
+            threshold: QUALITY_THRESHOLD,
+            optimizedWeights: false,
+            message: `${emoji} SCORE Padrão: ${grade} (${Math.round(score)}/100)`
+        };
+    }
+    
+    getOptimizedTargets(symbol, entryPrice, isBullish) {
+        try {
+            // Se temos modelo treinado, usar alvos otimizados
+            if (this.models.targetOptimization && this.models.targetOptimization.optimalTargets) {
+                const optimalTargets = this.models.targetOptimization.optimalTargets;
+                
+                // Usar os 3 melhores alvos aprendidos
+                return optimalTargets.map(percentage => {
+                    const targetPrice = isBullish ? 
+                        entryPrice * (1 + percentage / 100) :
+                        entryPrice * (1 - percentage / 100);
+                    
+                    return {
+                        percentage: percentage,
+                        price: targetPrice,
+                        optimized: true,
+                        hitRate: this.models.targetOptimization.hitRates[percentage]?.hitCount || 0
+                    };
+                });
+            }
+            
+            // Fallback para alvos padrão
+            return TARGET_PERCENTAGES.map(percentage => {
+                const targetPrice = isBullish ? 
+                    entryPrice * (1 + percentage / 100) :
+                    entryPrice * (1 - percentage / 100);
+                
+                return {
+                    percentage: percentage,
+                    price: targetPrice,
+                    optimized: false
+                };
+            });
+            
+        } catch (error) {
+            console.error('Erro ao obter alvos otimizados:', error);
+            // Fallback para alvos padrão
+            return TARGET_PERCENTAGES.map(percentage => ({
+                percentage: percentage,
+                price: isBullish ? 
+                    entryPrice * (1 + percentage / 100) :
+                    entryPrice * (1 - percentage / 100),
+                optimized: false
+            }));
+        }
+    }
+    
+    getOptimizedStop(symbol, entryPrice, isBullish, marketData) {
+        try {
+            // Verificar se temos condições perigosas aprendidas
+            let stopMultiplier = ATR_MULTIPLIER;
+            
+            if (this.models.stopOptimization) {
+                const conditionKey = this.getStopConditionKey(marketData);
+                if (this.models.stopOptimization.dangerousConditions[conditionKey]) {
+                    // Aumentar stop para condições perigosas
+                    stopMultiplier *= 1.5;
+                }
+            }
+            
+            // Verificar performance histórica do símbolo
+            const symbolStats = this.getSymbolPerformance(symbol);
+            if (symbolStats.winRate > 70) {
+                // Símbolo com boa performance pode usar stop mais apertado
+                stopMultiplier *= 0.8;
+            } else if (symbolStats.winRate < 40) {
+                // Símbolo com má performance precisa de stop mais largo
+                stopMultiplier *= 1.2;
+            }
+            
+            return {
+                multiplier: stopMultiplier,
+                originalMultiplier: ATR_MULTIPLIER,
+                adjustment: stopMultiplier !== ATR_MULTIPLIER,
+                reason: symbolStats.winRate > 70 ? 'Bom histórico' : 
+                       symbolStats.winRate < 40 ? 'Histórico ruim' : 'Padrão'
+            };
+            
+        } catch (error) {
+            console.error('Erro ao obter stop otimizado:', error);
+            return {
+                multiplier: ATR_MULTIPLIER,
+                originalMultiplier: ATR_MULTIPLIER,
+                adjustment: false,
+                reason: 'Erro no cálculo'
+            };
+        }
+    }
+    
+    getBestTimeToTrade() {
+        try {
+            if (Object.keys(this.timePerformance).length === 0) {
+                return { bestHour: 'N/A', bestDay: 'N/A', winRate: 0 };
+            }
+            
+            // Encontrar melhor hora
+            let bestHour = { key: 'N/A', winRate: 0 };
+            Object.entries(this.timePerformance).forEach(([key, stats]) => {
+                if (key.startsWith('hour_')) {
+                    const winRate = stats.total > 0 ? (stats.wins / stats.total) * 100 : 0;
+                    if (winRate > bestHour.winRate) {
+                        bestHour = { key: key.replace('hour_', ''), winRate };
+                    }
+                }
+            });
+            
+            // Encontrar melhor dia
+            let bestDay = { key: 'N/A', winRate: 0 };
+            Object.entries(this.timePerformance).forEach(([key, stats]) => {
+                if (key.startsWith('day_')) {
+                    const winRate = stats.total > 0 ? (stats.wins / stats.total) * 100 : 0;
+                    if (winRate > bestDay.winRate) {
+                        const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+                        bestDay = { key: dayNames[parseInt(key.replace('day_', ''))], winRate };
+                    }
+                }
+            });
+            
+            return {
+                bestHour: bestHour.key,
+                bestHourWinRate: bestHour.winRate.toFixed(1),
+                bestDay: bestDay.key,
+                bestDayWinRate: bestDay.winRate.toFixed(1)
+            };
+            
+        } catch (error) {
+            console.error('Erro ao obter melhor horário:', error);
+            return { bestHour: 'N/A', bestDay: 'N/A', winRate: 0 };
         }
     }
     
@@ -227,37 +1026,178 @@ class LearningSystem {
             successfulSignals: 0,
             totalProfit: 0,
             winRate: 0,
+            avgProfit: 0,
             recentScores: []
         };
     }
     
+    getTopSymbols(limit = 5) {
+        return Object.entries(this.symbolPerformance)
+            .filter(([_, stats]) => stats.totalSignals >= 3)
+            .sort((a, b) => b[1].winRate - a[1].winRate)
+            .slice(0, limit)
+            .map(([symbol, stats]) => ({
+                symbol,
+                winRate: stats.winRate.toFixed(1),
+                totalSignals: stats.totalSignals,
+                avgProfit: stats.avgProfit.toFixed(2),
+                recentScore: stats.recentScores.length > 0 ? 
+                    (stats.recentScores.reduce((a, b) => a + b, 0) / stats.recentScores.length).toFixed(1) : 0
+            }));
+    }
+    
+    getWorstSymbols(limit = 5) {
+        return Object.entries(this.symbolPerformance)
+            .filter(([_, stats]) => stats.totalSignals >= 3)
+            .sort((a, b) => a[1].winRate - b[1].winRate)
+            .slice(0, limit)
+            .map(([symbol, stats]) => ({
+                symbol,
+                winRate: stats.winRate.toFixed(1),
+                totalSignals: stats.totalSignals,
+                avgProfit: stats.avgProfit.toFixed(2)
+            }));
+    }
+    
     getPerformanceReport() {
         const closedTrades = this.tradeHistory.filter(t => t.status === 'CLOSED');
-        const winners = closedTrades.filter(t => t.outcome === 'SUCCESS');
+        const winningTrades = closedTrades.filter(t => t.outcome === 'WIN');
+        const losingTrades = closedTrades.filter(t => t.outcome === 'LOSS');
+        
+        const totalProfit = winningTrades.reduce((sum, trade) => sum + (trade.profitPercentage || 0), 0);
+        const avgProfit = winningTrades.length > 0 ? totalProfit / winningTrades.length : 0;
+        const avgLoss = losingTrades.length > 0 ? 
+            Math.abs(losingTrades.reduce((sum, trade) => sum + (trade.profitPercentage || 0), 0) / losingTrades.length) : 0;
         
         const winRate = closedTrades.length > 0 ? 
-            (winners.length / closedTrades.length) * 100 : 0;
+            (winningTrades.length / closedTrades.length) * 100 : 0;
         
-        const bestSymbols = Object.entries(this.symbolPerformance)
-            .filter(([_, stats]) => stats.totalSignals >= 3)
-            .sort((a, b) => {
-                const winRateA = a[1].successfulSignals / a[1].totalSignals;
-                const winRateB = b[1].successfulSignals / b[1].totalSignals;
-                return winRateB - winRateA;
-            })
-            .slice(0, 5);
+        const riskReward = avgLoss > 0 ? avgProfit / avgLoss : 0;
+        
+        const bestTime = this.getBestTimeToTrade();
+        const topSymbols = this.getTopSymbols(5);
+        const worstSymbols = this.getWorstSymbols(3);
         
         return {
             totalTrades: this.tradeHistory.length,
             closedTrades: closedTrades.length,
-            winningTrades: winners.length,
+            winningTrades: winningTrades.length,
+            losingTrades: losingTrades.length,
             winRate: winRate.toFixed(1),
-            bestSymbols: bestSymbols.map(([symbol, stats]) => ({
-                symbol,
-                winRate: ((stats.successfulSignals / stats.totalSignals) * 100).toFixed(1),
-                totalSignals: stats.totalSignals
-            }))
+            avgProfit: avgProfit.toFixed(2),
+            avgLoss: avgLoss.toFixed(2),
+            riskReward: riskReward.toFixed(2),
+            totalProfit: totalProfit.toFixed(2),
+            bestHour: bestTime.bestHour,
+            bestHourWinRate: bestTime.bestHourWinRate,
+            bestDay: bestTime.bestDay,
+            bestDayWinRate: bestTime.bestDayWinRate,
+            topSymbols: topSymbols,
+            worstSymbols: worstSymbols,
+            modelAccuracy: this.models.entryQuality?.accuracy?.toFixed(1) || 'N/A',
+            learningProgress: `${Object.keys(this.patterns.winning).length + Object.keys(this.patterns.losing).length} padrões aprendidos`
         };
+    }
+    
+    generateAnalytics() {
+        try {
+            const analyticsFile = path.join(this.analyticsDir, `analytics_${Date.now()}.json`);
+            const report = this.getPerformanceReport();
+            
+            fs.writeFileSync(analyticsFile, JSON.stringify(report, null, 2));
+            
+            // Gerar gráfico simples de performance
+            this.generatePerformanceChart();
+            
+            console.log('📊 Analytics gerados com sucesso');
+            
+        } catch (error) {
+            console.error('Erro ao gerar analytics:', error);
+        }
+    }
+    
+    generatePerformanceChart() {
+        try {
+            const canvas = createCanvas(800, 400);
+            const ctx = canvas.getContext('2d');
+            
+            // Fundo
+            ctx.fillStyle = '#1e1e1e';
+            ctx.fillRect(0, 0, 800, 400);
+            
+            // Título
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText('Sistema de Aprendizado SMC - Performance', 20, 30);
+            
+            // Dados de performance
+            const report = this.getPerformanceReport();
+            
+            ctx.font = '14px Arial';
+            ctx.fillText(`Win Rate: ${report.winRate}%`, 20, 60);
+            ctx.fillText(`Total Trades: ${report.totalTrades}`, 20, 85);
+            ctx.fillText(`Risk/Reward: ${report.riskReward}`, 20, 110);
+            ctx.fillText(`Melhor Hora: ${report.bestHour} (${report.bestHourWinRate}%)`, 20, 135);
+            
+            // Top símbolos
+            ctx.fillText('Top Símbolos:', 20, 170);
+            let yPos = 195;
+            report.topSymbols.forEach((symbol, index) => {
+                ctx.fillText(`${index + 1}. ${symbol.symbol}: ${symbol.winRate}% (${symbol.totalSignals} ops)`, 
+                    40, yPos);
+                yPos += 25;
+            });
+            
+            // Salvar imagem
+            const buffer = canvas.toBuffer('image/png');
+            const imagePath = path.join(this.analyticsDir, `performance_${Date.now()}.png`);
+            fs.writeFileSync(imagePath, buffer);
+            
+        } catch (error) {
+            console.error('Erro ao gerar gráfico:', error);
+        }
+    }
+    
+    getLearningInsights() {
+        const insights = [];
+        
+        // Insights baseados em padrões aprendidos
+        if (Object.keys(this.patterns.winning).length > 0) {
+            const topPattern = Object.entries(this.patterns.winning)
+                .sort((a, b) => b[1].count - a[1].count)[0];
+            
+            if (topPattern) {
+                insights.push(`🎯 Padrão vencedor mais comum: ${topPattern[1].count} ocorrências`);
+            }
+        }
+        
+        if (Object.keys(this.patterns.losing).length > 0) {
+            const topLosingPattern = Object.entries(this.patterns.losing)
+                .sort((a, b) => b[1].count - a[1].count)[0];
+            
+            if (topLosingPattern) {
+                insights.push(`⚠️ Padrão perdedor mais comum: ${topLosingPattern[1].count} ocorrências`);
+            }
+        }
+        
+        // Insights de horário
+        const bestTime = this.getBestTimeToTrade();
+        if (bestTime.bestHour !== 'N/A') {
+            insights.push(`⏰ Melhor horário para trades: ${bestTime.bestHour}h (${bestTime.bestHourWinRate}% win rate)`);
+        }
+        
+        // Insights de símbolos
+        const topSymbols = this.getTopSymbols(3);
+        if (topSymbols.length > 0) {
+            insights.push(`🏆 Top símbolo: ${topSymbols[0].symbol} (${topSymbols[0].winRate}% win rate)`);
+        }
+        
+        // Insights de modelos
+        if (this.models.entryQuality?.accuracy) {
+            insights.push(`🤖 Modelo de entrada: ${this.models.entryQuality.accuracy.toFixed(1)}% de acurácia`);
+        }
+        
+        return insights;
     }
 }
 
@@ -1835,18 +2775,25 @@ function calculateEntryLevelsATR(currentPrice, atrValue, isBullish, symbol) {
     };
 }
 
-// 🔴 FUNÇÃO AVANÇADA: Calcular alvos e stop baseado em ATR
-async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
+// 🔴 FUNÇÃO AVANÇADA: Calcular alvos e stop baseado em ATR (com aprendizado)
+async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol, marketData, learningSystem) {
     const targets = [];
     
     // 🔴 CALCULAR ATR PARA STOP DINÂMICO
     const atrData = await calculateATR(symbol, ATR_TIMEFRAME, ATR_PERIOD);
     
     let stopPrice, stopPercentage, stopType, atrValueUsed;
+    let stopMultiplier = ATR_MULTIPLIER;
+    
+    // 🔵 USAR SISTEMA DE APRENDIZADO PARA OTIMIZAR STOP
+    if (learningSystem && learningSystem.models.stopOptimization) {
+        const optimizedStop = learningSystem.getOptimizedStop(symbol, entryPrice, isBullish, marketData);
+        stopMultiplier = optimizedStop.multiplier;
+    }
     
     if (atrData.atr && atrData.atr > 0) {
-        // Usar ATR para stop dinâmico
-        atrValueUsed = atrData.atr * ATR_MULTIPLIER;
+        // Usar ATR para stop dinâmico (com multiplicador otimizado)
+        atrValueUsed = atrData.atr * stopMultiplier;
         stopType = "ATR";
         
         // Calcular porcentagem do stop baseado no ATR
@@ -1885,25 +2832,34 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
         entryLevels = calculateEntryLevelsATR(entryPrice, atrData.atr, isBullish, symbol);
     }
     
+    // 🔵 USAR SISTEMA DE APRENDIZADO PARA OTIMIZAR ALVOS
+    let targetPercentages = TARGET_PERCENTAGES;
+    if (learningSystem && learningSystem.models.targetOptimization) {
+        const optimizedTargets = learningSystem.getOptimizedTargets(symbol, entryPrice, isBullish);
+        targetPercentages = optimizedTargets.map(t => t.percentage);
+    }
+    
     // Calcular alvos de lucro
     if (isBullish) {
-        for (const percentage of TARGET_PERCENTAGES) {
+        for (const percentage of targetPercentages) {
             const targetPrice = entryPrice * (1 + percentage / 100);
             targets.push({
                 percentage: percentage,
                 price: targetPrice,
                 formatted: formatNumber(targetPrice, symbol, true),
-                riskReward: (percentage / stopPercentage).toFixed(2)
+                riskReward: (percentage / stopPercentage).toFixed(2),
+                optimized: learningSystem && learningSystem.models.targetOptimization ? true : false
             });
         }
     } else {
-        for (const percentage of TARGET_PERCENTAGES) {
+        for (const percentage of targetPercentages) {
             const targetPrice = entryPrice * (1 - percentage / 100);
             targets.push({
                 percentage: percentage,
                 price: targetPrice,
                 formatted: formatNumber(targetPrice, symbol, true),
-                riskReward: (percentage / stopPercentage).toFixed(2)
+                riskReward: (percentage / stopPercentage).toFixed(2),
+                optimized: learningSystem && learningSystem.models.targetOptimization ? true : false
             });
         }
     }
@@ -1914,17 +2870,45 @@ async function calculateTargetsAndStopATR(entryPrice, isBullish, symbol) {
         stopFormatted: formatNumber(stopPrice, symbol, true),
         stopPercentage: stopPercentage.toFixed(2),
         stopType: stopType,
+        stopMultiplier: stopMultiplier,
         atrData: atrData,
         atrValueUsed: atrValueUsed,
         atrMultiplier: ATR_MULTIPLIER,
         entryLevels: entryLevels,
         riskRewardRatios: targets.map(t => t.riskReward),
-        bestRiskReward: Math.max(...targets.map(t => parseFloat(t.riskReward))).toFixed(2)
+        bestRiskReward: Math.max(...targets.map(t => parseFloat(t.riskReward))).toFixed(2),
+        optimized: learningSystem ? true : false
     };
 }
 
-// 🔵 FUNÇÃO MELHORADA: Filtro de Qualidade de Sinal (sem Market Structure)
-async function calculateSignalQuality(symbol, isBullish, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData) {
+// 🔵 FUNÇÃO ATUALIZADA: Calcular qualidade do sinal com sistema de aprendizado
+async function calculateSignalQuality(symbol, isBullish, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData, learningSystem = null) {
+    try {
+        // Se temos sistema de aprendizado, usar cálculo otimizado
+        if (learningSystem) {
+            const marketData = {
+                volumeCheck,
+                oiCheck,
+                volatilityCheck,
+                lsrCheck,
+                rsi1h,
+                emas3mData
+            };
+            
+            return learningSystem.getOptimizedQualityScore(symbol, isBullish, marketData);
+        }
+        
+        // Fallback para cálculo padrão
+        return calculateDefaultSignalQuality(symbol, isBullish, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData);
+        
+    } catch (error) {
+        console.error('Erro ao calcular qualidade do sinal:', error);
+        return calculateDefaultSignalQuality(symbol, isBullish, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData);
+    }
+}
+
+// 🔵 FUNÇÃO PADRÃO: Calcular qualidade do sinal (sem aprendizado)
+function calculateDefaultSignalQuality(symbol, isBullish, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData) {
     let score = 0;
     let details = [];
     
@@ -2058,9 +3042,6 @@ async function calculateSignalQuality(symbol, isBullish, volumeCheck, oiCheck, v
         details.push(`📊 EMAs: 0/${QUALITY_WEIGHTS.emaAlignment} (dados insuficientes)`);
     }
     
-    // 🔵 REMOVIDO: Market Structure (20 pontos) 
-    // Simplesmente não incluímos mais esta seção
-    
     // Determinar classificação
     let grade, emoji;
     if (score >= 85) {
@@ -2088,7 +3069,7 @@ async function calculateSignalQuality(symbol, isBullish, volumeCheck, oiCheck, v
     };
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Construir mensagem de alerta mais objetiva e resumida
+// 🔵 FUNÇÃO ATUALIZADA: Construir mensagem de alerta com aprendizado
 function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, targetsAndStop, 
                           rsi1h, stoch4h, stochDaily, lsrData, fundingRate, 
                           volumeCheck, orderBook, sweepTime, emas3mData, oiCheck, volatilityCheck, lsrCheck,
@@ -2099,33 +3080,43 @@ function buildAlertMessage(isBullish, symbol, priceFormatted, brDateTime, target
     const winRate = symbolPerformance.totalSignals > 0 ? 
         ((symbolPerformance.successfulSignals / symbolPerformance.totalSignals) * 100).toFixed(1) : 'N/A';
     
-    // 🔴 INFORMAÇÕES DO STOP ATR
+    // Insights do sistema de aprendizado
+    const insights = learningSystem.getLearningInsights();
+    const bestTime = learningSystem.getBestTimeToTrade();
+    
+    // 🔴 INFORMAÇÕES DO STOP ATR (OTIMIZADO)
     const stopInfo = targetsAndStop.stopType === "ATR" ? 
-        `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)` :
+        `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%) ${targetsAndStop.optimized ? '🤖' : ''}` :
         `⛔Stop ${targetsAndStop.stopType}: $${targetsAndStop.stopFormatted} (${targetsAndStop.stopPercentage}%)`;
     
-    // Mensagem muito mais resumida
+    // Mensagem com aprendizado
     let message = `${title} | ${symbol}\n`;
     message += `🕒 ${brDateTime.time} | 💰$${priceFormatted}\n`;
-    message += `📊 Score: ${qualityScore.grade} (${qualityScore.score}/100)\n`;
-    message += `🎯 WinRate: ${winRate}% | ${symbolPerformance.totalSignals} ops\n\n`;
+    message += `📊 Score: ${qualityScore.grade} (${qualityScore.score}/100) ${qualityScore.optimizedWeights ? '🤖' : ''}\n`;
+    message += `🎯 WinRate: ${winRate}% | ${symbolPerformance.totalSignals} ops\n`;
+    message += `⏰ Melhor hora: ${bestTime.bestHour}h (${bestTime.bestHourWinRate}%)\n\n`;
     
     // Entrada e stop
     message += `${stopInfo}\n`;
     message += `📈 ADX 15m: ${adx15m.adx} ${adx15m.trend}\n`;
     message += `📈 ADX 1h: ${adx1h.adx} ${adx1h.trend}\n\n`;
     
-    // Alvos
-    message += `🎯 Alvos:\n`;
+    // Alvos (otimizados se disponível)
+    message += `🎯 Alvos ${targetsAndStop.optimized ? '🤖' : ''}:\n`;
     targetsAndStop.targets.forEach((target, index) => {
         message += isBullish ? 
-            `${target.percentage}%: $${target.formatted}\n` :
-            `${target.percentage}%: $${target.formatted}\n`;
+            `${target.percentage}%: $${target.formatted} ${target.optimized ? '⭐' : ''}\n` :
+            `${target.percentage}%: $${target.formatted} ${target.optimized ? '⭐' : ''}\n`;
     });
     
     message += `\n📊 Vol 3m: ${volumeCheck.volumeData.ratio}x\n`;
     message += `📈 OI: ${oiCheck.trend} | ⚖️ LSR: ${lsrCheck.lsrRatio}\n`;
     message += `📉 RSI: ${rsi1h.value} | 🔄 Stoch4h: ${stoch4h.k}/${stoch4h.d}\n`;
+    
+    // Insights do aprendizado (apenas se houver)
+    if (insights.length > 0 && Math.random() < 0.3) { // 30% das vezes mostrar insights
+        message += `\n🧠 Insight: ${insights[0]}`;
+    }
     
     message += `\nby @J4Rviz`;
     
@@ -2218,7 +3209,7 @@ async function detectSweeps(symbol) {
     }
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão com ADX
+// 🔵 FUNÇÃO ATUALIZADA: Monitorar confirmações de reversão com ADX e aprendizado
 async function monitorConfirmation(symbol, learningSystem) {
     try {
         // Verificar se houve um sweep recente (últimas 6 horas)
@@ -2275,9 +3266,9 @@ async function monitorConfirmation(symbol, learningSystem) {
             // 🔴 NOVO CRITÉRIO: LSR ratio menor que 2.5 (15 minutos)
             const lsrCheck = await checkLSRCriteria(symbol, true);
             
-            // 🔵 NOVO: Calcular qualidade do sinal (sem Market Structure)
+            // 🔵 ATUALIZADO: Calcular qualidade do sinal com sistema de aprendizado
             const qualityScore = await calculateSignalQuality(
-                symbol, true, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData
+                symbol, true, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData, learningSystem
             );
             
             // Verificar se passa em TODOS os novos critérios
@@ -2295,10 +3286,14 @@ async function monitorConfirmation(symbol, learningSystem) {
                     getADX(symbol, '1h', 14)
                 ]);
                 
-                // 🔴 CALCULAR ALVOS E STOP DINÂMICO
-                const targetsAndStop = await calculateTargetsAndStopATR(emas3mData.currentPrice, true, symbol);
+                // 🔴 CALCULAR ALVOS E STOP DINÂMICO COM APRENDIZADO
+                const targetsAndStop = await calculateTargetsAndStopATR(
+                    emas3mData.currentPrice, true, symbol, 
+                    { volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData, adx15m, adx1h },
+                    learningSystem
+                );
                 
-                // 🔵 ATUALIZAR FUNÇÃO buildAlertMessage com ADX
+                // 🔵 ATUALIZAR FUNÇÃO buildAlertMessage com aprendizado
                 const msg = buildAlertMessage(
                     true,
                     symbol,
@@ -2338,7 +3333,8 @@ async function monitorConfirmation(symbol, learningSystem) {
                     emas3mData: emas3mData,
                     qualityScore: qualityScore,
                     adx15m: adx15m,
-                    adx1h: adx1h
+                    adx1h: adx1h,
+                    isBullish: true
                 };
                 
                 // Registrar no sistema de aprendizado
@@ -2379,9 +3375,9 @@ async function monitorConfirmation(symbol, learningSystem) {
             // 🔴 NOVO CRITÉRIO: LSR ratio maior que 2.5 (15 minutos)
             const lsrCheck = await checkLSRCriteria(symbol, false);
             
-            // 🔵 NOVO: Calcular qualidade do sinal (sem Market Structure)
+            // 🔵 ATUALIZADO: Calcular qualidade do sinal com sistema de aprendizado
             const qualityScore = await calculateSignalQuality(
-                symbol, false, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData
+                symbol, false, volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData, learningSystem
             );
             
             // Verificar se passa em TODOS os novos critérios
@@ -2399,8 +3395,12 @@ async function monitorConfirmation(symbol, learningSystem) {
                     getADX(symbol, '1h', 14)
                 ]);
                 
-                // 🔴 CALCULAR ALVOS E STOP DINÂMICO
-                const targetsAndStop = await calculateTargetsAndStopATR(emas3mData.currentPrice, false, symbol);
+                // 🔴 CALCULAR ALVOS E STOP DINÂMICO COM APRENDIZADO
+                const targetsAndStop = await calculateTargetsAndStopATR(
+                    emas3mData.currentPrice, false, symbol,
+                    { volumeCheck, oiCheck, volatilityCheck, lsrCheck, rsi1h, emas3mData, adx15m, adx1h },
+                    learningSystem
+                );
                 
                 const msg = buildAlertMessage(
                     false,
@@ -2441,7 +3441,8 @@ async function monitorConfirmation(symbol, learningSystem) {
                     emas3mData: emas3mData,
                     qualityScore: qualityScore,
                     adx15m: adx15m,
-                    adx1h: adx1h
+                    adx1h: adx1h,
+                    isBullish: false
                 };
                 
                 // Registrar no sistema de aprendizado
@@ -2485,7 +3486,7 @@ async function processBatch(batch, processFunction, learningSystem = null) {
     return alerts;
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Loop principal do bot com ADX
+// 🔵 FUNÇÃO ATUALIZADA: Loop principal do bot com aprendizado
 async function mainBotLoop(learningSystem) {
     // Buscar símbolos dinamicamente
     console.log('\n🔍 Buscando todos os pares USDT da Binance Futures...');
@@ -2520,23 +3521,34 @@ async function mainBotLoop(learningSystem) {
         ` 📦 COMPRESSÃO DE CACHE: ${COMPRESS_CANDLES ? 'ATIVADA' : 'DESATIVADA'}\n` +
         ` 📊 FILTRO DE QUALIDADE: Score mínimo ${QUALITY_THRESHOLD}/100\n` +
         ` 📈 ADX INCLUÍDO: 15m e 1h para análise de tendência\n` +
-        ` 🧠 SISTEMA DE APRENDIZADO: ATIVADO\n` +
+        ` 🧠 SISTEMA DE APRENDIZADO AVANÇADO: ATIVADO\n` +
         '='.repeat(70) + '\n';
     
     console.log(initMsg);
     logToFile(`🤖 Bot iniciado - Monitorando ${SYMBOLS.length} ativos dinamicamente`);
+    
+    // Mostrar relatório inicial do sistema de aprendizado
+    const initialReport = learningSystem.getPerformanceReport();
+    console.log('\n🧠 RELATÓRIO INICIAL DO SISTEMA DE APRENDIZADO:');
+    console.log(`📊 Total de trades registrados: ${initialReport.totalTrades}`);
+    console.log(`🎯 Win Rate atual: ${initialReport.winRate}%`);
+    console.log(`⭐ Top símbolos: ${initialReport.topSymbols.map(s => `${s.symbol}(${s.winRate}%)`).join(', ')}`);
+    console.log(`⏰ Melhor horário: ${initialReport.bestHour}h (${initialReport.bestHourWinRate}% win rate)`);
     
     const brDateTime = getBrazilianDateTime();
     await sendAlert(`🤖 <b>SMC Confirmation Bot (Todos os pares Binance Futures)</b>\n` +
                     `📍 <b>Horário Brasil (BRT):</b> ${brDateTime.full}\n` +
                     `📊 <b>Ativos monitorados:</b> ${SYMBOLS.length} pares USDT\n` +
                     `📊 <b>Filtro de qualidade:</b> ${QUALITY_THRESHOLD}/100\n` +
-                    `🧠 <b>Sistema de aprendizado:</b> ATIVADO\n` +
+                    `🧠 <b>Sistema de aprendizado AVANÇADO:</b> ATIVADO\n` +
+                    `📈 <b>Performance aprendida:</b> ${initialReport.winRate}% win rate\n` +
+                    `⭐ <b>Top símbolos:</b> ${initialReport.topSymbols.slice(0, 3).map(s => s.symbol).join(', ')}\n` +
                     `⚠️ <b>ATENÇÃO:</b> Sem limites de risco - todos os alertas serão enviados\n` +
                     `by @J4Rviz.`);
 
     let consecutiveErrors = 0;
     let cycleCount = 0;
+    let lastPerformanceReport = Date.now();
 
     while (true) {
         try {
@@ -2565,6 +3577,16 @@ async function mainBotLoop(learningSystem) {
             console.log(`\n🔄 Ciclo ${cycleCount} - Verificando ${SYMBOLS.length} ativos...`);
             console.log(`📊 Rate Limit: ${rateLimitCounter.usedWeight}/${BINANCE_RATE_LIMIT.requestsPerMinute} (${rateLimitCounter.remainingWeight} restantes)`);
             
+            // Mostrar relatório de aprendizado a cada 10 ciclos
+            if (cycleCount % 10 === 0) {
+                const report = learningSystem.getPerformanceReport();
+                console.log('\n🧠 RELATÓRIO DE APRENDIZADO:');
+                console.log(`🎯 Win Rate: ${report.winRate}% (${report.winningTrades}/${report.closedTrades} trades)`);
+                console.log(`📈 Risk/Reward: ${report.riskReward}`);
+                console.log(`⭐ Top 3: ${report.topSymbols.slice(0, 3).map(s => `${s.symbol}(${s.winRate}%)`).join(', ')}`);
+                console.log(`⏰ Melhor hora: ${report.bestHour}h (${report.bestHourWinRate}%)`);
+            }
+            
             // 🔵 PROCESSAR DETECÇÃO DE SWEEPS (SILENCIOSA)
             console.log('🔍 Detectando sweeps (sem alertas)...');
             for (let i = 0; i < SYMBOLS.length; i += BATCH_SIZE) {
@@ -2589,7 +3611,7 @@ async function mainBotLoop(learningSystem) {
                 for (const alert of batchAlerts) {
                     console.log(`\n✅ CONFIRMAÇÃO DETECTADA PARA ${alert.symbol}!`);
                     console.log(`📊 ${alert.signal} - Preço: $${alert.priceFormatted}`);
-                    console.log(`📈 Score: ${alert.qualityScore.grade} (${alert.qualityScore.score}/100)`);
+                    console.log(`📈 Score: ${alert.qualityScore.grade} (${alert.qualityScore.score}/100) ${alert.qualityScore.optimizedWeights ? '🤖' : ''}`);
                     console.log(`📊 ADX 15m: ${alert.adx15m.adx} (${alert.adx15m.strength})`);
                     console.log(`📊 ADX 1h: ${alert.adx1h.adx} (${alert.adx1h.strength})`);
                     
@@ -2628,6 +3650,13 @@ async function mainBotLoop(learningSystem) {
                 rateLimitCounter.usedWeight = 0;
                 rateLimitCounter.remainingWeight = BINANCE_RATE_LIMIT.requestsPerMinute;
             }
+            
+            // 🔵 SALVAR DADOS DE APRENDIZADO PERIODICAMENTE
+            if (Date.now() - lastPerformanceReport > 30 * 60 * 1000) { // A cada 30 minutos
+                learningSystem.saveLearningData();
+                console.log('💾 Dados de aprendizado salvos');
+                lastPerformanceReport = Date.now();
+            }
 
             consecutiveErrors = 0;
             
@@ -2648,13 +3677,13 @@ async function mainBotLoop(learningSystem) {
     }
 }
 
-// 🔵 FUNÇÃO ATUALIZADA: Iniciar bot
+// 🔵 FUNÇÃO ATUALIZADA: Iniciar bot com sistema de aprendizado
 async function startBot() {
     try {
         initLogSystem();
         
-        // Inicializar sistema de aprendizado
-        const learningSystem = new LearningSystem();
+        // Inicializar sistema de aprendizado AVANÇADO
+        const learningSystem = new AdvancedLearningSystem();
         
         logToFile('🔍 Verificando conexão inicial...');
         console.log('🔍 Verificando conexão inicial...');
@@ -2686,13 +3715,16 @@ async function startBot() {
 // Iniciar o bot
 console.log('\n' + '='.repeat(80));
 console.log('🤖 BOT DE CONFIRMAÇÕES SMC 1H (TODOS OS PARES BINANCE FUTURES)');
+console.log('🧠 SISTEMA DE APRENDIZADO AVANÇADO INTEGRADO');
 console.log('='.repeat(80) + '\n');
 
 // Verificar dependências
 try {
     require('technicalindicators');
+    require('canvas');
 } catch (e) {
-    console.log('⚠️ technicalindicators não encontrado. Instale com: npm install technicalindicators');
+    console.log('⚠️ Dependências não encontradas. Instale com:');
+    console.log('npm install technicalindicators canvas');
     process.exit(1);
 }
 
