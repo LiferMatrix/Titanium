@@ -115,7 +115,7 @@ const LSR_SETTINGS = {
     sellThreshold: 2.5
 };
 
-const QUALITY_THRESHOLD = 70;
+const QUALITY_THRESHOLD = 55;
 const ADX_MIN_STRENGTH = 22;
 
 // === FILTROS RÁPIDOS PARA 540+ PARES ===
