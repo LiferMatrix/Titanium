@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_';
-const TELEGRAM_CHAT_ID = '-1001990';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -40,7 +40,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 70;
+const QUALITY_THRESHOLD = 75;
 const QUALITY_WEIGHTS = {
     volume: 15,           
     oi: 8,
