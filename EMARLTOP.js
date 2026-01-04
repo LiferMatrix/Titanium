@@ -6,8 +6,9 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
+
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -41,21 +42,20 @@ const COOLDOWN_SETTINGS = {
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
 const QUALITY_THRESHOLD = 73;
 const QUALITY_WEIGHTS = {
-    volume: 20,           
+    volume: 19,           
     oi: 10,
     volatility: 8,
     lsr: 8,
     rsi: 8,
     emaAlignment: 10,
-    adx: 8,
+    adx: 5,
     adx1h: 10,
     stoch1h: 5,
     stoch4h: 8,          
     cci4h: 10,
     divergence15m: 10,
     breakoutRisk: 8,
-    supportResistance: 10,
-    fundingRate: 8  
+    supportResistance: 8
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -140,30 +140,6 @@ const DIVERGENCE_SETTINGS = {
     confirmationCandles: 2
 };
 
-// === NOVAS CONFIGURAÇÕES PARA RSI DINÂMICO ===
-const DYNAMIC_RSI_SETTINGS = {
-    baseBuyThreshold: 70,     // RSI máximo para compra em condições normais
-    baseSellThreshold: 40,    // RSI mínimo para venda em condições normais
-    strongTrendAdjustment: 5, // Ajuste quando ADX > 30
-    weakTrendAdjustment: -3,  // Ajuste quando ADX < 20
-    adxStrongThreshold: 30,
-    adxWeakThreshold: 20
-};
-
-// === CONFIGURAÇÕES PARA ALVOS DINÂMICOS ===
-const DYNAMIC_TARGETS_SETTINGS = {
-    basePercentages: [0.3, 0.5, 0.7, 0.9, 1.2], // Multiplicadores da distância até S/R
-    minDistanceForTargets: 0.8, // Distância mínima em % para considerar S/R
-    maxRiskReward: 8.0,        // Risk-Reward máximo
-    minRiskReward: 1.5,        // Risk-Reward mínimo
-    useAdaptiveMultipliers: true,
-    multipliersByVolatility: {
-        low: 0.8,
-        medium: 1.0,
-        high: 1.2
-    }
-};
-
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
 const LEARNING_DIR = './learning_data';
@@ -215,424 +191,6 @@ const CCI_4H_SETTINGS = {
 const TARGET_PERCENTAGES = [2.5, 5.0, 8.0, 12.0, 18.0];
 const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
-
-// =====================================================================
-// 🔄 NOVO SISTEMA DE TRADE TRACKING COM TRAILING SIMULATION
-// =====================================================================
-
-class TradeTrackingSystem {
-    constructor() {
-        this.openTrades = new Map();
-        this.tradeHistory = [];
-        this.maxCandlesPerTrade = 1440; // 24h de candles de 1m
-        this.feeRate = 0.0004; // 0.04% Binance Futures
-    }
-
-    async simulateTrade(tradeRecord) {
-        try {
-            const { symbol, entryPrice, stopPrice, targets, direction, timestamp } = tradeRecord;
-            
-            // Baixar candles de 1m a partir do timestamp do trade
-            const startTime = timestamp;
-            const endTime = timestamp + (24 * 60 * 60 * 1000); // 24h após
-            let allCandles = [];
-            
-            // Coletar candles de 1m para as próximas 24h
-            let currentTime = startTime;
-            while (currentTime < endTime && allCandles.length < this.maxCandlesPerTrade) {
-                const candles = await this.fetchHistoricalCandles(symbol, '1m', currentTime, Math.min(currentTime + (60 * 1000 * 500), endTime));
-                if (candles.length === 0) break;
-                
-                allCandles = [...allCandles, ...candles];
-                currentTime = candles[candles.length - 1].time + 60000; // Próximo candle
-                
-                // Delay para não sobrecarregar API
-                await new Promise(r => setTimeout(r, 50));
-            }
-            
-            if (allCandles.length === 0) {
-                return await this.simulateWith5mCandles(tradeRecord);
-            }
-            
-            // Ordenar candles por tempo
-            allCandles.sort((a, b) => a.time - b.time);
-            
-            // Simular trade candle a candle
-            const result = this.simulateCandleByCandle(tradeRecord, allCandles);
-            
-            return result;
-            
-        } catch (error) {
-            console.error(`Erro na simulação do trade ${tradeRecord.symbol}:`, error.message);
-            return await this.fallbackSimulation(tradeRecord);
-        }
-    }
-
-    async simulateWith5mCandles(tradeRecord) {
-        try {
-            const { symbol, entryPrice, stopPrice, targets, direction, timestamp } = tradeRecord;
-            
-            // Usar candles de 5m como fallback
-            const candles = await getCandlesCached(symbol, '5m', 288); // 24h de candles 5m
-            
-            if (candles.length < 10) {
-                return await this.fallbackSimulation(tradeRecord);
-            }
-            
-            return this.simulateCandleByCandle(tradeRecord, candles);
-            
-        } catch (error) {
-            console.error(`Erro na simulação 5m do trade ${tradeRecord.symbol}:`, error.message);
-            return await this.fallbackSimulation(tradeRecord);
-        }
-    }
-
-    simulateCandleByCandle(tradeRecord, candles) {
-        const { entryPrice, stopPrice, targets, direction, partialTargets = [] } = tradeRecord;
-        
-        // Ordenar targets por porcentagem
-        const sortedTargets = [...targets].sort((a, b) => parseFloat(a.target) - parseFloat(b.target));
-        
-        // Configurar posições parciais
-        const partialConfig = {
-            totalPosition: 100, // 100% da posição
-            remainingPosition: 100,
-            partialSizes: [25, 25, 25, 25], // 4 alvos de 25% cada
-            profits: [],
-            fees: 0
-        };
-        
-        let outcome = 'PENDING';
-        let exitPrice = null;
-        let exitTime = null;
-        let stopHit = false;
-        let targetIndexHit = -1;
-        
-        // Simular cada candle
-        for (let i = 0; i < candles.length; i++) {
-            const candle = candles[i];
-            const high = candle.high;
-            const low = candle.low;
-            const close = candle.close;
-            const currentTime = candle.time;
-            
-            // Verificar se stop foi atingido primeiro
-            if (!stopHit) {
-                if (direction === 'BUY' && low <= stopPrice) {
-                    outcome = 'FAILURE';
-                    exitPrice = Math.min(stopPrice, close);
-                    exitTime = currentTime;
-                    stopHit = true;
-                    
-                    // Calcular P&L para posição restante
-                    const remainingProfit = direction === 'BUY' 
-                        ? ((exitPrice - entryPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100)
-                        : ((entryPrice - exitPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100);
-                    
-                    // Subtrair fees
-                    const fee = this.feeRate * 100 * 2; // Entrada e saída
-                    partialConfig.fees += fee * (partialConfig.remainingPosition / 100);
-                    
-                    break;
-                } else if (direction === 'SELL' && high >= stopPrice) {
-                    outcome = 'FAILURE';
-                    exitPrice = Math.max(stopPrice, close);
-                    exitTime = currentTime;
-                    stopHit = true;
-                    
-                    const remainingProfit = direction === 'SELL'
-                        ? ((entryPrice - exitPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100)
-                        : ((exitPrice - entryPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100);
-                    
-                    const fee = this.feeRate * 100 * 2;
-                    partialConfig.fees += fee * (partialConfig.remainingPosition / 100);
-                    
-                    break;
-                }
-            }
-            
-            // Verificar targets em ordem
-            for (let j = 0; j < sortedTargets.length && partialConfig.remainingPosition > 0; j++) {
-                if (partialConfig.partialSizes[j] <= 0) continue;
-                
-                const target = sortedTargets[j];
-                const targetPrice = parseFloat(target.price);
-                
-                // Verificar se target foi atingido
-                const targetHit = direction === 'BUY' 
-                    ? high >= targetPrice
-                    : low <= targetPrice;
-                
-                if (targetHit) {
-                    targetIndexHit = Math.max(targetIndexHit, j);
-                    const positionSize = partialConfig.partialSizes[j];
-                    
-                    // Calcular lucro para esta parte da posição
-                    const partialProfit = direction === 'BUY'
-                        ? ((targetPrice - entryPrice) / entryPrice) * 100 * (positionSize / 100)
-                        : ((entryPrice - targetPrice) / entryPrice) * 100 * (positionSize / 100);
-                    
-                    // Subtrair fees para esta parte
-                    const fee = this.feeRate * 100 * 2;
-                    partialConfig.fees += fee * (positionSize / 100);
-                    
-                    partialConfig.profits.push({
-                        targetIndex: j,
-                        price: targetPrice,
-                        profit: partialProfit,
-                        positionSize: positionSize,
-                        timestamp: currentTime
-                    });
-                    
-                    partialConfig.remainingPosition -= positionSize;
-                    partialConfig.partialSizes[j] = 0;
-                    
-                    // Se toda a posição foi fechada
-                    if (partialConfig.remainingPosition <= 0) {
-                        outcome = 'SUCCESS';
-                        exitPrice = targetPrice;
-                        exitTime = currentTime;
-                        break;
-                    }
-                }
-            }
-            
-            if (outcome !== 'PENDING' && partialConfig.remainingPosition <= 0) {
-                break;
-            }
-            
-            // Verificar se candle fechou abaixo/above do stop após target
-            if (partialConfig.remainingPosition > 0) {
-                if (direction === 'BUY' && close <= stopPrice) {
-                    outcome = 'PARTIAL_SUCCESS';
-                    exitPrice = close;
-                    exitTime = currentTime;
-                    
-                    const remainingProfit = ((exitPrice - entryPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100);
-                    const fee = this.feeRate * 100 * 2;
-                    partialConfig.fees += fee * (partialConfig.remainingPosition / 100);
-                    
-                    break;
-                } else if (direction === 'SELL' && close >= stopPrice) {
-                    outcome = 'PARTIAL_SUCCESS';
-                    exitPrice = close;
-                    exitTime = currentTime;
-                    
-                    const remainingProfit = ((entryPrice - exitPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100);
-                    const fee = this.feeRate * 100 * 2;
-                    partialConfig.fees += fee * (partialConfig.remainingPosition / 100);
-                    
-                    break;
-                }
-            }
-        }
-        
-        // Se ainda estiver pendente após todas as candles
-        if (outcome === 'PENDING') {
-            const lastCandle = candles[candles.length - 1];
-            outcome = partialConfig.profits.length > 0 ? 'PARTIAL_SUCCESS' : 'INCONCLUSIVE';
-            exitPrice = lastCandle.close;
-            exitTime = lastCandle.time;
-            
-            if (partialConfig.remainingPosition > 0) {
-                const remainingProfit = direction === 'BUY'
-                    ? ((exitPrice - entryPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100)
-                    : ((entryPrice - exitPrice) / entryPrice) * 100 * (partialConfig.remainingPosition / 100);
-                
-                const fee = this.feeRate * 100 * 2;
-                partialConfig.fees += fee * (partialConfig.remainingPosition / 100);
-            }
-        }
-        
-        // Calcular lucro total
-        const totalProfit = partialConfig.profits.reduce((sum, p) => sum + p.profit, 0);
-        const netProfit = totalProfit - partialConfig.fees;
-        
-        // Determinar resultado final
-        let finalOutcome = outcome;
-        if (outcome === 'SUCCESS' && targetIndexHit >= 0) {
-            finalOutcome = `SUCCESS_T${targetIndexHit + 1}`;
-        } else if (outcome === 'PARTIAL_SUCCESS' && targetIndexHit >= 0) {
-            finalOutcome = `PARTIAL_T${targetIndexHit + 1}`;
-        }
-        
-        return {
-            outcome: finalOutcome,
-            exitPrice: exitPrice,
-            exitTime: exitTime,
-            durationHours: exitTime ? (exitTime - tradeRecord.timestamp) / (1000 * 60 * 60) : 24,
-            totalProfit: totalProfit,
-            netProfit: netProfit,
-            fees: partialConfig.fees,
-            partialProfits: partialConfig.profits,
-            targetsHit: targetIndexHit + 1,
-            positionClosed: partialConfig.remainingPosition <= 0,
-            simulationMethod: '1m_candles',
-            candlesAnalyzed: candles.length
-        };
-    }
-
-    async fetchHistoricalCandles(symbol, interval, startTime, endTime) {
-        try {
-            const limit = 500;
-            const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${limit}`;
-            
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            
-            const data = await response.json();
-            
-            return data.map(candle => ({
-                time: candle[0],
-                open: parseFloat(candle[1]),
-                high: parseFloat(candle[2]),
-                low: parseFloat(candle[3]),
-                close: parseFloat(candle[4]),
-                volume: parseFloat(candle[5])
-            }));
-        } catch (error) {
-            console.error(`Erro ao buscar candles históricos ${symbol}:`, error.message);
-            return [];
-        }
-    }
-
-    async fallbackSimulation(tradeRecord) {
-        // Fallback simples baseado no preço após 24h
-        try {
-            const { symbol, entryPrice, stopPrice, targets, direction } = tradeRecord;
-            
-            // Buscar preço atual
-            const candles = await getCandlesCached(symbol, '1h', 2);
-            if (candles.length === 0) {
-                return {
-                    outcome: 'UNKNOWN',
-                    exitPrice: null,
-                    durationHours: 24,
-                    totalProfit: 0,
-                    netProfit: 0,
-                    fees: 0,
-                    simulationMethod: 'fallback_failed'
-                };
-            }
-            
-            const currentPrice = candles[candles.length - 1].close;
-            
-            // Verificar se algum target foi atingido
-            const sortedTargets = [...targets].sort((a, b) => parseFloat(a.target) - parseFloat(b.target));
-            let targetHit = -1;
-            
-            for (let i = 0; i < sortedTargets.length; i++) {
-                const targetPrice = parseFloat(sortedTargets[i].price);
-                const targetReached = direction === 'BUY' 
-                    ? currentPrice >= targetPrice
-                    : currentPrice <= targetPrice;
-                
-                if (targetReached) {
-                    targetHit = i;
-                    break;
-                }
-            }
-            
-            // Verificar se stop foi atingido
-            const stopReached = direction === 'BUY'
-                ? currentPrice <= stopPrice
-                : currentPrice >= stopPrice;
-            
-            let outcome = 'INCONCLUSIVE';
-            let exitPrice = currentPrice;
-            
-            if (stopReached) {
-                outcome = 'FAILURE';
-                exitPrice = stopPrice;
-            } else if (targetHit >= 0) {
-                outcome = `SUCCESS_T${targetHit + 1}`;
-                exitPrice = parseFloat(sortedTargets[targetHit].price);
-            }
-            
-            // Calcular lucro simples
-            const profit = direction === 'BUY'
-                ? ((exitPrice - entryPrice) / entryPrice) * 100
-                : ((entryPrice - exitPrice) / entryPrice) * 100;
-            
-            const fees = this.feeRate * 100 * 2; // Entrada e saída
-            const netProfit = profit - fees;
-            
-            return {
-                outcome: outcome,
-                exitPrice: exitPrice,
-                durationHours: 24,
-                totalProfit: profit,
-                netProfit: netProfit,
-                fees: fees,
-                simulationMethod: '24h_fallback'
-            };
-            
-        } catch (error) {
-            console.error(`Erro no fallback simulation:`, error.message);
-            return {
-                outcome: 'ERROR',
-                exitPrice: null,
-                durationHours: 24,
-                totalProfit: 0,
-                netProfit: 0,
-                fees: 0,
-                simulationMethod: 'error'
-            };
-        }
-    }
-
-    async recordAndTrackTrade(tradeRecord) {
-        const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        const trackedTrade = {
-            ...tradeRecord,
-            id: tradeId,
-            status: 'OPEN',
-            trackingStarted: Date.now()
-        };
-        
-        this.openTrades.set(tradeId, trackedTrade);
-        this.tradeHistory.push(trackedTrade);
-        
-        // Agendar verificação após 24h
-        setTimeout(async () => {
-            await this.checkTradeOutcome(tradeId);
-        }, 24 * 60 * 60 * 1000);
-        
-        return tradeId;
-    }
-
-    async checkTradeOutcome(tradeId) {
-        try {
-            const trade = this.openTrades.get(tradeId);
-            if (!trade || trade.status !== 'OPEN') return;
-            
-            // Simular trade com trailing simulation
-            const simulationResult = await this.simulateTrade(trade);
-            
-            // Atualizar trade com resultados
-            trade.status = 'CLOSED';
-            trade.outcome = simulationResult.outcome;
-            trade.exitPrice = simulationResult.exitPrice;
-            trade.exitTime = simulationResult.exitTime;
-            trade.profitPercentage = simulationResult.netProfit;
-            trade.durationHours = simulationResult.durationHours;
-            trade.simulationResult = simulationResult;
-            
-            this.openTrades.delete(tradeId);
-            
-            console.log(`📊 Trade ${trade.symbol} ${trade.direction} ${trade.outcome}: ${simulationResult.netProfit.toFixed(2)}% (Fees: ${simulationResult.fees.toFixed(2)}%)`);
-            
-            // Atualizar sistema de aprendizado se disponível
-            if (global.learningSystem) {
-                await global.learningSystem.recordTradeResult(trade);
-            }
-            
-        } catch (error) {
-            console.error(`Erro ao verificar outcome do trade ${tradeId}:`, error);
-        }
-    }
-}
 
 // =====================================================================
 // 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE)
@@ -805,7 +363,7 @@ class SophisticatedRiskLayer {
     
     analyzeVolumeRisk(signal) {
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-        const volumeAboveBelow = ((volumeRatio - 1) * 100).toFixed(1);
+        const volumeAboveBelow = ((volumeRatio - 1) * 100);
         
         let score = 0;
         let message = '';
@@ -1426,7 +984,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO (COM TRADE TRACKING MELHORADO)
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -1447,78 +1005,326 @@ class AdvancedLearningSystem {
         this.learningEnabled = true;
         this.minTradesForLearning = 10;
         this.tradeTrackingHours = 24;
-        this.tradeTrackingSystem = new TradeTrackingSystem();
+        
+        // Configuração de trailing simulation
+        this.trailingConfig = {
+            timeframe: '5m',
+            candlesToSimulate: 288, // 24 horas em candles de 5m
+            partialTargets: [
+                { percentage: 20, positionSize: 0.25 },
+                { percentage: 40, positionSize: 0.25 },
+                { percentage: 60, positionSize: 0.25 },
+                { percentage: 80, positionSize: 0.25 }
+            ],
+            fees: 0.0004 // 0.04% Binance Futures
+        };
         
         this.loadLearningData();
-        console.log('🧠 Sistema de Aprendizado Avançado inicializado');
+        console.log('🧠 Sistema de Aprendizado Avançado com Trailing Simulation inicializado');
     }
     
-    loadLearningData() {
+    async simulateTradeCandleByCandle(tradeId) {
         try {
-            if (!fs.existsSync(LEARNING_DIR)) {
-                fs.mkdirSync(LEARNING_DIR, { recursive: true });
+            const trade = this.openTrades.get(tradeId);
+            if (!trade) return null;
+            
+            console.log(`📊 Iniciando trailing simulation para ${trade.symbol} ${trade.direction}`);
+            
+            // Baixar candles de 5m após o sinal
+            const candles = await getCandlesCached(
+                trade.symbol, 
+                this.trailingConfig.timeframe, 
+                this.trailingConfig.candlesToSimulate
+            );
+            
+            if (candles.length < 10) return null;
+            
+            const entryTime = trade.timestamp;
+            const relevantCandles = candles.filter(c => c.time >= entryTime);
+            
+            if (relevantCandles.length === 0) return null;
+            
+            // Simular trade candle a candle
+            const simulationResult = this.simulateTradeExecution(
+                trade, 
+                relevantCandles
+            );
+            
+            // Atualizar trade com resultado da simulação
+            trade.simulationResult = simulationResult;
+            trade.status = 'SIMULATED';
+            trade.outcome = simulationResult.finalOutcome;
+            trade.exitPrice = simulationResult.exitPrice;
+            trade.profitPercentage = simulationResult.netProfitPercentage;
+            trade.durationHours = simulationResult.durationHours;
+            
+            // Registrar no histórico
+            this.recordTradeOutcome(trade);
+            
+            return simulationResult;
+            
+        } catch (error) {
+            console.error('Erro na simulação:', error);
+            return null;
+        }
+    }
+    
+    simulateTradeExecution(trade, candles) {
+        const entryPrice = trade.entryPrice;
+        const stopPrice = trade.stopPrice;
+        const isBullish = trade.direction === 'BUY';
+        
+        let currentPosition = 1.0; // 100% da posição inicial
+        let realizedProfit = 0;
+        let feesPaid = 0;
+        let hitStop = false;
+        let hitTargets = [];
+        let exitPrice = entryPrice;
+        let finalOutcome = 'FAILURE';
+        let firstHit = null;
+        
+        // Ordenar alvos por porcentagem
+        const sortedTargets = [...trade.targets].sort((a, b) => 
+            parseFloat(a.percentage) - parseFloat(b.percentage)
+        );
+        
+        // Simular cada candle
+        for (let i = 0; i < candles.length && currentPosition > 0; i++) {
+            const candle = candles[i];
+            const high = candle.high;
+            const low = candle.low;
+            const close = candle.close;
+            
+            // Verificar se stop foi atingido primeiro
+            if (!hitStop) {
+                if (isBullish && low <= stopPrice) {
+                    hitStop = true;
+                    firstHit = firstHit || 'STOP';
+                    exitPrice = stopPrice;
+                    
+                    const loss = (stopPrice - entryPrice) / entryPrice * 100 * currentPosition;
+                    realizedProfit += loss;
+                    
+                    // Calcular fees para saída
+                    const exitFees = currentPosition * this.trailingConfig.fees * 100;
+                    feesPaid += exitFees;
+                    
+                    currentPosition = 0;
+                    finalOutcome = 'STOP_HIT';
+                    break;
+                } else if (!isBullish && high >= stopPrice) {
+                    hitStop = true;
+                    firstHit = firstHit || 'STOP';
+                    exitPrice = stopPrice;
+                    
+                    const loss = (entryPrice - stopPrice) / entryPrice * 100 * currentPosition;
+                    realizedProfit += loss;
+                    
+                    // Calcular fees para saída
+                    const exitFees = currentPosition * this.trailingConfig.fees * 100;
+                    feesPaid += exitFees;
+                    
+                    currentPosition = 0;
+                    finalOutcome = 'STOP_HIT';
+                    break;
+                }
             }
             
-            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
-            if (fs.existsSync(learningFile)) {
-                const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
+            // Verificar alvos parciais
+            for (let j = 0; j < sortedTargets.length; j++) {
+                const target = sortedTargets[j];
+                const targetPrice = parseFloat(target.price);
                 
-                this.tradeHistory = data.tradeHistory || [];
-                this.symbolPerformance = data.symbolPerformance || {};
-                this.patterns = data.patterns || this.patterns;
-                this.parameterEvolution = data.parameterEvolution || this.parameterEvolution;
+                if (hitTargets.some(t => t.percentage === target.percentage)) continue;
                 
-                console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
+                // Verificar se o alvo foi atingido
+                const targetHit = isBullish ? 
+                    high >= targetPrice : 
+                    low <= targetPrice;
+                
+                if (targetHit) {
+                    if (!firstHit) firstHit = `TARGET_${target.percentage}%`;
+                    
+                    hitTargets.push({
+                        percentage: target.percentage,
+                        price: targetPrice,
+                        positionSize: this.trailingConfig.partialTargets[j]?.positionSize || 0.25
+                    });
+                    
+                    // Calcular profit para esta parte da posição
+                    const positionSize = this.trailingConfig.partialTargets[j]?.positionSize || 0.25;
+                    const profit = isBullish ?
+                        ((targetPrice - entryPrice) / entryPrice) * 100 * positionSize :
+                        ((entryPrice - targetPrice) / entryPrice) * 100 * positionSize;
+                    
+                    realizedProfit += profit;
+                    
+                    // Calcular fees para esta saída parcial
+                    const entryFees = positionSize * this.trailingConfig.fees * 100;
+                    const exitFees = positionSize * this.trailingConfig.fees * 100;
+                    feesPaid += entryFees + exitFees;
+                    
+                    currentPosition -= positionSize;
+                    
+                    if (currentPosition <= 0) {
+                        currentPosition = 0;
+                        exitPrice = targetPrice;
+                        finalOutcome = hitTargets.length === sortedTargets.length ? 
+                            'ALL_TARGETS_HIT' : 'PARTIAL_TARGETS_HIT';
+                        break;
+                    }
+                }
             }
+            
+            if (currentPosition <= 0) break;
+        }
+        
+        // Se ainda tiver posição após 24h, fechar no último preço
+        if (currentPosition > 0) {
+            const lastCandle = candles[candles.length - 1];
+            exitPrice = lastCandle.close;
+            
+            const finalProfit = isBullish ?
+                ((exitPrice - entryPrice) / entryPrice) * 100 * currentPosition :
+                ((entryPrice - exitPrice) / entryPrice) * 100 * currentPosition;
+            
+            realizedProfit += finalProfit;
+            
+            // Calcular fees finais
+            const finalFees = currentPosition * this.trailingConfig.fees * 100;
+            feesPaid += finalFees;
+            
+            currentPosition = 0;
+            finalOutcome = firstHit ? `${firstHit}_THEN_EXIT` : 'TIMEOUT_EXIT';
+        }
+        
+        // Calcular resultados finais
+        const netProfit = realizedProfit - feesPaid;
+        const durationMs = candles.length * 5 * 60 * 1000; // Cada candle de 5m
+        const durationHours = durationMs / (1000 * 60 * 60);
+        
+        return {
+            finalOutcome: finalOutcome,
+            exitPrice: exitPrice,
+            grossProfitPercentage: realizedProfit,
+            feesPercentage: feesPaid,
+            netProfitPercentage: netProfit,
+            durationHours: durationHours,
+            hitTargets: hitTargets,
+            hitStop: hitStop,
+            firstHit: firstHit,
+            candlesAnalyzed: candles.length,
+            simulationTimestamp: Date.now()
+        };
+    }
+    
+    async checkTradeOutcome(tradeId) {
+        try {
+            const trade = this.openTrades.get(tradeId);
+            if (!trade || trade.status !== 'OPEN') return;
+            
+            // Usar trailing simulation em vez de verificação simples
+            const simulationResult = await this.simulateTradeCandleByCandle(tradeId);
+            
+            if (simulationResult) {
+                console.log(`📊 Trade ${trade.symbol} ${trade.direction} ${simulationResult.finalOutcome}: ${simulationResult.netProfitPercentage.toFixed(2)}%`);
+                console.log(`   Alvos atingidos: ${simulationResult.hitTargets.length}, Stop: ${simulationResult.hitStop ? 'SIM' : 'NÃO'}`);
+            } else {
+                // Fallback para verificação antiga se a simulação falhar
+                await this.checkTradeOutcomeFallback(tradeId);
+            }
+            
         } catch (error) {
-            console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+            console.error('Erro ao verificar outcome do trade:', error);
+            // Tentar fallback
+            await this.checkTradeOutcomeFallback(tradeId);
         }
     }
     
-    saveLearningData() {
+    async checkTradeOutcomeFallback(tradeId) {
         try {
-            const data = {
-                tradeHistory: this.tradeHistory.slice(-1000),
-                symbolPerformance: this.symbolPerformance,
-                patterns: this.patterns,
-                parameterEvolution: this.parameterEvolution,
-                lastUpdated: Date.now()
-            };
+            const trade = this.openTrades.get(tradeId);
+            if (!trade || trade.status !== 'OPEN') return;
             
-            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
-            const backupFile = path.join(LEARNING_DIR, `learning_backup_${Date.now()}.json`);
+            const currentPrice = await this.getCurrentPrice(trade.symbol);
+            if (!currentPrice) return;
             
-            if (fs.existsSync(learningFile)) {
-                fs.copyFileSync(learningFile, backupFile);
+            let outcome = 'FAILURE';
+            let exitPrice = trade.stopPrice;
+            let profitPercentage = 0;
+            
+            for (const target of trade.targets) {
+                const targetReached = trade.direction === 'BUY' 
+                    ? currentPrice >= target.price
+                    : currentPrice <= target.price;
+                
+                if (targetReached) {
+                    outcome = 'SUCCESS';
+                    exitPrice = target.price;
+                    profitPercentage = trade.direction === 'BUY'
+                        ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+                        : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
+                    break;
+                }
             }
             
-            fs.writeFileSync(learningFile, JSON.stringify(data, null, 2));
-            this.cleanupOldBackups();
+            if (outcome === 'FAILURE') {
+                const stopHit = trade.direction === 'BUY'
+                    ? currentPrice <= trade.stopPrice
+                    : currentPrice >= trade.stopPrice;
+                
+                if (stopHit) {
+                    profitPercentage = trade.direction === 'BUY'
+                        ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100
+                        : ((trade.entryPrice - currentPrice) / trade.entryPrice) * 100;
+                } else {
+                    exitPrice = currentPrice;
+                    profitPercentage = trade.direction === 'BUY'
+                        ? ((exitPrice - trade.entryPrice) / trade.entryPrice) * 100
+                        : ((trade.entryPrice - exitPrice) / trade.entryPrice) * 100;
+                }
+            }
+            
+            trade.status = 'CLOSED';
+            trade.outcome = outcome;
+            trade.exitPrice = exitPrice;
+            trade.profitPercentage = profitPercentage;
+            trade.durationHours = (Date.now() - trade.timestamp) / (1000 * 60 * 60);
+            
+            this.recordTradeOutcome(trade);
             
         } catch (error) {
-            console.error('Erro ao salvar dados de aprendizado:', error);
+            console.error('Erro no fallback do trade outcome:', error);
         }
     }
     
-    cleanupOldBackups() {
-        try {
-            const files = fs.readdirSync(LEARNING_DIR)
-                .filter(file => file.startsWith('learning_backup_'))
-                .map(file => ({
-                    name: file,
-                    path: path.join(LEARNING_DIR, file),
-                    time: fs.statSync(path.join(LEARNING_DIR, file)).mtime.getTime()
-                }))
-                .sort((a, b) => b.time - a.time);
-            
-            if (files.length > 5) {
-                files.slice(5).forEach(file => {
-                    fs.unlinkSync(file.path);
-                });
-            }
-        } catch (error) {
-            // Ignorar erro
+    recordTradeOutcome(trade) {
+        const symbolStats = this.symbolPerformance[trade.symbol] || {
+            totalSignals: 0,
+            successfulSignals: 0,
+            totalProfit: 0,
+            avgHoldingTime: 0,
+            recentScores: []
+        };
+        
+        symbolStats.totalSignals++;
+        
+        if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+            symbolStats.successfulSignals++;
+            symbolStats.totalProfit += trade.profitPercentage || 0;
         }
+        
+        symbolStats.avgHoldingTime = symbolStats.successfulSignals > 0
+            ? (symbolStats.avgHoldingTime * (symbolStats.successfulSignals - 1) + (trade.durationHours || 0)) / symbolStats.successfulSignals
+            : (trade.durationHours || 0);
+        
+        symbolStats.recentScores.push(trade.qualityScore);
+        if (symbolStats.recentScores.length > 20) {
+            symbolStats.recentScores = symbolStats.recentScores.slice(-20);
+        }
+        
+        this.symbolPerformance[trade.symbol] = symbolStats;
+        this.openTrades.delete(trade.id || trade.timestamp);
     }
     
     async recordSignal(signal, marketData) {
@@ -1540,7 +1346,7 @@ class AdvancedLearningSystem {
                 bestTarget: signal.targetsData.targets.reduce((a, b) => 
                     parseFloat(b.riskReward) > parseFloat(a.riskReward) ? b : a
                 ),
-                qualityScore: signal.qualityScore,
+                qualityScore: signal.qualityScore.score,
                 marketData: {
                     volumeRatio: marketData.volume?.rawRatio || 0,
                     rsi: marketData.rsi?.raw || 0,
@@ -1564,11 +1370,14 @@ class AdvancedLearningSystem {
             };
             
             this.tradeHistory.push(tradeRecord);
+            this.openTrades.set(tradeRecord.id, tradeRecord);
             
-            // Usar o novo sistema de tracking
-            const tradeId = await this.tradeTrackingSystem.recordAndTrackTrade(tradeRecord);
-            this.openTrades.set(tradeId, tradeRecord);
+            // Agendar trailing simulation após 24h
+            setTimeout(() => {
+                this.checkTradeOutcome(tradeRecord.id);
+            }, this.tradeTrackingHours * 60 * 60 * 1000);
             
+            // Inicializar estatísticas do símbolo se não existirem
             if (!this.symbolPerformance[signal.symbol]) {
                 this.symbolPerformance[signal.symbol] = {
                     totalSignals: 0,
@@ -1579,20 +1388,12 @@ class AdvancedLearningSystem {
                 };
             }
             
-            const symbolStats = this.symbolPerformance[signal.symbol];
-            symbolStats.totalSignals++;
-            symbolStats.recentScores.push(signal.qualityScore.score);
-            
-            if (symbolStats.recentScores.length > 20) {
-                symbolStats.recentScores = symbolStats.recentScores.slice(-20);
-            }
-            
-            if (this.tradeHistory.length % 20 === 0) {
+            if (this.tradeHistory.length % 10 === 0) {
                 this.saveLearningData();
                 await this.analyzePatterns();
             }
             
-            return tradeId;
+            return tradeRecord.id;
             
         } catch (error) {
             console.error('Erro ao registrar sinal:', error);
@@ -1600,36 +1401,35 @@ class AdvancedLearningSystem {
         }
     }
     
-    async recordTradeResult(trade) {
+    async getCurrentPrice(symbol) {
         try {
-            const symbolStats = this.symbolPerformance[trade.symbol];
-            if (!symbolStats) return;
-            
-            if (trade.outcome && trade.outcome.includes('SUCCESS')) {
-                symbolStats.successfulSignals++;
-                symbolStats.totalProfit += trade.profitPercentage || 0;
+            const candles = await getCandlesCached(symbol, '1m', 2);
+            if (candles.length > 0) {
+                return candles[candles.length - 1].close;
             }
-            
-            if (trade.durationHours) {
-                symbolStats.avgHoldingTime = symbolStats.successfulSignals > 0
-                    ? (symbolStats.avgHoldingTime * (symbolStats.successfulSignals - 1) + trade.durationHours) / symbolStats.successfulSignals
-                    : trade.durationHours;
-            }
-            
-            await this.analyzePatterns();
-            
+            return null;
         } catch (error) {
-            console.error('Erro ao registrar resultado do trade:', error);
+            return null;
         }
     }
     
     async analyzePatterns() {
         try {
-            const closedTrades = this.tradeHistory.filter(t => t.status === 'CLOSED');
+            const closedTrades = this.tradeHistory.filter(t => 
+                t.status === 'CLOSED' || t.status === 'SIMULATED'
+            );
             if (closedTrades.length < 5) return;
             
-            const winners = closedTrades.filter(t => t.outcome && t.outcome.includes('SUCCESS'));
-            const losers = closedTrades.filter(t => t.outcome && t.outcome.includes('FAILURE'));
+            const winners = closedTrades.filter(t => 
+                t.outcome === 'SUCCESS' || 
+                t.outcome === 'ALL_TARGETS_HIT' || 
+                t.outcome === 'PARTIAL_TARGETS_HIT'
+            );
+            const losers = closedTrades.filter(t => 
+                t.outcome === 'FAILURE' || 
+                t.outcome === 'STOP_HIT' ||
+                t.outcome === 'TIMEOUT_EXIT'
+            );
             
             winners.forEach(trade => {
                 const patterns = this.extractPatterns(trade);
@@ -1785,7 +1585,9 @@ class AdvancedLearningSystem {
                 const type = data.type;
                 if (patterns[type]) {
                     patterns[type].total++;
-                    if (trade.outcome && trade.outcome.includes('SUCCESS')) patterns[type].wins++;
+                    if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                        patterns[type].wins++;
+                    }
                 }
             }
         });
@@ -1828,22 +1630,30 @@ class AdvancedLearningSystem {
             
             if (data.supportResistance?.nearestSupport?.distancePercent <= 1.0) {
                 patterns.nearSupport.total++;
-                if (trade.outcome && trade.outcome.includes('SUCCESS')) patterns.nearSupport.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.nearSupport.wins++;
+                }
             }
             
             if (data.supportResistance?.nearestResistance?.distancePercent <= 1.0) {
                 patterns.nearResistance.total++;
-                if (trade.outcome && trade.outcome.includes('SUCCESS')) patterns.nearResistance.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.nearResistance.wins++;
+                }
             }
             
             if (data.breakoutRisk?.level === 'high') {
                 patterns.highRisk.total++;
-                if (trade.outcome && trade.outcome.includes('SUCCESS')) patterns.highRisk.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.highRisk.wins++;
+                }
             }
             
             if (data.breakoutRisk?.level === 'low') {
                 patterns.lowRisk.total++;
-                if (trade.outcome && trade.outcome.includes('SUCCESS')) patterns.lowRisk.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.lowRisk.wins++;
+                }
             }
         });
         
@@ -1879,7 +1689,11 @@ class AdvancedLearningSystem {
         thresholds.forEach(threshold => {
             const filtered = trades.filter(t => getValueFn(t) >= threshold);
             if (filtered.length >= 3) {
-                const winners = filtered.filter(t => t.outcome && t.outcome.includes('SUCCESS'));
+                const winners = filtered.filter(t => 
+                    t.outcome === 'SUCCESS' || 
+                    t.outcome === 'ALL_TARGETS_HIT' || 
+                    t.outcome === 'PARTIAL_TARGETS_HIT'
+                );
                 const winRate = winners.length / filtered.length;
                 
                 if (winRate > bestWinRate) {
@@ -1895,10 +1709,89 @@ class AdvancedLearningSystem {
         };
     }
     
+    loadLearningData() {
+        try {
+            if (!fs.existsSync(LEARNING_DIR)) {
+                fs.mkdirSync(LEARNING_DIR, { recursive: true });
+            }
+            
+            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
+            if (fs.existsSync(learningFile)) {
+                const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
+                
+                this.tradeHistory = data.tradeHistory || [];
+                this.symbolPerformance = data.symbolPerformance || {};
+                this.patterns = data.patterns || this.patterns;
+                this.parameterEvolution = data.parameterEvolution || this.parameterEvolution;
+                
+                console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
+            }
+        } catch (error) {
+            console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+        }
+    }
+    
+    saveLearningData() {
+        try {
+            const data = {
+                tradeHistory: this.tradeHistory.slice(-1000),
+                symbolPerformance: this.symbolPerformance,
+                patterns: this.patterns,
+                parameterEvolution: this.parameterEvolution,
+                lastUpdated: Date.now(),
+                trailingConfig: this.trailingConfig
+            };
+            
+            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
+            const backupFile = path.join(LEARNING_DIR, `learning_backup_${Date.now()}.json`);
+            
+            if (fs.existsSync(learningFile)) {
+                fs.copyFileSync(learningFile, backupFile);
+            }
+            
+            fs.writeFileSync(learningFile, JSON.stringify(data, null, 2));
+            this.cleanupOldBackups();
+            
+        } catch (error) {
+            console.error('Erro ao salvar dados de aprendizado:', error);
+        }
+    }
+    
+    cleanupOldBackups() {
+        try {
+            const files = fs.readdirSync(LEARNING_DIR)
+                .filter(file => file.startsWith('learning_backup_'))
+                .map(file => ({
+                    name: file,
+                    path: path.join(LEARNING_DIR, file),
+                    time: fs.statSync(path.join(LEARNING_DIR, file)).mtime.getTime()
+                }))
+                .sort((a, b) => b.time - a.time);
+            
+            if (files.length > 5) {
+                files.slice(5).forEach(file => {
+                    fs.unlinkSync(file.path);
+                });
+            }
+        } catch (error) {
+            // Ignorar erro
+        }
+    }
+    
     getPerformanceReport() {
-        const closedTrades = this.tradeHistory.filter(t => t.status === 'CLOSED');
-        const winners = closedTrades.filter(t => t.outcome && t.outcome.includes('SUCCESS'));
-        const losers = closedTrades.filter(t => t.outcome && t.outcome.includes('FAILURE'));
+        const closedTrades = this.tradeHistory.filter(t => 
+            t.status === 'CLOSED' || t.status === 'SIMULATED'
+        );
+        const winners = closedTrades.filter(t => 
+            t.outcome === 'SUCCESS' || 
+            t.outcome === 'ALL_TARGETS_HIT' || 
+            t.outcome === 'PARTIAL_TARGETS_HIT'
+        );
+        const losers = closedTrades.filter(t => 
+            t.outcome === 'FAILURE' || 
+            t.outcome === 'STOP_HIT' ||
+            t.outcome === 'TIMEOUT_EXIT'
+        );
         
         const winRate = closedTrades.length > 0 ? winners.length / closedTrades.length : 0;
         const avgProfit = winners.length > 0 ? 
@@ -1918,6 +1811,16 @@ class AdvancedLearningSystem {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
         
+        const simulationStats = {
+            totalSimulated: this.tradeHistory.filter(t => t.simulationResult).length,
+            stopFirst: this.tradeHistory.filter(t => 
+                t.simulationResult?.firstHit === 'STOP'
+            ).length,
+            targetFirst: this.tradeHistory.filter(t => 
+                t.simulationResult?.firstHit?.startsWith('TARGET')
+            ).length
+        };
+        
         return {
             totalTrades: closedTrades.length,
             winningTrades: winners.length,
@@ -1928,9 +1831,57 @@ class AdvancedLearningSystem {
             avgLoss: avgLoss.toFixed(2),
             bestPatterns: winningPatterns,
             worstPatterns: losingPatterns,
+            simulationStats: simulationStats,
             openTrades: this.openTrades.size,
             monitoredSymbols: Object.keys(this.symbolPerformance).length
         };
+    }
+    
+    async sendPerformanceReport() {
+        try {
+            const report = this.getPerformanceReport();
+            
+            if (report.totalTrades < 5) {
+                return;
+            }
+            
+            const message = `
+🧠 <b>RELATÓRIO DE PERFORMANCE COM TRAILING</b>
+
+📊 <b>ESTATÍSTICAS:</b>
+• Trades Fechados: <b>${report.totalTrades}</b>
+• Win Rate: <b>${report.winRate.toFixed(1)}%</b>
+• Profit Factor: <b>${report.profitFactor}</b>
+• Média Gain: <b>${report.avgProfit}%</b>
+• Média Loss: <b>${report.avgLoss}%</b>
+
+🎯 <b>ANÁLISE DE TRAILING:</b>
+• Total Simulado: <b>${report.simulationStats.totalSimulated}</b>
+• Stop Primeiro: <b>${report.simulationStats.stopFirst}</b>
+• Alvo Primeiro: <b>${report.simulationStats.targetFirst}</b>
+
+📈 <b>PADRÕES VENCEDORES:</b>
+${report.bestPatterns.map(([pattern, count]) => `• ${pattern}: ${count} trades`).join('\n') || '• Coletando dados...'}
+
+📉 <b>PADRÕES PERDEDORES:</b>
+${report.worstPatterns.map(([pattern, count]) => `• ${pattern}: ${count} trades`).join('\n') || '• Coletando dados...'}
+
+⚙️ <b>PARÂMETROS ATUAIS:</b>
+• Volume Threshold: <b>${VOLUME_SETTINGS.baseThreshold.toFixed(2)}x</b>
+• ADX Mínimo: <b>${ADX_1H_SETTINGS.minStrength.toFixed(1)}</b>
+• Quality Threshold: <b>${QUALITY_THRESHOLD}</b>
+• Trailing Simulation: <b>ATIVADO (5m candles)</b>
+• Alvos Parciais: <b>4 alvos (25% cada)</b>
+
+🔧 <i>Sistema aprimorado com trailing simulation</i>
+🔔 by @J4Rviz.
+            `;
+            
+            await sendTelegramAlert(message);
+            
+        } catch (error) {
+            console.error('Erro ao enviar relatório:', error);
+        }
     }
 }
 
@@ -2227,9 +2178,6 @@ async function sendSignalAlertWithRisk(signal) {
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const stopPrice = signal.targetsData.stopPrice;
         
-        // Obter data e hora atual do Brasil
-        const brazilTime = getBrazilianDateTime();
-        
         if (!global.riskLayer) {
             global.riskLayer = new SophisticatedRiskLayer();
         }
@@ -2254,25 +2202,28 @@ async function sendSignalAlertWithRisk(signal) {
                          riskAssessment.level === 'HIGH' ? '🔴' : 
                          riskAssessment.level === 'MEDIUM' ? '🟡' : '🟢';
         
-        // Gerar mensagem base com data/hora após o stop
+        // Obter data e hora atual
+        const now = getBrazilianDateTime();
+        
+        // Gerar mensagem base
         let message = `
-${directionEmoji} <i>${signal.symbol} - ${direction}</i>
-<i>Preço:</i> $${signal.price.toFixed(6)}
-<i>⛔Stop:</i> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
-<i>📅 Data/Hora:</i> ${brazilTime.full}
-<i>🔹Score Técnico:</i> ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
-<i>Vol 3m:</b> ${volumeClassification} (${volumeRatio.toFixed(2)}x, ${volumeAboveBelow}% ${volumeRatio >= 1 ? 'acima' : 'abaixo'} da média)
-<i>Probabilidade RL:</i> ${riskAdjustedProbability}% (base: ${baseProbability}%)
-<i>Distância S/R:</i> ${distancePercent}% ${signal.isBullish ? 'da resistência' : 'do suporte'}
+${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+<b>Preço:</b> $${signal.price.toFixed(6)}
+<b>⛔Stop:</b> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
+${now.full}
+<b>🔹Score Técnico:</b> ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+<b>Vol 3m:</b> ${volumeClassification} (${volumeRatio.toFixed(2)}x, ${volumeAboveBelow}% ${volumeRatio >= 1 ? 'acima' : 'abaixo'} da média)
+<b>Probabilidade RL:</b> ${riskAdjustedProbability}% (base: ${baseProbability}%)
+<b>Distância S/R:</b> ${distancePercent}% ${signal.isBullish ? 'da resistência' : 'do suporte'}
 
 `;
         
         // Adicionar seção de risco SE o risco não for LOW
         if (riskAssessment.level !== 'LOW') {
             message += `
-${riskEmoji} <i>ALERTA DE RISCO: ${riskAssessment.level}</i> ${riskEmoji}
-<i>Score de Risco:</i> ${riskAssessment.overallScore.toFixed(2)}
-<i>Confiança do Sinal:</i> ${riskAssessment.confidence}%
+${riskEmoji} <b>ALERTA DE RISCO: ${riskAssessment.level}</b> ${riskEmoji}
+<b>Score de Risco:</b> ${riskAssessment.overallScore.toFixed(2)}
+<b>Confiança do Sinal:</b> ${riskAssessment.confidence}%
 
 <i>✨🤖IA Recomendações:</i>
 ${riskAssessment.recommendations.slice(0, 3).map(r => `• ${r}`).join('\n')}
@@ -2280,7 +2231,7 @@ ${riskAssessment.recommendations.slice(0, 3).map(r => `• ${r}`).join('\n')}
 `;
             
             if (riskAssessment.warnings.length > 0) {
-                message += `<i>⚠️ AVISOS CRÍTICOS:</i>
+                message += `<b>⚠️ AVISOS CRÍTICOS:</b>
 ${riskAssessment.warnings.map(w => `• ${w}`).join('\n')}
 
 `;
@@ -2288,7 +2239,7 @@ ${riskAssessment.warnings.map(w => `• ${w}`).join('\n')}
         } else {
             // Se o risco for LOW, mostrar apenas as recomendações padrão
             message += `
-${riskEmoji} <i>RISCO BAIXO - CONFIANÇA</i> ${riskEmoji}
+${riskEmoji} <b>RISCO BAIXO - CONFIANÇA</b> ${riskEmoji}
 • Tamanho normal de posição OK
 • Stop padrão adequado
 • Pode buscar alvos mais longos
@@ -2298,11 +2249,11 @@ ${riskEmoji} <i>RISCO BAIXO - CONFIANÇA</i> ${riskEmoji}
         
         // Adicionar informações de entrada e alvos
         message += `<b>Entrada:</b>
-<i>Gatilho:</i> $${signal.price.toFixed(6)}
-<i>Entrada 1:</i> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-<i>Entrada 2:</i> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<b>Gatilho:</b> $${signal.price.toFixed(6)}
+<b>Entrada 1:</b> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+<b>Entrada 2:</b> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 
-<i>Alvos:</i>
+<b> ALVOS SUGERIDOS:</b>
 ${signal.targetsData.targets.slice(0, 4).map((target, index) => 
     `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`
 ).join('\n')}
@@ -2313,7 +2264,7 @@ ${signal.targetsData.targets.slice(0, 4).map((target, index) =>
         await sendTelegramAlert(message);
         
         console.log(`\n📤 Alerta enviado: ${signal.symbol} ${direction}`);
-        console.log(`   Data/Hora: ${brazilTime.full}`);
+        console.log(`   Data/Hora: ${now.full}`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
         console.log(`   Confidence: ${riskAssessment.confidence}%`);
         if (riskAssessment.warnings.length > 0) {
@@ -2329,12 +2280,12 @@ ${signal.targetsData.targets.slice(0, 4).map((target, index) =>
 
 async function sendSignalAlert(signal) {
     try {
-        const direction = signal.isBullish ? 'Compra' : 'Correção';
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const stopPrice = signal.targetsData.stopPrice;
         
-        // Obter data e hora atual do Brasil
-        const brazilTime = getBrazilianDateTime();
+        // Obter data e hora atual
+        const now = getBrazilianDateTime();
         
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         const volumeClassification = getVolumeClassification(volumeRatio);
@@ -2349,28 +2300,30 @@ async function sendSignalAlert(signal) {
         const distancePercent = nearestLevel?.distancePercent?.toFixed(2) || 'N/A';
         
         const message = `
-${directionEmoji} <i>${signal.symbol} - ${direction}</i>
-<i>Preço:</i> $${signal.price.toFixed(6)}
-<i>⛔Stop:</i> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
-<i>📅 Data/Hora:</i> ${brazilTime.full}
-<i>🔹Score:</i> ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
-<i>📊Volume 3m:</i> ${volumeClassification} (${volumeRatio.toFixed(2)}x, ${volumeAboveBelow}% ${volumeRatio >= 1 ? 'acima' : 'abaixo'} da média)
-<i>🎯Probabilidade:</i> Compra ${buyProbability}% | Venda ${sellProbability}%
-<i>📈Distância S/R:</i> ${distancePercent}% ${signal.isBullish ? 'da resistência' : 'do suporte'}
-<i>Entrada:</i> $${signal.price.toFixed(6)}
-<i>Entrada 1:</i> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-<1>Entrada 2:</i> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
-<i>Alvos:</i>
+${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+<b>Preço:</b> $${signal.price.toFixed(6)}
+<b>⛔Stop:</b> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
+${now.full}
+<b>🔹Score:</b> ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+<b>📊Volume 3m:</b> ${volumeClassification} (${volumeRatio.toFixed(2)}x, ${volumeAboveBelow}% ${volumeRatio >= 1 ? 'acima' : 'abaixo'} da média)
+<b>🎯Probabilidade:</b> Compra ${buyProbability}% | Venda ${sellProbability}%
+<b>📈Distância S/R:</b> ${distancePercent}% ${signal.isBullish ? 'da resistência' : 'do suporte'}
+
+<b>Entrada:</b> $${signal.price.toFixed(6)}
+<b>Entrada Mín:</b> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+<b>Entrada Máx:</b> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<b>Alvos:</b>
 ${signal.targetsData.targets.slice(0, 4).map((target, index) => 
     `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`
 ).join('\n')}
-<i>IA Titanium - by @J4Rviz.</i>
+
+<b>IA Titanium - by @J4Rviz.</b>
         `;
         
         await sendTelegramAlert(message);
         
         console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
-        console.log(`   Data/Hora: ${brazilTime.full}`);
+        console.log(`   Data/Hora: ${now.full}`);
         
     } catch (error) {
         console.error('Erro ao enviar alerta:', error.message);
@@ -3111,114 +3064,30 @@ function calculateDynamicRetracements(price, stopData, isBullish, atrData) {
     };
 }
 
-// =====================================================================
-// 🎯 FUNÇÃO PARA CALCULAR RSI DINÂMICO
-// =====================================================================
-
-function calculateDynamicRSIThresholds(adxValue) {
-    let buyThreshold = DYNAMIC_RSI_SETTINGS.baseBuyThreshold; // 70
-    let sellThreshold = DYNAMIC_RSI_SETTINGS.baseSellThreshold; // 40
-    
-    // Se ADX > 30 (trend forte), ajustar thresholds para ser mais flexível
-    if (adxValue > DYNAMIC_RSI_SETTINGS.adxStrongThreshold) {
-        buyThreshold += DYNAMIC_RSI_SETTINGS.strongTrendAdjustment; // 70 + 5 = 75
-        sellThreshold -= DYNAMIC_RSI_SETTINGS.strongTrendAdjustment; // 40 - 5 = 35
-    }
-    // Se ADX < 20 (trend fraco), ajustar thresholds para ser mais conservador
-    else if (adxValue < DYNAMIC_RSI_SETTINGS.adxWeakThreshold) {
-        buyThreshold += DYNAMIC_RSI_SETTINGS.weakTrendAdjustment; // 70 - 3 = 67
-        sellThreshold -= DYNAMIC_RSI_SETTINGS.weakTrendAdjustment; // 40 + 3 = 43
-    }
-    
-    return {
-        buyThreshold: Math.max(60, Math.min(80, buyThreshold)), // Limites: 60-80
-        sellThreshold: Math.max(30, Math.min(50, sellThreshold)) // Limites: 30-50
-    };
-}
-
-// =====================================================================
-// 🎯 FUNÇÃO PARA CALCULAR ALVOS DINÂMICOS
-// =====================================================================
-
-async function calculateDynamicTargetsAndStop(price, isBullish, symbol, marketData) {
+async function calculateAdvancedTargetsAndStop(price, isBullish, symbol) {
     try {
         const atrData = await getATRData(symbol, ATR_TIMEFRAME, ATR_PERIOD);
         const stopData = calculateDynamicStopLoss(price, isBullish, atrData);
         const retracementData = calculateDynamicRetracements(price, stopData, isBullish, atrData);
         
-        // Obter dados de suporte/resistência
-        const srData = marketData?.supportResistance;
-        const nearestLevel = isBullish ? 
-            srData?.nearestResistance?.price : 
-            srData?.nearestSupport?.price;
-        
-        let targets = [];
-        
-        // Se tiver nível de S/R próximo o suficiente, usar alvos dinâmicos
-        if (nearestLevel && Math.abs(nearestLevel - price) / price * 100 >= DYNAMIC_TARGETS_SETTINGS.minDistanceForTargets) {
-            const distanceToSR = Math.abs(nearestLevel - price);
+        const targets = TARGET_PERCENTAGES.map(percent => {
+            const targetPrice = isBullish ? 
+                price * (1 + percent / 100) : 
+                price * (1 - percent / 100);
             
-            // Aplicar multiplicadores baseados na volatilidade
-            let volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.medium;
-            if (atrData) {
-                if (atrData.volatilityLevel === 'low') {
-                    volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.low;
-                } else if (atrData.volatilityLevel === 'high') {
-                    volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.high;
-                }
-            }
+            const distanceToStop = Math.abs(price - stopData.price);
+            const distanceToTarget = Math.abs(targetPrice - price);
+            const riskReward = distanceToTarget / distanceToStop;
             
-            // Calcular alvos dinâmicos
-            targets = DYNAMIC_TARGETS_SETTINGS.basePercentages.map((multiplier, index) => {
-                const targetDistance = distanceToSR * multiplier * volatilityMultiplier;
-                const targetPrice = isBullish ? 
-                    price + targetDistance : 
-                    price - targetDistance;
-                
-                const distanceToStop = Math.abs(price - stopData.price);
-                const riskReward = targetDistance / distanceToStop;
-                
-                // Calcular porcentagem do target
-                const targetPercentage = (targetDistance / price) * 100;
-                
-                return {
-                    target: targetPercentage.toFixed(1),
-                    price: targetPrice.toFixed(6),
-                    riskReward: riskReward.toFixed(2),
-                    distance: targetDistance,
-                    isDynamic: true,
-                    multiplier: multiplier,
-                    baseDistance: distanceToSR
-                };
-            });
-        } 
-        // Se não tiver S/R próximo, usar alvos fixos como fallback
-        else {
-            targets = TARGET_PERCENTAGES.map(percent => {
-                const targetPrice = isBullish ? 
-                    price * (1 + percent / 100) : 
-                    price * (1 - percent / 100);
-                
-                const distanceToStop = Math.abs(price - stopData.price);
-                const distanceToTarget = Math.abs(targetPrice - price);
-                const riskReward = distanceToTarget / distanceToStop;
-                
-                return {
-                    target: percent.toFixed(1),
-                    price: targetPrice.toFixed(6),
-                    riskReward: riskReward.toFixed(2),
-                    distance: distanceToTarget,
-                    isDynamic: false
-                };
-            });
-        }
+            return {
+                target: percent.toFixed(1),
+                price: targetPrice.toFixed(6),
+                riskReward: riskReward.toFixed(2),
+                distance: distanceToTarget
+            };
+        });
         
-        // Filtrar targets com risk-reward adequado
-        const validTargets = targets.filter(t => 
-            parseFloat(t.riskReward) >= DYNAMIC_TARGETS_SETTINGS.minRiskReward && 
-            parseFloat(t.riskReward) <= DYNAMIC_TARGETS_SETTINGS.maxRiskReward
-        );
-        
+        const validTargets = targets.filter(t => parseFloat(t.riskReward) >= 1.5);
         const bestTarget = validTargets.length > 0 ? 
             validTargets.reduce((a, b) => parseFloat(a.riskReward) > parseFloat(b.riskReward) ? a : b) : 
             targets[0];
@@ -3231,15 +3100,11 @@ async function calculateDynamicTargetsAndStop(price, isBullish, symbol, marketDa
             targets: targets,
             bestRiskReward: parseFloat(bestTarget.riskReward).toFixed(2),
             atrData: atrData,
-            bestTarget: bestTarget,
-            usingDynamicTargets: targets[0]?.isDynamic || false,
-            srLevelUsed: nearestLevel || null,
-            srDistancePercent: nearestLevel ? 
-                (Math.abs(nearestLevel - price) / price * 100).toFixed(2) : null
+            bestTarget: bestTarget
         };
         
     } catch (error) {
-        console.log(`⚠️ Erro no cálculo dinâmico para ${symbol}: ${error.message}`);
+        console.log(`⚠️ Erro no cálculo avançado para ${symbol}: ${error.message}`);
         return getDefaultTargets(price, isBullish);
     }
 }
@@ -3264,8 +3129,7 @@ function getDefaultTargets(price, isBullish) {
         targets: targets,
         bestRiskReward: (8.0 / stopPercentage).toFixed(2),
         stopData: { method: 'fixed_fallback' },
-        retracementData: { method: 'fixed_fallback' },
-        usingDynamicTargets: false
+        retracementData: { method: 'fixed_fallback' }
     };
 }
 
@@ -3278,10 +3142,13 @@ async function sendInitializationMessage(allSymbols) {
         const brazilTime = getBrazilianDateTime();
         
         const message = `
-🚀 <i>TITANIUM ATIVADO</i>
+🚀 <b>TITANIUM ATIVADO COM TRAILING SIMULATION</b>
 
 ${brazilTime.full}
- by @J4Rviz.
+🧠 Sistema de aprendizado aprimorado com trailing simulation
+🎯 Alvos parciais e análise candle a candle
+⏱️ Verificação precisa da ordem dos eventos
+🔧 by @J4Rviz.
         `;
         
         console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
@@ -3334,7 +3201,7 @@ ${brazilTime.full}
         if (!success) {
             console.log('📋 Mensagem que seria enviada:');
             console.log('\n' + '='.repeat(60));
-            console.log('🚀 TITANIUM ATIVADO');
+            console.log('🚀 TITANIUM ATIVADO COM TRAILING SIMULATION');
             console.log(`⏰ ${brazilTime.full}`);
             console.log('='.repeat(60) + '\n');
         }
@@ -3755,7 +3622,7 @@ async function checkFundingRate(symbol, isBullish) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM FUNDING RATE
+// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
@@ -3792,18 +3659,14 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         const rsiValue = marketData.rsi.value;
         let rsiScore = 0;
         
-        // USANDO RSI DINÂMICO baseado no ADX
-        const adxValue = marketData.adx1h?.raw || 0;
-        const rsiThresholds = calculateDynamicRSIThresholds(adxValue);
-        
-        if (isBullish && rsiValue < rsiThresholds.buyThreshold) {
+        if (isBullish && rsiValue < 60) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} < ${rsiThresholds.buyThreshold} - ADX: ${adxValue.toFixed(2)})`);
-        } else if (!isBullish && rsiValue > rsiThresholds.sellThreshold) {
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrevendido)`);
+        } else if (!isBullish && rsiValue > 60) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} > ${rsiThresholds.sellThreshold} - ADX: ${adxValue.toFixed(2)})`);
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrecomprado`);
         } else {
-            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥' : '≤'} ${isBullish ? rsiThresholds.buyThreshold : rsiThresholds.sellThreshold} (ADX: ${adxValue.toFixed(2)})`);
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 60'} (${isBullish ? 'RSI < 60' : ' RSI > 60'})`);
         }
         score += rsiScore;
     }
@@ -3862,30 +3725,9 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`OI: Tendência ${marketData.oi?.trend || 'indefinida'} não confirma`);
     }
     
-    // FUNDING RATE AGORA ENTRA NO SCORE
-    if (marketData.funding) {
-        let fundingScore = 0;
-        let fundingDetail = '';
-        
-        if (marketData.funding.isValid) {
-            // Funding rate positivo pontua na VENDA
-            // Funding rate negativo pontua na COMPRA
-            if ((isBullish && marketData.funding.raw < 0) || (!isBullish && marketData.funding.raw > 0)) {
-                fundingScore = QUALITY_WEIGHTS.fundingRate;
-                fundingDetail = `${fundingScore}/${QUALITY_WEIGHTS.fundingRate} (${(marketData.funding.raw * 100).toFixed(4)}% ${isBullish ? 'negativo' : 'positivo'})`;
-            } else {
-                fundingDetail = `0/${QUALITY_WEIGHTS.fundingRate} (${(marketData.funding.raw * 100).toFixed(4)}% não favorável)`;
-                failedChecks.push(`Funding Rate: ${(marketData.funding.raw * 100).toFixed(4)}% não favorável para ${isBullish ? 'COMPRA' : 'VENDA'}`);
-            }
-        } else {
-            fundingDetail = `0/${QUALITY_WEIGHTS.fundingRate} (${(marketData.funding.raw * 100).toFixed(4)}% não atende critério)`;
-            failedChecks.push(`Funding Rate: ${(marketData.funding.raw * 100).toFixed(4)}% não atende critério`);
-        }
-        
-        score += fundingScore;
-        details.push(` Funding Rate: ${fundingDetail}`);
-    } else {
-        failedChecks.push(`Funding Rate: Dados não disponíveis`);
+    if (marketData.funding && marketData.funding.isValid) {
+        score += 5;
+        details.push(` Fund. Rate: +5/${5} (${(marketData.funding.raw * 100).toFixed(4)}% ${isBullish ? 'negativo' : 'positivo'})`);
     }
     
     if (marketData.divergence15m && marketData.divergence15m.hasDivergence) {
@@ -4111,30 +3953,25 @@ async function monitorSymbol(symbol) {
         
         if (!isBullish && !isBearish) return null;
         
-        // Obter ADX para calcular RSI dinâmico
-        const adx1hData = await getADX1h(symbol);
-        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
-        
-        // 🎯 MELHORIA 1: RSI DINÂMICO
-        const rsiThresholds = calculateDynamicRSIThresholds(adx1hData.raw);
-        
-        // Aplicar thresholds dinâmicos de RSI
-        if (isBullish && rsiData.value >= rsiThresholds.buyThreshold) return null;
-        if (isBearish && rsiData.value <= rsiThresholds.sellThreshold) return null;
+        if (isBullish && rsiData.value >= 60) return null;      
+        if (isBearish && rsiData.value <= 60) return null;      
         
         const divergenceData = await checkDivergence15m(symbol, isBullish);
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
         
-        const [volumeData, volatilityData, lsrData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
+        const [volumeData, volatilityData, lsrData, adx1hData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
             checkVolume(symbol),      
             checkVolatility(symbol),  
             checkLSR(symbol, isBullish),
+            getADX1h(symbol),
             checkStochastic(symbol, isBullish),
             checkStochastic4h(symbol, isBullish),  
             checkCCI4h(symbol, isBullish),         
             checkOpenInterest(symbol, isBullish),
             checkFundingRate(symbol, isBullish)
         ]);
+        
+        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
         
         const marketData = {
             volume: volumeData,
@@ -4161,8 +3998,7 @@ async function monitorSymbol(symbol) {
         
         if (!qualityScore.isAcceptable) return null;
         
-        // 🎯 MELHORIA 2: ALVOS DINÂMICOS
-        const targetsData = await calculateDynamicTargetsAndStop(emaData.currentPrice, isBullish, symbol, marketData);
+        const targetsData = await calculateAdvancedTargetsAndStop(emaData.currentPrice, isBullish, symbol);
         
         const signal = {
             symbol: symbol,
@@ -4171,9 +4007,7 @@ async function monitorSymbol(symbol) {
             qualityScore: qualityScore,
             targetsData: targetsData,
             marketData: marketData,
-            timestamp: Date.now(),
-            rsiThresholdsUsed: rsiThresholds, // Adicionando para debug/log
-            adxValue: adx1hData.raw
+            timestamp: Date.now()
         };
         
         if (learningSystem) {
@@ -4186,12 +4020,8 @@ async function monitorSymbol(symbol) {
         const srDistance = srInfo?.distancePercent?.toFixed(2) || 'N/A';
         const breakoutRisk = supportResistanceData?.breakoutRisk?.level || 'N/A';
         
-        // Log melhorado com informações dos alvos dinâmicos
-        const targetType = targetsData.usingDynamicTargets ? 'Dinâmicos' : 'Fixos';
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   📊 RSI: ${rsiData.value.toFixed(2)}/${isBullish ? rsiThresholds.buyThreshold : rsiThresholds.sellThreshold} | ADX: ${adx1hData.raw.toFixed(2)}`);
-        console.log(`   🎯 Alvos: ${targetType} | S/R: ${srDistance}% | Stop: ${targetsData.stopPercentage}%`);
-        console.log(`   📈 Divergência: ${divergenceInfo} | Risco: ${breakoutRisk}`);
+        console.log(`   📊 Divergência: ${divergenceInfo} | S/R: ${srDistance}% | Risco: ${breakoutRisk} | Stop: ${targetsData.stopPercentage}%`);
         
         return signal;
         
@@ -4247,23 +4077,23 @@ async function sendMarketRiskReport() {
                          marketRisk.riskLevel === 'MEDIUM' ? '🟡' : '🟢';
         
         const message = `
-${riskEmoji} <i>RELATÓRIO DE RISCO DO MERCADO</i> ${riskEmoji}
+${riskEmoji} <b>RELATÓRIO DE RISCO DO MERCADO</b> ${riskEmoji}
 
-<i>Nível Geral de Risco:</i> ${marketRisk.riskLevel}
-<i>Score Médio de Risco:</i> ${marketRisk.averageRiskScore.toFixed(2)}
-<i>Símbolos Monitorados:</i> ${marketRisk.monitoredSymbols}
+<b>Nível Geral de Risco:</b> ${marketRisk.riskLevel}
+<b>Score Médio de Risco:</b> ${marketRisk.averageRiskScore.toFixed(2)}
+<b>Símbolos Monitorados:</b> ${marketRisk.monitoredSymbols}
 
-<i>🔍 INTERPRETAÇÃO:</i>
-• <i>BAIXO 🟢</i>: Condições normais de mercado
-• <i>MEDIANO 🟡</i>: Cautela recomendada
-• <i>ALTO 🔴</i>: Risco elevado - reduza exposição
-• <i>CRÍTICO 🚨</i>: Alto risco - considere pausa nas operações
+<b>🔍 INTERPRETAÇÃO:</b>
+• <b>LOW 🟢</b>: Condições normais de mercado
+• <b>MEDIUM 🟡</b>: Cautela recomendada
+• <b>HIGH 🔴</b>: Risco elevado - reduza exposição
+• <b>CRITICAL 🚨</b>: Alto risco - considere parar trades
 
-<i>💡 RECOMENDAÇÕES GERAIS:</i>
-${marketRisk.riskLevel === 'CRÍTICO' ? '• ⚠️ PARE DE OPERAR temporariamente' : ''}
-${marketRisk.riskLevel === 'ALTO' ? '• Reduza tamanho das posições em 50%' : ''}
-${marketRisk.riskLevel === 'MEDIANO' ? '• Use stop loss mais conservadores' : ''}
-${marketRisk.riskLevel === 'BAIXO' ? '• Condições favoráveis para trading' : ''}
+<b>💡 RECOMENDAÇÕES GERAIS:</b>
+${marketRisk.riskLevel === 'CRITICAL' ? '• ⚠️ PARE DE TRADAR temporariamente' : ''}
+${marketRisk.riskLevel === 'HIGH' ? '• Reduza tamanho das posições em 50%' : ''}
+${marketRisk.riskLevel === 'MEDIUM' ? '• Use stop loss mais conservadores' : ''}
+${marketRisk.riskLevel === 'LOW' ? '• Condições favoráveis para trading' : ''}
 
 <i>Última atualização: ${new Date().toLocaleTimeString()}</i>
         `;
@@ -4300,12 +4130,9 @@ async function mainBotLoop() {
         return;
     }
     
-    console.log(`\n🚀 TITANIUM ATIVADO COM MELHORIAS AVANÇADAS`);
+    console.log(`\n🚀 TITANIUM ATIVADO COM TRAILING SIMULATION`);
     console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
-    console.log(`🎯 RSI Dinâmico: Ativo (base: ${DYNAMIC_RSI_SETTINGS.baseBuyThreshold}/${DYNAMIC_RSI_SETTINGS.baseSellThreshold})`);
-    console.log(`🎯 Alvos Dinâmicos: Ativo (S/R based)`);
-    console.log(`📊 Trade Tracking: Ativo (1m trailing simulation)`);
-    console.log(`📅 Data/Hora nos alertas: Ativo`);
+    console.log(`🧠 Sistema de aprendizado aprimorado com trailing simulation`);
     
     await sendInitializationMessage(allSymbols);
     
@@ -4360,6 +4187,11 @@ async function mainBotLoop() {
             
             cleanupCaches();
             
+            if (Date.now() - lastReportTime >= 3600000) {
+                await learningSystem.sendPerformanceReport();
+                lastReportTime = Date.now();
+            }
+            
             if (Date.now() - lastRiskReportTime >= 6 * 60 * 60 * 1000) {
                 await sendMarketRiskReport();
                 lastRiskReportTime = Date.now();
@@ -4399,9 +4231,7 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM V2 - ANÁLISE AVANÇADA COM MELHORIAS');
-        console.log('📅 Data/Hora nos alertas');
-        console.log('📊 Trade Tracking com trailing simulation (1m)');
+        console.log('🚀 TITANIUM - ANÁLISE AVANÇADA COM TRAILING SIMULATION');
         console.log('='.repeat(80) + '\n');
         
         try {
@@ -4429,7 +4259,7 @@ async function startBot() {
         global.riskLayer = new SophisticatedRiskLayer();
         console.log('🛡️  Risk Layer Sofisticado ativado (modo apenas alerta)');
         
-        console.log('✅ Tudo pronto! Iniciando monitoramento com melhorias...');
+        console.log('✅ Tudo pronto! Iniciando monitoramento...');
         
         await mainBotLoop();
         
