@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -3314,11 +3314,11 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         if (isBullish && rsiValue < 60) {
             rsiScore = QUALITY_WEIGHTS.rsi;
             details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrevendido)`);
-        } else if (!isBullish && rsiValue > 60) {
+        } else if (!isBullish && rsiValue > 40) {  // CORREÇÃO AQUI: mudado de > 60 para > 40
             rsiScore = QUALITY_WEIGHTS.rsi;
             details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrecomprado`);
         } else {
-            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 60'} (${isBullish ? 'RSI < 60' : ' RSI > 60'})`);
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 40'} (${isBullish ? 'RSI < 60' : ' RSI > 40'})`);
         }
         score += rsiScore;
     }
@@ -3626,8 +3626,9 @@ async function monitorSymbol(symbol) {
         
         if (!isBullish && !isBearish) return null;
         
-        if (isBullish && rsiData.value >= 60) return null;      
-        if (isBearish && rsiData.value <= 60) return null;      
+        // CORREÇÕES APLICADAS AQUI:
+        if (isBullish && rsiData.value >= 70) return null;      // CORREÇÃO: mudado de >= 60 para >= 70
+        if (isBearish && rsiData.value <= 40) return null;      // CORREÇÃO: mudado de <= 60 para <= 40
         
         const divergenceData = await checkDivergence15m(symbol, isBullish);
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
