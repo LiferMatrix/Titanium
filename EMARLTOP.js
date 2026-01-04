@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -39,7 +39,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 75;
+const QUALITY_THRESHOLD = 73;
 const QUALITY_WEIGHTS = {
     volume: 20,           
     oi: 10,
@@ -55,7 +55,7 @@ const QUALITY_WEIGHTS = {
     divergence15m: 10,
     breakoutRisk: 8,
     supportResistance: 10,
-    fundingRate: 8  // ADICIONADO: Funding Rate agora tem peso no Score
+    fundingRate: 8  
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -138,6 +138,30 @@ const DIVERGENCE_SETTINGS = {
     rsiPeriod: 14,
     minCandleDistance: 3,
     confirmationCandles: 2
+};
+
+// === NOVAS CONFIGURAÇÕES PARA RSI DINÂMICO ===
+const DYNAMIC_RSI_SETTINGS = {
+    baseBuyThreshold: 70,     // RSI máximo para compra em condições normais
+    baseSellThreshold: 40,    // RSI mínimo para venda em condições normais
+    strongTrendAdjustment: 5, // Ajuste quando ADX > 30
+    weakTrendAdjustment: -3,  // Ajuste quando ADX < 20
+    adxStrongThreshold: 30,
+    adxWeakThreshold: 20
+};
+
+// === CONFIGURAÇÕES PARA ALVOS DINÂMICOS ===
+const DYNAMIC_TARGETS_SETTINGS = {
+    basePercentages: [0.3, 0.5, 0.7, 0.9, 1.2], // Multiplicadores da distância até S/R
+    minDistanceForTargets: 0.8, // Distância mínima em % para considerar S/R
+    maxRiskReward: 8.0,        // Risk-Reward máximo
+    minRiskReward: 1.5,        // Risk-Reward mínimo
+    useAdaptiveMultipliers: true,
+    multipliersByVolatility: {
+        low: 0.8,
+        medium: 1.0,
+        high: 1.2
+    }
 };
 
 // === DIRETÓRIOS ===
@@ -1916,7 +1940,7 @@ ${riskEmoji} <i>RISCO BAIXO - CONFIANÇA</i> ${riskEmoji}
 <i>Entrada 1:</i> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 <i>Entrada 2:</i> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 
-<i> ALVOS:</i>
+<i>Alvos:</i>
 ${signal.targetsData.targets.slice(0, 4).map((target, index) => 
     `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`
 ).join('\n')}
@@ -2719,30 +2743,114 @@ function calculateDynamicRetracements(price, stopData, isBullish, atrData) {
     };
 }
 
-async function calculateAdvancedTargetsAndStop(price, isBullish, symbol) {
+// =====================================================================
+// 🎯 NOVA FUNÇÃO PARA CALCULAR RSI DINÂMICO
+// =====================================================================
+
+function calculateDynamicRSIThresholds(adxValue) {
+    let buyThreshold = DYNAMIC_RSI_SETTINGS.baseBuyThreshold; // 70
+    let sellThreshold = DYNAMIC_RSI_SETTINGS.baseSellThreshold; // 40
+    
+    // Se ADX > 30 (trend forte), ajustar thresholds para ser mais flexível
+    if (adxValue > DYNAMIC_RSI_SETTINGS.adxStrongThreshold) {
+        buyThreshold += DYNAMIC_RSI_SETTINGS.strongTrendAdjustment; // 70 + 5 = 75
+        sellThreshold -= DYNAMIC_RSI_SETTINGS.strongTrendAdjustment; // 40 - 5 = 35
+    }
+    // Se ADX < 20 (trend fraco), ajustar thresholds para ser mais conservador
+    else if (adxValue < DYNAMIC_RSI_SETTINGS.adxWeakThreshold) {
+        buyThreshold += DYNAMIC_RSI_SETTINGS.weakTrendAdjustment; // 70 - 3 = 67
+        sellThreshold -= DYNAMIC_RSI_SETTINGS.weakTrendAdjustment; // 40 + 3 = 43
+    }
+    
+    return {
+        buyThreshold: Math.max(60, Math.min(80, buyThreshold)), // Limites: 60-80
+        sellThreshold: Math.max(30, Math.min(50, sellThreshold)) // Limites: 30-50
+    };
+}
+
+// =====================================================================
+// 🎯 NOVA FUNÇÃO PARA CALCULAR ALVOS DINÂMICOS
+// =====================================================================
+
+async function calculateDynamicTargetsAndStop(price, isBullish, symbol, marketData) {
     try {
         const atrData = await getATRData(symbol, ATR_TIMEFRAME, ATR_PERIOD);
         const stopData = calculateDynamicStopLoss(price, isBullish, atrData);
         const retracementData = calculateDynamicRetracements(price, stopData, isBullish, atrData);
         
-        const targets = TARGET_PERCENTAGES.map(percent => {
-            const targetPrice = isBullish ? 
-                price * (1 + percent / 100) : 
-                price * (1 - percent / 100);
-            
-            const distanceToStop = Math.abs(price - stopData.price);
-            const distanceToTarget = Math.abs(targetPrice - price);
-            const riskReward = distanceToTarget / distanceToStop;
-            
-            return {
-                target: percent.toFixed(1),
-                price: targetPrice.toFixed(6),
-                riskReward: riskReward.toFixed(2),
-                distance: distanceToTarget
-            };
-        });
+        // Obter dados de suporte/resistência
+        const srData = marketData?.supportResistance;
+        const nearestLevel = isBullish ? 
+            srData?.nearestResistance?.price : 
+            srData?.nearestSupport?.price;
         
-        const validTargets = targets.filter(t => parseFloat(t.riskReward) >= 1.5);
+        let targets = [];
+        
+        // Se tiver nível de S/R próximo o suficiente, usar alvos dinâmicos
+        if (nearestLevel && Math.abs(nearestLevel - price) / price * 100 >= DYNAMIC_TARGETS_SETTINGS.minDistanceForTargets) {
+            const distanceToSR = Math.abs(nearestLevel - price);
+            
+            // Aplicar multiplicadores baseados na volatilidade
+            let volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.medium;
+            if (atrData) {
+                if (atrData.volatilityLevel === 'low') {
+                    volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.low;
+                } else if (atrData.volatilityLevel === 'high') {
+                    volatilityMultiplier = DYNAMIC_TARGETS_SETTINGS.multipliersByVolatility.high;
+                }
+            }
+            
+            // Calcular alvos dinâmicos
+            targets = DYNAMIC_TARGETS_SETTINGS.basePercentages.map((multiplier, index) => {
+                const targetDistance = distanceToSR * multiplier * volatilityMultiplier;
+                const targetPrice = isBullish ? 
+                    price + targetDistance : 
+                    price - targetDistance;
+                
+                const distanceToStop = Math.abs(price - stopData.price);
+                const riskReward = targetDistance / distanceToStop;
+                
+                // Calcular porcentagem do target
+                const targetPercentage = (targetDistance / price) * 100;
+                
+                return {
+                    target: targetPercentage.toFixed(1),
+                    price: targetPrice.toFixed(6),
+                    riskReward: riskReward.toFixed(2),
+                    distance: targetDistance,
+                    isDynamic: true,
+                    multiplier: multiplier,
+                    baseDistance: distanceToSR
+                };
+            });
+        } 
+        // Se não tiver S/R próximo, usar alvos fixos como fallback
+        else {
+            targets = TARGET_PERCENTAGES.map(percent => {
+                const targetPrice = isBullish ? 
+                    price * (1 + percent / 100) : 
+                    price * (1 - percent / 100);
+                
+                const distanceToStop = Math.abs(price - stopData.price);
+                const distanceToTarget = Math.abs(targetPrice - price);
+                const riskReward = distanceToTarget / distanceToStop;
+                
+                return {
+                    target: percent.toFixed(1),
+                    price: targetPrice.toFixed(6),
+                    riskReward: riskReward.toFixed(2),
+                    distance: distanceToTarget,
+                    isDynamic: false
+                };
+            });
+        }
+        
+        // Filtrar targets com risk-reward adequado
+        const validTargets = targets.filter(t => 
+            parseFloat(t.riskReward) >= DYNAMIC_TARGETS_SETTINGS.minRiskReward && 
+            parseFloat(t.riskReward) <= DYNAMIC_TARGETS_SETTINGS.maxRiskReward
+        );
+        
         const bestTarget = validTargets.length > 0 ? 
             validTargets.reduce((a, b) => parseFloat(a.riskReward) > parseFloat(b.riskReward) ? a : b) : 
             targets[0];
@@ -2755,11 +2863,15 @@ async function calculateAdvancedTargetsAndStop(price, isBullish, symbol) {
             targets: targets,
             bestRiskReward: parseFloat(bestTarget.riskReward).toFixed(2),
             atrData: atrData,
-            bestTarget: bestTarget
+            bestTarget: bestTarget,
+            usingDynamicTargets: targets[0]?.isDynamic || false,
+            srLevelUsed: nearestLevel || null,
+            srDistancePercent: nearestLevel ? 
+                (Math.abs(nearestLevel - price) / price * 100).toFixed(2) : null
         };
         
     } catch (error) {
-        console.log(`⚠️ Erro no cálculo avançado para ${symbol}: ${error.message}`);
+        console.log(`⚠️ Erro no cálculo dinâmico para ${symbol}: ${error.message}`);
         return getDefaultTargets(price, isBullish);
     }
 }
@@ -2784,7 +2896,8 @@ function getDefaultTargets(price, isBullish) {
         targets: targets,
         bestRiskReward: (8.0 / stopPercentage).toFixed(2),
         stopData: { method: 'fixed_fallback' },
-        retracementData: { method: 'fixed_fallback' }
+        retracementData: { method: 'fixed_fallback' },
+        usingDynamicTargets: false
     };
 }
 
@@ -3311,14 +3424,18 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         const rsiValue = marketData.rsi.value;
         let rsiScore = 0;
         
-        if (isBullish && rsiValue < 60) {
+        // USANDO RSI DINÂMICO baseado no ADX
+        const adxValue = marketData.adx1h?.raw || 0;
+        const rsiThresholds = calculateDynamicRSIThresholds(adxValue);
+        
+        if (isBullish && rsiValue < rsiThresholds.buyThreshold) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrevendido)`);
-        } else if (!isBullish && rsiValue > 40) {  // CORREÇÃO AQUI: mudado de > 60 para > 40
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} < ${rsiThresholds.buyThreshold} - ADX: ${adxValue.toFixed(2)})`);
+        } else if (!isBullish && rsiValue > rsiThresholds.sellThreshold) {
             rsiScore = QUALITY_WEIGHTS.rsi;
-            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} Sobrecomprado`);
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(2)} > ${rsiThresholds.sellThreshold} - ADX: ${adxValue.toFixed(2)})`);
         } else {
-            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥ 60' : '≤ 40'} (${isBullish ? 'RSI < 60' : ' RSI > 40'})`);
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(2)} ${isBullish ? '≥' : '≤'} ${isBullish ? rsiThresholds.buyThreshold : rsiThresholds.sellThreshold} (ADX: ${adxValue.toFixed(2)})`);
         }
         score += rsiScore;
     }
@@ -3626,26 +3743,30 @@ async function monitorSymbol(symbol) {
         
         if (!isBullish && !isBearish) return null;
         
-        // CORREÇÕES APLICADAS AQUI:
-        if (isBullish && rsiData.value >= 70) return null;      // CORREÇÃO: mudado de >= 60 para >= 70
-        if (isBearish && rsiData.value <= 40) return null;      // CORREÇÃO: mudado de <= 60 para <= 40
+        // Obter ADX para calcular RSI dinâmico
+        const adx1hData = await getADX1h(symbol);
+        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
+        
+        // 🎯 MELHORIA 1: RSI DINÂMICO
+        const rsiThresholds = calculateDynamicRSIThresholds(adx1hData.raw);
+        
+        // Aplicar thresholds dinâmicos de RSI
+        if (isBullish && rsiData.value >= rsiThresholds.buyThreshold) return null;
+        if (isBearish && rsiData.value <= rsiThresholds.sellThreshold) return null;
         
         const divergenceData = await checkDivergence15m(symbol, isBullish);
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
         
-        const [volumeData, volatilityData, lsrData, adx1hData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
+        const [volumeData, volatilityData, lsrData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
             checkVolume(symbol),      
             checkVolatility(symbol),  
             checkLSR(symbol, isBullish),
-            getADX1h(symbol),
             checkStochastic(symbol, isBullish),
             checkStochastic4h(symbol, isBullish),  
             checkCCI4h(symbol, isBullish),         
             checkOpenInterest(symbol, isBullish),
             checkFundingRate(symbol, isBullish)
         ]);
-        
-        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
         
         const marketData = {
             volume: volumeData,
@@ -3672,7 +3793,8 @@ async function monitorSymbol(symbol) {
         
         if (!qualityScore.isAcceptable) return null;
         
-        const targetsData = await calculateAdvancedTargetsAndStop(emaData.currentPrice, isBullish, symbol);
+        // 🎯 MELHORIA 2: ALVOS DINÂMICOS
+        const targetsData = await calculateDynamicTargetsAndStop(emaData.currentPrice, isBullish, symbol, marketData);
         
         const signal = {
             symbol: symbol,
@@ -3681,7 +3803,9 @@ async function monitorSymbol(symbol) {
             qualityScore: qualityScore,
             targetsData: targetsData,
             marketData: marketData,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            rsiThresholdsUsed: rsiThresholds, // Adicionando para debug/log
+            adxValue: adx1hData.raw
         };
         
         if (learningSystem) {
@@ -3694,8 +3818,12 @@ async function monitorSymbol(symbol) {
         const srDistance = srInfo?.distancePercent?.toFixed(2) || 'N/A';
         const breakoutRisk = supportResistanceData?.breakoutRisk?.level || 'N/A';
         
+        // Log melhorado com informações dos alvos dinâmicos
+        const targetType = targetsData.usingDynamicTargets ? 'Dinâmicos' : 'Fixos';
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   📊 Divergência: ${divergenceInfo} | S/R: ${srDistance}% | Risco: ${breakoutRisk} | Stop: ${targetsData.stopPercentage}%`);
+        console.log(`   📊 RSI: ${rsiData.value.toFixed(2)}/${isBullish ? rsiThresholds.buyThreshold : rsiThresholds.sellThreshold} | ADX: ${adx1hData.raw.toFixed(2)}`);
+        console.log(`   🎯 Alvos: ${targetType} | S/R: ${srDistance}% | Stop: ${targetsData.stopPercentage}%`);
+        console.log(`   📈 Divergência: ${divergenceInfo} | Risco: ${breakoutRisk}`);
         
         return signal;
         
@@ -3804,8 +3932,10 @@ async function mainBotLoop() {
         return;
     }
     
-    console.log(`\n🚀 TITANIUM ATIVADO`);
+    console.log(`\n🚀 TITANIUM ATIVADO COM MELHORIAS AVANÇADAS`);
     console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
+    console.log(`🎯 RSI Dinâmico: Ativo (base: ${DYNAMIC_RSI_SETTINGS.baseBuyThreshold}/${DYNAMIC_RSI_SETTINGS.baseSellThreshold})`);
+    console.log(`🎯 Alvos Dinâmicos: Ativo (S/R based)`);
     
     await sendInitializationMessage(allSymbols);
     
@@ -3899,7 +4029,7 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - ANÁLISE AVANÇADA COM RISK LAYER SOFISTICADO');
+        console.log('🚀 TITANIUM V2 - ANÁLISE AVANÇADA COM RSI DINÂMICO E ALVOS DINÂMICOS');
         console.log('='.repeat(80) + '\n');
         
         try {
@@ -3927,7 +4057,7 @@ async function startBot() {
         global.riskLayer = new SophisticatedRiskLayer();
         console.log('🛡️  Risk Layer Sofisticado ativado (modo apenas alerta)');
         
-        console.log('✅ Tudo pronto! Iniciando monitoramento...');
+        console.log('✅ Tudo pronto! Iniciando monitoramento com melhorias...');
         
         await mainBotLoop();
         
