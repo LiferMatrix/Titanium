@@ -6,8 +6,9 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZ';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
+
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -2156,7 +2157,7 @@ async function sendSignalAlertWithRisk(signal) {
 
         const now = getBrazilianDateTime();
 
-        // NOVO FORMATO - SEPARADO POR SEÇÕES CLARAS
+        // FORMATO CORRIGIDO - LSR INCLUÍDO NA MENSAGEM
         let message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 ${now.full}
@@ -2208,6 +2209,7 @@ async function sendSignalAlert(signal) {
         const now = getBrazilianDateTime();
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const lsrRatio = signal.marketData.lsr?.lsrRatio || 0; // Adicionado LSR também no fallback
         const baseProbability = calculateProbability(signal);
 
         const srData = signal.marketData.supportResistance;
@@ -2222,7 +2224,7 @@ ${now.full}
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-• Volume: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
+• Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)} | Dist S/R: ${distancePercent}%
 
 <b>💰 Alvos Sugeridos</b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
@@ -2238,6 +2240,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 
         console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
         console.log(`   Data/Hora: ${now.full}`);
+        console.log(`   LSR: ${lsrRatio.toFixed(2)}`);
 
     } catch (error) {
         console.error('Erro ao enviar alerta:', error.message);
@@ -2860,7 +2863,7 @@ function getSupportResistanceAnalysis(nearestSupport, nearestResistance, isBulli
     }
 
     if (nearestResistance) {
-        analysis.push(`Resistência mais próxima: ${nearestResistance.price.toFixed(6)} (${nearestResistance.strength})`);
+        analysis.push(`Resistência mais próximo: ${nearestResistance.price.toFixed(6)} (${nearestResistance.strength})`);
         analysis.push(`Distância à resistência: ${((nearestResistance.distancePercent || 0).toFixed(2))}%`);
 
         if (nearestResistance.distancePercent <= SUPPORT_RESISTANCE_SETTINGS.proximityThreshold) {
@@ -3889,6 +3892,7 @@ async function monitorSymbol(symbol) {
         ]);
 
         if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
+        if (!lsrData.isValid) return null;
 
         const marketData = {
             volume: volumeData,
