@@ -6,8 +6,9 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfs';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
+
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -39,23 +40,22 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE COMPLETO - COM NOVOS INDICADORES ===
-const QUALITY_THRESHOLD = 70;
+const QUALITY_THRESHOLD = 75;
 const QUALITY_WEIGHTS = {
-    volume: 15,           
-    oi: 8,
+    volume: 20,           
+    oi: 10,
     volatility: 8,
     lsr: 8,
     rsi: 8,
     emaAlignment: 10,
     adx: 5,
-    adx1h: 10,
+    adx1h: 12,
     stoch1h: 5,
-    stoch4h: 0,          // ALTERADO: 0 pontos (apenas análise)
+    stoch4h: 8,          
     cci4h: 10,
-    ema55_1h: 10,
     divergence15m: 10,
     breakoutRisk: 8,
-    supportResistance: 8
+    supportResistance: 10
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -168,22 +168,18 @@ const ADX_1H_SETTINGS = {
     minStrength: 22
 };
 
-// === CONFIGURAÇÕES ATUALIZADAS DO STOCHASTIC ===
 const STOCH_SETTINGS = {
     period: 5,
     signalPeriod: 3,
     smooth: 3,
-    timeframe1h: '1h',
-    isRequired: true  // AGORA É OBRIGATÓRIO
+    timeframe1h: '1h'
 };
 
-// === CONFIGURAÇÕES ATUALIZADAS PARA STOCHASTIC 4H ===
 const STOCH_4H_SETTINGS = {
     period: 14,
     signalPeriod: 3,
     smooth: 3,
-    timeframe: '4h',
-    analysisOnly: true  // APENAS PARA ANÁLISE
+    timeframe: '4h'
 };
 
 const CCI_4H_SETTINGS = {
@@ -195,6 +191,721 @@ const CCI_4H_SETTINGS = {
 const TARGET_PERCENTAGES = [2.5, 5.0, 8.0, 12.0, 18.0];
 const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
+
+// =====================================================================
+// 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE)
+// =====================================================================
+
+class SophisticatedRiskLayer {
+    constructor() {
+        this.riskLevels = {
+            LOW: { emoji: '🟢', score: 0, action: 'high_confidence' },
+            MEDIUM: { emoji: '🟡', score: 1, action: 'caution_advised' },
+            HIGH: { emoji: '🟠', score: 2, action: 'extreme_caution' },
+            CRITICAL: { emoji: '🔴', score: 3, action: 'consider_avoiding' }
+        };
+        
+        this.riskFactors = {
+            VOLATILITY_RISK: { weight: 1.2, threshold: 2.5 },
+            VOLUME_RISK: { weight: 1.0, threshold: 0.5 },
+            LIQUIDITY_RISK: { weight: 1.5, threshold: 1000000 },
+            CORRELATION_RISK: { weight: 1.3, threshold: 0.8 },
+            TIME_RISK: { weight: 0.8 },
+            SUPPORT_RESISTANCE_RISK: { weight: 1.4 },
+            DIVERGENCE_RISK: { weight: 1.1 },
+            MARKET_CONDITION_RISK: { weight: 1.6 }
+        };
+        
+        this.riskHistory = new Map();
+        this.maxHistorySize = 100;
+        
+        console.log('🛡️  Risk Layer Sofisticado inicializado');
+    }
+    
+    async assessSignalRisk(signal) {
+        try {
+            const riskAssessment = {
+                overallScore: 0,
+                level: 'LOW',
+                factors: [],
+                warnings: [],
+                recommendations: [],
+                confidence: 100,
+                shouldAlert: true,
+                shouldBlock: false
+            };
+            
+            const volatilityRisk = await this.analyzeVolatilityRisk(signal);
+            riskAssessment.factors.push(volatilityRisk);
+            riskAssessment.overallScore += volatilityRisk.score * this.riskFactors.VOLATILITY_RISK.weight;
+            
+            const volumeRisk = this.analyzeVolumeRisk(signal);
+            riskAssessment.factors.push(volumeRisk);
+            riskAssessment.overallScore += volumeRisk.score * this.riskFactors.VOLUME_RISK.weight;
+            
+            const liquidityRisk = await this.analyzeLiquidityRisk(signal.symbol);
+            riskAssessment.factors.push(liquidityRisk);
+            riskAssessment.overallScore += liquidityRisk.score * this.riskFactors.LIQUIDITY_RISK.weight;
+            
+            const correlationRisk = await this.analyzeCorrelationRisk(signal);
+            riskAssessment.factors.push(correlationRisk);
+            riskAssessment.overallScore += correlationRisk.score * this.riskFactors.CORRELATION_RISK.weight;
+            
+            const timeRisk = this.analyzeTimeRisk();
+            riskAssessment.factors.push(timeRisk);
+            riskAssessment.overallScore += timeRisk.score * this.riskFactors.TIME_RISK.weight;
+            
+            const srRisk = this.analyzeSupportResistanceRisk(signal);
+            riskAssessment.factors.push(srRisk);
+            riskAssessment.overallScore += srRisk.score * this.riskFactors.SUPPORT_RESISTANCE_RISK.weight;
+            
+            const divergenceRisk = this.analyzeDivergenceRisk(signal);
+            riskAssessment.factors.push(divergenceRisk);
+            riskAssessment.overallScore += divergenceRisk.score * this.riskFactors.DIVERGENCE_RISK.weight;
+            
+            const marketRisk = await this.analyzeMarketConditionRisk();
+            riskAssessment.factors.push(marketRisk);
+            riskAssessment.overallScore += marketRisk.score * this.riskFactors.MARKET_CONDITION_RISK.weight;
+            
+            const trendRisk = await this.analyzeTrendRisk(signal);
+            riskAssessment.factors.push(trendRisk);
+            riskAssessment.overallScore += trendRisk.score * 1.2;
+            
+            riskAssessment.level = this.determineRiskLevel(riskAssessment.overallScore);
+            riskAssessment.confidence = this.calculateConfidence(riskAssessment);
+            
+            riskAssessment.recommendations = this.generateRecommendations(riskAssessment);
+            riskAssessment.warnings = this.generateWarnings(riskAssessment);
+            
+            this.addToHistory(signal.symbol, riskAssessment);
+            this.logRiskAssessment(signal.symbol, riskAssessment);
+            
+            return riskAssessment;
+            
+        } catch (error) {
+            console.error('Erro na avaliação de risco:', error);
+            return this.getDefaultRiskAssessment();
+        }
+    }
+    
+    async analyzeVolatilityRisk(signal) {
+        try {
+            const candles = await getCandlesCached(signal.symbol, '15m', 50);
+            if (candles.length < 20) {
+                return { type: 'VOLATILITY', score: 1, message: 'Dados insuficientes' };
+            }
+            
+            const closes = candles.map(c => c.close);
+            const atr = await getATRData(signal.symbol, '15m', 14);
+            
+            if (!atr) {
+                return { type: 'VOLATILITY', score: 1, message: 'ATR não disponível' };
+            }
+            
+            let sumReturns = 0;
+            for (let i = 1; i < closes.length; i++) {
+                const returnVal = Math.abs((closes[i] - closes[i-1]) / closes[i-1]);
+                sumReturns += returnVal;
+            }
+            const historicalVol = (sumReturns / (closes.length - 1)) * 100;
+            
+            const recentCloses = closes.slice(-6);
+            let recentVol = 0;
+            for (let i = 1; i < recentCloses.length; i++) {
+                const returnVal = Math.abs((recentCloses[i] - recentCloses[i-1]) / recentCloses[i-1]);
+                recentVol += returnVal;
+            }
+            recentVol = (recentVol / 5) * 100;
+            
+            const volatilitySpike = recentVol / Math.max(historicalVol, 0.1);
+            
+            let score = 0;
+            let message = '';
+            
+            if (volatilitySpike > 3.0) {
+                score = 3;
+                message = `ALTA VOLATILIDADE: Spike de ${volatilitySpike.toFixed(1)}x`;
+            } else if (volatilitySpike > 2.0) {
+                score = 2;
+                message = `Volatilidade elevada: ${volatilitySpike.toFixed(1)}x`;
+            } else if (recentVol > 5.0) {
+                score = 2;
+                message = `Volatilidade alta: ${recentVol.toFixed(2)}%`;
+            } else if (recentVol > 3.0) {
+                score = 1;
+                message = `Volatilidade moderada: ${recentVol.toFixed(2)}%`;
+            } else {
+                score = 0;
+                message = `Volatilidade normal: ${recentVol.toFixed(2)}%`;
+            }
+            
+            if (atr.percentage > 3.0) {
+                score = Math.max(score, 2);
+                message += ` | ATR alto: ${atr.percentage.toFixed(2)}%`;
+            }
+            
+            return {
+                type: 'VOLATILITY',
+                score: score,
+                message: message,
+                data: {
+                    historicalVol: historicalVol,
+                    recentVol: recentVol,
+                    volatilitySpike: volatilitySpike,
+                    atrPercentage: atr.percentage
+                }
+            };
+            
+        } catch (error) {
+            return { type: 'VOLATILITY', score: 1, message: 'Erro na análise' };
+        }
+    }
+    
+    analyzeVolumeRisk(signal) {
+        const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const volumeAboveBelow = ((volumeRatio - 1) * 100);
+        
+        let score = 0;
+        let message = '';
+        
+        if (volumeRatio < 0.7) {
+            score = 2;
+            message = `VOLUME MUITO BAIXO: ${volumeRatio.toFixed(2)}x`;
+        } else if (volumeRatio < 1.0) {
+            score = 1;
+            message = `Volume abaixo da média: ${volumeRatio.toFixed(2)}x`;
+        } else if (volumeRatio > 3.0) {
+            score = 1;
+            message = `Volume muito alto: ${volumeRatio.toFixed(2)}x`;
+        } else if (volumeRatio > 2.0) {
+            score = 0.5;
+            message = `Volume alto: ${volumeRatio.toFixed(2)}x`;
+        } else {
+            score = 0;
+            message = `Volume normal: ${volumeRatio.toFixed(2)}x`;
+        }
+        
+        return {
+            type: 'VOLUME',
+            score: score,
+            message: message,
+            data: { volumeRatio: volumeRatio }
+        };
+    }
+    
+    async analyzeLiquidityRisk(symbol) {
+        try {
+            const tickerData = await rateLimiter.makeRequest(
+                `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`,
+                {},
+                'ticker24hr'
+            );
+            
+            const quoteVolume = parseFloat(tickerData.quoteVolume) || 0;
+            
+            let score = 0;
+            let message = '';
+            
+            if (quoteVolume < 500000) {
+                score = 3;
+                message = `LIQUIDEZ MUITO BAIXA: $${(quoteVolume/1000).toFixed(1)}k`;
+            } else if (quoteVolume < 2000000) {
+                score = 2;
+                message = `Liquidez baixa: $${(quoteVolume/1000000).toFixed(2)}M`;
+            } else if (quoteVolume < 10000000) {
+                score = 1;
+                message = `Liquidez moderada: $${(quoteVolume/1000000).toFixed(2)}M`;
+            } else {
+                score = 0;
+                message = `Liquidez boa: $${(quoteVolume/1000000).toFixed(2)}M`;
+            }
+            
+            return {
+                type: 'LIQUIDITY',
+                score: score,
+                message: message,
+                data: { quoteVolume: quoteVolume }
+            };
+            
+        } catch (error) {
+            return { type: 'LIQUIDITY', score: 1, message: 'Dados não disponíveis' };
+        }
+    }
+    
+    async analyzeCorrelationRisk(signal) {
+        try {
+            const symbol = signal.symbol;
+            const btcSymbol = 'BTCUSDT';
+            
+            if (symbol === btcSymbol) {
+                return { type: 'CORRELATION', score: 0, message: 'BTC não tem correlação' };
+            }
+            
+            const symbolCandles = await getCandlesCached(symbol, '15m', 8);
+            const btcCandles = await getCandlesCached(btcSymbol, '15m', 8);
+            
+            if (symbolCandles.length < 5 || btcCandles.length < 5) {
+                return { type: 'CORRELATION', score: 1, message: 'Dados insuficientes' };
+            }
+            
+            const symbolReturns = [];
+            const btcReturns = [];
+            
+            for (let i = 1; i < Math.min(symbolCandles.length, btcCandles.length); i++) {
+                const symbolReturn = (symbolCandles[i].close - symbolCandles[i-1].close) / symbolCandles[i-1].close;
+                const btcReturn = (btcCandles[i].close - btcCandles[i-1].close) / btcCandles[i-1].close;
+                
+                symbolReturns.push(symbolReturn);
+                btcReturns.push(btcReturn);
+            }
+            
+            const correlation = this.calculateCorrelation(symbolReturns, btcReturns);
+            const absCorrelation = Math.abs(correlation);
+            
+            let score = 0;
+            let message = '';
+            
+            if (absCorrelation > 0.8) {
+                score = correlation > 0 ? 0.5 : 1;
+                message = `Correlação ${correlation > 0 ? 'POSITIVA' : 'NEGATIVA'}: ${correlation.toFixed(2)}`;
+            } else if (absCorrelation > 0.5) {
+                score = 0;
+                message = `Correlação moderada: ${correlation.toFixed(2)}`;
+            } else {
+                score = 0;
+                message = `Baixa correlação: ${correlation.toFixed(2)}`;
+            }
+            
+            const lastSymbolReturn = symbolReturns[symbolReturns.length - 1];
+            const lastBtcReturn = btcReturns[btcReturns.length - 1];
+            
+            if (Math.sign(lastSymbolReturn) !== Math.sign(lastBtcReturn) && absCorrelation > 0.6) {
+                score += 1;
+                message += ` | INDO CONTRA BTC!`;
+            }
+            
+            return {
+                type: 'CORRELATION',
+                score: Math.min(3, score),
+                message: message,
+                data: {
+                    correlation: correlation,
+                    lastSymbolReturn: lastSymbolReturn,
+                    lastBtcReturn: lastBtcReturn
+                }
+            };
+            
+        } catch (error) {
+            return { type: 'CORRELATION', score: 1, message: 'Erro análise' };
+        }
+    }
+    
+    calculateCorrelation(x, y) {
+        const n = x.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+        
+        for (let i = 0; i < n; i++) {
+            sumX += x[i];
+            sumY += y[i];
+            sumXY += x[i] * y[i];
+            sumX2 += x[i] * x[i];
+            sumY2 += y[i] * y[i];
+        }
+        
+        const numerator = n * sumXY - sumX * sumY;
+        const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+        
+        return denominator === 0 ? 0 : numerator / denominator;
+    }
+    
+    analyzeTimeRisk() {
+        const now = new Date();
+        const hour = now.getUTCHours();
+        const day = now.getUTCDay();
+        
+        let score = 0;
+        let message = '';
+        
+        const riskHours = [13, 14, 20, 21];
+        
+        if (riskHours.includes(hour)) {
+            score = 1;
+            message = `Horário de maior volatilidade`;
+        } else if (hour >= 22 || hour <= 3) {
+            score = 0;
+            message = `Horário asiático`;
+        } else {
+            score = 0;
+            message = `Horário normal`;
+        }
+        
+        if (day === 0 || day === 6) {
+            score += 1;
+            message += ` | FIM DE SEMANA`;
+        }
+        
+        return {
+            type: 'TIME',
+            score: Math.min(2, score),
+            message: message,
+            data: { hour: hour, day: day }
+        };
+    }
+    
+    analyzeSupportResistanceRisk(signal) {
+        const srData = signal.marketData.supportResistance;
+        if (!srData || !srData.breakoutRisk) {
+            return { type: 'S/R', score: 1, message: 'Dados não disponíveis' };
+        }
+        
+        const breakoutRisk = srData.breakoutRisk;
+        let score = 0;
+        
+        switch (breakoutRisk.level) {
+            case 'very_low': score = 0; break;
+            case 'low': score = 0.5; break;
+            case 'medium': score = 1; break;
+            case 'high': score = 2; break;
+            default: score = 1;
+        }
+        
+        const nearestLevel = signal.isBullish ? 
+            srData.nearestResistance : srData.nearestSupport;
+        
+        if (nearestLevel && nearestLevel.distancePercent < 0.5) {
+            score = Math.max(score, 2);
+        }
+        
+        return {
+            type: 'S/R',
+            score: score,
+            message: breakoutRisk.reason,
+            data: {
+                riskLevel: breakoutRisk.level,
+                distancePercent: nearestLevel?.distancePercent
+            }
+        };
+    }
+    
+    analyzeDivergenceRisk(signal) {
+        const divergenceData = signal.marketData.divergence15m;
+        
+        if (!divergenceData || !divergenceData.hasDivergence) {
+            return { type: 'DIVERGENCE', score: 0, message: 'Sem divergência' };
+        }
+        
+        let score = 0;
+        let message = '';
+        
+        const isAligned = (signal.isBullish && (divergenceData.type === 'bullish' || divergenceData.type === 'hiddenBullish')) ||
+                         (!signal.isBullish && (divergenceData.type === 'bearish' || divergenceData.type === 'hiddenBearish'));
+        
+        if (isAligned) {
+            score = -1;
+            message = `Divergência ${divergenceData.type} confirmando`;
+            
+            if (divergenceData.confirmed) {
+                score = -1.5;
+                message += ` (CONFIRMADA)`;
+            }
+        } else {
+            score = 2;
+            message = `⚠️ DIVERGÊNCIA ${divergenceData.type.toUpperCase()} CONTRA SINAL!`;
+        }
+        
+        return {
+            type: 'DIVERGENCE',
+            score: Math.max(-2, Math.min(3, score)),
+            message: message,
+            data: {
+                type: divergenceData.type,
+                confirmed: divergenceData.confirmed,
+                aligned: isAligned
+            }
+        };
+    }
+    
+    async analyzeMarketConditionRisk() {
+        try {
+            const btcCandles = await getCandlesCached('BTCUSDT', '1h', 24);
+            
+            if (btcCandles.length < 20) {
+                return { type: 'MARKET', score: 1, message: 'Dados insuficientes' };
+            }
+            
+            const closes = btcCandles.map(c => c.close);
+            const currentPrice = closes[closes.length - 1];
+            const high24h = Math.max(...closes);
+            const low24h = Math.min(...closes);
+            
+            const drawdown = ((high24h - currentPrice) / high24h) * 100;
+            const volatility = ((high24h - low24h) / low24h) * 100;
+            
+            let score = 0;
+            let message = '';
+            
+            if (drawdown > 10) {
+                score = 2;
+                message = `MERCADO EM CORREÇÃO: BTC -${drawdown.toFixed(1)}%`;
+            } else if (drawdown > 5) {
+                score = 1;
+                message = `Mercado em pullback: BTC -${drawdown.toFixed(1)}%`;
+            } else if (volatility > 8) {
+                score = 1;
+                message = `Alta volatilidade BTC: ${volatility.toFixed(1)}%`;
+            } else {
+                score = 0;
+                message = `Mercado estável: BTC ${drawdown > 0 ? '-' : '+'}${Math.abs(drawdown).toFixed(1)}%`;
+            }
+            
+            return {
+                type: 'MARKET',
+                score: score,
+                message: message,
+                data: {
+                    btcDrawdown: drawdown,
+                    btcVolatility: volatility,
+                    btcPrice: currentPrice
+                }
+            };
+            
+        } catch (error) {
+            return { type: 'MARKET', score: 1, message: 'Erro análise' };
+        }
+    }
+    
+    async analyzeTrendRisk(signal) {
+        try {
+            const timeframes = ['15m', '1h', '4h'];
+            let conflictingTrends = 0;
+            let totalTrends = 0;
+            let trendMessages = [];
+            
+            for (const tf of timeframes) {
+                const candles = await getCandlesCached(signal.symbol, tf, 50);
+                if (candles.length < 20) continue;
+                
+                const closes = candles.map(c => c.close);
+                const sma20 = this.calculateSMA(closes, 20);
+                const sma50 = this.calculateSMA(closes, 50);
+                
+                if (sma20 && sma50) {
+                    const currentPrice = closes[closes.length - 1];
+                    const isBullishTrend = currentPrice > sma20 && sma20 > sma50;
+                    const isBearishTrend = currentPrice < sma20 && sma20 < sma50;
+                    
+                    totalTrends++;
+                    
+                    if (signal.isBullish && isBearishTrend) {
+                        conflictingTrends++;
+                        trendMessages.push(`${tf}: tendência de BAISA`);
+                    } else if (!signal.isBullish && isBullishTrend) {
+                        conflictingTrends++;
+                        trendMessages.push(`${tf}: tendência de ALTA`);
+                    }
+                }
+            }
+            
+            let score = 0;
+            let message = '';
+            
+            if (conflictingTrends > 0) {
+                const conflictRatio = conflictingTrends / totalTrends;
+                
+                if (conflictRatio > 0.66) {
+                    score = 2;
+                    message = `CONFLITO DE TENDÊNCIA em ${conflictingTrends}/${totalTrends} timeframes`;
+                } else if (conflictRatio > 0.33) {
+                    score = 1;
+                    message = `Tendência conflitante em ${conflictingTrends}/${totalTrends} timeframes`;
+                }
+                
+                if (trendMessages.length > 0) {
+                    message += ` (${trendMessages.join(', ')})`;
+                }
+            } else {
+                score = 0;
+                message = `Tendências alinhadas em ${totalTrends} timeframes`;
+            }
+            
+            return {
+                type: 'TREND',
+                score: score,
+                message: message,
+                data: {
+                    conflictingTrends: conflictingTrends,
+                    totalTrends: totalTrends,
+                    conflictRatio: conflictingTrends / totalTrends
+                }
+            };
+            
+        } catch (error) {
+            return { type: 'TREND', score: 1, message: 'Erro análise' };
+        }
+    }
+    
+    calculateSMA(data, period) {
+        if (data.length < period) return null;
+        const slice = data.slice(-period);
+        return slice.reduce((a, b) => a + b, 0) / period;
+    }
+    
+    determineRiskLevel(score) {
+        if (score >= 15) return 'CRITICAL';
+        if (score >= 10) return 'HIGH';
+        if (score >= 5) return 'MEDIUM';
+        return 'LOW';
+    }
+    
+    calculateConfidence(assessment) {
+        const maxScore = 25;
+        const normalizedScore = Math.min(Math.max(assessment.overallScore, 0), maxScore);
+        const confidence = 100 - (normalizedScore / maxScore) * 40;
+        
+        return Math.max(60, Math.min(100, Math.round(confidence)));
+    }
+    
+    generateRecommendations(assessment) {
+        const recommendations = [];
+        
+        switch (assessment.level) {
+            case 'CRITICAL':
+                recommendations.push('⚠️ <b>CONSIDERE EVITAR ESTE TRADE</b>');
+                recommendations.push('• Reduza tamanho da posição em 75%');
+                recommendations.push('• Use stop loss mais apertado');
+                recommendations.push('• Espere confirmação adicional');
+                break;
+                
+            case 'HIGH':
+                recommendations.push('🔶 <b>ALTO RISCO - EXTREMA CAUTELA</b>');
+                recommendations.push('• Reduza tamanho da posição em 50%');
+                recommendations.push('• Use stop loss conservador');
+                recommendations.push('• Procure entrada melhor');
+                break;
+                
+            case 'MEDIUM':
+                recommendations.push('🟡 <b>RISCO MODERADO - CAUTELA</b>');
+                recommendations.push('• Reduza tamanho da posição em 25%');
+                recommendations.push('• Aguarde confirmação parcial');
+                recommendations.push('• Considere alvos mais curtos');
+                break;
+                
+            case 'LOW':
+                recommendations.push('🟢 <b>RISCO BAIXO - CONFIANÇA</b>');
+                recommendations.push('• Tamanho normal de posição OK');
+                recommendations.push('• Stop loss padrão adequado');
+                recommendations.push('• Pode buscar alvos mais longos');
+                break;
+        }
+        
+        assessment.factors.forEach(factor => {
+            if (factor.score >= 2) {
+                switch (factor.type) {
+                    case 'VOLATILITY':
+                        recommendations.push(`• <b>Volatilidade alta:</b> Use stop mais largo`);
+                        break;
+                    case 'VOLUME':
+                        recommendations.push(`• <b>Volume anormal:</b> Aguarde confirmação`);
+                        break;
+                    case 'LIQUIDITY':
+                        recommendations.push(`• <b>Liquidez baixa:</b> Reduza tamanho`);
+                        break;
+                    case 'CORRELATION':
+                        if (factor.message.includes('CONTRA BTC')) {
+                            recommendations.push(`• <b>Indo contra BTC:</b> Cuidado extra`);
+                        }
+                        break;
+                    case 'DIVERGENCE':
+                        if (factor.data && !factor.data.aligned) {
+                            recommendations.push(`• <b>Divergência contra:</b> Considere cancelar trade`);
+                        }
+                        break;
+                }
+            }
+        });
+        
+        return recommendations;
+    }
+    
+    generateWarnings(assessment) {
+        const warnings = [];
+        
+        assessment.factors.forEach(factor => {
+            if (factor.score >= 2.5) {
+                warnings.push(`⚠️ ${factor.message}`);
+            } else if (factor.score >= 2) {
+                warnings.push(`🔶 ${factor.message}`);
+            }
+        });
+        
+        return warnings;
+    }
+    
+    addToHistory(symbol, assessment) {
+        if (!this.riskHistory.has(symbol)) {
+            this.riskHistory.set(symbol, []);
+        }
+        
+        const history = this.riskHistory.get(symbol);
+        history.push({
+            timestamp: Date.now(),
+            assessment: assessment
+        });
+        
+        if (history.length > this.maxHistorySize) {
+            history.shift();
+        }
+    }
+    
+    logRiskAssessment(symbol, assessment) {
+        console.log(`\n🛡️  RISK ASSESSMENT: ${symbol}`);
+        console.log(`   Nível: ${assessment.level} ${this.riskLevels[assessment.level].emoji}`);
+        console.log(`   Score: ${assessment.overallScore.toFixed(2)}`);
+        console.log(`   Confiança: ${assessment.confidence}%`);
+        
+        if (assessment.warnings.length > 0) {
+            console.log(`   Warnings:`);
+            assessment.warnings.forEach(w => console.log(`     ${w}`));
+        }
+    }
+    
+    getDefaultRiskAssessment() {
+        return {
+            overallScore: 1,
+            level: 'LOW',
+            factors: [],
+            warnings: ['Sistema de risco indisponível'],
+            recommendations: ['Use cautela padrão'],
+            confidence: 70,
+            shouldAlert: true,
+            shouldBlock: false
+        };
+    }
+    
+    getSymbolRiskHistory(symbol) {
+        return this.riskHistory.get(symbol) || [];
+    }
+    
+    getOverallMarketRisk() {
+        let totalScore = 0;
+        let count = 0;
+        
+        this.riskHistory.forEach((history, symbol) => {
+            if (history.length > 0) {
+                const latest = history[history.length - 1];
+                totalScore += latest.assessment.overallScore;
+                count++;
+            }
+        });
+        
+        const avgScore = count > 0 ? totalScore / count : 0;
+        return {
+            averageRiskScore: avgScore,
+            riskLevel: this.determineRiskLevel(avgScore),
+            monitoredSymbols: count
+        };
+    }
+}
 
 // =====================================================================
 // 🔄 CIRCUIT BREAKER CLASS
@@ -273,7 +984,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO (COM TRADE TRACKING)
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -295,162 +1006,242 @@ class AdvancedLearningSystem {
         this.minTradesForLearning = 10;
         this.tradeTrackingHours = 24;
         
-        this.loadLearningData();
-        console.log('🧠 Sistema de Aprendizado Avançado inicializado');
-    }
-    
-    loadLearningData() {
-        try {
-            if (!fs.existsSync(LEARNING_DIR)) {
-                fs.mkdirSync(LEARNING_DIR, { recursive: true });
-            }
-            
-            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
-            if (fs.existsSync(learningFile)) {
-                const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
-                
-                this.tradeHistory = data.tradeHistory || [];
-                this.symbolPerformance = data.symbolPerformance || {};
-                this.patterns = data.patterns || this.patterns;
-                this.parameterEvolution = data.parameterEvolution || this.parameterEvolution;
-                
-                console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
-            }
-        } catch (error) {
-            console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
-        }
-    }
-    
-    saveLearningData() {
-        try {
-            const data = {
-                tradeHistory: this.tradeHistory.slice(-1000),
-                symbolPerformance: this.symbolPerformance,
-                patterns: this.patterns,
-                parameterEvolution: this.parameterEvolution,
-                lastUpdated: Date.now()
-            };
-            
-            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
-            const backupFile = path.join(LEARNING_DIR, `learning_backup_${Date.now()}.json`);
-            
-            if (fs.existsSync(learningFile)) {
-                fs.copyFileSync(learningFile, backupFile);
-            }
-            
-            fs.writeFileSync(learningFile, JSON.stringify(data, null, 2));
-            this.cleanupOldBackups();
-            
-        } catch (error) {
-            console.error('Erro ao salvar dados de aprendizado:', error);
-        }
-    }
-    
-    cleanupOldBackups() {
-        try {
-            const files = fs.readdirSync(LEARNING_DIR)
-                .filter(file => file.startsWith('learning_backup_'))
-                .map(file => ({
-                    name: file,
-                    path: path.join(LEARNING_DIR, file),
-                    time: fs.statSync(path.join(LEARNING_DIR, file)).mtime.getTime()
-                }))
-                .sort((a, b) => b.time - a.time);
-            
-            if (files.length > 5) {
-                files.slice(5).forEach(file => {
-                    fs.unlinkSync(file.path);
-                });
-            }
-        } catch (error) {
-            // Ignorar erro
-        }
-    }
-    
-    async recordSignal(signal, marketData) {
-        if (!this.learningEnabled) return null;
+        // Configuração de trailing simulation
+        this.trailingConfig = {
+            timeframe: '5m',
+            candlesToSimulate: 288, // 24 horas em candles de 5m
+            partialTargets: [
+                { percentage: 20, positionSize: 0.25 },
+                { percentage: 40, positionSize: 0.25 },
+                { percentage: 60, positionSize: 0.25 },
+                { percentage: 80, positionSize: 0.25 }
+            ],
+            fees: 0.0004 // 0.04% Binance Futures
+        };
         
+        this.loadLearningData();
+        console.log('🧠 Sistema de Aprendizado Avançado com Trailing Simulation inicializado');
+    }
+    
+    async simulateTradeCandleByCandle(tradeId) {
         try {
-            const tradeRecord = {
-                id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                timestamp: Date.now(),
-                symbol: signal.symbol,
-                direction: signal.isBullish ? 'BUY' : 'SELL',
-                entryPrice: signal.price,
-                stopPrice: signal.targetsData.stopPrice,
-                targets: signal.targetsData.targets.map(t => ({
-                    price: parseFloat(t.price),
-                    percentage: parseFloat(t.target),
-                    rr: parseFloat(t.riskReward)
-                })),
-                bestTarget: signal.targetsData.targets.reduce((a, b) => 
-                    parseFloat(b.riskReward) > parseFloat(a.riskReward) ? b : a
-                ),
-                qualityScore: signal.qualityScore,
-                marketData: {
-                    volumeRatio: marketData.volume?.rawRatio || 0,
-                    rsi: marketData.rsi?.raw || 0,
-                    adx1h: marketData.adx1h?.raw || 0,
-                    volatility: marketData.volatility?.rawVolatility || 0,
-                    lsr: marketData.lsr?.lsrRatio || 0,
-                    emaAlignment: marketData.ema?.isAboveEMA55 || false,
-                    ema55_1h: marketData.ema55_1h?.isAboveEMA55 || false,
-                    stoch1hValid: marketData.stoch?.isValid || false,  // NOVO
-                    stoch4hValid: marketData.stoch4h?.isValid || false,
-                    stoch4hDirection: marketData.stoch4h?.kDirection || 'NEUTRAL',  // NOVO
-                    cci4hValid: marketData.cci4h?.isValid || false,
-                    cci4hValue: marketData.cci4h?.value || 0,
-                    cci4hMA: marketData.cci4h?.maValue || 0,
-                    divergence15m: marketData.divergence15m || {},
-                    breakoutRisk: marketData.breakoutRisk || {},
-                    supportResistance: marketData.supportResistance || {}
-                },
-                status: 'OPEN',
-                outcome: null,
-                exitPrice: null,
-                profitPercentage: null,
-                durationHours: null
-            };
+            const trade = this.openTrades.get(tradeId);
+            if (!trade) return null;
             
-            this.tradeHistory.push(tradeRecord);
-            this.openTrades.set(tradeRecord.id, tradeRecord);
+            console.log(`📊 Iniciando trailing simulation para ${trade.symbol} ${trade.direction}`);
             
-            setTimeout(() => {
-                this.checkTradeOutcome(tradeRecord.id);
-            }, this.tradeTrackingHours * 60 * 60 * 1000);
+            // Baixar candles de 5m após o sinal
+            const candles = await getCandlesCached(
+                trade.symbol, 
+                this.trailingConfig.timeframe, 
+                this.trailingConfig.candlesToSimulate
+            );
             
-            if (!this.symbolPerformance[signal.symbol]) {
-                this.symbolPerformance[signal.symbol] = {
-                    totalSignals: 0,
-                    successfulSignals: 0,
-                    totalProfit: 0,
-                    avgHoldingTime: 0,
-                    recentScores: []
-                };
-            }
+            if (candles.length < 10) return null;
             
-            const symbolStats = this.symbolPerformance[signal.symbol];
-            symbolStats.totalSignals++;
-            symbolStats.recentScores.push(signal.qualityScore.score);
+            const entryTime = trade.timestamp;
+            const relevantCandles = candles.filter(c => c.time >= entryTime);
             
-            if (symbolStats.recentScores.length > 20) {
-                symbolStats.recentScores = symbolStats.recentScores.slice(-20);
-            }
+            if (relevantCandles.length === 0) return null;
             
-            if (this.tradeHistory.length % 20 === 0) {
-                this.saveLearningData();
-                await this.analyzePatterns();
-            }
+            // Simular trade candle a candle
+            const simulationResult = this.simulateTradeExecution(
+                trade, 
+                relevantCandles
+            );
             
-            return tradeRecord.id;
+            // Atualizar trade com resultado da simulação
+            trade.simulationResult = simulationResult;
+            trade.status = 'SIMULATED';
+            trade.outcome = simulationResult.finalOutcome;
+            trade.exitPrice = simulationResult.exitPrice;
+            trade.profitPercentage = simulationResult.netProfitPercentage;
+            trade.durationHours = simulationResult.durationHours;
+            
+            // Registrar no histórico
+            this.recordTradeOutcome(trade);
+            
+            return simulationResult;
             
         } catch (error) {
-            console.error('Erro ao registrar sinal:', error);
+            console.error('Erro na simulação:', error);
             return null;
         }
     }
     
+    simulateTradeExecution(trade, candles) {
+        const entryPrice = trade.entryPrice;
+        const stopPrice = trade.stopPrice;
+        const isBullish = trade.direction === 'BUY';
+        
+        let currentPosition = 1.0; // 100% da posição inicial
+        let realizedProfit = 0;
+        let feesPaid = 0;
+        let hitStop = false;
+        let hitTargets = [];
+        let exitPrice = entryPrice;
+        let finalOutcome = 'FAILURE';
+        let firstHit = null;
+        
+        // Ordenar alvos por porcentagem
+        const sortedTargets = [...trade.targets].sort((a, b) => 
+            parseFloat(a.percentage) - parseFloat(b.percentage)
+        );
+        
+        // Simular cada candle
+        for (let i = 0; i < candles.length && currentPosition > 0; i++) {
+            const candle = candles[i];
+            const high = candle.high;
+            const low = candle.low;
+            const close = candle.close;
+            
+            // Verificar se stop foi atingido primeiro
+            if (!hitStop) {
+                if (isBullish && low <= stopPrice) {
+                    hitStop = true;
+                    firstHit = firstHit || 'STOP';
+                    exitPrice = stopPrice;
+                    
+                    const loss = (stopPrice - entryPrice) / entryPrice * 100 * currentPosition;
+                    realizedProfit += loss;
+                    
+                    // Calcular fees para saída
+                    const exitFees = currentPosition * this.trailingConfig.fees * 100;
+                    feesPaid += exitFees;
+                    
+                    currentPosition = 0;
+                    finalOutcome = 'STOP_HIT';
+                    break;
+                } else if (!isBullish && high >= stopPrice) {
+                    hitStop = true;
+                    firstHit = firstHit || 'STOP';
+                    exitPrice = stopPrice;
+                    
+                    const loss = (entryPrice - stopPrice) / entryPrice * 100 * currentPosition;
+                    realizedProfit += loss;
+                    
+                    // Calcular fees para saída
+                    const exitFees = currentPosition * this.trailingConfig.fees * 100;
+                    feesPaid += exitFees;
+                    
+                    currentPosition = 0;
+                    finalOutcome = 'STOP_HIT';
+                    break;
+                }
+            }
+            
+            // Verificar alvos parciais
+            for (let j = 0; j < sortedTargets.length; j++) {
+                const target = sortedTargets[j];
+                const targetPrice = parseFloat(target.price);
+                
+                if (hitTargets.some(t => t.percentage === target.percentage)) continue;
+                
+                // Verificar se o alvo foi atingido
+                const targetHit = isBullish ? 
+                    high >= targetPrice : 
+                    low <= targetPrice;
+                
+                if (targetHit) {
+                    if (!firstHit) firstHit = `TARGET_${target.percentage}%`;
+                    
+                    hitTargets.push({
+                        percentage: target.percentage,
+                        price: targetPrice,
+                        positionSize: this.trailingConfig.partialTargets[j]?.positionSize || 0.25
+                    });
+                    
+                    // Calcular profit para esta parte da posição
+                    const positionSize = this.trailingConfig.partialTargets[j]?.positionSize || 0.25;
+                    const profit = isBullish ?
+                        ((targetPrice - entryPrice) / entryPrice) * 100 * positionSize :
+                        ((entryPrice - targetPrice) / entryPrice) * 100 * positionSize;
+                    
+                    realizedProfit += profit;
+                    
+                    // Calcular fees para esta saída parcial
+                    const entryFees = positionSize * this.trailingConfig.fees * 100;
+                    const exitFees = positionSize * this.trailingConfig.fees * 100;
+                    feesPaid += entryFees + exitFees;
+                    
+                    currentPosition -= positionSize;
+                    
+                    if (currentPosition <= 0) {
+                        currentPosition = 0;
+                        exitPrice = targetPrice;
+                        finalOutcome = hitTargets.length === sortedTargets.length ? 
+                            'ALL_TARGETS_HIT' : 'PARTIAL_TARGETS_HIT';
+                        break;
+                    }
+                }
+            }
+            
+            if (currentPosition <= 0) break;
+        }
+        
+        // Se ainda tiver posição após 24h, fechar no último preço
+        if (currentPosition > 0) {
+            const lastCandle = candles[candles.length - 1];
+            exitPrice = lastCandle.close;
+            
+            const finalProfit = isBullish ?
+                ((exitPrice - entryPrice) / entryPrice) * 100 * currentPosition :
+                ((entryPrice - exitPrice) / entryPrice) * 100 * currentPosition;
+            
+            realizedProfit += finalProfit;
+            
+            // Calcular fees finais
+            const finalFees = currentPosition * this.trailingConfig.fees * 100;
+            feesPaid += finalFees;
+            
+            currentPosition = 0;
+            finalOutcome = firstHit ? `${firstHit}_THEN_EXIT` : 'TIMEOUT_EXIT';
+        }
+        
+        // Calcular resultados finais
+        const netProfit = realizedProfit - feesPaid;
+        const durationMs = candles.length * 5 * 60 * 1000; // Cada candle de 5m
+        const durationHours = durationMs / (1000 * 60 * 60);
+        
+        return {
+            finalOutcome: finalOutcome,
+            exitPrice: exitPrice,
+            grossProfitPercentage: realizedProfit,
+            feesPercentage: feesPaid,
+            netProfitPercentage: netProfit,
+            durationHours: durationHours,
+            hitTargets: hitTargets,
+            hitStop: hitStop,
+            firstHit: firstHit,
+            candlesAnalyzed: candles.length,
+            simulationTimestamp: Date.now()
+        };
+    }
+    
     async checkTradeOutcome(tradeId) {
+        try {
+            const trade = this.openTrades.get(tradeId);
+            if (!trade || trade.status !== 'OPEN') return;
+            
+            // Usar trailing simulation em vez de verificação simples
+            const simulationResult = await this.simulateTradeCandleByCandle(tradeId);
+            
+            if (simulationResult) {
+                console.log(`📊 Trade ${trade.symbol} ${trade.direction} ${simulationResult.finalOutcome}: ${simulationResult.netProfitPercentage.toFixed(2)}%`);
+                console.log(`   Alvos atingidos: ${simulationResult.hitTargets.length}, Stop: ${simulationResult.hitStop ? 'SIM' : 'NÃO'}`);
+            } else {
+                // Fallback para verificação antiga se a simulação falhar
+                await this.checkTradeOutcomeFallback(tradeId);
+            }
+            
+        } catch (error) {
+            console.error('Erro ao verificar outcome do trade:', error);
+            // Tentar fallback
+            await this.checkTradeOutcomeFallback(tradeId);
+        }
+    }
+    
+    async checkTradeOutcomeFallback(tradeId) {
         try {
             const trade = this.openTrades.get(tradeId);
             if (!trade || trade.status !== 'OPEN') return;
@@ -500,24 +1291,113 @@ class AdvancedLearningSystem {
             trade.profitPercentage = profitPercentage;
             trade.durationHours = (Date.now() - trade.timestamp) / (1000 * 60 * 60);
             
-            const symbolStats = this.symbolPerformance[trade.symbol];
-            if (outcome === 'SUCCESS') {
-                symbolStats.successfulSignals++;
-                symbolStats.totalProfit += profitPercentage;
-            }
-            
-            symbolStats.avgHoldingTime = symbolStats.successfulSignals > 0
-                ? (symbolStats.avgHoldingTime * (symbolStats.successfulSignals - 1) + trade.durationHours) / symbolStats.successfulSignals
-                : trade.durationHours;
-            
-            this.openTrades.delete(tradeId);
-            
-            await this.analyzePatterns();
-            
-            console.log(`📊 Trade ${trade.symbol} ${trade.direction} ${outcome}: ${profitPercentage.toFixed(2)}%`);
+            this.recordTradeOutcome(trade);
             
         } catch (error) {
-            console.error('Erro ao verificar outcome do trade:', error);
+            console.error('Erro no fallback do trade outcome:', error);
+        }
+    }
+    
+    recordTradeOutcome(trade) {
+        const symbolStats = this.symbolPerformance[trade.symbol] || {
+            totalSignals: 0,
+            successfulSignals: 0,
+            totalProfit: 0,
+            avgHoldingTime: 0,
+            recentScores: []
+        };
+        
+        symbolStats.totalSignals++;
+        
+        if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+            symbolStats.successfulSignals++;
+            symbolStats.totalProfit += trade.profitPercentage || 0;
+        }
+        
+        symbolStats.avgHoldingTime = symbolStats.successfulSignals > 0
+            ? (symbolStats.avgHoldingTime * (symbolStats.successfulSignals - 1) + (trade.durationHours || 0)) / symbolStats.successfulSignals
+            : (trade.durationHours || 0);
+        
+        symbolStats.recentScores.push(trade.qualityScore);
+        if (symbolStats.recentScores.length > 20) {
+            symbolStats.recentScores = symbolStats.recentScores.slice(-20);
+        }
+        
+        this.symbolPerformance[trade.symbol] = symbolStats;
+        this.openTrades.delete(trade.id || trade.timestamp);
+    }
+    
+    async recordSignal(signal, marketData) {
+        if (!this.learningEnabled) return null;
+        
+        try {
+            const tradeRecord = {
+                id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                timestamp: Date.now(),
+                symbol: signal.symbol,
+                direction: signal.isBullish ? 'BUY' : 'SELL',
+                entryPrice: signal.price,
+                stopPrice: signal.targetsData.stopPrice,
+                targets: signal.targetsData.targets.map(t => ({
+                    price: parseFloat(t.price),
+                    percentage: parseFloat(t.target),
+                    rr: parseFloat(t.riskReward)
+                })),
+                bestTarget: signal.targetsData.targets.reduce((a, b) => 
+                    parseFloat(b.riskReward) > parseFloat(a.riskReward) ? b : a
+                ),
+                qualityScore: signal.qualityScore.score,
+                marketData: {
+                    volumeRatio: marketData.volume?.rawRatio || 0,
+                    rsi: marketData.rsi?.raw || 0,
+                    adx1h: marketData.adx1h?.raw || 0,
+                    volatility: marketData.volatility?.rawVolatility || 0,
+                    lsr: marketData.lsr?.lsrRatio || 0,
+                    emaAlignment: marketData.ema?.isAboveEMA55 || false,
+                    stoch4hValid: marketData.stoch4h?.isValid || false,
+                    cci4hValid: marketData.cci4h?.isValid || false,
+                    cci4hValue: marketData.cci4h?.value || 0,
+                    cci4hMA: marketData.cci4h?.maValue || 0,
+                    divergence15m: marketData.divergence15m || {},
+                    breakoutRisk: marketData.breakoutRisk || {},
+                    supportResistance: marketData.supportResistance || {}
+                },
+                status: 'OPEN',
+                outcome: null,
+                exitPrice: null,
+                profitPercentage: null,
+                durationHours: null
+            };
+            
+            this.tradeHistory.push(tradeRecord);
+            this.openTrades.set(tradeRecord.id, tradeRecord);
+            
+            // Agendar trailing simulation após 24h
+            setTimeout(() => {
+                this.checkTradeOutcome(tradeRecord.id);
+            }, this.tradeTrackingHours * 60 * 60 * 1000);
+            
+            // Inicializar estatísticas do símbolo se não existirem
+            if (!this.symbolPerformance[signal.symbol]) {
+                this.symbolPerformance[signal.symbol] = {
+                    totalSignals: 0,
+                    successfulSignals: 0,
+                    totalProfit: 0,
+                    avgHoldingTime: 0,
+                    recentScores: []
+                };
+            }
+            
+            if (this.tradeHistory.length % 10 === 0) {
+                this.saveLearningData();
+                await this.analyzePatterns();
+            }
+            
+            return tradeRecord.id;
+            
+        } catch (error) {
+            console.error('Erro ao registrar sinal:', error);
+            return null;
         }
     }
     
@@ -535,11 +1415,21 @@ class AdvancedLearningSystem {
     
     async analyzePatterns() {
         try {
-            const closedTrades = this.tradeHistory.filter(t => t.status === 'CLOSED');
+            const closedTrades = this.tradeHistory.filter(t => 
+                t.status === 'CLOSED' || t.status === 'SIMULATED'
+            );
             if (closedTrades.length < 5) return;
             
-            const winners = closedTrades.filter(t => t.outcome === 'SUCCESS');
-            const losers = closedTrades.filter(t => t.outcome === 'FAILURE');
+            const winners = closedTrades.filter(t => 
+                t.outcome === 'SUCCESS' || 
+                t.outcome === 'ALL_TARGETS_HIT' || 
+                t.outcome === 'PARTIAL_TARGETS_HIT'
+            );
+            const losers = closedTrades.filter(t => 
+                t.outcome === 'FAILURE' || 
+                t.outcome === 'STOP_HIT' ||
+                t.outcome === 'TIMEOUT_EXIT'
+            );
             
             winners.forEach(trade => {
                 const patterns = this.extractPatterns(trade);
@@ -585,18 +1475,8 @@ class AdvancedLearningSystem {
         if (data.lsr >= 3.0) {
             patterns.push('HIGH_LSR');
         }
-        if (data.ema55_1h) {
-            patterns.push(`EMA55_1H_${data.ema55_1h ? 'ABOVE' : 'BELOW'}`);
-        }
-        // NOVO: Padrões com Stoch 1h e 4h
-        if (data.stoch1hValid) {
-            patterns.push('STOCH_1H_VALID');
-        }
-        if (data.stoch4hValid && data.stoch4hDirection === trade.direction.toLowerCase()) {
-            patterns.push('STOCH_4H_ALIGNED');
-        }
-        if (data.cci4hValid) {
-            patterns.push('CCI_4H_VALID');
+        if (data.stoch4hValid && data.cci4hValid) {
+            patterns.push('STOCH_CCI_4H_BULLISH');
         }
         if (data.cci4hValue > 100 || data.cci4hValue < -100) {
             patterns.push('CCI_EXTREME');
@@ -664,12 +1544,12 @@ class AdvancedLearningSystem {
                 });
             }
             
-            const ema55Analysis = this.analyzeEMA55Patterns(closedTrades);
-            if (ema55Analysis.bestWinRate > 0.6) {
+            const divergenceAnalysis = this.analyzeDivergence(closedTrades);
+            if (divergenceAnalysis.bestWinRate > 0.6) {
                 this.parameterEvolution.divergence.push({
                     timestamp: Date.now(),
-                    analysis: ema55Analysis,
-                    winRate: ema55Analysis.bestWinRate
+                    analysis: divergenceAnalysis,
+                    winRate: divergenceAnalysis.bestWinRate
                 });
             }
             
@@ -690,22 +1570,25 @@ class AdvancedLearningSystem {
         }
     }
     
-    analyzeEMA55Patterns(closedTrades) {
+    analyzeDivergence(closedTrades) {
         const patterns = {
-            aboveEMA55_bullish: { wins: 0, total: 0 },
-            belowEMA55_bearish: { wins: 0, total: 0 },
-            aboveEMA55_bearish: { wins: 0, total: 0 },
-            belowEMA55_bullish: { wins: 0, total: 0 }
+            bullish: { wins: 0, total: 0 },
+            bearish: { wins: 0, total: 0 },
+            hiddenBullish: { wins: 0, total: 0 },
+            hiddenBearish: { wins: 0, total: 0 }
         };
         
         closedTrades.forEach(trade => {
-            const direction = trade.direction;
-            const ema55Above = trade.marketData.ema55_1h;
+            const data = trade.marketData.divergence15m;
             
-            const key = `${ema55Above ? 'aboveEMA55' : 'belowEMA55'}_${direction.toLowerCase()}`;
-            if (patterns[key]) {
-                patterns[key].total++;
-                if (trade.outcome === 'SUCCESS') patterns[key].wins++;
+            if (data?.hasDivergence) {
+                const type = data.type;
+                if (patterns[type]) {
+                    patterns[type].total++;
+                    if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                        patterns[type].wins++;
+                    }
+                }
             }
         });
         
@@ -747,22 +1630,30 @@ class AdvancedLearningSystem {
             
             if (data.supportResistance?.nearestSupport?.distancePercent <= 1.0) {
                 patterns.nearSupport.total++;
-                if (trade.outcome === 'SUCCESS') patterns.nearSupport.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.nearSupport.wins++;
+                }
             }
             
             if (data.supportResistance?.nearestResistance?.distancePercent <= 1.0) {
                 patterns.nearResistance.total++;
-                if (trade.outcome === 'SUCCESS') patterns.nearResistance.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.nearResistance.wins++;
+                }
             }
             
             if (data.breakoutRisk?.level === 'high') {
                 patterns.highRisk.total++;
-                if (trade.outcome === 'SUCCESS') patterns.highRisk.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.highRisk.wins++;
+                }
             }
             
             if (data.breakoutRisk?.level === 'low') {
                 patterns.lowRisk.total++;
-                if (trade.outcome === 'SUCCESS') patterns.lowRisk.wins++;
+                if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+                    patterns.lowRisk.wins++;
+                }
             }
         });
         
@@ -798,7 +1689,11 @@ class AdvancedLearningSystem {
         thresholds.forEach(threshold => {
             const filtered = trades.filter(t => getValueFn(t) >= threshold);
             if (filtered.length >= 3) {
-                const winners = filtered.filter(t => t.outcome === 'SUCCESS');
+                const winners = filtered.filter(t => 
+                    t.outcome === 'SUCCESS' || 
+                    t.outcome === 'ALL_TARGETS_HIT' || 
+                    t.outcome === 'PARTIAL_TARGETS_HIT'
+                );
                 const winRate = winners.length / filtered.length;
                 
                 if (winRate > bestWinRate) {
@@ -814,10 +1709,89 @@ class AdvancedLearningSystem {
         };
     }
     
+    loadLearningData() {
+        try {
+            if (!fs.existsSync(LEARNING_DIR)) {
+                fs.mkdirSync(LEARNING_DIR, { recursive: true });
+            }
+            
+            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
+            if (fs.existsSync(learningFile)) {
+                const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
+                
+                this.tradeHistory = data.tradeHistory || [];
+                this.symbolPerformance = data.symbolPerformance || {};
+                this.patterns = data.patterns || this.patterns;
+                this.parameterEvolution = data.parameterEvolution || this.parameterEvolution;
+                
+                console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
+            }
+        } catch (error) {
+            console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+        }
+    }
+    
+    saveLearningData() {
+        try {
+            const data = {
+                tradeHistory: this.tradeHistory.slice(-1000),
+                symbolPerformance: this.symbolPerformance,
+                patterns: this.patterns,
+                parameterEvolution: this.parameterEvolution,
+                lastUpdated: Date.now(),
+                trailingConfig: this.trailingConfig
+            };
+            
+            const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
+            const backupFile = path.join(LEARNING_DIR, `learning_backup_${Date.now()}.json`);
+            
+            if (fs.existsSync(learningFile)) {
+                fs.copyFileSync(learningFile, backupFile);
+            }
+            
+            fs.writeFileSync(learningFile, JSON.stringify(data, null, 2));
+            this.cleanupOldBackups();
+            
+        } catch (error) {
+            console.error('Erro ao salvar dados de aprendizado:', error);
+        }
+    }
+    
+    cleanupOldBackups() {
+        try {
+            const files = fs.readdirSync(LEARNING_DIR)
+                .filter(file => file.startsWith('learning_backup_'))
+                .map(file => ({
+                    name: file,
+                    path: path.join(LEARNING_DIR, file),
+                    time: fs.statSync(path.join(LEARNING_DIR, file)).mtime.getTime()
+                }))
+                .sort((a, b) => b.time - a.time);
+            
+            if (files.length > 5) {
+                files.slice(5).forEach(file => {
+                    fs.unlinkSync(file.path);
+                });
+            }
+        } catch (error) {
+            // Ignorar erro
+        }
+    }
+    
     getPerformanceReport() {
-        const closedTrades = this.tradeHistory.filter(t => t.status === 'CLOSED');
-        const winners = closedTrades.filter(t => t.outcome === 'SUCCESS');
-        const losers = closedTrades.filter(t => t.outcome === 'FAILURE');
+        const closedTrades = this.tradeHistory.filter(t => 
+            t.status === 'CLOSED' || t.status === 'SIMULATED'
+        );
+        const winners = closedTrades.filter(t => 
+            t.outcome === 'SUCCESS' || 
+            t.outcome === 'ALL_TARGETS_HIT' || 
+            t.outcome === 'PARTIAL_TARGETS_HIT'
+        );
+        const losers = closedTrades.filter(t => 
+            t.outcome === 'FAILURE' || 
+            t.outcome === 'STOP_HIT' ||
+            t.outcome === 'TIMEOUT_EXIT'
+        );
         
         const winRate = closedTrades.length > 0 ? winners.length / closedTrades.length : 0;
         const avgProfit = winners.length > 0 ? 
@@ -837,6 +1811,16 @@ class AdvancedLearningSystem {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
         
+        const simulationStats = {
+            totalSimulated: this.tradeHistory.filter(t => t.simulationResult).length,
+            stopFirst: this.tradeHistory.filter(t => 
+                t.simulationResult?.firstHit === 'STOP'
+            ).length,
+            targetFirst: this.tradeHistory.filter(t => 
+                t.simulationResult?.firstHit?.startsWith('TARGET')
+            ).length
+        };
+        
         return {
             totalTrades: closedTrades.length,
             winningTrades: winners.length,
@@ -847,52 +1831,10 @@ class AdvancedLearningSystem {
             avgLoss: avgLoss.toFixed(2),
             bestPatterns: winningPatterns,
             worstPatterns: losingPatterns,
+            simulationStats: simulationStats,
             openTrades: this.openTrades.size,
             monitoredSymbols: Object.keys(this.symbolPerformance).length
         };
-    }
-    
-    async sendPerformanceReport() {
-        try {
-            const report = this.getPerformanceReport();
-            
-            if (report.totalTrades < 5) {
-                return;
-            }
-            
-            const message = `
-🧠 <b>RELATÓRIO DE PERFORMANCE</b>
-
-📊 <b>ESTATÍSTICAS:</b>
-• Trades Fechados: <b>${report.totalTrades}</b>
-• Win Rate: <b>${report.winRate.toFixed(1)}%</b>
-• Profit Factor: <b>${report.profitFactor}</b>
-• Média Gain: <b>${report.avgProfit}%</b>
-• Média Loss: <b>${report.avgLoss}%</b>
-• Trades Abertos: <b>${report.openTrades}</b>
-
-📈 <b>PADRÕES VENCEDORES:</b>
-${report.bestPatterns.map(([pattern, count]) => `• ${pattern}: ${count} trades`).join('\n') || '• Coletando dados...'}
-
-📉 <b>PADRÕES PERDEDORES:</b>
-${report.worstPatterns.map(([pattern, count]) => `• ${pattern}: ${count} trades`).join('\n') || '• Coletando dados...'}
-
-⚙️ <b>PARÂMETROS ATUAIS:</b>
-• Volume Threshold: <b>${VOLUME_SETTINGS.baseThreshold.toFixed(2)}x</b>
-• ADX Mínimo: <b>${ADX_1H_SETTINGS.minStrength.toFixed(1)}</b>
-• Quality Threshold: <b>${QUALITY_THRESHOLD}</b>
-• Stoch 1h: <b>OBRIGATÓRIO</b>
-• Stoch 4h: <b>APENAS ANÁLISE</b>
-
-🔧 <i>IA em aprendizado contínuo</i>
-🔔 by @J4Rviz.
-            `;
-            
-            await sendTelegramAlert(message);
-            
-        } catch (error) {
-            console.error('Erro ao enviar relatório:', error);
-        }
     }
 }
 
@@ -1177,6 +2119,156 @@ async function sendTelegramAlert(message) {
         console.error('❌ Erro ao enviar alerta:', error.message);
         return false;
     }
+}
+
+// =====================================================================
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO
+// =====================================================================
+
+async function sendSignalAlertWithRisk(signal) {
+    try {
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
+        const directionEmoji = signal.isBullish ? '🟢' : '🔴';
+        const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
+        
+        const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const lsrRatio = signal.marketData.lsr?.lsrRatio || 0; // Adicionado LSR ratio
+        const baseProbability = calculateProbability(signal);
+        const riskAdjustedProbability = Math.max(30, Math.min(95, baseProbability - (riskAssessment.overallScore * 2)));
+        
+        const srData = signal.marketData.supportResistance;
+        const nearestLevel = signal.isBullish ? srData?.nearestResistance : srData?.nearestSupport;
+        const distancePercent = nearestLevel?.distancePercent?.toFixed(2) || 'N/A';
+        
+        const riskEmoji = riskAssessment.level === 'CRITICAL' ? '🚨' : 
+                         riskAssessment.level === 'HIGH' ? '🔴' : 
+                         riskAssessment.level === 'MEDIUM' ? '🟡' : '🟢';
+        
+        const now = getBrazilianDateTime();
+        
+        // NOVO FORMATO - SEPARADO POR SEÇÕES CLARAS
+        let message = `
+${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+${now.full}
+
+<i> ANÁLISE TÉCNICA</i>
+⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+⚠️ Probabilidade: ${riskAdjustedProbability}%
+• Preço: $${signal.price.toFixed(6)} |⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+• Vol: ${volumeRatio.toFixed(2)}x 
+• LSR: ${lsrRatio.toFixed(2)} | Dist S/R: ${distancePercent}%
+
+<i>🤖 IA Titanium ANÁLISE </i>
+• Nível: ${riskEmoji} ${riskAssessment.level} | Score: ${riskAssessment.overallScore.toFixed(2)}
+⚠️ Confiança no Sinal: ${riskAssessment.confidence}%
+${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
+
+<i> Alvos Sugeridos</i>
+${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
+
+<i> Entradas </i>
+• Ideal : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Zona de liquidação: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+
+<i>✨Titanium by @J4Rviz✨</i>
+        `;
+        
+        await sendTelegramAlert(message);
+        
+        console.log(`\n📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`   Data/Hora: ${now.full}`);
+        console.log(`   Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})`);
+        console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
+        console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
+        console.log(`   Confiança: ${riskAssessment.confidence}%`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)}`);
+        
+    } catch (error) {
+        console.error('Erro ao enviar alerta com risk layer:', error.message);
+        // Fallback para o alerta simples se houver erro
+        await sendSignalAlert(signal);
+    }
+}
+
+async function sendSignalAlert(signal) {
+    try {
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
+        const directionEmoji = signal.isBullish ? '🟢' : '🔴';
+        
+        const now = getBrazilianDateTime();
+        
+        const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const baseProbability = calculateProbability(signal);
+        
+        const srData = signal.marketData.supportResistance;
+        const nearestLevel = signal.isBullish ? srData?.nearestResistance : srData?.nearestSupport;
+        const distancePercent = nearestLevel?.distancePercent?.toFixed(2) || 'N/A';
+        
+        const message = `
+${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+${now.full}
+
+<b>🎯 ANÁLISE TÉCNICA</b>
+• Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+• Probabilidade de Sucesso: ${baseProbability}%
+• Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+• Volume: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
+
+<b>💰 Alvos Sugeridos</b>
+${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
+
+<b>📍 MELHORES ENTRADAS</b>
+• Ideal: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Alternativa: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+
+<i>✨🤖IA Titanium by @J4Rviz</i>
+        `;
+        
+        await sendTelegramAlert(message);
+        
+        console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`   Data/Hora: ${now.full}`);
+        
+    } catch (error) {
+        console.error('Erro ao enviar alerta:', error.message);
+    }
+}
+
+function getVolumeClassification(volumeRatio) {
+    if (volumeRatio >= 2.5) return '🔥 MUITO ALTO';
+    if (volumeRatio >= 2.0) return '📈 ALTO';
+    if (volumeRatio >= 1.5) return '📊 MODERADO';
+    if (volumeRatio >= 1.2) return '📉 BAIXO';
+    return '⚠️ MUITO BAIXO';
+}
+
+function calculateProbability(signal) {
+    let baseProbability = 65; // Base mais realista
+    
+    baseProbability += (signal.qualityScore.score - 70) * 0.4; // Ajuste mais suave
+    
+    const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+    if (volumeRatio >= 2.0) baseProbability += 8;
+    else if (volumeRatio >= 1.5) baseProbability += 4;
+    
+    const srData = signal.marketData.supportResistance;
+    const nearestLevel = signal.isBullish ? 
+        srData?.nearestResistance : srData?.nearestSupport;
+    const distance = nearestLevel?.distancePercent || 0;
+    
+    if (distance >= 3.0) baseProbability += 6;
+    else if (distance >= 2.0) baseProbability += 3;
+    else if (distance < 0.8) baseProbability -= 15; // Penalidade maior se muito próximo
+    
+    if (signal.marketData.divergence15m?.hasDivergence && signal.marketData.divergence15m.confirmed) {
+        baseProbability += 10;
+    }
+    
+    // Ajuste baseado no nível de risco
+    if (signal.marketData.breakoutRisk?.level === 'high') baseProbability -= 12;
+    if (signal.marketData.breakoutRisk?.level === 'low') baseProbability += 5;
+    
+    return Math.min(92, Math.max(35, Math.round(baseProbability))); // Range mais conservador
 }
 
 // =====================================================================
@@ -1949,7 +3041,7 @@ function getDefaultTargets(price, isBullish) {
 }
 
 // =====================================================================
-// 🚀 FUNÇÃO ESPECIAL PARA MENSAGEM DE INICIALIZAÇÃO CORRIGIDA
+// 🚀 FUNÇÃO ESPECIAL PARA MENSAGEM DE INICIALIZAÇÃO
 // =====================================================================
 
 async function sendInitializationMessage(allSymbols) {
@@ -1957,10 +3049,13 @@ async function sendInitializationMessage(allSymbols) {
         const brazilTime = getBrazilianDateTime();
         
         const message = `
-🚀 <b>TITANIUM ATIVADO</b>
+🚀 <b>TITANIUM ATIVADO COM TRAILING SIMULATION</b>
 
 ${brazilTime.full}
-🔔 by @J4Rviz.
+🧠 Sistema de aprendizado aprimorado com trailing simulation
+🎯 Alvos parciais e análise candle a candle
+⏱️ Verificação precisa da ordem dos eventos
+🔧 by @J4Rviz.
         `;
         
         console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
@@ -2013,7 +3108,7 @@ ${brazilTime.full}
         if (!success) {
             console.log('📋 Mensagem que seria enviada:');
             console.log('\n' + '='.repeat(60));
-            console.log('🚀 TITANIUM ATIVADO');
+            console.log('🚀 TITANIUM ATIVADO COM TRAILING SIMULATION');
             console.log(`⏰ ${brazilTime.full}`);
             console.log('='.repeat(60) + '\n');
         }
@@ -2027,7 +3122,7 @@ ${brazilTime.full}
 }
 
 // =====================================================================
-// 🔍 FUNÇÕES DE ANÁLISE TÉCNICA
+// 📊 FUNÇÕES DE ANÁLISE TÉCNICA
 // =====================================================================
 
 let rateLimiter = new AdaptiveRateLimiter();
@@ -2086,35 +3181,6 @@ async function getCandlesCached(symbol, timeframe, limit = 80) {
         return candles;
     } catch (error) {
         return [];
-    }
-}
-
-// =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA VERIFICAR EMA 55 NO TIMEFRAME DE 1H
-// =====================================================================
-
-async function getEMA55_1h(symbol) {
-    try {
-        const candles = await getCandlesCached(symbol, '1h', 100);
-        if (candles.length < 55) return null;
-        
-        const closes = candles.map(c => c.close);
-        const currentPrice = closes[closes.length - 1];
-        
-        const ema55 = EMA.calculate({ period: 55, values: closes });
-        
-        if (!ema55 || ema55.length === 0) return null;
-        
-        const latestEma55 = ema55[ema55.length - 1];
-        
-        return {
-            isAboveEMA55: currentPrice > latestEma55,
-            currentPrice: currentPrice,
-            ema55Value: latestEma55,
-            distancePercent: ((currentPrice - latestEma55) / latestEma55) * 100
-        };
-    } catch (error) {
-        return null;
     }
 }
 
@@ -2181,10 +3247,7 @@ async function checkVolume(symbol) {
         
         return {
             rawRatio: ratio,
-            isAbnormal: ratio >= VOLUME_SETTINGS.baseThreshold,
-            currentVolume: currentVolume,
-            avgVolume: avgVolume,
-            percentageAbove: ((currentVolume - avgVolume) / avgVolume) * 100
+            isAbnormal: ratio >= VOLUME_SETTINGS.baseThreshold
         };
     } catch (error) {
         return { rawRatio: 0, isAbnormal: false };
@@ -2273,10 +3336,6 @@ async function getADX1h(symbol) {
     }
 }
 
-// =====================================================================
-// 🔄 FUNÇÕES ATUALIZADAS PARA STOCHASTIC
-// =====================================================================
-
 async function checkStochastic(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '1h', 30);
@@ -2299,25 +3358,13 @@ async function checkStochastic(symbol, isBullish) {
         const current = stochValues[stochValues.length - 1];
         const previous = stochValues[stochValues.length - 2];
         
-        // CRITÉRIO OBRIGATÓRIO: linha K cruzando para cima da linha D na compra
-        // linha K cruzando para baixo da linha D na venda
         if (isBullish) {
             return {
-                isValid: previous.k <= previous.d && current.k > current.d,
-                kValue: current.k,
-                dValue: current.d,
-                previousK: previous.k,
-                previousD: previous.d,
-                direction: 'BULLISH_CROSS'
+                isValid: previous.k <= previous.d && current.k > current.d
             };
         } else {
             return {
-                isValid: previous.k >= previous.d && current.k < current.d,
-                kValue: current.k,
-                dValue: current.d,
-                previousK: previous.k,
-                previousD: previous.d,
-                direction: 'BEARISH_CROSS'
+                isValid: previous.k >= previous.d && current.k < current.d
             };
         }
     } catch (error) {
@@ -2328,10 +3375,7 @@ async function checkStochastic(symbol, isBullish) {
 async function checkStochastic4h(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '4h', 40);
-        if (candles.length < STOCH_4H_SETTINGS.period + 5) return { 
-            isValid: false, 
-            kDirection: 'NEUTRAL' 
-        };
+        if (candles.length < STOCH_4H_SETTINGS.period + 5) return { isValid: false };
         
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
@@ -2346,41 +3390,26 @@ async function checkStochastic4h(symbol, isBullish) {
             smooth: STOCH_4H_SETTINGS.smooth
         });
         
-        if (!stochValues || stochValues.length < 3) return { 
-            isValid: false, 
-            kDirection: 'NEUTRAL' 
-        };
+        if (!stochValues || stochValues.length < 2) return { isValid: false };
         
         const current = stochValues[stochValues.length - 1];
         const previous = stochValues[stochValues.length - 2];
-        const twoBack = stochValues[stochValues.length - 3];
         
-        // Determinar direção da linha K no 4h
-        let kDirection = 'NEUTRAL';
-        if (current.k > previous.k && previous.k > twoBack.k) {
-            kDirection = 'UPWARD';
-        } else if (current.k < previous.k && previous.k < twoBack.k) {
-            kDirection = 'DOWNWARD';
+        if (isBullish) {
+            return {
+                isValid: previous.k <= previous.d && current.k > current.d,
+                kValue: current.k,
+                dValue: current.d
+            };
+        } else {
+            return {
+                isValid: previous.k >= previous.d && current.k < current.d,
+                kValue: current.k,
+                dValue: current.d
+            };
         }
-        
-        // Verificar cruzamento
-        const hasCross = isBullish ? 
-            (previous.k <= previous.d && current.k > current.d) :
-            (previous.k >= previous.d && current.k < current.d);
-        
-        return {
-            isValid: hasCross,
-            kValue: current.k,
-            dValue: current.d,
-            kDirection: kDirection,
-            hasCross: hasCross,
-            analysis: `K: ${current.k.toFixed(2)}, D: ${current.d.toFixed(2)}, Direção K: ${kDirection}`
-        };
     } catch (error) {
-        return { 
-            isValid: false, 
-            kDirection: 'NEUTRAL' 
-        };
+        return { isValid: false };
     }
 }
 
@@ -2500,7 +3529,7 @@ async function checkFundingRate(symbol, isBullish) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM STOCH 1H OBRIGATÓRIO
+// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
@@ -2508,34 +3537,15 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     let details = [];
     let failedChecks = [];
     
-    // CRITÉRIO OBRIGATÓRIO: Stoch 1h DEVE ter cruzamento
-    if (!marketData.stoch || !marketData.stoch.isValid) {
-        console.log(`❌ ${symbol}: Stoch 1h sem cruzamento válido - REJEITADO`);
-        return {
-            score: 0,
-            grade: "F",
-            emoji: "❌",
-            details: ["Stoch 1h: SEM CRUZAMENTO (OBRIGATÓRIO)"],
-            failedChecks: ["Stoch 1h: Sem cruzamento válido"],
-            isAcceptable: false,
-            threshold: QUALITY_THRESHOLD,
-            message: "❌ REJEITADO: Stoch 1h obrigatório não atendido"
-        };
-    }
-    
-    // 1. Volume (15 pontos) - COM PORCENTAGEM
     if (marketData.volume && marketData.volume.rawRatio >= VOLUME_SETTINGS.baseThreshold) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume, 
             QUALITY_WEIGHTS.volume * (marketData.volume.rawRatio / 2.0));
         score += volumeScore;
-        const percentage = marketData.volume.percentageAbove?.toFixed(1) || 
-                          ((marketData.volume.rawRatio - 1) * 100).toFixed(1);
-        details.push(` Vol 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${percentage}% acima)`);
+        details.push(` Vol 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${marketData.volume.rawRatio.toFixed(2)}x)`);
     } else {
         failedChecks.push(`Vol 3m: ${marketData.volume?.rawRatio.toFixed(2) || 0}x < ${VOLUME_SETTINGS.baseThreshold}x`);
     }
     
-    // 2. Volatilidade (8 pontos)
     if (marketData.volatility && marketData.volatility.isValid) {
         const volScore = QUALITY_WEIGHTS.volatility;
         score += volScore;
@@ -2544,7 +3554,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Volatilidade 15m: ${marketData.volatility?.rawVolatility.toFixed(2) || 0}% < ${VOLATILITY_THRESHOLD}%`);
     }
     
-    // 3. LSR (8 pontos)
     if (marketData.lsr && marketData.lsr.isValid) {
         const lsrScore = QUALITY_WEIGHTS.lsr;
         score += lsrScore;
@@ -2553,7 +3562,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`LSR 15m: ${marketData.lsr?.lsrRatio.toFixed(2) || 0} ${isBullish ? '>' : '≤'} ${LSR_BUY_THRESHOLD}`);
     }
     
-    // 4. RSI (8 pontos)
     if (marketData.rsi) {
         const rsiValue = marketData.rsi.value;
         let rsiScore = 0;
@@ -2570,7 +3578,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         score += rsiScore;
     }
     
-    // 5. ADX 1h (10 pontos)
     if (marketData.adx1h && marketData.adx1h.raw >= ADX_1H_SETTINGS.minStrength) {
         const adxScore = QUALITY_WEIGHTS.adx1h;
         score += adxScore;
@@ -2579,7 +3586,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`ADX 1h: ${marketData.adx1h?.raw?.toFixed(2) || 0} < ${ADX_1H_SETTINGS.minStrength}`);
     }
     
-    // 6. EMA Alignment 3m (10 pontos)
     if (marketData.ema) {
         const isEmaValid = (isBullish && marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingUp) ||
                           (!isBullish && !marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingDown);
@@ -2587,65 +3593,28 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         if (isEmaValid) {
             const emaScore = QUALITY_WEIGHTS.emaAlignment;
             score += emaScore;
-            details.push(` EMA 3m: ${emaScore}/${QUALITY_WEIGHTS.emaAlignment} ${isBullish ? 'bullish' : 'bearish'})`);
+            details.push(` EMA 3m: ${emaScore}/${QUALITY_WEIGHTS.emaAlignment}  ${isBullish ? 'bullish' : 'bearish'})`);
         } else {
             failedChecks.push(`EMA 3m: Alinhamento incorreto`);
         }
     }
     
-    // 7. EMA 55 1h (10 pontos) - APENAS PONTUAÇÃO
-    if (marketData.ema55_1h) {
-        let ema55Score = 0;
-        const emaStatus = marketData.ema55_1h.isAboveEMA55 ? 'ACIMA' : 'ABAIXO';
-        const distance = marketData.ema55_1h.distancePercent?.toFixed(2) || '0.00';
-        
-        const isEma55Correct = (isBullish && marketData.ema55_1h.isAboveEMA55) ||
-                              (!isBullish && !marketData.ema55_1h.isAboveEMA55);
-        
-        if (isEma55Correct) {
-            const distanceValue = Math.abs(marketData.ema55_1h.distancePercent || 0);
-            if (distanceValue >= 0.5) {
-                ema55Score = QUALITY_WEIGHTS.ema55_1h;
-                details.push(` EMA55 1h: ${ema55Score}/${QUALITY_WEIGHTS.ema55_1h} (${emaStatus}, ${distance}% ${isBullish ? 'acima' : 'abaixo'} ✅)`);
-            } else {
-                ema55Score = QUALITY_WEIGHTS.ema55_1h * 0.7;
-                details.push(` EMA55 1h: ${ema55Score.toFixed(1)}/${QUALITY_WEIGHTS.ema55_1h} (${emaStatus}, ${distance}% muito próximo ⚠️)`);
-            }
-        } else {
-            ema55Score = QUALITY_WEIGHTS.ema55_1h * 0.3;
-            details.push(` EMA55 1h: ${ema55Score.toFixed(1)}/${QUALITY_WEIGHTS.ema55_1h} (${emaStatus}, posição incorreta para ${isBullish ? 'compra' : 'venda'} ⚠️)`);
-            failedChecks.push(`EMA55 1h: Preço ${emaStatus.toLowerCase()} da EMA 55 (${isBullish ? 'ideal acima' : 'ideal abaixo'})`);
-        }
-        score += ema55Score;
-    } else {
-        failedChecks.push(`EMA55 1h: Dados indisponíveis`);
-    }
-    
-    // 8. Stochastic 1h (5 pontos) - OBRIGATÓRIO, JÁ VERIFICADO ACIMA
     if (marketData.stoch && marketData.stoch.isValid) {
         const stochScore = QUALITY_WEIGHTS.stoch1h;
         score += stochScore;
-        details.push(` Stoch 1h: ${stochScore}/${QUALITY_WEIGHTS.stoch1h} (cruzamento ${marketData.stoch.direction})`);
+        details.push(` Stoch 1h: ${stochScore}/${QUALITY_WEIGHTS.stoch1h} (cruzamento confirmado)`);
     } else {
         failedChecks.push(`Stoch 1h: Sem cruzamento`);
     }
     
-    // 9. Stochastic 4h (0 pontos - apenas análise)
-    if (marketData.stoch4h) {
-        let stoch4hDetail = '';
-        const stoch4hDirection = marketData.stoch4h.kDirection || 'NEUTRAL';
-        
-        if (marketData.stoch4h.isValid) {
-            stoch4hDetail = `✅ Cruzamento confirmado (K: ${marketData.stoch4h.kValue.toFixed(2)}, D: ${marketData.stoch4h.dValue.toFixed(2)})`;
-        } else {
-            stoch4hDetail = `⚠️ Sem cruzamento (K: ${marketData.stoch4h.kValue?.toFixed(2) || 'N/A'}, D: ${marketData.stoch4h.dValue?.toFixed(2) || 'N/A'})`;
-        }
-        
-        details.push(` Stoch 4h: ${stoch4hDetail}`);
-        details.push(` Direção K 4h: ${stoch4hDirection}`);
+    if (marketData.stoch4h && marketData.stoch4h.isValid) {
+        const stoch4hScore = QUALITY_WEIGHTS.stoch4h;
+        score += stoch4hScore;
+        details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h}  ${isBullish ? 'bullish' : 'bearish'} `);
+    } else {
+        failedChecks.push(`Stoch 4h:  ${isBullish ? 'bullish' : 'bearish'} `);
     }
     
-    // 10. CCI 4h (10 pontos)
     if (marketData.cci4h && marketData.cci4h.isValid) {
         const cci4hScore = QUALITY_WEIGHTS.cci4h;
         score += cci4hScore;
@@ -2655,7 +3624,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
     }
     
-    // 11. Open Interest (8 pontos)
     if (marketData.oi && marketData.oi.isValid) {
         const oiScore = QUALITY_WEIGHTS.oi;
         score += oiScore;
@@ -2664,13 +3632,11 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`OI: Tendência ${marketData.oi?.trend || 'indefinida'} não confirma`);
     }
     
-    // 12. Funding Rate (5 pontos extra)
     if (marketData.funding && marketData.funding.isValid) {
         score += 5;
         details.push(` Fund. Rate: +5/${5} (${(marketData.funding.raw * 100).toFixed(4)}% ${isBullish ? 'negativo' : 'positivo'})`);
     }
     
-    // 13. DIVERGÊNCIA 15M (10 pontos)
     if (marketData.divergence15m && marketData.divergence15m.hasDivergence) {
         let divergenceScore = 0;
         let divergenceDetail = '';
@@ -2699,7 +3665,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Divergência 15m: Nenhuma detectada`);
     }
     
-    // 14. RISCO DE ROMPIMENTO (8 pontos)
     if (marketData.breakoutRisk) {
         let breakoutScore = 0;
         let breakoutDetail = '';
@@ -2730,7 +3695,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Risco Rompimento: ${breakoutDetail}`);
     }
     
-    // 15. SUPORTE/RESISTÊNCIA (8 pontos)
     if (marketData.supportResistance) {
         let srScore = 0;
         let srDetail = '';
@@ -2896,33 +3860,24 @@ async function monitorSymbol(symbol) {
         
         if (!isBullish && !isBearish) return null;
         
-        // CRITÉRIOS OBRIGATÓRIOS
         if (isBullish && rsiData.value >= 60) return null;      
         if (isBearish && rsiData.value <= 60) return null;      
         
-        // Verificar Stoch 1h (OBRIGATÓRIO)
-        const stochData = await checkStochastic(symbol, isBullish);
-        if (!stochData.isValid) {
-            console.log(`❌ ${symbol}: Stoch 1h sem cruzamento válido`);
-            return null;
-        }
-        
-        const ema55_1hData = await getEMA55_1h(symbol);
         const divergenceData = await checkDivergence15m(symbol, isBullish);
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
         
-        const [volumeData, volatilityData, lsrData, adx1hData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
+        const [volumeData, volatilityData, lsrData, adx1hData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
             checkVolume(symbol),      
             checkVolatility(symbol),  
             checkLSR(symbol, isBullish),
             getADX1h(symbol),
+            checkStochastic(symbol, isBullish),
             checkStochastic4h(symbol, isBullish),  
             checkCCI4h(symbol, isBullish),         
             checkOpenInterest(symbol, isBullish),
             checkFundingRate(symbol, isBullish)
         ]);
         
-        // CRITÉRIO OBRIGATÓRIO
         if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
         
         const marketData = {
@@ -2931,8 +3886,8 @@ async function monitorSymbol(symbol) {
             lsr: lsrData,
             rsi: rsiData,
             adx1h: adx1hData,
-            stoch: stochData,           // OBRIGATÓRIO
-            stoch4h: stoch4hData,       // APENAS ANÁLISE
+            stoch: stochData,
+            stoch4h: stoch4hData, 
             cci4h: cci4hData,     
             oi: oiData,
             funding: fundingData,
@@ -2941,7 +3896,6 @@ async function monitorSymbol(symbol) {
                 isEMA13CrossingUp: emaData.isEMA13CrossingUp,
                 isEMA13CrossingDown: emaData.isEMA13CrossingDown
             },
-            ema55_1h: ema55_1hData,
             divergence15m: divergenceData,
             supportResistance: supportResistanceData,
             breakoutRisk: supportResistanceData?.breakoutRisk
@@ -2949,7 +3903,6 @@ async function monitorSymbol(symbol) {
         
         const qualityScore = await calculateSignalQuality(symbol, isBullish, marketData);
         
-        // QUALITY THRESHOLD
         if (!qualityScore.isAcceptable) return null;
         
         const targetsData = await calculateAdvancedTargetsAndStop(emaData.currentPrice, isBullish, symbol);
@@ -2968,18 +3921,15 @@ async function monitorSymbol(symbol) {
             await learningSystem.recordSignal(signal, marketData);
         }
         
-        // Log com informações atualizadas
-        const ema55Status = ema55_1hData ? 
-            (ema55_1hData.isAboveEMA55 ? 'ACIMA' : 'ABAIXO') + ` (${ema55_1hData.distancePercent?.toFixed(2) || '0.00'}%)` : 'N/A';
         const divergenceInfo = divergenceData?.hasDivergence ? 
             `${divergenceData.type}${divergenceData.confirmed ? '✅' : '⚠️'}` : 'N/A';
         const srInfo = supportResistanceData?.nearestSupport || supportResistanceData?.nearestResistance;
         const srDistance = srInfo?.distancePercent?.toFixed(2) || 'N/A';
         const breakoutRisk = supportResistanceData?.breakoutRisk?.level || 'N/A';
-        const stoch4hDirection = stoch4hData?.kDirection || 'N/A';
         
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   📊 Stoch 1h: ✅ | Stoch 4h K: ${stoch4hDirection} | EMA55 1h: ${ema55Status} | Div: ${divergenceInfo} | S/R: ${srDistance}% | Risco: ${breakoutRisk} | Stop: ${targetsData.stopPercentage}%`);
+        console.log(`   📊 Divergência: ${divergenceInfo} | S/R: ${srDistance}% | Risco: ${breakoutRisk} | Stop: ${targetsData.stopPercentage}%`);
+        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x | LSR: ${lsrData.lsrRatio.toFixed(2)}`);
         
         return signal;
         
@@ -3021,168 +3971,9 @@ function cleanupCaches() {
     });
 }
 
-// =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM STOCH 4H COMO ANÁLISE
-// =====================================================================
-
-async function sendSignalAlert(signal) {
-    try {
-        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
-        const directionEmoji = signal.isBullish ? '🟢' : '🔴';
-        const stopPrice = signal.targetsData.stopPrice;
-        
-        // Informações de volume
-        const volumeData = signal.marketData.volume;
-        let volumeInfo = '';
-        if (volumeData) {
-            const percentage = volumeData.percentageAbove?.toFixed(1) || 
-                              ((volumeData.rawRatio - 1) * 100).toFixed(1);
-            volumeInfo = `📊 <b>Volume 3m:</b> ${percentage}% acima da média\n`;
-        }
-        
-        // Informações de EMA 55 1h
-        const ema55Data = signal.marketData.ema55_1h;
-        let ema55Info = '';
-        if (ema55Data) {
-            const emaStatus = ema55Data.isAboveEMA55 ? 'ACIMA' : 'ABAIXO';
-            const distance = ema55Data.distancePercent?.toFixed(2) || '0.00';
-            const emaEmoji = ema55Data.isAboveEMA55 ? '📈' : '📉';
-            
-            const isCorrect = (signal.isBullish && ema55Data.isAboveEMA55) ||
-                             (!signal.isBullish && !ema55Data.isAboveEMA55);
-            
-            const statusEmoji = isCorrect ? '✅' : '⚠️';
-            
-            ema55Info = `${emaEmoji} <b>EMA55 1h:</b> ${emaStatus} (${distance}% ${ema55Data.isAboveEMA55 ? 'acima' : 'abaixo'}) ${statusEmoji}\n`;
-        }
-        
-        // Informações de divergência
-        const divergenceData = signal.marketData.divergence15m;
-        let divergenceInfo = '';
-        
-        if (divergenceData?.hasDivergence) {
-            const divergenceType = divergenceData.type;
-            let divergenceEmoji = '📊';
-            let divergenceText = '';
-            
-            switch (divergenceType) {
-                case 'bullish':
-                    divergenceEmoji = '📈';
-                    divergenceText = 'Bullish Regular';
-                    break;
-                case 'bearish':
-                    divergenceEmoji = '📉';
-                    divergenceText = 'Bearish Regular';
-                    break;
-                case 'hiddenBullish':
-                    divergenceEmoji = '🔄📈';
-                    divergenceText = 'Hidden Bullish';
-                    break;
-                case 'hiddenBearish':
-                    divergenceEmoji = '🔄📉';
-                    divergenceText = 'Hidden Bearish';
-                    break;
-            }
-            
-            const confirmedText = divergenceData.confirmed ? '✅ CONFIRMADA' : '⚠️ NÃO CONFIRMADA';
-            divergenceInfo = `${divergenceEmoji} <b>Divergência 15m:</b> ${divergenceText} ${confirmedText}\n`;
-        }
-        
-        // Informações de Stoch 1h (OBRIGATÓRIO)
-        const stochData = signal.marketData.stoch;
-        let stoch1hInfo = '';
-        if (stochData) {
-            stoch1hInfo = `📈 <b>Stoch 1h:</b> CRUZAMENTO ${signal.isBullish ? 'BULLISH' : 'BEARISH'} CONFIRMADO ✅\n`;
-            stoch1hInfo += `   K: ${stochData.kValue?.toFixed(2) || 'N/A'} | D: ${stochData.dValue?.toFixed(2) || 'N/A'}\n`;
-        }
-        
-        // Informações de Stoch 4h (ANÁLISE)
-        const stoch4hData = signal.marketData.stoch4h;
-        let stoch4hAnalysis = '';
-        if (stoch4hData) {
-            const kDirection = stoch4hData.kDirection || 'NEUTRAL';
-            let directionEmoji = '➡️';
-            let analysisText = '';
-            
-            if (kDirection === 'UPWARD') {
-                directionEmoji = '📈';
-                analysisText = signal.isBullish ? 
-                    'ALINHADO (K em alta favorece compra)' : 
-                    'CONTRA-TENDÊNCIA (K em alta na venda)';
-            } else if (kDirection === 'DOWNWARD') {
-                directionEmoji = '📉';
-                analysisText = !signal.isBullish ? 
-                    'ALINHADO (K em baixa favorece venda)' : 
-                    'CONTRA-TENDÊNCIA (K em baixa na compra)';
-            } else {
-                analysisText = 'K NEUTRO no 4h';
-            }
-            
-            stoch4hAnalysis = `${directionEmoji} <b>Análise Stoch 4h:</b> ${kDirection} - ${analysisText}\n`;
-            if (stoch4hData.hasCross) {
-                stoch4hAnalysis += `   ✅ <i>Cruzamento no 4h também confirmado</i>\n`;
-            }
-        }
-        
-        // Informações de Suporte/Resistência
-        const srData = signal.marketData.supportResistance;
-        const breakoutRisk = signal.marketData.breakoutRisk;
-        
-        let srAnalysis = '';
-        let riskAnalysis = '';
-        
-        if (srData && !srData.error) {
-            if (srData.nearestSupport) {
-                srAnalysis += ` <b>🔹Suporte:</b> $${srData.nearestSupport.price.toFixed(6)} (${srData.nearestSupport.distancePercent.toFixed(2)}%)\n`;
-            }
-            
-            if (srData.nearestResistance) {
-                srAnalysis += ` <b>🔹Resistência:</b> $${srData.nearestResistance.price.toFixed(6)} (${srData.nearestResistance.distancePercent.toFixed(2)}%)\n`;
-            }
-            
-            if (breakoutRisk) {
-                let riskEmoji = '🟢';
-                if (breakoutRisk.level === 'high') riskEmoji = '🔴';
-                else if (breakoutRisk.level === 'medium') riskEmoji = '🟡';
-                
-                riskAnalysis = `${riskEmoji} <b>Risco da Operação:</b> ${breakoutRisk.level.toUpperCase()}\n`;
-            }
-        }
-        
-        const message = `
-${directionEmoji} <b>${signal.symbol} - ${direction}</b>
-<b>Preço:</b> $${signal.price.toFixed(6)}
-<b>🔹Score:</b> ${signal.qualityScore.score}/100
-<b>⛔Stop:</b> $${stopPrice.toFixed(6)} (${signal.targetsData.stopPercentage}%)
-<b>RR:</b> ${signal.targetsData.bestRiskReward}:1
-
-${volumeInfo}${ema55Info}${stoch1hInfo}
-${stoch4hAnalysis}
-${divergenceInfo ? divergenceInfo + '\n' : ''}
-${srAnalysis ? '<b>S/R:</b>\n' + srAnalysis : ''}
-${riskAnalysis ? riskAnalysis + '\n' : ''}
-<b>Entrada:</b> $${signal.price.toFixed(6)}
-<b>Entrada Mín:</b> $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-<b>Entrada Máx:</b> $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
-<b>Alvos:</b>
-${signal.targetsData.targets.slice(0, 4).map((target, index) => 
-    `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`
-).join('\n')}
-<b>IA Titanium - by @J4Rviz.</b>
- 
-        `;
-        
-        await sendTelegramAlert(message);
-        
-        console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
-        
-    } catch (error) {
-        console.error('Erro ao enviar alerta:', error.message);
-    }
-}
 
 // =====================================================================
-// 🚀 LOOP PRINCIPAL DO BOT
+// 🔄 LOOP PRINCIPAL DO BOT
 // =====================================================================
 
 async function checkInternetConnection() {
@@ -3206,15 +3997,16 @@ async function mainBotLoop() {
         return;
     }
     
-    console.log(`\n🚀 TITANIUM ATIVADO`);
+    console.log(`\n🚀 TITANIUM ATIVADO COM TRAILING SIMULATION`);
     console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
-    console.log(`🔔 Stoch 1h: OBRIGATÓRIO | Stoch 4h: APENAS ANÁLISE`);
+    console.log(`🧠 Sistema de aprendizado aprimorado com trailing simulation`);
     
     await sendInitializationMessage(allSymbols);
     
     let consecutiveErrors = 0;
     let totalSignals = 0;
     let lastReportTime = Date.now();
+    let lastRiskReportTime = Date.now();
     
     while (true) {
         try {
@@ -3255,7 +4047,7 @@ async function mainBotLoop() {
             
             for (const signal of signals) {
                 if (signal.qualityScore.score >= QUALITY_THRESHOLD) {
-                    await sendSignalAlert(signal);
+                    await sendSignalAlertWithRisk(signal);
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
@@ -3265,6 +4057,11 @@ async function mainBotLoop() {
             if (Date.now() - lastReportTime >= 3600000) {
                 await learningSystem.sendPerformanceReport();
                 lastReportTime = Date.now();
+            }
+            
+            if (Date.now() - lastRiskReportTime >= 6 * 60 * 60 * 1000) {
+                await sendMarketRiskReport();
+                lastRiskReportTime = Date.now();
             }
             
             const status = symbolManager.getCurrentStatus();
@@ -3301,7 +4098,7 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - STOCH 1H OBRIGATÓRIO | STOCH 4H APENAS ANÁLISE');
+        console.log('🚀 TITANIUM - ANÁLISE AVANÇADA COM TRAILING SIMULATION');
         console.log('='.repeat(80) + '\n');
         
         try {
@@ -3326,6 +4123,9 @@ async function startBot() {
             process.exit(1);
         }
         
+        global.riskLayer = new SophisticatedRiskLayer();
+        console.log('🛡️  Risk Layer Sofisticado ativado (modo apenas alerta)');
+        
         console.log('✅ Tudo pronto! Iniciando monitoramento...');
         
         await mainBotLoop();
@@ -3337,6 +4137,94 @@ async function startBot() {
         await startBot();
     }
 }
+
+// =====================================================================
+// 📊 FUNÇÕES FALTANTES
+// =====================================================================
+
+async function sendMarketRiskReport() {
+    try {
+        if (!global.riskLayer) return;
+        
+        const marketRisk = global.riskLayer.getOverallMarketRisk();
+        const now = getBrazilianDateTime();
+        
+        const message = `
+🛡️ <b>RELATÓRIO DE RISCO DE MERCADO</b>
+${now.full}
+
+• <b>Nível de Risco Geral:</b> ${marketRisk.riskLevel} ${marketRisk.riskLevel === 'CRITICAL' ? '🚨' : marketRisk.riskLevel === 'HIGH' ? '🔴' : marketRisk.riskLevel === 'MEDIUM' ? '🟡' : '🟢'}
+• <b>Score Médio de Risco:</b> ${marketRisk.averageRiskScore.toFixed(2)}/15
+• <b>Símbolos Monitorados:</b> ${marketRisk.monitoredSymbols}
+• <b>Horário:</b> ${now.full}
+
+<i>✨Titanium Risk Management by @J4Rviz✨</i>
+        `;
+        
+        await sendTelegramAlert(message);
+        console.log('📊 Relatório de risco de mercado enviado');
+        
+    } catch (error) {
+        console.error('Erro ao enviar relatório de risco:', error.message);
+    }
+}
+
+async function sendLearningReport() {
+    try {
+        if (!learningSystem) return;
+        
+        const report = learningSystem.getPerformanceReport();
+        const now = getBrazilianDateTime();
+        
+        const bestPatterns = report.bestPatterns.map(([pattern, count]) => 
+            `${pattern}: ${count} trades`
+        ).join('\n');
+        
+        const worstPatterns = report.worstPatterns.map(([pattern, count]) => 
+            `${pattern}: ${count} trades`
+        ).join('\n');
+        
+        const message = `
+🧠 <b>RELATÓRIO DE APRENDIZADO</b>
+${now.full}
+
+• <b>Trades Totais:</b> ${report.totalTrades}
+• <b>Taxa de Acerto:</b> ${report.winRate.toFixed(1)}%
+• <b>Fator de Lucro:</b> ${report.profitFactor}
+• <b>Lucro Médio:</b> ${report.avgProfit}% | <b>Perda Média:</b> ${report.avgLoss}%
+
+<b>📈 Padrões Vencedores (Top 5):</b>
+${bestPatterns || 'Nenhum padrão identificado ainda'}
+
+<b>📉 Padrões Perdedores (Top 5):</b>
+${worstPatterns || 'Nenhum padrão identificado ainda'}
+
+<b>📊 Simulação Trailing:</b>
+• Total: ${report.simulationStats.totalSimulated}
+• Stop Primeiro: ${report.simulationStats.stopFirst}
+• Alvo Primeiro: ${report.simulationStats.targetFirst}
+
+<i>✨Titanium Learning System by @J4Rviz✨</i>
+        `;
+        
+        await sendTelegramAlert(message);
+        console.log('📊 Relatório de aprendizado enviado');
+        
+    } catch (error) {
+        console.error('Erro ao enviar relatório de aprendizado:', error.message);
+    }
+}
+
+// Adicionando métodos faltantes ao AdvancedLearningSystem
+AdvancedLearningSystem.prototype.sendPerformanceReport = async function() {
+    try {
+        await sendLearningReport();
+        return true;
+    } catch (error) {
+        console.error('Erro ao enviar relatório:', error.message);
+        return false;
+    }
+};
 
 // Iniciar
 startBot();
