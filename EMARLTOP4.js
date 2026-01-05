@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -2165,24 +2165,22 @@ async function sendSignalAlertWithRisk(signal) {
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 ${now.full}
 
-<i> ANÁLISE TÉCNICA</i>
+<i> Análise Técnica</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x 
-• LSR: ${lsrRatio.toFixed(2)}| Dist S/R: ${distancePercent}%
+• Vol: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)} ${lsrDetails} | Dist S/R: ${distancePercent}%
 
-<i>🤖 IA Titanium ANÁLISE </i>
+<i>🤖 IA Titanium Análise </i>
 • Nível: ${riskEmoji} ${riskAssessment.level} | Score: ${riskAssessment.overallScore.toFixed(2)}
-⚠️ Confiança no Sinal: ${riskAssessment.confidence}%
+⚠️ Confiança da Análise da IA: ${riskAssessment.confidence}%
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
 
 <i> Alvos Sugeridos:</i>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-
-<i> Entradas: </i>
-• Ideal : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Zona de liquidação: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<i> A Entrada 2 é a melhor: </i>
+• Zona 1 liquidação : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Zona 2 de liquidação: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
 <i>✨Titanium by @J4Rviz✨</i>
         `;
