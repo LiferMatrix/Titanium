@@ -6,9 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHAT_ID = '-100199';
-
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -26,10 +25,10 @@ const VOLATILITY_PERIOD = 20;
 const VOLATILITY_TIMEFRAME = '15m'; // Timeframe da volatilidade
 const VOLATILITY_THRESHOLD = 0.8;
 
-// === CONFIGURAÇÕES LSR SIMPLIFICADAS ===
+// === CONFIGURAÇÕES LSR AJUSTADAS ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.5;  // COMPRA: LSR ≤ 2.5
-const LSR_SELL_THRESHOLD = 2.5; // VENDA: LSR > 2.5
+const LSR_BUY_THRESHOLD = 2.5;
+const LSR_SELL_THRESHOLD = 2.5;
 const FUNDING_BUY_MAX = -0.0005;
 const FUNDING_SELL_MIN = 0.0005;
 
@@ -1353,6 +1352,7 @@ class AdvancedLearningSystem {
                     adx1h: marketData.adx1h?.raw || 0,
                     volatility: marketData.volatility?.rawVolatility || 0,
                     lsr: marketData.lsr?.lsrRatio || 0,
+                    lsrSimple: marketData.lsr?.lsrSimple || "N/A",
                     emaAlignment: marketData.ema?.isAboveEMA55 || false,
                     stoch4hValid: marketData.stoch4h?.isValid || false,
                     cci4hValid: marketData.cci4h?.isValid || false,
@@ -2098,6 +2098,14 @@ function getBrazilianDateTime() {
     return { date, time, full: `${date} ${time}` };
 }
 
+function getLSREmoji(lsrValue) {
+    if (lsrValue < 0.3) return "🟢🟢"; // Muito baixo - forte venda
+    if (lsrValue < 0.7) return "🟢";   // Baixo - venda
+    if (lsrValue < 1.3) return "🟡";   // Neutro
+    if (lsrValue < 2.0) return "🔴";   // Alto - compra
+    return "🔴🔴";                     // Muito alto - forte compra
+}
+
 async function sendTelegramAlert(message) {
     try {
         const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -2133,7 +2141,7 @@ async function sendTelegramAlert(message) {
 }
 
 // =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM LSR SIMPLES
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
@@ -2144,6 +2152,10 @@ async function sendSignalAlertWithRisk(signal) {
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         const lsrRatio = signal.marketData.lsr?.lsrRatio || 0;
+        const lsrSimple = signal.marketData.lsr?.lsrSimple || "N/A";
+        const lsrInterpretation = signal.marketData.lsr?.interpretation || "";
+        const lsrEmoji = getLSREmoji(lsrRatio);
+        
         const baseProbability = calculateProbability(signal);
         const riskAdjustedProbability = Math.max(30, Math.min(95, baseProbability - (riskAssessment.overallScore * 2)));
 
@@ -2157,28 +2169,30 @@ async function sendSignalAlertWithRisk(signal) {
 
         const now = getBrazilianDateTime();
 
+        // FORMATO ATUALIZADO COM LSR SIMPLES
         let message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 ${now.full}
-
 <i> Análise Técnica</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
-• LSR: ${lsrRatio.toFixed(2)}
+• Vol: ${volumeRatio.toFixed(2)}x | LSR: ${lsrSimple} ${lsrEmoji} | Dist S/R: ${distancePercent}%
 
 <i>🤖 IA Titanium Análise </i>
 • Nível: ${riskEmoji} ${riskAssessment.level} | Score: ${riskAssessment.overallScore.toFixed(2)}
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
 
-<i> 💡Entrada ideal Liquidez 2!: </i>
+<i>LSR:</i> ${lsrSimple} ${lsrEmoji}
+• ${lsrInterpretation}
+
+<i> 💡Entrada 2 é a melhor: </i>
 • Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
-⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-<i> Alvos :</i>
+<i> Alvos:</i>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
+⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
 
 <i>✨Titanium by @J4Rviz✨</i>
         `;
@@ -2191,11 +2205,12 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
         console.log(`   Confiança: ${riskAssessment.confidence}%`);
-        console.log(`   Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)}`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x | LSR Simples: ${lsrSimple} ${lsrEmoji} | LSR Ratio: ${lsrRatio.toFixed(2)}`);
+        console.log(`   Interpretação LSR: ${lsrInterpretation}`);
 
     } catch (error) {
         console.error('Erro ao enviar alerta com risk layer:', error.message);
-        // Fallback para o alerta simples se houver erro
+        // Fallback para o alerta simples
         await sendSignalAlert(signal);
     }
 }
@@ -2209,6 +2224,10 @@ async function sendSignalAlert(signal) {
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         const lsrRatio = signal.marketData.lsr?.lsrRatio || 0;
+        const lsrSimple = signal.marketData.lsr?.lsrSimple || "N/A";
+        const lsrInterpretation = signal.marketData.lsr?.interpretation || "";
+        const lsrEmoji = getLSREmoji(lsrRatio);
+        
         const baseProbability = calculateProbability(signal);
 
         const srData = signal.marketData.supportResistance;
@@ -2223,14 +2242,18 @@ ${now.full}
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-• Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)} | Dist S/R: ${distancePercent}%
+• Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrSimple} ${lsrEmoji} | Dist S/R: ${distancePercent}%
 
-<b>💰 Alvos Sugeridos</b>
+<b>📊 LSR DETALHES</b>
+• Valor: ${lsrSimple} ${lsrEmoji}
+• Interpretação: ${lsrInterpretation}
+
+<b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
 
-<b>📍 MELHORES ENTRADAS</b>
-• Ideal: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Alternativa: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<b>📍 ENTRADA</b>
+• Liquidez 1: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 
 <i>✨🤖IA Titanium by @J4Rviz</i>
         `;
@@ -2239,7 +2262,8 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 
         console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
         console.log(`   Data/Hora: ${now.full}`);
-        console.log(`   LSR: ${lsrRatio.toFixed(2)}`);
+        console.log(`   LSR Simples: ${lsrSimple} ${lsrEmoji} | Ratio: ${lsrRatio.toFixed(2)}`);
+        console.log(`   Interpretação: ${lsrInterpretation}`);
 
     } catch (error) {
         console.error('Erro ao enviar alerta:', error.message);
@@ -2833,7 +2857,7 @@ function calculateBreakoutRisk(currentPrice, nearestSupport, nearestResistance, 
         reason = `Próximo (${distancePercent.toFixed(2)}%) de ${levelType} ${levelStrength}`;
     } else if (distancePercent <= BREAKOUT_RISK_SETTINGS.lowRiskDistance) {
         riskLevel = 'low';
-        reason = `Distante (${distancePercent.toFixed(2)}%) de ${levelType} ${levelStrength}`;
+        reason = `Distante (${distancePercent.toFixed(2)}%) de qualquer ${levelType}`;
     } else {
         riskLevel = 'very_low';
         reason = `Muito distante (${distancePercent.toFixed(2)}%) de qualquer ${levelType}`;
@@ -3290,40 +3314,88 @@ async function checkVolatility(symbol) {
 }
 
 // =====================================================================
-// ✅ FUNÇÃO checkLSR SIMPLIFICADA - VALORES FIXOS
+// ✅ FUNÇÃO checkLSR ATUALIZADA - COM LSR SIMPLES
 // =====================================================================
 
 async function checkLSR(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, LSR_TIMEFRAME, 50);
-        if (candles.length < 2) return { lsrRatio: 0, isValid: false };
+        if (candles.length < 2) return { 
+            lsrRatio: 0, 
+            lsrSimple: "N/A", 
+            isValid: false, 
+            interpretation: "Dados insuficientes" 
+        };
 
         const lastCandle = candles[candles.length - 1];
         
-        // Usar apenas os valores do candle sem cálculo complexo
-        const lsrRatio = lastCandle.close; // Usando o preço de fechamento como LSR simplificado
+        // Cálculo do LSR do candle atual
+        const currentHigh = lastCandle.high;
+        const currentLow = lastCandle.low;
+        const currentClose = lastCandle.close;
+
+        // Cálculo correto do LSR
+        const numerator = currentHigh - currentClose;
+        const denominator = currentClose - currentLow;
         
-        // Validação SIMPLES baseada apenas no valor
+        let lsrRatio = 0;
+        let lsrSimple = "N/A";
+        
+        if (denominator !== 0) {
+            lsrRatio = numerator / denominator;
+            lsrSimple = lsrRatio.toFixed(2);
+        } else {
+            // Se denominador for zero, usar um valor padrão baseado no numerador
+            lsrRatio = numerator > 0 ? 10 : 0.1;
+            lsrSimple = lsrRatio.toFixed(2);
+        }
+
+        // Interpretação do LSR
+        let lsrInterpretation = "";
+        if (lsrRatio < 0.3) {
+            lsrInterpretation = "(forte venda)";
+        } else if (lsrRatio < 0.7) {
+            lsrInterpretation = "(venda)";
+        } else if (lsrRatio < 1.3) {
+            lsrInterpretation = "(neutro)";
+        } else if (lsrRatio < 2.0) {
+            lsrInterpretation = "(compra)";
+        } else {
+            lsrInterpretation = "(forte compra)";
+        }
+
+        // Validação baseada na direção
         const isValid = isBullish ? 
-            lsrRatio <= LSR_BUY_THRESHOLD :  // Para compra: valor ≤ 2.5
-            lsrRatio > LSR_SELL_THRESHOLD;   // Para venda: valor > 2.5
+            lsrRatio <= LSR_BUY_THRESHOLD :  // Para compra, queremos LSR baixo (mais vendas)
+            lsrRatio > LSR_SELL_THRESHOLD;   // Para venda, queremos LSR alto (mais compras)
 
         console.log(`📊 LSR ${symbol} (15m):`);
-        console.log(`   Valor: ${lsrRatio.toFixed(6)}`);
-        console.log(`   Direção: ${isBullish ? 'COMPRA' : 'VENDA'}`);
-        console.log(`   Validação: ${lsrRatio.toFixed(6)} ${isBullish ? '≤' : '>'} ${LSR_BUY_THRESHOLD} = ${isValid}`);
-        console.log(`   Regra: ${isBullish ? 'Compra se ≤ 2.5' : 'Venda se > 2.5'}`);
+        console.log(`   High: ${currentHigh.toFixed(6)}, Low: ${currentLow.toFixed(6)}, Close: ${currentClose.toFixed(6)}`);
+        console.log(`   LSR Simple: ${lsrSimple} | LSR Ratio: ${lsrRatio.toFixed(2)}`);
+        console.log(`   Interpretação: ${lsrInterpretation}`);
+        console.log(`   Validação: ${lsrRatio.toFixed(2)} ${isBullish ? '≤' : '>'} ${isBullish ? LSR_BUY_THRESHOLD : LSR_SELL_THRESHOLD} = ${isValid}`);
 
         return {
             lsrRatio: lsrRatio,
+            lsrSimple: lsrSimple,
             isValid: isValid,
+            interpretation: lsrInterpretation,
             rawData: {
-                value: lsrRatio
+                high: currentHigh,
+                low: currentLow,
+                close: currentClose,
+                numerator: numerator,
+                denominator: denominator
             }
         };
     } catch (error) {
-        console.error(`❌ Erro no LSR simplificado para ${symbol}:`, error.message);
-        return { lsrRatio: 0, isValid: false };
+        console.error(`❌ Erro no cálculo do LSR para ${symbol}:`, error.message);
+        return { 
+            lsrRatio: 0, 
+            lsrSimple: "N/A", 
+            isValid: false, 
+            interpretation: "Erro no cálculo" 
+        };
     }
 }
 
@@ -3340,9 +3412,12 @@ async function debugLSR(symbol) {
         for (let i = Math.max(0, candles.length - 5); i < candles.length; i++) {
             const candle = candles[i];
             const time = new Date(candle.time).toLocaleTimeString();
-            const value = candle.close; // Usando close como valor
+            const high = candle.high;
+            const low = candle.low;
+            const close = candle.close;
+            const lsr = (high - close) / (close - low);
             
-            console.log(`${time}: Valor=${value.toFixed(6)}`);
+            console.log(`${time}: H=${high.toFixed(6)}, L=${low.toFixed(6)}, C=${close.toFixed(6)}, LSR=${lsr.toFixed(2)}`);
         }
         
         // Testar para compra e venda
@@ -3350,8 +3425,8 @@ async function debugLSR(symbol) {
         const sellLSR = await checkLSR(symbol, false);
         
         console.log(`\nResultados para ${symbol}:`);
-        console.log(`Compra (isBullish=true): Valor=${buyLSR.lsrRatio.toFixed(6)}, Válido=${buyLSR.isValid}`);
-        console.log(`Venda (isBullish=false): Valor=${sellLSR.lsrRatio.toFixed(6)}, Válido=${sellLSR.isValid}`);
+        console.log(`Compra (isBullish=true): LSR=${buyLSR.lsrSimple}, Válido=${buyLSR.isValid}`);
+        console.log(`Venda (isBullish=false): LSR=${sellLSR.lsrSimple}, Válido=${sellLSR.isValid}`);
         
     } catch (error) {
         console.error(`Erro no debug do LSR:`, error.message);
@@ -3611,9 +3686,9 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (marketData.lsr && marketData.lsr.isValid) {
         const lsrScore = QUALITY_WEIGHTS.lsr;
         score += lsrScore;
-        details.push(` LSR 15m: ${lsrScore}/${QUALITY_WEIGHTS.lsr} (${marketData.lsr.lsrRatio.toFixed(2)} ${isBullish ? '≤' : '>'} ${LSR_BUY_THRESHOLD})`);
+        details.push(` LSR 15m: ${lsrScore}/${QUALITY_WEIGHTS.lsr} (${marketData.lsr.lsrSimple} ${isBullish ? '≤' : '>'} ${LSR_BUY_THRESHOLD})`);
     } else {
-        failedChecks.push(`LSR 15m: ${marketData.lsr?.lsrRatio.toFixed(2) || 0} ${isBullish ? '>' : '≤'} ${LSR_BUY_THRESHOLD}`);
+        failedChecks.push(`LSR 15m: ${marketData.lsr?.lsrSimple || 0} ${isBullish ? '>' : '≤'} ${LSR_BUY_THRESHOLD}`);
     }
 
     if (marketData.rsi) {
@@ -3984,7 +4059,7 @@ async function monitorSymbol(symbol) {
 
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
         console.log(`   📊 Divergência: ${divergenceInfo} | S/R: ${srDistance}% | Risco: ${breakoutRisk} | Stop: ${targetsData.stopPercentage}%`);
-        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x | LSR: ${lsrData.lsrRatio.toFixed(6)}`);
+        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x | LSR: ${lsrData.lsrSimple} (${lsrData.interpretation})`);
 
         return signal;
 
