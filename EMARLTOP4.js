@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -2169,18 +2169,18 @@ ${now.full}
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)} ${lsrDetails} | Dist S/R: ${distancePercent}%
+• Vol: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
 
 <i>🤖 IA Titanium Análise </i>
 • Nível: ${riskEmoji} ${riskAssessment.level} | Score: ${riskAssessment.overallScore.toFixed(2)}
-⚠️ Confiança da Análise da IA: ${riskAssessment.confidence}%
+⚠️ Confiança da IA: ${riskAssessment.confidence}%
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
 
-<i> Alvos Sugeridos:</i>
+<i> 💡Entrada 2 é a melhor: </i>
+• Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<i> Alvos:</i>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-<i> A Entrada 2 é a melhor: </i>
-• Zona 1 liquidação : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Zona 2 de liquidação: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
 <i>✨Titanium by @J4Rviz✨</i>
         `;
@@ -2230,12 +2230,12 @@ ${now.full}
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
 • Volume: ${volumeRatio.toFixed(2)}x | LSR: ${lsrRatio.toFixed(2)} ${lsrDetails} | Dist S/R: ${distancePercent}%
 
-<b>💰 Alvos Sugeridos</b>
+<b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
 
-<b>📍 MELHORES ENTRADAS</b>
-• Ideal: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Alternativa: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+<b>📍 ENTRADA</b>
+• Liquidez 1: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
+• Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 
 <i>✨🤖IA Titanium by @J4Rviz</i>
         `;
