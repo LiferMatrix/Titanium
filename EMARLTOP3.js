@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI, MACD } = require('technicalind
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -72,7 +72,7 @@ const PIVOT_POINT_SETTINGS = {
 };
 
 // === QUALITY SCORE AJUSTADO BASEADO NO APRENDIZADO ===
-const QUALITY_THRESHOLD = 80; // Aumentado de 75 para 80
+const QUALITY_THRESHOLD = 77; // Aumentado de 75 para 80
 const QUALITY_WEIGHTS = {
     volume: 25,           // Aumentado de 20 para 25
     oi: 12,              // Aumentado de 10 para 12
