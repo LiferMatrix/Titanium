@@ -2362,6 +2362,7 @@ async function sendSignalAlertWithRisk(signal) {
                 riskAssessment.level === 'MEDIUM' ? '🟡' : '🟢';
 
         const now = getBrazilianDateTime();
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
         // Obter funding rate com emojis
         const fundingRate = signal.marketData.funding?.raw || 0;
@@ -2387,7 +2388,7 @@ async function sendSignalAlertWithRisk(signal) {
 
         let message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
-${now.full}
+${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <i> Análise Técnica</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
@@ -2415,7 +2416,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         await sendTelegramAlert(message);
 
         console.log(`\n📤 Alerta enviado: ${signal.symbol} ${direction}`);
-        console.log(`   Data/Hora: ${now.full}`);
+        console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})`);
         console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
@@ -2437,6 +2438,7 @@ async function sendSignalAlert(signal) {
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
 
         const now = getBrazilianDateTime();
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
@@ -2473,7 +2475,7 @@ async function sendSignalAlert(signal) {
 
         const message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
-${now.full}
+${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <b>🎯 ANÁLISE TÉCNICA</b>
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
@@ -2493,7 +2495,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         await sendTelegramAlert(message);
 
         console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
-        console.log(`   Data/Hora: ${now.full}`);
+        console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot Distance: ${pivotDistance}%`);
