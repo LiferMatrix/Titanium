@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMq';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; // Modo REAL sempre ativo
@@ -1048,7 +1048,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION (CORRIGIDO)
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -1354,13 +1354,19 @@ class AdvancedLearningSystem {
 
         symbolStats.totalSignals++;
 
-        if (trade.outcome === 'SUCCESS' || trade.outcome === 'ALL_TARGETS_HIT' || trade.outcome === 'PARTIAL_TARGETS_HIT') {
+        const isSuccessful = trade.outcome === 'SUCCESS' || 
+                           trade.outcome === 'ALL_TARGETS_HIT' || 
+                           trade.outcome === 'PARTIAL_TARGETS_HIT';
+
+        if (isSuccessful) {
             symbolStats.successfulSignals++;
+            symbolStats.totalProfit += trade.profitPercentage || 0;
+        } else {
             symbolStats.totalProfit += trade.profitPercentage || 0;
         }
 
-        symbolStats.avgHoldingTime = symbolStats.successfulSignals > 0
-            ? (symbolStats.avgHoldingTime * (symbolStats.successfulSignals - 1) + (trade.durationHours || 0)) / symbolStats.successfulSignals
+        symbolStats.avgHoldingTime = symbolStats.totalSignals > 0
+            ? (symbolStats.avgHoldingTime * (symbolStats.totalSignals - 1) + (trade.durationHours || 0)) / symbolStats.totalSignals
             : (trade.durationHours || 0);
 
         symbolStats.recentScores.push(trade.qualityScore);
@@ -1370,6 +1376,14 @@ class AdvancedLearningSystem {
 
         this.symbolPerformance[trade.symbol] = symbolStats;
         this.openTrades.delete(trade.id || trade.timestamp);
+        
+        // Adicionar ao histórico de trades
+        this.tradeHistory.push(trade);
+        
+        // Limitar o histórico para evitar sobrecarga
+        if (this.tradeHistory.length > 1000) {
+            this.tradeHistory = this.tradeHistory.slice(-500);
+        }
     }
 
     async recordSignal(signal, marketData) {
@@ -1416,7 +1430,6 @@ class AdvancedLearningSystem {
                 durationHours: null
             };
 
-            this.tradeHistory.push(tradeRecord);
             this.openTrades.set(tradeRecord.id, tradeRecord);
 
             setTimeout(() => {
@@ -1478,6 +1491,10 @@ class AdvancedLearningSystem {
 
             const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
             console.log(`📊 Análise RSI: ${rsiAnalysis.extremeWinners.length} vencedores extremos vs ${rsiAnalysis.extremeLosers.length} perdedores extremos`);
+
+            // Resetar padrões para evitar contagem incorreta
+            this.patterns.winning = {};
+            this.patterns.losing = {};
 
             winners.forEach(trade => {
                 const patterns = this.extractPatterns(trade);
@@ -1847,12 +1864,16 @@ class AdvancedLearningSystem {
             if (fs.existsSync(learningFile)) {
                 const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
 
+                // Corrigir: carregar apenas os dados que existem
                 this.tradeHistory = data.tradeHistory || [];
                 this.symbolPerformance = data.symbolPerformance || {};
-                this.patterns = data.patterns || this.patterns;
+                this.patterns = data.patterns || { winning: {}, losing: {} };
                 this.parameterEvolution = data.parameterEvolution || this.parameterEvolution;
 
                 console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
+                
+                // Corrigir contagens inconsistentes
+                this.fixPatternCounts();
                 
                 if (this.patterns.losing.RSI_EXTREME > 20) {
                     console.log('⚠️  Padrão aprendido: RSI_EXTREME é PERDEDOR (' + this.patterns.losing.RSI_EXTREME + ' trades)');
@@ -1860,15 +1881,43 @@ class AdvancedLearningSystem {
             }
         } catch (error) {
             console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+            // Resetar dados se houver erro
+            this.tradeHistory = [];
+            this.symbolPerformance = {};
+            this.patterns = { winning: {}, losing: {} };
+            this.parameterEvolution = this.parameterEvolution;
         }
+    }
+
+    fixPatternCounts() {
+        // Corrigir contagens inconsistentes nos padrões
+        const totalTrades = this.tradeHistory.length;
+        
+        Object.keys(this.patterns.winning).forEach(pattern => {
+            if (this.patterns.winning[pattern] > totalTrades) {
+                this.patterns.winning[pattern] = Math.min(this.patterns.winning[pattern], totalTrades);
+            }
+        });
+        
+        Object.keys(this.patterns.losing).forEach(pattern => {
+            if (this.patterns.losing[pattern] > totalTrades) {
+                this.patterns.losing[pattern] = Math.min(this.patterns.losing[pattern], totalTrades);
+            }
+        });
     }
 
     saveLearningData() {
         try {
+            // Corrigir: garantir que os dados sejam consistentes antes de salvar
+            this.fixPatternCounts();
+            
             const data = {
-                tradeHistory: this.tradeHistory.slice(-1000),
+                tradeHistory: this.tradeHistory.slice(-500), // Limitar histórico
                 symbolPerformance: this.symbolPerformance,
-                patterns: this.patterns,
+                patterns: {
+                    winning: this.patterns.winning,
+                    losing: this.patterns.losing
+                },
                 parameterEvolution: this.parameterEvolution,
                 lastUpdated: Date.now(),
                 trailingConfig: this.trailingConfig
@@ -1914,18 +1963,24 @@ class AdvancedLearningSystem {
         const closedTrades = this.tradeHistory.filter(t =>
             t.status === 'CLOSED' || t.status === 'SIMULATED'
         );
-        const winners = closedTrades.filter(t =>
+        
+        // Corrigir: usar apenas trades fechados com resultados válidos
+        const validClosedTrades = closedTrades.filter(t => 
+            t.outcome && t.profitPercentage !== null && t.profitPercentage !== undefined
+        );
+        
+        const winners = validClosedTrades.filter(t =>
             t.outcome === 'SUCCESS' ||
             t.outcome === 'ALL_TARGETS_HIT' ||
             t.outcome === 'PARTIAL_TARGETS_HIT'
         );
-        const losers = closedTrades.filter(t =>
+        const losers = validClosedTrades.filter(t =>
             t.outcome === 'FAILURE' ||
             t.outcome === 'STOP_HIT' ||
             t.outcome === 'TIMEOUT_EXIT'
         );
 
-        const winRate = closedTrades.length > 0 ? winners.length / closedTrades.length : 0;
+        const winRate = validClosedTrades.length > 0 ? winners.length / validClosedTrades.length : 0;
         const avgProfit = winners.length > 0 ?
             winners.reduce((sum, t) => sum + (t.profitPercentage || 0), 0) / winners.length : 0;
         const avgLoss = losers.length > 0 ?
@@ -1933,13 +1988,14 @@ class AdvancedLearningSystem {
 
         const profitFactor = avgLoss !== 0 ? Math.abs(avgProfit / avgLoss) : 0;
 
+        // Corrigir: filtrar padrões com contagens válidas
         const winningPatterns = Object.entries(this.patterns.winning)
-            .filter(([pattern, count]) => count >= 3 && !pattern.includes('RSI_EXTREME'))
+            .filter(([pattern, count]) => count >= 1 && count <= validClosedTrades.length)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
 
         const losingPatterns = Object.entries(this.patterns.losing)
-            .filter(([pattern, count]) => count >= 2)
+            .filter(([pattern, count]) => count >= 1 && count <= validClosedTrades.length)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
 
@@ -1953,10 +2009,10 @@ class AdvancedLearningSystem {
             ).length
         };
 
-        const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
+        const rsiAnalysis = this.analyzeRSIPatterns(validClosedTrades);
 
         return {
-            totalTrades: closedTrades.length,
+            totalTrades: validClosedTrades.length,
             winningTrades: winners.length,
             losingTrades: losers.length,
             winRate: winRate * 100,
@@ -2343,7 +2399,7 @@ ${now.full}
 • Fund. Rate: ${fundingRateText}
 ${rsiWarning}
 <i>🤖 IA Titanium Análise </i>
-• Nível: ${riskEmoji} ${riskAssessment.level} | Risco: ${riskAssessment.overallScore.toFixed(2)}
+• Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
 
@@ -4583,7 +4639,7 @@ async function sendLearningReport() {
         const worstPatterns = report.worstPatterns.map(([pattern, count]) => `${pattern}: ${count} trades`).join('\n');
 
         const message = `
-🧠 <b>RELATÓRIO DE APRENDIZADO </b>
+🧠 <b>RELATÓRIO DE APRENDIZADO (ATUALIZADO)</b>
 ${now.full}
 
 • <b>Trades Totais:</b> ${report.totalTrades}
@@ -4618,7 +4674,53 @@ ${worstPatterns || 'Nenhum padrão identificado ainda'}
 }
 
 // =====================================================================
-// ▶️ INICIALIZAÇÃO
+// 🆕 FUNÇÃO PARA RESETAR APRENDIZADO
+// =====================================================================
+
+function resetLearningData() {
+    try {
+        console.log('🔄 RESETANDO DADOS DE APRENDIZADO...');
+        
+        // Resetar sistema de aprendizado
+        learningSystem = new AdvancedLearningSystem();
+        
+        // Criar arquivo de aprendizado limpo
+        const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
+        
+        const cleanData = {
+            tradeHistory: [],
+            symbolPerformance: {},
+            patterns: { winning: {}, losing: {} },
+            parameterEvolution: {
+                volumeThreshold: [],
+                qualityThreshold: [],
+                adxThreshold: [],
+                breakoutRisk: [],
+                supportResistance: [],
+                pivotPoints: [],
+                rsiSettings: []
+            },
+            lastUpdated: Date.now(),
+            trailingConfig: learningSystem.trailingConfig,
+            resetTimestamp: Date.now(),
+            resetNote: 'Sistema resetado devido a bugs nas estatísticas'
+        };
+        
+        fs.writeFileSync(learningFile, JSON.stringify(cleanData, null, 2));
+        
+        console.log('✅ Dados de aprendizado resetados com sucesso!');
+        console.log('📊 Novo relatório será gerado com dados limpos.');
+        
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Erro ao resetar dados de aprendizado:', error.message);
+        return false;
+    }
+}
+
+// =====================================================================
+// ▶️ INICIALIZAÇÃO COM OPÇÃO DE RESET
 // =====================================================================
 
 async function startBot() {
@@ -4639,6 +4741,13 @@ async function startBot() {
         } catch (error) {
             console.log('❌ Execute: npm install technicalindicators');
             process.exit(1);
+        }
+
+        // Verificar se deve resetar o aprendizado
+        const args = process.argv.slice(2);
+        if (args.includes('--reset-learning')) {
+            console.log('🔄 Opção de reset detectada...');
+            resetLearningData();
         }
 
         console.log('🔍 Verificando conexão...');
