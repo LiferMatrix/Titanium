@@ -6,11 +6,11 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMq';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
-const LIVE_MODE = true; // Modo REAL sempre ativo
+const LIVE_MODE = true; 
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
@@ -19,6 +19,28 @@ const VOLUME_SETTINGS = {
     maxThreshold: 2.8,       // ⬆️ Aceita pumps reais (sem cortar)
     volatilityMultiplier: 0.3, // ⬆️ Ajusta melhor em dias voláteis
     useAdaptive: true
+};
+
+// === NOVAS CONFIGURAÇÕES DE VOLUME ROBUSTO ===
+const VOLUME_ROBUST_SETTINGS = {
+    // Média Móvel de Volume (VMA)
+    vmaPeriod: 20,            // Períodos para a média móvel de volume
+    vmaThreshold: 1.8,        // Volume atual deve ser maior que VMA * threshold
+    
+    // Z-Score do Volume
+    zScoreLookback: 50,       // Períodos para cálculo do Z-Score
+    zScoreThreshold: 2.0,     // Z-Score mínimo para considerar outlier
+    
+    // Volume-Price Trend (VPT)
+    vptThreshold: 0.5,        // Mínimo movimento de preço percentual
+    minPriceMovement: 0.15,   // 0.15% mínimo de movimento de preço
+    
+    // Configurações combinadas
+    combinedMultiplier: 1.2,  // Multiplicador para sinais combinados
+    volumeWeight: 0.4,        // Peso do volume no score final
+    vmaWeight: 0.3,           // Peso da VMA no score final
+    zScoreWeight: 0.2,        // Peso do Z-Score no score final
+    vptWeight: 0.1           // Peso do VPT no score final
 };
 
 const VOLATILITY_PERIOD = 20;
@@ -131,6 +153,34 @@ const BREAKOUT_RISK_SETTINGS = {
     mediumRiskDistance: 1.0,
     lowRiskDistance: 2.0,
     safeDistance: 3.0
+};
+
+// === NOVA: CONFIGURAÇÕES PARA PIVOT POINTS MULTI-TIMEFRAME ===
+const PIVOT_POINTS_SETTINGS = {
+    // Configurações de força por timeframe
+    timeframeStrengthWeights: {
+        '15m': 1.0,   // Pivot fraco (15 minutos)
+        '1h': 2.0,    // Pivot moderado (1 hora)
+        '4h': 3.0,    // Pivot forte (4 horas)
+        '1d': 5.0     // Pivot muito forte (diário)
+    },
+    // Distâncias seguras baseadas na força do pivot
+    safeDistanceMultipliers: {
+        'weak': 0.5,      // Pivot fraco: precisa de 0.5% de distância
+        'moderate': 1.0,  // Pivot moderado: precisa de 1.0% de distância
+        'strong': 1.5,    // Pivot forte: precisa de 1.5% de distância
+        'very_strong': 2.0 // Pivot muito forte: precisa de 2.0% de distância
+    },
+    // Configurações de detecção
+    minDistance: 5,        // Distância mínima entre pivots (velas)
+    priceTolerance: 0.005, // Tolerância de preço para considerar toque (0.5%)
+    // Configurações de análise
+    analyzeTimeframes: ['15m', '1h', '4h'], // Timeframes a serem analisados
+    candlesPerTimeframe: {
+        '15m': 70,  // ~17.5 horas
+        '1h': 100,  // ~4 dias
+        '4h': 120   // ~20 dias
+    }
 };
 
 // === DIRETÓRIOS ===
@@ -341,21 +391,33 @@ class SophisticatedRiskLayer {
         if (pivotData.nearestPivot) {
             const distancePercent = pivotData.nearestPivot.distancePercent;
             const pivotType = pivotData.nearestPivot.type;
+            const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
             
-            if (distancePercent < 0.5) {
+            // Calcular risco baseado na força do pivot e distância
+            const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
+            
+            if (distancePercent < safeDistance * 0.5) {
                 score = 2;
-                message = `MUITO PRÓXIMO de pivot ${pivotType} (${distancePercent.toFixed(2)}%)`;
-            } else if (distancePercent < 1.0) {
+                message = `MUITO PRÓXIMO de pivot ${pivotType.toUpperCase()} ${pivotStrength} (${distancePercent.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
+            } else if (distancePercent < safeDistance) {
                 score = 1;
-                message = `Próximo de pivot ${pivotType} (${distancePercent.toFixed(2)}%)`;
+                message = `Próximo de pivot ${pivotType} ${pivotStrength} (${distancePercent.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
             } else {
                 score = 0;
-                message = `Boa distância de pivot (${distancePercent.toFixed(2)}%)`;
+                message = `Boa distância de pivot ${pivotType} ${pivotStrength} (${distancePercent.toFixed(2)}%)`;
             }
             
             if (pivotData.nearestPivot.isTesting) {
                 score += 1;
                 message += ' | TESTANDO PIVOT!';
+            }
+            
+            // Adicionar peso baseado no timeframe do pivot
+            if (pivotData.nearestPivot.timeframe) {
+                const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
+                if (timeframeWeight >= 2.0) {
+                    message += ` | PIVOT ${pivotData.nearestPivot.timeframe.toUpperCase()} (FORTE)`;
+                }
             }
         }
 
@@ -441,34 +503,38 @@ class SophisticatedRiskLayer {
     }
 
     analyzeVolumeRisk(signal) {
-        const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-        const volumeAboveBelow = ((volumeRatio - 1) * 100);
+        const volumeData = signal.marketData.volume?.robustData;
+        if (!volumeData) {
+            return { type: 'VOLUME', score: 1, message: 'Dados de volume insuficientes' };
+        }
 
+        const combinedScore = volumeData.combinedScore || 0;
+        
         let score = 0;
         let message = '';
 
-        if (volumeRatio < 0.7) {
+        if (combinedScore < 0.3) {
             score = 2;
-            message = `VOLUME MUITO BAIXO: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio < 1.0) {
+            message = `VOLUME MUITO FRACO: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore < 0.5) {
             score = 1;
-            message = `Volume abaixo da média: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio > 3.0) {
-            score = 1;
-            message = `Volume muito alto: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio > 2.0) {
-            score = 0.5;
-            message = `Volume alto: ${volumeRatio.toFixed(2)}x`;
+            message = `Volume fraco: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore > 0.8) {
+            score = -0.5;
+            message = `Volume muito forte: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore > 0.6) {
+            score = 0;
+            message = `Volume forte: Score ${combinedScore.toFixed(2)}`;
         } else {
             score = 0;
-            message = `Volume normal: ${volumeRatio.toFixed(2)}x`;
+            message = `Volume moderado: Score ${combinedScore.toFixed(2)}`;
         }
 
         return {
             type: 'VOLUME',
             score: score,
             message: message,
-            data: { volumeRatio: volumeRatio }
+            data: volumeData
         };
     }
 
@@ -739,7 +805,7 @@ class SophisticatedRiskLayer {
 
                     if (signal.isBullish && isBearishTrend) {
                         conflictingTrends++;
-                        trendMessages.push(`${tf}: tendência de BAISA`);
+                        trendMessages.push(`${tf}: tendência de BAIXA`);
                     } else if (!signal.isBullish && isBullishTrend) {
                         conflictingTrends++;
                         trendMessages.push(`${tf}: tendência de ALTA`);
@@ -811,7 +877,7 @@ class SophisticatedRiskLayer {
 
         assessment.factors.forEach(factor => {
             if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
-                recommendations.push('🚨 <b>EVITAR: RSI EXTREMO (Padrão PERDEDOR confirmado)</b>');
+                recommendations.push('🚨 <i>EVITAR: RSI EXTREMO (Padrão PERDEDOR confirmado)</i>');
                 recommendations.push('• Considere cancelar o trade');
                 recommendations.push('• Aguarde RSI retornar à zona neutra (25-75)');
             }
@@ -819,28 +885,28 @@ class SophisticatedRiskLayer {
 
         switch (assessment.level) {
             case 'CRITICAL':
-                recommendations.push('⚠️ <b>CONSIDERE EVITAR ESTE TRADE</b>');
+                recommendations.push('⚠️ <i>CONSIDERE EVITAR ESTE TRADE</i>');
                 recommendations.push('• Reduza tamanho da posição em 75%');
                 recommendations.push('• Use stop loss mais apertado');
                 recommendations.push('• Espere confirmação adicional');
                 break;
 
             case 'HIGH':
-                recommendations.push('🔶 <b>ALTO RISCO - EXTREMA CAUTELA</b>');
+                recommendations.push('🔶 <i>ALTO RISCO - EXTREMA CAUTELA</i>');
                 recommendations.push('• Reduza tamanho da posição em 50%');
                 recommendations.push('• Use stop loss conservador');
                 recommendations.push('• Procure entrada melhor');
                 break;
 
             case 'MEDIUM':
-                recommendations.push('🟡 <b>RISCO MODERADO - CAUTELA</b>');
+                recommendations.push('🟡 <i>RISCO MODERADO - CAUTELA</i>');
                 recommendations.push('• Reduza tamanho da posição em 25%');
                 recommendations.push('• Aguarde confirmação parcial');
                 recommendations.push('• Considere alvos mais curtos');
                 break;
 
             case 'LOW':
-                recommendations.push('🟢 <b>RISCO BAIXO - CONFIANÇA</b>');
+                recommendations.push('🟢 <i>RISCO BAIXO - CONFIANÇA</i>');
                 recommendations.push('• Tamanho normal de posição OK');
                 recommendations.push('• Stop loss padrão adequado');
                 recommendations.push('• Pode buscar alvos mais longos');
@@ -1408,6 +1474,7 @@ class AdvancedLearningSystem {
                 qualityScore: signal.qualityScore.score,
                 marketData: {
                     volumeRatio: marketData.volume?.rawRatio || 0,
+                    volumeRobust: marketData.volume?.robustData || null,
                     rsi: marketData.rsi?.raw || 0,
                     adx1h: marketData.adx1h?.raw || 0,
                     volatility: marketData.volatility?.rawVolatility || 0,
@@ -1558,6 +1625,9 @@ class AdvancedLearningSystem {
         const patterns = [];
         const data = trade.marketData;
 
+        if (data.volumeRobust?.combinedScore >= 0.7) {
+            patterns.push('ROBUST_VOLUME');
+        }
         if (data.volumeRatio >= 1.8 && data.adx1h >= 25) {
             patterns.push('HIGH_VOL_STRONG_TREND');
         }
@@ -2337,7 +2407,10 @@ async function sendSignalAlertWithRisk(signal) {
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
 
+        const volumeData = signal.marketData.volume?.robustData;
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
         
         // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
@@ -2356,6 +2429,8 @@ async function sendSignalAlertWithRisk(signal) {
         const nearestPivot = pivotData?.nearestPivot;
         const pivotDistance = nearestPivot?.distancePercent?.toFixed(2) || 'N/A';
         const pivotType = nearestPivot?.type || 'N/A';
+        const pivotStrength = nearestPivot?.strength || 'N/A';
+        const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
         const riskEmoji = riskAssessment.level === 'CRITICAL' ? '🚨' :
             riskAssessment.level === 'HIGH' ? '🔴' :
@@ -2389,12 +2464,14 @@ async function sendSignalAlertWithRisk(signal) {
         let message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<i> Análise Técnica</i>
+<i> Análise Técnica Avançada</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
-• Pivot: ${pivotType} ${pivotDistance}%
+• Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
+• VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• Dist S/R: ${distancePercent}%
+• Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
 • Fund. Rate: ${fundingRateText}
@@ -2421,9 +2498,10 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
         console.log(`   Confiança: ${riskAssessment.confidence}%`);
-        console.log(`   Volume: ${volumeRatio.toFixed(2)}x | LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
+        console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
-        console.log(`   Pivot: ${pivotType} ${pivotDistance}%`);
+        console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   Funding: ${fundingRateText}`);
 
     } catch (error) {
@@ -2440,7 +2518,10 @@ async function sendSignalAlert(signal) {
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
+        const volumeData = signal.marketData.volume?.robustData;
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
         
         // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
@@ -2457,6 +2538,8 @@ async function sendSignalAlert(signal) {
         const pivotData = signal.marketData.pivotPoints;
         const nearestPivot = pivotData?.nearestPivot;
         const pivotDistance = nearestPivot?.distancePercent?.toFixed(2) || 'N/A';
+        const pivotStrength = nearestPivot?.strength || 'N/A';
+        const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
         // Obter funding rate com emojis
         const fundingRate = signal.marketData.funding?.raw || 0;
@@ -2476,13 +2559,15 @@ async function sendSignalAlert(signal) {
         const message = `
 ${directionEmoji} <b>${signal.symbol} - ${direction}</b>
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<b>🎯 ANÁLISE TÉCNICA</b>
+<b>🎯 ANÁLISE TÉCNICA AVANÇADA</b>
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-• Volume: ${volumeRatio.toFixed(2)}x | LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
+• Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
+• VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-• Dist S/R: ${distancePercent}% | Pivot: ${pivotDistance}%
+• Dist S/R: ${distancePercent}% | Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • Fund. Rate: ${fundingRateText}
 <b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
@@ -2496,9 +2581,10 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 
         console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
-        console.log(`   Pivot Distance: ${pivotDistance}%`);
+        console.log(`   Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   Funding: ${fundingRateText}`);
 
     } catch (error) {
@@ -2519,9 +2605,12 @@ function calculateProbability(signal) {
 
     baseProbability += (signal.qualityScore.score - 70) * 0.4;
 
-    const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-    if (volumeRatio >= 2.0) baseProbability += 8;
-    else if (volumeRatio >= 1.5) baseProbability += 4;
+    const volumeData = signal.marketData.volume?.robustData;
+    const volumeScore = volumeData?.combinedScore || 0;
+    
+    if (volumeScore >= 0.7) baseProbability += 10;
+    else if (volumeScore >= 0.5) baseProbability += 5;
+    else if (volumeScore < 0.3) baseProbability -= 8;
 
     const srData = signal.marketData.supportResistance;
     const nearestLevel = signal.isBullish ?
@@ -2546,16 +2635,29 @@ function calculateProbability(signal) {
     const pivotData = signal.marketData.pivotPoints;
     if (pivotData?.nearestPivot) {
         const pivotDistance = pivotData.nearestPivot.distancePercent || 0;
-        if (pivotDistance < 0.5) {
-            baseProbability -= 10;
-        } else if (pivotDistance < 1.0) {
-            baseProbability -= 5;
-        } else if (pivotDistance > 2.0) {
-            baseProbability += 5;
+        const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
+        
+        // Obter distância segura baseada na força do pivot
+        const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
+        
+        if (pivotDistance < safeDistance * 0.5) {
+            baseProbability -= 15; // Muito próximo
+        } else if (pivotDistance < safeDistance) {
+            baseProbability -= 8;  // Próximo
+        } else if (pivotDistance > safeDistance * 1.5) {
+            baseProbability += 5;  // Boa distância
         }
         
         if (pivotData.nearestPivot.isTesting) {
-            baseProbability -= 8;
+            baseProbability -= 12;
+        }
+        
+        // Adicionar peso baseado no timeframe
+        if (pivotData.nearestPivot.timeframe) {
+            const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
+            if (timeframeWeight >= 2.0 && pivotDistance < safeDistance) {
+                baseProbability -= 5; // Pivot forte muito próximo
+            }
         }
     }
 
@@ -2635,49 +2737,405 @@ async function getBinanceLSRValue(symbol, period = '15m') {
 }
 
 // =====================================================================
-// 📊 NOVAS FUNÇÕES PARA PONTOS DE PIVÔ (MANTIDO, MAS SEM TREND LINES)
+// 📊 FUNÇÃO ATUALIZADA DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS
+// =====================================================================
+
+async function checkVolumeRobust(symbol) {
+    try {
+        // Buscar candles de 3 minutos
+        const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.zScoreLookback);
+        if (candles.length < VOLUME_ROBUST_SETTINGS.vmaPeriod) {
+            return {
+                rawRatio: 0,
+                isAbnormal: false,
+                robustData: null
+            };
+        }
+
+        const volumes = candles.map(c => c.volume);
+        const closes = candles.map(c => c.close);
+        
+        // Volume atual e últimos volumes
+        const currentVolume = volumes[volumes.length - 1];
+        const previousVolume = volumes[volumes.length - 2] || currentVolume;
+        
+        // 1. MÉDIA MÓVEL DE VOLUME (VMA)
+        const vmaData = calculateVMA(volumes, VOLUME_ROBUST_SETTINGS.vmaPeriod);
+        const vmaRatio = currentVolume / vmaData.currentVMA;
+        const vmaScore = calculateVMAScore(vmaRatio);
+        
+        // 2. Z-SCORE DO VOLUME
+        const zScoreData = calculateVolumeZScore(volumes);
+        const zScore = zScoreData.currentZScore;
+        const zScoreScore = calculateZScoreScore(zScore);
+        
+        // 3. VOLUME-PRICE TREND (VPT)
+        const vptData = calculateVolumePriceTrend(volumes, closes);
+        const vptScore = calculateVPTScore(vptData);
+        
+        // 4. CALCULAR SCORE COMBINADO
+        const combinedScore = calculateCombinedVolumeScore({
+            vmaScore,
+            zScoreScore,
+            vptScore,
+            vmaRatio,
+            zScore
+        });
+        
+        // 5. CLASSIFICAÇÃO
+        const classification = classifyVolumeStrength(combinedScore);
+        
+        // 6. VERIFICAR ANORMALIDADE
+        const isAbnormal = combinedScore >= VOLUME_ROBUST_SETTINGS.vmaThreshold || 
+                          zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold;
+        
+        // Razão bruta para compatibilidade
+        const rawRatio = currentVolume / vmaData.averageVolume || 1;
+        
+        const robustData = {
+            currentVolume,
+            previousVolume,
+            vma: vmaData.currentVMA,
+            vmaRatio,
+            zScore,
+            vpt: vptData,
+            vmaScore,
+            zScoreScore,
+            vptScore,
+            combinedScore,
+            classification,
+            isAbnormal,
+            rawRatio,
+            details: {
+                volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(2) + '%',
+                vmaPeriod: VOLUME_ROBUST_SETTINGS.vmaPeriod,
+                zScorePeriod: VOLUME_ROBUST_SETTINGS.zScoreLookback,
+                isVMAValid: vmaRatio >= VOLUME_ROBUST_SETTINGS.vmaThreshold,
+                isZScoreValid: zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
+                isVPTValid: vptData.priceMovementPercent >= VOLUME_ROBUST_SETTINGS.vptThreshold
+            }
+        };
+        
+        console.log(`📊 Volume Robust ${symbol} (3m):`);
+        console.log(`   Volume: ${currentVolume.toFixed(2)} (${robustData.details.volumeChange})`);
+        console.log(`   VMA: ${vmaData.currentVMA.toFixed(2)} (${vmaRatio.toFixed(2)}x)`);
+        console.log(`   Z-Score: ${zScore.toFixed(2)}`);
+        console.log(`   VPT: ${vptData.priceMovementPercent.toFixed(2)}% (${vptData.trendDirection})`);
+        console.log(`   Score Combinado: ${combinedScore.toFixed(2)} (${classification})`);
+        console.log(`   Anormal: ${isAbnormal ? '✅' : '❌'}`);
+        
+        return {
+            rawRatio,
+            isAbnormal,
+            robustData
+        };
+        
+    } catch (error) {
+        console.error(`❌ Erro na análise robusta de volume para ${symbol}:`, error.message);
+        return {
+            rawRatio: 0,
+            isAbnormal: false,
+            robustData: null
+        };
+    }
+}
+
+function calculateVMA(volumes, period) {
+    if (volumes.length < period) {
+        return {
+            currentVMA: volumes[volumes.length - 1] || 0,
+            averageVolume: volumes.reduce((a, b) => a + b, 0) / volumes.length || 0
+        };
+    }
+    
+    const recentVolumes = volumes.slice(-period);
+    const vma = recentVolumes.reduce((a, b) => a + b, 0) / period;
+    
+    // Calcular também a média geral para referência
+    const averageVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    
+    return {
+        currentVMA: vma,
+        averageVolume: averageVolume,
+        minVMA: Math.min(...recentVolumes),
+        maxVMA: Math.max(...recentVolumes),
+        vmaTrend: vma > (volumes[volumes.length - period - 1] || vma) ? 'rising' : 'falling'
+    };
+}
+
+function calculateVolumeZScore(volumes) {
+    if (volumes.length < 10) {
+        return {
+            currentZScore: 0,
+            mean: volumes[0] || 0,
+            stdDev: 0
+        };
+    }
+    
+    const recentVolumes = volumes.slice(-VOLUME_ROBUST_SETTINGS.zScoreLookback);
+    const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    
+    // Calcular desvio padrão
+    const squaredDifferences = recentVolumes.map(v => Math.pow(v - mean, 2));
+    const variance = squaredDifferences.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Z-Score do volume atual
+    const currentVolume = volumes[volumes.length - 1];
+    const zScore = stdDev !== 0 ? (currentVolume - mean) / stdDev : 0;
+    
+    return {
+        currentZScore: zScore,
+        mean: mean,
+        stdDev: stdDev,
+        isOutlier: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold
+    };
+}
+
+function calculateVolumePriceTrend(volumes, closes) {
+    if (volumes.length < 5 || closes.length < 5) {
+        return {
+            priceMovementPercent: 0,
+            volumeTrend: 'neutral',
+            trendDirection: 'neutral',
+            correlation: 0
+        };
+    }
+    
+    // Calcular movimento de preço recente
+    const recentCloses = closes.slice(-5);
+    const priceChange = ((recentCloses[recentCloses.length - 1] - recentCloses[0]) / recentCloses[0]) * 100;
+    
+    // Calcular tendência de volume
+    const recentVolumes = volumes.slice(-5);
+    const volumeSum = recentVolumes.reduce((a, b) => a + b, 0);
+    const avgVolume = volumeSum / recentVolumes.length;
+    
+    // Verificar se o movimento de preço é significativo
+    const hasSignificantMovement = Math.abs(priceChange) >= VOLUME_ROBUST_SETTINGS.minPriceMovement;
+    
+    // Determinar direção da tendência
+    let trendDirection = 'neutral';
+    if (priceChange > VOLUME_ROBUST_SETTINGS.minPriceMovement) {
+        trendDirection = 'bullish';
+    } else if (priceChange < -VOLUME_ROBUST_SETTINGS.minPriceMovement) {
+        trendDirection = 'bearish';
+    }
+    
+    // Calcular correlação simples entre volume e preço
+    let correlation = 0;
+    if (hasSignificantMovement) {
+        const volumeChanges = [];
+        const priceChanges = [];
+        
+        for (let i = 1; i < recentVolumes.length; i++) {
+            volumeChanges.push(recentVolumes[i] - recentVolumes[i - 1]);
+            priceChanges.push(recentCloses[i] - recentCloses[i - 1]);
+        }
+        
+        // Correlação simples
+        const avgVolumeChange = volumeChanges.reduce((a, b) => a + b, 0) / volumeChanges.length;
+        const avgPriceChange = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
+        
+        let numerator = 0;
+        let denomVolume = 0;
+        let denomPrice = 0;
+        
+        for (let i = 0; i < volumeChanges.length; i++) {
+            numerator += (volumeChanges[i] - avgVolumeChange) * (priceChanges[i] - avgPriceChange);
+            denomVolume += Math.pow(volumeChanges[i] - avgVolumeChange, 2);
+            denomPrice += Math.pow(priceChanges[i] - avgPriceChange, 2);
+        }
+        
+        correlation = denominator !== 0 ? numerator / Math.sqrt(denomVolume * denomPrice) : 0;
+    }
+    
+    return {
+        priceMovementPercent: priceChange,
+        volumeTrend: recentVolumes[recentVolumes.length - 1] > avgVolume ? 'rising' : 'falling',
+        trendDirection: trendDirection,
+        correlation: correlation,
+        hasSignificantMovement: hasSignificantMovement
+    };
+}
+
+function calculateVMAScore(vmaRatio) {
+    if (vmaRatio >= 3.0) return 1.0;
+    if (vmaRatio >= 2.5) return 0.9;
+    if (vmaRatio >= 2.0) return 0.8;
+    if (vmaRatio >= 1.8) return 0.7;
+    if (vmaRatio >= 1.5) return 0.6;
+    if (vmaRatio >= 1.2) return 0.4;
+    if (vmaRatio >= 1.0) return 0.2;
+    return 0.0;
+}
+
+function calculateZScoreScore(zScore) {
+    const absZScore = Math.abs(zScore);
+    if (absZScore >= 3.0) return 1.0;
+    if (absZScore >= 2.5) return 0.9;
+    if (absZScore >= 2.0) return 0.8;
+    if (absZScore >= 1.5) return 0.6;
+    if (absZScore >= 1.0) return 0.4;
+    if (absZScore >= 0.5) return 0.2;
+    return 0.0;
+}
+
+function calculateVPTScore(vptData) {
+    let score = 0;
+    
+    // Score baseado no movimento de preço
+    const absPriceMovement = Math.abs(vptData.priceMovementPercent);
+    if (absPriceMovement >= 1.0) score += 0.4;
+    else if (absPriceMovement >= 0.5) score += 0.3;
+    else if (absPriceMovement >= VOLUME_ROBUST_SETTINGS.minPriceMovement) score += 0.2;
+    
+    // Score baseado na correlação
+    if (Math.abs(vptData.correlation) >= 0.7) score += 0.3;
+    else if (Math.abs(vptData.correlation) >= 0.5) score += 0.2;
+    else if (Math.abs(vptData.correlation) >= 0.3) score += 0.1;
+    
+    // Score baseado na consistência da tendência
+    if (vptData.hasSignificantMovement && vptData.volumeTrend === 'rising') {
+        score += 0.3;
+    }
+    
+    return Math.min(1.0, score);
+}
+
+function calculateCombinedVolumeScore(data) {
+    const {
+        vmaScore,
+        zScoreScore,
+        vptScore,
+        vmaRatio,
+        zScore
+    } = data;
+    
+    // Pesos configuráveis
+    const weights = VOLUME_ROBUST_SETTINGS;
+    
+    // Calcular score ponderado
+    let combinedScore = 
+        (vmaScore * weights.vmaWeight) +
+        (zScoreScore * weights.zScoreWeight) +
+        (vptScore * weights.vptWeight);
+    
+    // Aplicar bônus para sinais fortes
+    if (vmaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
+        combinedScore *= weights.combinedMultiplier;
+    }
+    
+    // Normalizar para 0-1
+    return Math.min(1.0, combinedScore);
+}
+
+function classifyVolumeStrength(score) {
+    if (score >= 0.8) return '🔥 MUITO FORTE';
+    if (score >= 0.7) return '📈 FORTE';
+    if (score >= 0.6) return '📊 MODERADO-ALTO';
+    if (score >= 0.5) return '📊 MODERADO';
+    if (score >= 0.4) return '📉 MODERADO-BAIXO';
+    if (score >= 0.3) return '📉 BAIXO';
+    if (score >= 0.2) return '⚠️ MUITO BAIXO';
+    return '🚫 INSUFICIENTE';
+}
+
+// =====================================================================
+// 📊 NOVAS FUNÇÕES PARA PONTOS DE PIVÔ MULTI-TIMEFRAME (ATUALIZADO)
 // =====================================================================
 
 async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     try {
-        const candles = await getCandlesCached(symbol, '15m', 70);
+        const allPivots = [];
+        
+        // Analisar pivots em múltiplos timeframes
+        for (const timeframe of PIVOT_POINTS_SETTINGS.analyzeTimeframes) {
+            try {
+                const candles = await getCandlesCached(
+                    symbol, 
+                    timeframe, 
+                    PIVOT_POINTS_SETTINGS.candlesPerTimeframe[timeframe] || 70
+                );
 
-        if (candles.length < 50) {
-            return { error: 'Dados insuficientes' };
+                if (candles.length < 50) continue;
+
+                const timeframePivots = await analyzePivotPointsInTimeframe(
+                    symbol,
+                    timeframe,
+                    candles,
+                    currentPrice
+                );
+                
+                // Adicionar timeframe a cada pivot
+                timeframePivots.supports.forEach(pivot => {
+                    pivot.timeframe = timeframe;
+                    pivot.strength = calculatePivotStrength(pivot, timeframe);
+                    allPivots.push(pivot);
+                });
+                
+                timeframePivots.resistances.forEach(pivot => {
+                    pivot.timeframe = timeframe;
+                    pivot.strength = calculatePivotStrength(pivot, timeframe);
+                    allPivots.push(pivot);
+                });
+                
+            } catch (error) {
+                console.log(`⚠️ Erro análise pivot ${timeframe} ${symbol}: ${error.message}`);
+                continue;
+            }
         }
 
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
+        if (allPivots.length === 0) {
+            return { error: 'Nenhum pivot detectado' };
+        }
 
-        const pivotHighs = findPivotHighs(highs, 5);
-        const pivotLows = findPivotLows(lows, 5);
+        // Separar supports e resistances
+        const supportPivots = allPivots.filter(p => p.type === 'support');
+        const resistancePivots = allPivots.filter(p => p.type === 'resistance');
 
-        const supportPivots = classifyPivots(pivotLows, 'support', candles);
-        const resistancePivots = classifyPivots(pivotHighs, 'resistance', candles);
+        // Encontrar pivots mais próximos
+        const nearestSupportPivot = findNearestPivotMultiTimeframe(supportPivots, currentPrice, true);
+        const nearestResistancePivot = findNearestPivotMultiTimeframe(resistancePivots, currentPrice, false);
 
-        const nearestSupportPivot = findNearestPivot(supportPivots, currentPrice, true);
-        const nearestResistancePivot = findNearestPivot(resistancePivots, currentPrice, false);
+        // Verificar se está testando algum pivot
+        const testingPivot = checkTestingPivotMultiTimeframe(currentPrice, allPivots);
 
-        const testingPivot = checkTestingPivot(currentPrice, supportPivots, resistancePivots, candles);
-
+        // Calcular distâncias
         const supportDistancePercent = nearestSupportPivot ?
             ((currentPrice - nearestSupportPivot.price) / currentPrice) * 100 : null;
         const resistanceDistancePercent = nearestResistancePivot ?
             ((nearestResistancePivot.price - currentPrice) / currentPrice) * 100 : null;
 
+        // Determinar pivot mais próximo
         let nearestPivot = null;
         if (nearestSupportPivot && nearestResistancePivot) {
             const supportDistance = Math.abs(currentPrice - nearestSupportPivot.price);
             const resistanceDistance = Math.abs(nearestResistancePivot.price - currentPrice);
             
             nearestPivot = supportDistance < resistanceDistance ? 
-                { ...nearestSupportPivot, distancePercent: supportDistancePercent } : 
-                { ...nearestResistancePivot, distancePercent: resistanceDistancePercent };
+                { 
+                    ...nearestSupportPivot, 
+                    distancePercent: supportDistancePercent,
+                    timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestSupportPivot.timeframe] || 1.0
+                } : 
+                { 
+                    ...nearestResistancePivot, 
+                    distancePercent: resistanceDistancePercent,
+                    timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestResistancePivot.timeframe] || 1.0
+                };
         } else if (nearestSupportPivot) {
-            nearestPivot = { ...nearestSupportPivot, distancePercent: supportDistancePercent };
+            nearestPivot = { 
+                ...nearestSupportPivot, 
+                distancePercent: supportDistancePercent,
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestSupportPivot.timeframe] || 1.0
+            };
         } else if (nearestResistancePivot) {
-            nearestPivot = { ...nearestResistancePivot, distancePercent: resistanceDistancePercent };
+            nearestPivot = { 
+                ...nearestResistancePivot, 
+                distancePercent: resistanceDistancePercent,
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestResistancePivot.timeframe] || 1.0
+            };
         }
 
         return {
@@ -2686,34 +3144,133 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
             nearestSupport: nearestSupportPivot ? {
                 price: nearestSupportPivot.price,
                 strength: nearestSupportPivot.strength,
+                timeframe: nearestSupportPivot.timeframe,
                 distance: currentPrice - nearestSupportPivot.price,
                 distancePercent: supportDistancePercent,
-                touches: nearestSupportPivot.touches
+                touches: nearestSupportPivot.touches,
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestSupportPivot.timeframe] || 1.0
             } : null,
             nearestResistance: nearestResistancePivot ? {
                 price: nearestResistancePivot.price,
                 strength: nearestResistancePivot.strength,
+                timeframe: nearestResistancePivot.timeframe,
                 distance: nearestResistancePivot.price - currentPrice,
                 distancePercent: resistanceDistancePercent,
-                touches: nearestResistancePivot.touches
+                touches: nearestResistancePivot.touches,
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[nearestResistancePivot.timeframe] || 1.0
             } : null,
             nearestPivot: nearestPivot ? {
                 type: nearestPivot.type,
                 price: nearestPivot.price,
                 strength: nearestPivot.strength,
+                timeframe: nearestPivot.timeframe,
                 distancePercent: nearestPivot.distancePercent,
                 isTesting: testingPivot?.price === nearestPivot.price,
-                touches: nearestPivot.touches
+                touches: nearestPivot.touches,
+                timeframeStrength: nearestPivot.timeframeStrength,
+                safeDistance: PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[nearestPivot.strength] || 1.0
             } : null,
             testingPivot: testingPivot,
             currentPrice: currentPrice,
-            totalPivots: supportPivots.length + resistancePivots.length
+            totalPivots: allPivots.length,
+            timeframeAnalysis: {
+                '15m': allPivots.filter(p => p.timeframe === '15m').length,
+                '1h': allPivots.filter(p => p.timeframe === '1h').length,
+                '4h': allPivots.filter(p => p.timeframe === '4h').length
+            }
         };
 
     } catch (error) {
         console.log(`⚠️ Erro análise pivot points ${symbol}: ${error.message}`);
         return { error: error.message };
     }
+}
+
+async function analyzePivotPointsInTimeframe(symbol, timeframe, candles, currentPrice) {
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+
+    const pivotHighs = findPivotHighs(highs, PIVOT_POINTS_SETTINGS.minDistance);
+    const pivotLows = findPivotLows(lows, PIVOT_POINTS_SETTINGS.minDistance);
+
+    const supportPivots = classifyPivots(pivotLows, 'support', candles, timeframe);
+    const resistancePivots = classifyPivots(pivotHighs, 'resistance', candles, timeframe);
+
+    return {
+        supports: supportPivots,
+        resistances: resistancePivots,
+        timeframe: timeframe,
+        candlesAnalyzed: candles.length
+    };
+}
+
+function calculatePivotStrength(pivot, timeframe) {
+    let baseStrength = 'weak';
+    
+    // Baseado no número de toques
+    if (pivot.touches >= 4) {
+        baseStrength = 'very_strong';
+    } else if (pivot.touches >= 3) {
+        baseStrength = 'strong';
+    } else if (pivot.touches >= 2) {
+        baseStrength = 'moderate';
+    }
+    
+    // Ajustar baseado no timeframe
+    const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
+    
+    if (timeframeWeight >= 3.0 && baseStrength !== 'weak') {
+        // Upgrade de força para timeframes maiores
+        if (baseStrength === 'moderate') return 'strong';
+        if (baseStrength === 'strong') return 'very_strong';
+    }
+    
+    return baseStrength;
+}
+
+function findNearestPivotMultiTimeframe(pivots, currentPrice, isSupport) {
+    if (pivots.length === 0) return null;
+    
+    let nearest = null;
+    let minDistance = Infinity;
+    
+    for (const pivot of pivots) {
+        const distance = Math.abs(currentPrice - pivot.price);
+        
+        // Aplicar peso do timeframe na distância
+        const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0;
+        const adjustedDistance = distance / timeframeWeight;
+        
+        if (adjustedDistance < minDistance) {
+            if ((isSupport && pivot.price < currentPrice) || 
+                (!isSupport && pivot.price > currentPrice)) {
+                minDistance = adjustedDistance;
+                nearest = pivot;
+            }
+        }
+    }
+    
+    return nearest;
+}
+
+function checkTestingPivotMultiTimeframe(currentPrice, allPivots) {
+    const tolerance = currentPrice * PIVOT_POINTS_SETTINGS.priceTolerance;
+    
+    for (const pivot of allPivots) {
+        if (Math.abs(currentPrice - pivot.price) <= tolerance) {
+            return {
+                price: pivot.price,
+                type: pivot.type,
+                strength: pivot.strength,
+                timeframe: pivot.timeframe,
+                touches: pivot.touches,
+                distance: Math.abs(currentPrice - pivot.price),
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0
+            };
+        }
+    }
+    
+    return null;
 }
 
 function findPivotHighs(highs, minDistance) {
@@ -2766,14 +3323,14 @@ function findPivotLows(lows, minDistance) {
     return pivots;
 }
 
-function classifyPivots(pivots, type, candles) {
+function classifyPivots(pivots, type, candles, timeframe) {
     const classified = [];
     
     for (const pivot of pivots) {
         let touches = 1;
         for (let i = pivot.index + 1; i < candles.length; i++) {
             const candle = candles[i];
-            const priceRange = pivot.price * 0.005;
+            const priceRange = pivot.price * PIVOT_POINTS_SETTINGS.priceTolerance;
             
             if ((type === 'support' && candle.low <= pivot.price + priceRange && candle.low >= pivot.price - priceRange) ||
                 (type === 'resistance' && candle.high <= pivot.price + priceRange && candle.high >= pivot.price - priceRange)) {
@@ -2781,79 +3338,16 @@ function classifyPivots(pivots, type, candles) {
             }
         }
         
-        let strength = 'weak';
-        if (touches >= 4) {
-            strength = 'strong';
-        } else if (touches >= 3) {
-            strength = 'moderate';
-        }
-        
         classified.push({
             price: pivot.price,
             type: type,
-            strength: strength,
             touches: touches,
-            index: pivot.index
+            index: pivot.index,
+            timeframe: timeframe
         });
     }
     
     return classified;
-}
-
-function findNearestPivot(pivots, currentPrice, isSupport) {
-    if (pivots.length === 0) return null;
-    
-    let nearest = null;
-    let minDistance = Infinity;
-    
-    for (const pivot of pivots) {
-        const distance = Math.abs(currentPrice - pivot.price);
-        
-        if (distance < minDistance) {
-            if ((isSupport && pivot.price < currentPrice) || 
-                (!isSupport && pivot.price > currentPrice)) {
-                minDistance = distance;
-                nearest = pivot;
-            }
-        }
-    }
-    
-    return nearest;
-}
-
-function checkTestingPivot(currentPrice, supportPivots, resistancePivots, candles) {
-    const recentCandles = candles.slice(-5);
-    const tolerance = currentPrice * 0.005;
-    
-    for (const support of supportPivots) {
-        for (const candle of recentCandles) {
-            if (Math.abs(candle.low - support.price) <= tolerance) {
-                return {
-                    price: support.price,
-                    type: 'support',
-                    strength: support.strength,
-                    candleTime: new Date(candle.time).toLocaleTimeString(),
-                    distance: Math.abs(currentPrice - support.price)
-                };
-            }
-        }
-    }
-    
-    for (const resistance of resistancePivots) {
-        for (const candle of recentCandles) {
-            if (Math.abs(candle.high - resistance.price) <= tolerance) {
-                return {
-                    price: resistance.price,
-                    type: 'resistance',
-                    strength: resistance.strength,
-                    candleTime: new Date(candle.time).toLocaleTimeString(),
-                    distance: Math.abs(currentPrice - resistance.price)
-                };
-            }
-        }
-    }
-    
-    return null;
 }
 
 // =====================================================================
@@ -3406,9 +3900,11 @@ async function sendInitializationMessage(allSymbols) {
 ${brazilTime.full}
 🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}
 📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)
-📈 +8 pontos para K cruzando D na direção correta
-🎯 Foco em: Volume, LSR Binance, RSI ajustado, Pivot Points, Funding Rate
+📈 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)
+🎯 Foco em: Volume Robusto, LSR Binance, RSI ajustado, Pivot Points Multi-TF, Funding Rate
 🔧 LSR: Apenas Binance API (com percentual de mudança)
+🔧 Volume: Média Móvel (VMA), Z-Score, Volume-Price Trend
+🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
 🔧 Funding Rate: Emojis coloridos para visualização rápida
 🔧 by @J4Rviz.
         `;
@@ -3600,21 +4096,11 @@ async function getRSI1h(symbol) {
 
 async function checkVolume(symbol) {
     try {
-        const candles = await getCandlesCached(symbol, '3m', 50);
-        if (candles.length < 20) return { rawRatio: 0, isAbnormal: false };
-
-        const volumes = candles.map(c => c.volume);
-        const currentVolume = volumes[volumes.length - 1];
-        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-
-        const ratio = currentVolume / avgVolume;
-
-        return {
-            rawRatio: ratio,
-            isAbnormal: ratio >= VOLUME_SETTINGS.baseThreshold
-        };
+        // Usar a nova função robusta de detecção de volume
+        const volumeAnalysis = await checkVolumeRobust(symbol);
+        return volumeAnalysis;
     } catch (error) {
-        return { rawRatio: 0, isAbnormal: false };
+        return { rawRatio: 0, isAbnormal: false, robustData: null };
     }
 }
 
@@ -3962,14 +4448,16 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     let details = [];
     let failedChecks = [];
 
-    // 1. Volume
-    if (marketData.volume && marketData.volume.rawRatio >= VOLUME_SETTINGS.baseThreshold) {
+    // 1. Volume (ATUALIZADO: usando análise robusta)
+    const volumeData = marketData.volume?.robustData;
+    if (volumeData && volumeData.combinedScore >= 0.5) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume,
-            QUALITY_WEIGHTS.volume * (marketData.volume.rawRatio / 2.0));
+            QUALITY_WEIGHTS.volume * volumeData.combinedScore);
         score += volumeScore;
-        details.push(` Vol 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${marketData.volume.rawRatio.toFixed(2)}x)`);
+        details.push(` Vol 3m Robusto: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (Score: ${volumeData.combinedScore.toFixed(2)} - ${volumeData.classification})`);
+        details.push(`   VMA: ${volumeData.vmaRatio.toFixed(2)}x | Z-Score: ${volumeData.zScore.toFixed(2)} | VPT: ${volumeData.vpt.priceMovementPercent.toFixed(2)}%`);
     } else {
-        failedChecks.push(`Vol 3m: ${marketData.volume?.rawRatio.toFixed(2) || 0}x < ${VOLUME_SETTINGS.baseThreshold}x`);
+        failedChecks.push(`Vol 3m: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
     }
 
     // 2. Volatilidade
@@ -4163,7 +4651,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Distância S/R: ${srDetail}`);
     }
 
-    // 14. Pivot Points
+    // 14. Pivot Points (ATUALIZADO: Com diferenciação de timeframe)
     if (marketData.pivotPoints) {
         let pivotScore = 0;
         let pivotDetail = '';
@@ -4172,26 +4660,43 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         
         if (nearestPivot) {
             const distance = nearestPivot.distancePercent || 0;
+            const pivotStrength = nearestPivot.strength || 'unknown';
+            const timeframe = nearestPivot.timeframe || 'unknown';
+            const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
+            const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
             
-            if (distance >= 2.0) {
+            // Calcular score baseado na distância relativa à distância segura
+            const distanceRatio = distance / safeDistance;
+            
+            if (distanceRatio >= 1.5) {
+                // Muito longe - ponto positivo
                 pivotScore = QUALITY_WEIGHTS.pivotPoints;
-                pivotDetail = `${pivotScore}/${QUALITY_WEIGHTS.pivotPoints} (Boa distância do pivot ${nearestPivot.type}: ${distance.toFixed(2)}%)`;
-            } else if (distance >= 1.0) {
-                pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.7;
-                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Pivot ${nearestPivot.type} próximo: ${distance.toFixed(2)}%)`;
-            } else if (distance >= 0.5) {
-                pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.3;
-                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Muito próximo do pivot ${nearestPivot.type}: ${distance.toFixed(2)}%)`;
+                pivotDetail = `${pivotScore}/${QUALITY_WEIGHTS.pivotPoints} (Excelente distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% > ${safeDistance.toFixed(1)}%)`;
+            } else if (distanceRatio >= 1.0) {
+                // Distância segura
+                pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.8;
+                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Boa distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% ≥ ${safeDistance.toFixed(1)}%)`;
+            } else if (distanceRatio >= 0.5) {
+                // Próximo mas não crítico
+                pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.4;
+                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Próximo do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
             } else {
+                // Muito próximo
                 pivotScore = 0;
-                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (EXTREMAMENTE PRÓXIMO DO PIVOT ${nearestPivot.type.toUpperCase()}!)`;
-                failedChecks.push(`Pivot ${nearestPivot.type}: Muito próximo (${distance.toFixed(2)}%)`);
+                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (MUITO PRÓXIMO DO PIVOT ${pivotStrength.toUpperCase()} ${timeframe.toUpperCase()}!)`;
+                failedChecks.push(`Pivot ${pivotStrength} ${timeframe}: Muito próximo (${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`);
+            }
+            
+            // Penalizar pivots fortes muito próximos
+            if (timeframeWeight >= 2.0 && distanceRatio < 0.8) {
+                pivotScore = Math.max(0, pivotScore - 2);
+                pivotDetail += ` | PIVOT FORTE PRÓXIMO`;
             }
             
             if (nearestPivot.isTesting) {
                 pivotScore = 0;
-                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (TESTANDO PIVOT ${nearestPivot.type.toUpperCase()}!)`;
-                failedChecks.push(`Pivot ${nearestPivot.type}: Testando nível`);
+                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (TESTANDO PIVOT ${pivotStrength.toUpperCase()} ${timeframe.toUpperCase()}!)`;
+                failedChecks.push(`Pivot ${pivotStrength} ${timeframe}: Testando nível`);
             }
         } else {
             pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.5;
@@ -4417,6 +4922,8 @@ async function monitorSymbol(symbol) {
         const pivotInfo = pivotPointsData?.nearestPivot;
         const pivotDistance = pivotInfo?.distancePercent?.toFixed(2) || 'N/A';
         const pivotType = pivotInfo?.type || 'N/A';
+        const pivotStrength = pivotInfo?.strength || 'N/A';
+        const pivotTimeframe = pivotInfo?.timeframe || 'N/A';
 
         // Obter funding rate com emojis
         const fundingRate = fundingData.raw || 0;
@@ -4433,10 +4940,20 @@ async function monitorSymbol(symbol) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
             : 'Indisponível';
 
+        // Informações de volume robusto
+        const volumeRobustData = volumeData.robustData;
+        const volumeScore = volumeRobustData?.combinedScore?.toFixed(2) || '0.00';
+        const volumeClassification = volumeRobustData?.classification || 'NORMAL';
+        const vmaRatio = volumeRobustData?.vmaRatio?.toFixed(2) || 'N/A';
+        const zScore = volumeRobustData?.zScore?.toFixed(2) || 'N/A';
+
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status}) | Vol: ${volumeData.rawRatio.toFixed(2)}x | LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
-        console.log(`   📈 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
-        console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}%`);
+        console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
+        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x (Score: ${volumeScore} - ${volumeClassification})`);
+        console.log(`   📊 VMA: ${vmaRatio}x | Z-Score: ${zScore}`);
+        console.log(`   📊 LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
+        console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
+        console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   📊 Stoch 1h: ${stochData.isValid ? '✅' : '❌'} (K:${stochData.kValue?.toFixed(1) || 'N/A'}, D:${stochData.dValue?.toFixed(1) || 'N/A'})`);
         console.log(`   💰 Funding: ${fundingRateText}`);
 
@@ -4509,7 +5026,9 @@ async function mainBotLoop() {
     console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
     console.log(`🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
     console.log(`📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)`);
+    console.log(`📈 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)`);
     console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
+    console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
     console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
 
     await sendInitializationMessage(allSymbols);
@@ -4611,13 +5130,13 @@ async function sendMarketRiskReport() {
         const now = getBrazilianDateTime();
 
         const message = `
-🛡️ <b>RELATÓRIO DE RISCO DE MERCADO</b>
+🛡️ <i>⚠️IA SENSITIVE - RISCO / VOLATILIDADE⚠️</i>
 ${now.full}
 
-• <b>Nível de Risco Geral:</b> ${marketRisk.riskLevel} ${marketRisk.riskLevel === 'CRITICAL' ? '🚨' : marketRisk.riskLevel === 'HIGH' ? '🔴' : marketRisk.riskLevel === 'MEDIUM' ? '🟡' : '🟢'}
-• <b>Score Médio de Risco:</b> ${marketRisk.averageRiskScore.toFixed(2)}/15
-• <b>Símbolos Monitorados:</b> ${marketRisk.monitoredSymbols}
-• <b>Horário:</b> ${now.full}
+• <i>Nível de Risco Geral:</i> ${marketRisk.riskLevel} ${marketRisk.riskLevel === 'CRÍTICO' ? '🚨' : marketRisk.riskLevel === 'ALTO' ? '🔴' : marketRisk.riskLevel === 'MEDIANO' ? '🟡' : '🟢'}
+• <i>Score Médio de Risco:</i> ${marketRisk.averageRiskScore.toFixed(2)}/15
+• <i>Símbolos Monitorados:</i> ${marketRisk.monitoredSymbols}
+• <i>Horário:</I> ${now.full}
 
 <i>✨Titanium Risk Management by @J4Rviz✨</i>
         `;
@@ -4641,7 +5160,7 @@ async function sendLearningReport() {
         const worstPatterns = report.worstPatterns.map(([pattern, count]) => `${pattern}: ${count} trades`).join('\n');
 
         const message = `
-🧠 <b>RELATÓRIO DE APRENDIZADO (ATUALIZADO)</b>
+🧠 <i>RELATÓRIO </i>
 ${now.full}
 
 • <b>Trades Totais:</b> ${report.totalTrades}
@@ -4734,7 +5253,9 @@ async function startBot() {
         console.log('🚀 TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
         console.log(`📊 RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
         console.log(`📈 Stochastic 1h: 14,3,3 (8 pontos)`);
+        console.log(`📊 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)`);
         console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
+        console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
         console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
         console.log('='.repeat(80) + '\n');
 
