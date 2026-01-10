@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -32,32 +32,32 @@ const VOLUME_SETTINGS = {
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
 const VOLUME_ROBUST_SETTINGS = {
     // Média Móvel Exponencial (EMA) do Volume
-    emaPeriod: 20,           // Períodos para a EMA do volume
-    emaAlpha: 0.2,           // Fator de suavização (α) para EMA
-    
+    emaPeriod: 20,           // Mantido – bom equilíbrio entre sensibilidade e suavização
+    emaAlpha: 0.25,          // ↑ ligeiramente mais responsivo (de 0.2 → 0.25)
+
     // Z-Score do Volume com lookback adaptativo
-    baseZScoreLookback: 50,  // Lookback base para Z-Score
-    minZScoreLookback: 20,   // Lookback mínimo para alta volatilidade
-    maxZScoreLookback: 100,  // Lookback máximo para baixa volatilidade
-    zScoreThreshold: 2.0,    // Z-Score mínimo para considerar outlier
-    
+    baseZScoreLookback: 45,  // ↓ um pouco mais curto → responde melhor a mudanças rápidas
+    minZScoreLookback: 15,   // ↓ permite reação mais ágil em alta volatilidade
+    maxZScoreLookback: 90,   // ↓ evita over-smoothing em mercados calmos
+    zScoreThreshold: 1.8,    // ↓ de 2.0 → aceita volumes "acima do normal", não só "outliers"
+
     // Volume-Price Trend (VPT)
-    vptThreshold: 0.5,       // Mínimo movimento de preço percentual
-    minPriceMovement: 0.15,  // 0.15% mínimo de movimento de preço
-    
-    // Configurações combinadas
-    combinedMultiplier: 1.2, // Multiplicador para sinais combinados
-    volumeWeight: 0.4,       // Peso do volume no score final
-    emaWeight: 0.3,          // Peso da EMA no score final
-    zScoreWeight: 0.2,       // Peso do Z-Score no score final
-    vptWeight: 0.1,          // Peso do VPT no score final
-    
-    // Thresholds mínimos para confirmação
+    vptThreshold: 0.4,       // ↓ de 0.5 → aceita movimentos menores com volume
+    minPriceMovement: 0.12,  // ↓ de 0.15% → mais sensível a micro-movimentos
+
+    // Configurações combinadas – pesos ajustados para priorizar confirmação múltipla
+    combinedMultiplier: 1.15,// ↓ ligeiramente menos agressivo
+    volumeWeight: 0.35,      // ↓ levemente reduzido
+    emaWeight: 0.35,         // ↑ aumentado – EMA é sinal mais confiável que volume isolado
+    zScoreWeight: 0.2,       // mantido
+    vptWeight: 0.1,          // mantido
+
+    // Thresholds mínimos para confirmação – MAIS FLEXÍVEIS, MAS NÃO PERMISSIVOS
     minimumThresholds: {
-        combinedScore: 0.4,
-        emaRatio: 1.3,
-        zScore: 0.5,
-        classification: 'MODERADO'
+        combinedScore: 0.25,   // ✅ principal ajuste: de 0.4 → 0.25 (permite "volume fraco-moderado")
+        emaRatio: 1.2,         // ↓ de 1.3 → aceita setups iniciais
+        zScore: 0.4,           // ↓ de 0.5 → ainda filtra ruído
+        classification: 'BAIXO' // ✅ agora aceita até "BAIXO", desde que outros critérios confirmem
     }
 };
 
