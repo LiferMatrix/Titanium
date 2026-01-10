@@ -6,11 +6,19 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
-const LIVE_MODE = true; 
+const LIVE_MODE = true;
+
+// === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
+const VOLUME_MINIMUM_THRESHOLDS = {
+    absoluteScore: 0.3,           // Score mínimo absoluto (0-1)
+    combinedScore: 0.4,           // Score combinado mínimo
+    classification: 'MODERADO',   // Classificação mínima aceitável
+    requireConfirmation: true     // Requer confirmação de volume
+};
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
@@ -42,7 +50,15 @@ const VOLUME_ROBUST_SETTINGS = {
     volumeWeight: 0.4,       // Peso do volume no score final
     emaWeight: 0.3,          // Peso da EMA no score final
     zScoreWeight: 0.2,       // Peso do Z-Score no score final
-    vptWeight: 0.1           // Peso do VPT no score final
+    vptWeight: 0.1,          // Peso do VPT no score final
+    
+    // Thresholds mínimos para confirmação
+    minimumThresholds: {
+        combinedScore: 0.4,
+        emaRatio: 1.3,
+        zScore: 0.5,
+        classification: 'MODERADO'
+    }
 };
 
 const VOLATILITY_PERIOD = 20;
@@ -56,7 +72,7 @@ const LSR_SELL_THRESHOLD = 2.5;
 
 // === ATUALIZADO: CONFIGURAÇÕES RSI ===
 const RSI_BUY_MAX = 56; 
-const RSI_SELL_MIN = 70; 
+const RSI_SELL_MIN = 70;
 
 const COOLDOWN_SETTINGS = {
     sameDirection: 30 * 60 * 1000,
@@ -75,13 +91,13 @@ const QUALITY_WEIGHTS = {
     emaAlignment: 12,
     adx: 8,
     adx1h: 15,
-    stoch1h: 8, 
+    stoch1h: 8,
     stoch4h: 5,
     cci4h: 8,
     breakoutRisk: 12,
     supportResistance: 12,
     pivotPoints: 12,
-    funding: 10  
+    funding: 10
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -2400,19 +2416,47 @@ async function sendTelegramAlert(message) {
 }
 
 // =====================================================================
+// 📊 FUNÇÃO PARA VERIFICAR CONFIRMAÇÃO DE VOLUME
+// =====================================================================
+
+function checkVolumeConfirmation(volumeData) {
+    if (!volumeData) {
+        return false;
+    }
+
+    const combinedScore = volumeData.combinedScore || 0;
+    const classification = volumeData.classification || '';
+    const emaRatio = volumeData.emaRatio || 0;
+    const zScore = volumeData.zScore || 0;
+
+    // Verificar se o volume está confirmado
+    const isConfirmed = 
+        combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
+        emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
+        Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore &&
+        (!classification.includes('BAIXO') && !classification.includes('INSUFICIENTE'));
+
+    return isConfirmed;
+}
+
+// =====================================================================
 // 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
     try {
+        const volumeData = signal.marketData.volume?.robustData;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
+        
+        // VERIFICAR SE O VOLUME É SUFICIENTE PARA SINAL DE COMPRA/VENDA
+        const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
+        
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
-
-        const volumeData = signal.marketData.volume?.robustData;
+        
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-        const volumeScore = volumeData?.combinedScore || 0;
-        const volumeClassification = volumeData?.classification || 'NORMAL';
         
         // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
@@ -2463,67 +2507,114 @@ async function sendSignalAlertWithRisk(signal) {
             }
         });
 
+        // DECIDIR SE É UM ALERTA DE COMPRA/VENDA OU APENAS ANÁLISE
+        let alertTitle = '';
+        let alertType = '';
+        
+        if (isVolumeConfirmed) {
+            // VOLUME CONFIRMADO: Enviar alerta de COMPRA/VENDA
+            alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
+            alertType = 'trade';
+        } else {
+            // VOLUME NÃO CONFIRMADO: Enviar apenas análise da IA
+            alertTitle = `🤖 <i>IA ANALISANDO...  ${signal.symbol}</i>`;
+            alertType = 'analysis';
+        }
+
         let message = `
-${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<i> Análise Técnica Avançada</i>
+<i> Indicadores Técnicos</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
-• VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
-• Dist S/R: ${distancePercent}%
+⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Vol Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• Dist. Suport/Resist.: ${distancePercent}%
 • Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
-• RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
+• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
 ${rsiWarning}
-<i>🤖 IA Titanium Análise </i>
+<i>🤖 IA Titanium Reação Momentum </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
+${!isVolumeConfirmed ? `• 🔶 ATENÇÃO NO VOLUME: Score ${volumeScore.toFixed(2)} - Aguarde confirmação` : ''}
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
+        `;
 
+        // APENAS ADICIONAR DICAS DE ENTRADA E ALVOS SE O VOLUME ESTIVER CONFIRMADO
+        if (isVolumeConfirmed) {
+            message += `
 <i> 💡Dica de Entrada : </i>
 • Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 <i> Alvos:</i>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+            `;
+        } else {
+            message += `
+<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</i>
+• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
+• EMA Ratio: ${volumeData?.emaRatio?.toFixed(2) || 'N/A'}x (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio}x)
+• Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'} (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore})
+            `;
+        }
+
+        message += `
 <i>✨Titanium by @J4Rviz✨</i>
         `;
 
         await sendTelegramAlert(message);
 
-        console.log(`\n📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`\n📤 ${alertType === 'trade' ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})`);
         console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
         console.log(`   Confiança: ${riskAssessment.confidence}%`);
         console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
+        console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   Funding: ${fundingRateText}`);
 
+        // Retornar o tipo de alerta enviado
+        return {
+            type: alertType,
+            volumeConfirmed: isVolumeConfirmed,
+            volumeScore: volumeScore
+        };
+
     } catch (error) {
         console.error('Erro ao enviar alerta com risk layer:', error.message);
-        await sendSignalAlert(signal);
+        return await sendSignalAlert(signal);
     }
 }
 
 async function sendSignalAlert(signal) {
     try {
+        const volumeData = signal.marketData.volume?.robustData;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
+        
+        // VERIFICAR SE O VOLUME É SUFICIENTE
+        const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
+        
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
+        
+        let alertTitle = '';
+        if (isVolumeConfirmed) {
+            alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
+        } else {
+            alertTitle = `🤖 <b>IA ANALISANDO: ${signal.symbol}</b>`;
+        }
 
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
-        const volumeData = signal.marketData.volume?.robustData;
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-        const volumeScore = volumeData?.combinedScore || 0;
-        const volumeClassification = volumeData?.classification || 'NORMAL';
         
         // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
@@ -2558,8 +2649,8 @@ async function sendSignalAlert(signal) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}% ${signal.marketData.funding?.isRising ? '⬆️' : '⬇️'}`
             : '🔹 Indisp.';
 
-        const message = `
-${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+        let message = `
+${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <b>🎯 ANÁLISE TÉCNICA AVANÇADA</b>
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
@@ -2571,19 +2662,36 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Dist S/R: ${distancePercent}% | Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • Fund. Rate: ${fundingRateText}
+${!isVolumeConfirmed ? `\n<b>⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</b>` : ''}
+        `;
+
+        // APENAS ADICIONAR ALVOS SE O VOLUME ESTIVER CONFIRMADO
+        if (isVolumeConfirmed) {
+            message += `
 <b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
 <b>📍 ENTRADA</b>
 • Liquidez 1: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+            `;
+        } else {
+            message += `
+<b>⚠️ RECOMENDAÇÃO:</b>
+• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
+• Monitorar para possível entrada futura
+            `;
+        }
+
+        message += `
 <i>✨🤖IA Titanium by @J4Rviz</i>
         `;
 
         await sendTelegramAlert(message);
 
-        console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`📤 ${isVolumeConfirmed ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
+        console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
@@ -2788,8 +2896,13 @@ async function checkVolumeRobust(symbol) {
         // 5. CLASSIFICAÇÃO
         const classification = classifyVolumeStrength(combinedScore);
         
-        // 6. VERIFICAR ANORMALIDADE
-        const isAbnormal = combinedScore >= 0.6 || zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold;
+        // 6. VERIFICAR SE O VOLUME ESTÁ CONFIRMADO
+        const isVolumeConfirmed = checkVolumeRobustConfirmation({
+            combinedScore,
+            classification,
+            emaRatio,
+            zScore
+        });
         
         // Razão bruta para compatibilidade
         const rawRatio = currentVolume / emaData.averageVolume || 1;
@@ -2806,15 +2919,15 @@ async function checkVolumeRobust(symbol) {
             vptScore,
             combinedScore,
             classification,
-            isAbnormal,
+            isVolumeConfirmed,
             rawRatio,
             details: {
                 volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(2) + '%',
                 emaPeriod: VOLUME_ROBUST_SETTINGS.emaPeriod,
                 emaAlpha: VOLUME_ROBUST_SETTINGS.emaAlpha,
                 zScoreLookback: adaptiveLookback,
-                isEMAValid: emaRatio >= 1.5,
-                isZScoreValid: zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
+                isEMAValid: emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio,
+                isZScoreValid: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore,
                 isVPTValid: vptData.priceMovementPercent >= VOLUME_ROBUST_SETTINGS.vptThreshold
             }
         };
@@ -2825,11 +2938,11 @@ async function checkVolumeRobust(symbol) {
         console.log(`   Z-Score: ${zScore.toFixed(2)} (Lookback: ${adaptiveLookback})`);
         console.log(`   VPT: ${vptData.priceMovementPercent.toFixed(2)}% (${vptData.trendDirection})`);
         console.log(`   Score Combinado: ${combinedScore.toFixed(2)} (${classification})`);
-        console.log(`   Anormal: ${isAbnormal ? '✅' : '❌'}`);
+        console.log(`   Confirmado: ${isVolumeConfirmed ? '✅' : '❌'}`);
         
         return {
             rawRatio,
-            isAbnormal,
+            isAbnormal: combinedScore >= 0.6 || Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
             robustData
         };
         
@@ -2841,6 +2954,23 @@ async function checkVolumeRobust(symbol) {
             robustData: null
         };
     }
+}
+
+function checkVolumeRobustConfirmation(volumeData) {
+    const {
+        combinedScore,
+        classification,
+        emaRatio,
+        zScore
+    } = volumeData;
+    
+    return (
+        combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
+        emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
+        Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore &&
+        !classification.includes('BAIXO') &&
+        !classification.includes('INSUFICIENTE')
+    );
 }
 
 // Função para calcular EMA do volume
@@ -3953,6 +4083,10 @@ ${brazilTime.full}
 🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
 🔧 Funding Rate: Emojis coloridos para visualização rápida
 🔧 by @J4Rviz.
+
+<b>⚠️ NOVO SISTEMA DE CLASSIFICAÇÃO:</b>
+• Volume Score ≥ 0.4: Alerta de COMPRA/VENDA
+• Volume Score < 0.4: "🤖 IA ANALISANDO..." (apenas análise)
         `;
 
         console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
@@ -5068,19 +5202,16 @@ async function mainBotLoop() {
         return;
     }
 
-    console.log(`\n🚀 TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES`);
-    console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
-    console.log(`🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
-    console.log(`📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)`);
-    console.log(`📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)`);
-    console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
-    console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
-    console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
+    console.log(`\n TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES`);
+    console.log(` ${allSymbols.length} ativos Binance Futures`);
+    console.log(` RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
+    console.log(`  Score < 0.4: "🤖 IA ANALISANDO...")`);
 
     await sendInitializationMessage(allSymbols);
 
     let consecutiveErrors = 0;
     let totalSignals = 0;
+    let totalAnalysis = 0;
     let lastReportTime = Date.now();
     let lastRiskReportTime = Date.now();
 
@@ -5123,7 +5254,10 @@ async function mainBotLoop() {
 
             for (const signal of signals) {
                 if (signal.qualityScore.score >= QUALITY_THRESHOLD) {
-                    await sendSignalAlertWithRisk(signal);
+                    const alertResult = await sendSignalAlertWithRisk(signal);
+                    if (alertResult && alertResult.type === 'analysis') {
+                        totalAnalysis++;
+                    }
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
@@ -5141,7 +5275,7 @@ async function mainBotLoop() {
             }
 
             const status = symbolManager.getCurrentStatus();
-            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais`);
+            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
 
             consecutiveErrors = 0;
 
@@ -5296,13 +5430,9 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
-        console.log(`📊 RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
-        console.log(`📈 Stochastic 1h: 14,3,3 (8 pontos)`);
-        console.log(`📊 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)`);
-        console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
-        console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
-        console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
+        console.log(' TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
+        console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
+        console.log(` Stochastic 1h: 14,3,3 (8 pontos)`);
         console.log('='.repeat(80) + '\n');
 
         try {
