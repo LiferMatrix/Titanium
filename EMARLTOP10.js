@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicator
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5O';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true; 
@@ -21,25 +21,27 @@ const VOLUME_SETTINGS = {
     useAdaptive: true
 };
 
-// === NOVAS CONFIGURAÇÕES DE VOLUME ROBUSTO ===
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
 const VOLUME_ROBUST_SETTINGS = {
-    // Média Móvel de Volume (VMA)
-    vmaPeriod: 20,            // Períodos para a média móvel de volume
-    vmaThreshold: 1.8,        // Volume atual deve ser maior que VMA * threshold
+    // Média Móvel Exponencial (EMA) do Volume
+    emaPeriod: 20,           // Períodos para a EMA do volume
+    emaAlpha: 0.2,           // Fator de suavização (α) para EMA
     
-    // Z-Score do Volume
-    zScoreLookback: 50,       // Períodos para cálculo do Z-Score
-    zScoreThreshold: 2.0,     // Z-Score mínimo para considerar outlier
+    // Z-Score do Volume com lookback adaptativo
+    baseZScoreLookback: 50,  // Lookback base para Z-Score
+    minZScoreLookback: 20,   // Lookback mínimo para alta volatilidade
+    maxZScoreLookback: 100,  // Lookback máximo para baixa volatilidade
+    zScoreThreshold: 2.0,    // Z-Score mínimo para considerar outlier
     
     // Volume-Price Trend (VPT)
-    vptThreshold: 0.5,        // Mínimo movimento de preço percentual
-    minPriceMovement: 0.15,   // 0.15% mínimo de movimento de preço
+    vptThreshold: 0.5,       // Mínimo movimento de preço percentual
+    minPriceMovement: 0.15,  // 0.15% mínimo de movimento de preço
     
     // Configurações combinadas
-    combinedMultiplier: 1.2,  // Multiplicador para sinais combinados
-    volumeWeight: 0.4,        // Peso do volume no score final
-    vmaWeight: 0.3,           // Peso da VMA no score final
-    zScoreWeight: 0.2,        // Peso do Z-Score no score final
+    combinedMultiplier: 1.2, // Multiplicador para sinais combinados
+    volumeWeight: 0.4,       // Peso do volume no score final
+    emaWeight: 0.3,          // Peso da EMA no score final
+    zScoreWeight: 0.2,       // Peso do Z-Score no score final
     vptWeight: 0.1           // Peso do VPT no score final
 };
 
@@ -54,7 +56,7 @@ const LSR_SELL_THRESHOLD = 2.5;
 
 // === ATUALIZADO: CONFIGURAÇÕES RSI ===
 const RSI_BUY_MAX = 56; 
-const RSI_SELL_MIN = 66; 
+const RSI_SELL_MIN = 70; 
 
 const COOLDOWN_SETTINGS = {
     sameDirection: 30 * 60 * 1000,
@@ -2743,8 +2745,8 @@ async function getBinanceLSRValue(symbol, period = '15m') {
 async function checkVolumeRobust(symbol) {
     try {
         // Buscar candles de 3 minutos
-        const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.zScoreLookback);
-        if (candles.length < VOLUME_ROBUST_SETTINGS.vmaPeriod) {
+        const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.maxZScoreLookback);
+        if (candles.length < VOLUME_ROBUST_SETTINGS.emaPeriod) {
             return {
                 rawRatio: 0,
                 isAbnormal: false,
@@ -2759,13 +2761,14 @@ async function checkVolumeRobust(symbol) {
         const currentVolume = volumes[volumes.length - 1];
         const previousVolume = volumes[volumes.length - 2] || currentVolume;
         
-        // 1. MÉDIA MÓVEL DE VOLUME (VMA)
-        const vmaData = calculateVMA(volumes, VOLUME_ROBUST_SETTINGS.vmaPeriod);
-        const vmaRatio = currentVolume / vmaData.currentVMA;
-        const vmaScore = calculateVMAScore(vmaRatio);
+        // 1. MÉDIA MÓVEL EXPONENCIAL (EMA) DO VOLUME
+        const emaData = calculateVolumeEMA(volumes, VOLUME_ROBUST_SETTINGS.emaPeriod, VOLUME_ROBUST_SETTINGS.emaAlpha);
+        const emaRatio = currentVolume / emaData.currentEMA;
+        const emaScore = calculateEMAScore(emaRatio);
         
-        // 2. Z-SCORE DO VOLUME
-        const zScoreData = calculateVolumeZScore(volumes);
+        // 2. Z-SCORE DO VOLUME COM LOOKBACK DINÂMICO
+        const adaptiveLookback = calculateAdaptiveZScoreLookback(closes);
+        const zScoreData = calculateVolumeZScore(volumes, adaptiveLookback);
         const zScore = zScoreData.currentZScore;
         const zScoreScore = calculateZScoreScore(zScore);
         
@@ -2775,10 +2778,10 @@ async function checkVolumeRobust(symbol) {
         
         // 4. CALCULAR SCORE COMBINADO
         const combinedScore = calculateCombinedVolumeScore({
-            vmaScore,
+            emaScore,
             zScoreScore,
             vptScore,
-            vmaRatio,
+            emaRatio,
             zScore
         });
         
@@ -2786,20 +2789,19 @@ async function checkVolumeRobust(symbol) {
         const classification = classifyVolumeStrength(combinedScore);
         
         // 6. VERIFICAR ANORMALIDADE
-        const isAbnormal = combinedScore >= VOLUME_ROBUST_SETTINGS.vmaThreshold || 
-                          zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold;
+        const isAbnormal = combinedScore >= 0.6 || zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold;
         
         // Razão bruta para compatibilidade
-        const rawRatio = currentVolume / vmaData.averageVolume || 1;
+        const rawRatio = currentVolume / emaData.averageVolume || 1;
         
         const robustData = {
             currentVolume,
             previousVolume,
-            vma: vmaData.currentVMA,
-            vmaRatio,
+            ema: emaData.currentEMA,
+            emaRatio,
             zScore,
             vpt: vptData,
-            vmaScore,
+            emaScore,
             zScoreScore,
             vptScore,
             combinedScore,
@@ -2808,9 +2810,10 @@ async function checkVolumeRobust(symbol) {
             rawRatio,
             details: {
                 volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(2) + '%',
-                vmaPeriod: VOLUME_ROBUST_SETTINGS.vmaPeriod,
-                zScorePeriod: VOLUME_ROBUST_SETTINGS.zScoreLookback,
-                isVMAValid: vmaRatio >= VOLUME_ROBUST_SETTINGS.vmaThreshold,
+                emaPeriod: VOLUME_ROBUST_SETTINGS.emaPeriod,
+                emaAlpha: VOLUME_ROBUST_SETTINGS.emaAlpha,
+                zScoreLookback: adaptiveLookback,
+                isEMAValid: emaRatio >= 1.5,
                 isZScoreValid: zScore >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
                 isVPTValid: vptData.priceMovementPercent >= VOLUME_ROBUST_SETTINGS.vptThreshold
             }
@@ -2818,8 +2821,8 @@ async function checkVolumeRobust(symbol) {
         
         console.log(`📊 Volume Robust ${symbol} (3m):`);
         console.log(`   Volume: ${currentVolume.toFixed(2)} (${robustData.details.volumeChange})`);
-        console.log(`   VMA: ${vmaData.currentVMA.toFixed(2)} (${vmaRatio.toFixed(2)}x)`);
-        console.log(`   Z-Score: ${zScore.toFixed(2)}`);
+        console.log(`   EMA: ${emaData.currentEMA.toFixed(2)} (${emaRatio.toFixed(2)}x, α=${VOLUME_ROBUST_SETTINGS.emaAlpha})`);
+        console.log(`   Z-Score: ${zScore.toFixed(2)} (Lookback: ${adaptiveLookback})`);
         console.log(`   VPT: ${vptData.priceMovementPercent.toFixed(2)}% (${vptData.trendDirection})`);
         console.log(`   Score Combinado: ${combinedScore.toFixed(2)} (${classification})`);
         console.log(`   Anormal: ${isAbnormal ? '✅' : '❌'}`);
@@ -2840,31 +2843,73 @@ async function checkVolumeRobust(symbol) {
     }
 }
 
-function calculateVMA(volumes, period) {
+// Função para calcular EMA do volume
+function calculateVolumeEMA(volumes, period, alpha) {
     if (volumes.length < period) {
         return {
-            currentVMA: volumes[volumes.length - 1] || 0,
-            averageVolume: volumes.reduce((a, b) => a + b, 0) / volumes.length || 0
+            currentEMA: volumes[volumes.length - 1] || 0,
+            averageVolume: volumes.reduce((a, b) => a + b, 0) / volumes.length || 0,
+            emaHistory: []
         };
     }
     
-    const recentVolumes = volumes.slice(-period);
-    const vma = recentVolumes.reduce((a, b) => a + b, 0) / period;
+    // Inicializar EMA com SMA
+    const initialSMA = volumes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    let ema = initialSMA;
+    const emaHistory = [ema];
+    
+    // Calcular EMA para os volumes restantes
+    for (let i = period; i < volumes.length; i++) {
+        ema = alpha * volumes[i] + (1 - alpha) * ema;
+        emaHistory.push(ema);
+    }
     
     // Calcular também a média geral para referência
     const averageVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
     
     return {
-        currentVMA: vma,
+        currentEMA: ema,
         averageVolume: averageVolume,
-        minVMA: Math.min(...recentVolumes),
-        maxVMA: Math.max(...recentVolumes),
-        vmaTrend: vma > (volumes[volumes.length - period - 1] || vma) ? 'rising' : 'falling'
+        minEMA: Math.min(...emaHistory),
+        maxEMA: Math.max(...emaHistory),
+        emaTrend: ema > emaHistory[emaHistory.length - 2] ? 'rising' : 'falling',
+        emaHistory: emaHistory
     };
 }
 
-function calculateVolumeZScore(volumes) {
-    if (volumes.length < 10) {
+// Função para calcular lookback adaptativo do Z-Score baseado na volatilidade
+function calculateAdaptiveZScoreLookback(closes) {
+    if (closes.length < 10) {
+        return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
+    }
+    
+    // Calcular volatilidade recente
+    const recentCloses = closes.slice(-20);
+    let sumReturns = 0;
+    for (let i = 1; i < recentCloses.length; i++) {
+        const returnVal = Math.abs((recentCloses[i] - recentCloses[i-1]) / recentCloses[i-1]);
+        sumReturns += returnVal;
+    }
+    const volatility = sumReturns / (recentCloses.length - 1) * 100;
+    
+    // Ajustar lookback baseado na volatilidade
+    if (volatility > 2.0) {
+        // Alta volatilidade: usar lookback menor
+        return Math.max(VOLUME_ROBUST_SETTINGS.minZScoreLookback, 
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 0.5);
+    } else if (volatility < 0.5) {
+        // Baixa volatilidade: usar lookback maior
+        return Math.min(VOLUME_ROBUST_SETTINGS.maxZScoreLookback,
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 1.5);
+    }
+    
+    // Volatilidade média: usar lookback base
+    return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
+}
+
+// Função atualizada para calcular Z-Score com lookback dinâmico
+function calculateVolumeZScore(volumes, lookback) {
+    if (volumes.length < lookback) {
         return {
             currentZScore: 0,
             mean: volumes[0] || 0,
@@ -2872,7 +2917,7 @@ function calculateVolumeZScore(volumes) {
         };
     }
     
-    const recentVolumes = volumes.slice(-VOLUME_ROBUST_SETTINGS.zScoreLookback);
+    const recentVolumes = volumes.slice(-lookback);
     const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
     
     // Calcular desvio padrão
@@ -2888,6 +2933,7 @@ function calculateVolumeZScore(volumes) {
         currentZScore: zScore,
         mean: mean,
         stdDev: stdDev,
+        lookbackUsed: lookback,
         isOutlier: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold
     };
 }
@@ -2902,7 +2948,7 @@ function calculateVolumePriceTrend(volumes, closes) {
         };
     }
     
-    // Calcular movimento de preço recente
+    // Calcular movimento de preço recente (últimas 5 velas)
     const recentCloses = closes.slice(-5);
     const priceChange = ((recentCloses[recentCloses.length - 1] - recentCloses[0]) / recentCloses[0]) * 100;
     
@@ -2947,26 +2993,26 @@ function calculateVolumePriceTrend(volumes, closes) {
             denomPrice += Math.pow(priceChanges[i] - avgPriceChange, 2);
         }
         
-        correlation = denominator !== 0 ? numerator / Math.sqrt(denomVolume * denomPrice) : 0;
+        correlation = numerator / Math.sqrt(denomVolume * denomPrice);
     }
     
     return {
         priceMovementPercent: priceChange,
         volumeTrend: recentVolumes[recentVolumes.length - 1] > avgVolume ? 'rising' : 'falling',
         trendDirection: trendDirection,
-        correlation: correlation,
+        correlation: isNaN(correlation) ? 0 : correlation,
         hasSignificantMovement: hasSignificantMovement
     };
 }
 
-function calculateVMAScore(vmaRatio) {
-    if (vmaRatio >= 3.0) return 1.0;
-    if (vmaRatio >= 2.5) return 0.9;
-    if (vmaRatio >= 2.0) return 0.8;
-    if (vmaRatio >= 1.8) return 0.7;
-    if (vmaRatio >= 1.5) return 0.6;
-    if (vmaRatio >= 1.2) return 0.4;
-    if (vmaRatio >= 1.0) return 0.2;
+function calculateEMAScore(emaRatio) {
+    if (emaRatio >= 3.0) return 1.0;
+    if (emaRatio >= 2.5) return 0.9;
+    if (emaRatio >= 2.0) return 0.8;
+    if (emaRatio >= 1.8) return 0.7;
+    if (emaRatio >= 1.5) return 0.6;
+    if (emaRatio >= 1.2) return 0.4;
+    if (emaRatio >= 1.0) return 0.2;
     return 0.0;
 }
 
@@ -3005,10 +3051,10 @@ function calculateVPTScore(vptData) {
 
 function calculateCombinedVolumeScore(data) {
     const {
-        vmaScore,
+        emaScore,
         zScoreScore,
         vptScore,
-        vmaRatio,
+        emaRatio,
         zScore
     } = data;
     
@@ -3017,12 +3063,12 @@ function calculateCombinedVolumeScore(data) {
     
     // Calcular score ponderado
     let combinedScore = 
-        (vmaScore * weights.vmaWeight) +
+        (emaScore * weights.emaWeight) +
         (zScoreScore * weights.zScoreWeight) +
         (vptScore * weights.vptWeight);
     
     // Aplicar bônus para sinais fortes
-    if (vmaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
+    if (emaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
         combinedScore *= weights.combinedMultiplier;
     }
     
@@ -3900,10 +3946,10 @@ async function sendInitializationMessage(allSymbols) {
 ${brazilTime.full}
 🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}
 📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)
-📈 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)
+📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)
 🎯 Foco em: Volume Robusto, LSR Binance, RSI ajustado, Pivot Points Multi-TF, Funding Rate
 🔧 LSR: Apenas Binance API (com percentual de mudança)
-🔧 Volume: Média Móvel (VMA), Z-Score, Volume-Price Trend
+🔧 Volume: Média Móvel Exponencial (EMA), Z-Score Adaptativo, Volume-Price Trend
 🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
 🔧 Funding Rate: Emojis coloridos para visualização rápida
 🔧 by @J4Rviz.
@@ -4455,7 +4501,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
             QUALITY_WEIGHTS.volume * volumeData.combinedScore);
         score += volumeScore;
         details.push(` Vol 3m Robusto: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (Score: ${volumeData.combinedScore.toFixed(2)} - ${volumeData.classification})`);
-        details.push(`   VMA: ${volumeData.vmaRatio.toFixed(2)}x | Z-Score: ${volumeData.zScore.toFixed(2)} | VPT: ${volumeData.vpt.priceMovementPercent.toFixed(2)}%`);
+        details.push(`   EMA: ${volumeData.emaRatio.toFixed(2)}x | Z-Score: ${volumeData.zScore.toFixed(2)} | VPT: ${volumeData.vpt.priceMovementPercent.toFixed(2)}%`);
     } else {
         failedChecks.push(`Vol 3m: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
     }
@@ -4944,13 +4990,13 @@ async function monitorSymbol(symbol) {
         const volumeRobustData = volumeData.robustData;
         const volumeScore = volumeRobustData?.combinedScore?.toFixed(2) || '0.00';
         const volumeClassification = volumeRobustData?.classification || 'NORMAL';
-        const vmaRatio = volumeRobustData?.vmaRatio?.toFixed(2) || 'N/A';
+        const emaRatio = volumeRobustData?.emaRatio?.toFixed(2) || 'N/A';
         const zScore = volumeRobustData?.zScore?.toFixed(2) || 'N/A';
 
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
         console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
         console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x (Score: ${volumeScore} - ${volumeClassification})`);
-        console.log(`   📊 VMA: ${vmaRatio}x | Z-Score: ${zScore}`);
+        console.log(`   📊 EMA: ${emaRatio}x | Z-Score: ${zScore}`);
         console.log(`   📊 LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
         console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
         console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
@@ -5026,7 +5072,7 @@ async function mainBotLoop() {
     console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
     console.log(`🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
     console.log(`📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)`);
-    console.log(`📈 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)`);
+    console.log(`📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)`);
     console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
     console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
     console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
@@ -5253,7 +5299,7 @@ async function startBot() {
         console.log('🚀 TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
         console.log(`📊 RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
         console.log(`📈 Stochastic 1h: 14,3,3 (8 pontos)`);
-        console.log(`📊 Volume 3m: Detecção Robusta (VMA + Z-Score + VPT)`);
+        console.log(`📊 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)`);
         console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
         console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
         console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
