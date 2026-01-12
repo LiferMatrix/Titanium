@@ -1,29 +1,69 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
-const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicators');
+const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
-const LIVE_MODE = true; 
+const LIVE_MODE = true;
+
+// === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
+const VOLUME_MINIMUM_THRESHOLDS = {
+    absoluteScore: 0.25,          // ↓ Reduzido para permitir sinais com volume inicial mais fraco
+    combinedScore: 0.3,           // ↓ Flexibilizado levemente
+    classification: 'BAIXO',      // ✅ Aceita até "BAIXO" se outros fatores confirmarem
+    requireConfirmation: true     // Mantido – confirmação ainda obrigatória
+};
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.9,      // ⬇️ Reduzido de 2.2 → mais sinais de qualidade
-    minThreshold: 1.6,       // ⬇️ Aceita setups iniciais mais suaves
-    maxThreshold: 2.8,       // ⬆️ Aceita pumps reais (sem cortar)
-    volatilityMultiplier: 0.3, // ⬆️ Ajusta melhor em dias voláteis
+    baseThreshold: 1.8,           // ⬇️ Mais sensível a setups de qualidade
+    minThreshold: 1.5,            // ⬇️ Aceita movimentos iniciais suaves
+    maxThreshold: 2.9,            // ⬆️ Captura pumps reais sem cortar
+    volatilityMultiplier: 0.35,   // ⬆️ Melhor adaptação em alta volatilidade
     useAdaptive: true
+};
+
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
+const VOLUME_ROBUST_SETTINGS = {
+    // Média Móvel Exponencial (EMA) do Volume
+    emaPeriod: 20,
+    emaAlpha: 0.26,               // ↑ Levemente mais responsivo
+
+    // Z-Score do Volume com lookback adaptativo
+    baseZScoreLookback: 40,       // ↓ Responde mais rápido a mudanças
+    minZScoreLookback: 12,        // ↓ Reação ágil em alta volatilidade
+    maxZScoreLookback: 80,        // ↓ Evita over-smoothing
+    zScoreThreshold: 1.7,         // ↓ Aceita volumes "acima do normal"
+
+    // Volume-Price Trend (VPT)
+    vptThreshold: 0.35,           // ↓ Aceita micro-movimentos com volume
+    minPriceMovement: 0.10,       // ↓ Mais sensível a movimentos menores
+
+    // Configurações combinadas – pesos ajustados
+    combinedMultiplier: 1.12,
+    volumeWeight: 0.33,
+    emaWeight: 0.37,              // ↑ Prioriza EMA (sinal mais confiável)
+    zScoreWeight: 0.2,
+    vptWeight: 0.1,
+
+    // Thresholds mínimos – MAIS FLEXÍVEIS, MAS NÃO PERMISSIVOS
+    minimumThresholds: {
+        combinedScore: 0.20,      // ✅ Principal ajuste: permite volume "fraco-moderado"
+        emaRatio: 1.1,            // ↓ Aceita setups iniciais mais cedo
+        zScore: 0.3,              // ↓ Filtra ruído, mas capta variações normais
+        classification: 'BAIXO'   // ✅ Aceita classificação "BAIXO" com confirmação cruzada
+    }
 };
 
 const VOLATILITY_PERIOD = 20;
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.8;
+const VOLATILITY_THRESHOLD = 0.6; // ⬇️ Permite operar em mais ativos com volatilidade moderada
 
 // === CONFIGURAÇÕES LSR AJUSTADAS ===
 const LSR_TIMEFRAME = '15m';
@@ -31,8 +71,8 @@ const LSR_BUY_THRESHOLD = 2.5;
 const LSR_SELL_THRESHOLD = 2.5;
 
 // === ATUALIZADO: CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 56; 
-const RSI_SELL_MIN = 66; 
+const RSI_BUY_MAX = 60; 
+const RSI_SELL_MIN = 65;
 
 const COOLDOWN_SETTINGS = {
     sameDirection: 30 * 60 * 1000,
@@ -40,26 +80,23 @@ const COOLDOWN_SETTINGS = {
     useDifferentiated: true
 };
 
-// === QUALITY SCORE AJUSTADO BASEADO NO APRENDIZADO ===
-const QUALITY_THRESHOLD = 80;
+// === QUALITY SCORE AJUSTADO PARA MAIOR LUCRATIVIDADE ===
+const QUALITY_THRESHOLD = 75; // ⬇️ Aumenta número de alertas com boa qualidade
 const QUALITY_WEIGHTS = {
-    volume: 25,
-    oi: 12,
-    volatility: 10,
-    lsr: 10,
-    rsi: 10,
-    emaAlignment: 12,
-    adx: 8,
-    adx1h: 15,
-    stoch1h: 8, 
-    stoch4h: 5,
-    cci4h: 8,
-    breakoutRisk: 12,
-    supportResistance: 12,
-    pivotPoints: 12,
-    funding: 10  
+    volume: 38,          // ↑ +3 → volume robusto é seu principal filtro
+    oi: 10,              // ↓ -2 → Open Interest menos crítico
+    volatility: 8,       // ↓ -2 → volatilidade é contexto, não sinal
+    lsr: 10,             // mantido
+    rsi: 12,             // ↑ +2 → RSI ideal altamente lucrativo
+    emaAlignment: 14,    // ↑ +2 → alinhamento de EMA é sinal forte
+    stoch1h: 8,          // mantido
+    stoch4h: 4,          // ↓ -1 → secundário
+    cci4h: 6,            // ↓ -2 → útil, mas não essencial
+    breakoutRisk: 14,    // ↑ +2 → evitar rompimentos falsos aumenta win rate
+    supportResistance: 14, // ↑ +2 → distância segura = maior margem
+    pivotPoints: 12,     // mantido
+    funding: 10          // mantido
 };
-
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
     requestsPerMinute: 1000,
@@ -176,18 +213,6 @@ const OI_CACHE_TTL = 2 * 60 * 1000;
 const OI_HISTORY_SIZE = 20;
 
 // === ATUALIZADO: CONFIGURAÇÕES TÉCNICAS ===
-const ADX_SETTINGS = {
-    period: 14,
-    timeframe: '15m',
-    strongTrendThreshold: 28
-};
-
-const ADX_1H_SETTINGS = {
-    period: 14,
-    timeframe: '1h',
-    strongTrendThreshold: 25,
-    minStrength: 22
-};
 
 // ATUALIZADO: Stochastic 1h com nova configuração 14,3,3
 const STOCH_SETTINGS = {
@@ -481,34 +506,38 @@ class SophisticatedRiskLayer {
     }
 
     analyzeVolumeRisk(signal) {
-        const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-        const volumeAboveBelow = ((volumeRatio - 1) * 100);
+        const volumeData = signal.marketData.volume?.robustData;
+        if (!volumeData) {
+            return { type: 'VOLUME', score: 1, message: 'Dados de volume insuficientes' };
+        }
 
+        const combinedScore = volumeData.combinedScore || 0;
+        
         let score = 0;
         let message = '';
 
-        if (volumeRatio < 0.7) {
+        if (combinedScore < 0.3) {
             score = 2;
-            message = `VOLUME MUITO BAIXO: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio < 1.0) {
+            message = `VOLUME MUITO FRACO: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore < 0.5) {
             score = 1;
-            message = `Volume abaixo da média: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio > 3.0) {
-            score = 1;
-            message = `Volume muito alto: ${volumeRatio.toFixed(2)}x`;
-        } else if (volumeRatio > 2.0) {
-            score = 0.5;
-            message = `Volume alto: ${volumeRatio.toFixed(2)}x`;
+            message = `Volume fraco: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore > 0.8) {
+            score = -0.5;
+            message = `Volume muito forte: Score ${combinedScore.toFixed(2)}`;
+        } else if (combinedScore > 0.6) {
+            score = 0;
+            message = `Volume forte: Score ${combinedScore.toFixed(2)}`;
         } else {
             score = 0;
-            message = `Volume normal: ${volumeRatio.toFixed(2)}x`;
+            message = `Volume moderado: Score ${combinedScore.toFixed(2)}`;
         }
 
         return {
             type: 'VOLUME',
             score: score,
             message: message,
-            data: { volumeRatio: volumeRatio }
+            data: volumeData
         };
     }
 
@@ -1100,7 +1129,6 @@ class AdvancedLearningSystem {
         this.parameterEvolution = {
             volumeThreshold: [],
             qualityThreshold: [],
-            adxThreshold: [],
             breakoutRisk: [],
             supportResistance: [],
             pivotPoints: [],
@@ -1448,8 +1476,8 @@ class AdvancedLearningSystem {
                 qualityScore: signal.qualityScore.score,
                 marketData: {
                     volumeRatio: marketData.volume?.rawRatio || 0,
+                    volumeRobust: marketData.volume?.robustData || null,
                     rsi: marketData.rsi?.raw || 0,
-                    adx1h: marketData.adx1h?.raw || 0,
                     volatility: marketData.volatility?.rawVolatility || 0,
                     lsr: marketData.lsr?.lsrRatio || 0,
                     emaAlignment: marketData.ema?.isAboveEMA55 || false,
@@ -1598,11 +1626,14 @@ class AdvancedLearningSystem {
         const patterns = [];
         const data = trade.marketData;
 
-        if (data.volumeRatio >= 1.8 && data.adx1h >= 25) {
-            patterns.push('HIGH_VOL_STRONG_TREND');
+        if (data.volumeRobust?.combinedScore >= 0.7) {
+            patterns.push('ROBUST_VOLUME');
         }
-        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8 && data.adx1h >= 22) {
-            patterns.push('MOD_VOL_GOOD_TREND');
+        if (data.volumeRatio >= 1.8 && data.rsi <= RSI_BUY_MAX) {
+            patterns.push('HIGH_VOL_GOOD_RSI');
+        }
+        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8 && data.rsi <= RSI_BUY_MAX) {
+            patterns.push('MOD_VOL_GOOD_RSI');
         }
         
         if (data.rsi < 25 || data.rsi > 75) {
@@ -1689,26 +1720,6 @@ class AdvancedLearningSystem {
                 });
             }
 
-            const adxAnalysis = this.analyzeParameter(
-                closedTrades,
-                t => t.marketData.adx1h,
-                [20, 22, 24, 26, 28],
-                ADX_1H_SETTINGS.minStrength
-            );
-
-            if (adxAnalysis.bestValue && adxAnalysis.winRate > 0.4) {
-                const adjustment = (adxAnalysis.bestValue - ADX_1H_SETTINGS.minStrength) * 0.1;
-                ADX_1H_SETTINGS.minStrength += adjustment;
-                ADX_1H_SETTINGS.minStrength = Math.max(20, Math.min(30, ADX_1H_SETTINGS.minStrength));
-
-                this.parameterEvolution.adxThreshold.push({
-                    timestamp: Date.now(),
-                    old: ADX_1H_SETTINGS.minStrength - adjustment,
-                    new: ADX_1H_SETTINGS.minStrength,
-                    winRate: adxAnalysis.winRate
-                });
-            }
-
             const breakoutAnalysis = this.analyzeBreakoutRisk(closedTrades);
             if (breakoutAnalysis.bestWinRate > 0.4) {
                 this.parameterEvolution.breakoutRisk.push({
@@ -1727,7 +1738,7 @@ class AdvancedLearningSystem {
                 });
             }
 
-            console.log(`⚙️  Parâmetros otimizados: Volume=${VOLUME_SETTINGS.baseThreshold.toFixed(2)}, ADX=${ADX_1H_SETTINGS.minStrength.toFixed(1)}`);
+            console.log(`⚙️  Parâmetros otimizados: Volume=${VOLUME_SETTINGS.baseThreshold.toFixed(2)}`);
             this.saveLearningData();
 
         } catch (error) {
@@ -2368,15 +2379,46 @@ async function sendTelegramAlert(message) {
 }
 
 // =====================================================================
+// 📊 FUNÇÃO PARA VERIFICAR CONFIRMAÇÃO DE VOLUME
+// =====================================================================
+
+function checkVolumeConfirmation(volumeData) {
+    if (!volumeData) {
+        return false;
+    }
+
+    const combinedScore = volumeData.combinedScore || 0;
+    const classification = volumeData.classification || '';
+    const emaRatio = volumeData.emaRatio || 0;
+    const zScore = volumeData.zScore || 0;
+
+    // Verificar se o volume está confirmado
+    const isConfirmed = 
+        combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
+        emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
+        Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore &&
+        (!classification.includes('BAIXO') && !classification.includes('INSUFICIENTE'));
+
+    return isConfirmed;
+}
+
+// =====================================================================
 // 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
     try {
+        const volumeData = signal.marketData.volume?.robustData;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
+        
+        // VERIFICAR SE O VOLUME É SUFICIENTE PARA SINAL DE COMPRA/VENDA
+        const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
+        
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
-
+        
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
         // Obter LSR da Binance
@@ -2428,56 +2470,109 @@ async function sendSignalAlertWithRisk(signal) {
             }
         });
 
+        // DECIDIR SE É UM ALERTA DE COMPRA/VENDA OU APENAS ANÁLISE
+        let alertTitle = '';
+        let alertType = '';
+        
+        if (isVolumeConfirmed) {
+            // VOLUME CONFIRMADO: Enviar alerta de COMPRA/VENDA
+            alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
+            alertType = 'trade';
+        } else {
+            // VOLUME NÃO CONFIRMADO: Enviar apenas análise da IA
+            alertTitle = `🤖 <i>IA Analizando...  ${signal.symbol}</i>`;
+            alertType = 'analysis';
+        }
+
         let message = `
-${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<i> Análise Técnica</i>
+<i> Indicadores Técnicos</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Vol: ${volumeRatio.toFixed(2)}x | Dist S/R: ${distancePercent}%
+⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Vol Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• Dist. Suport/Resist.: ${distancePercent}%
 • Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
-• RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
+• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
 ${rsiWarning}
-<i>🤖 IA Titanium Análise </i>
+<i>🤖 IA Operação/Risco </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
+${!isVolumeConfirmed ? `• 🔶 ATENÇÃO NO VOLUME: Score ${volumeScore.toFixed(2)} - Aguarde confirmação` : ''}
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
+        `;
 
+        // APENAS ADICIONAR DICAS DE ENTRADA E ALVOS SE O VOLUME ESTIVER CONFIRMADO
+        if (isVolumeConfirmed) {
+            message += `
 <i> 💡Dica de Entrada : </i>
 • Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
 <i> Alvos:</i>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+            `;
+        } else {
+            message += `
+<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</i>
+• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
+• EMA Ratio: ${volumeData?.emaRatio?.toFixed(2) || 'N/A'}x (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio}x)
+• Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'} (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore})
+            `;
+        }
+
+        message += `
 <i>✨Titanium by @J4Rviz✨</i>
         `;
 
         await sendTelegramAlert(message);
 
-        console.log(`\n📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`\n📤 ${alertType === 'trade' ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})`);
         console.log(`   Probabilidade: ${riskAdjustedProbability}%`);
         console.log(`   Risk Level: ${riskAssessment.level} (Score: ${riskAssessment.overallScore.toFixed(2)})`);
         console.log(`   Confiança: ${riskAssessment.confidence}%`);
-        console.log(`   Volume: ${volumeRatio.toFixed(2)}x | LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
+        console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
+        console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   Funding: ${fundingRateText}`);
 
+        // Retornar o tipo de alerta enviado
+        return {
+            type: alertType,
+            volumeConfirmed: isVolumeConfirmed,
+            volumeScore: volumeScore
+        };
+
     } catch (error) {
         console.error('Erro ao enviar alerta com risk layer:', error.message);
-        await sendSignalAlert(signal);
+        return await sendSignalAlert(signal);
     }
 }
 
 async function sendSignalAlert(signal) {
     try {
+        const volumeData = signal.marketData.volume?.robustData;
+        const volumeScore = volumeData?.combinedScore || 0;
+        const volumeClassification = volumeData?.classification || 'NORMAL';
+        
+        // VERIFICAR SE O VOLUME É SUFICIENTE
+        const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
+        
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
+        
+        let alertTitle = '';
+        if (isVolumeConfirmed) {
+            alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
+        } else {
+            alertTitle = `🤖 <b>IA ANALISANDO: ${signal.symbol}</b>`;
+        }
 
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
@@ -2517,29 +2612,49 @@ async function sendSignalAlert(signal) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}% ${signal.marketData.funding?.isRising ? '⬆️' : '⬇️'}`
             : '🔹 Indisp.';
 
-        const message = `
-${directionEmoji} <b>${signal.symbol} - ${direction}</b>
+        let message = `
+${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<b>🎯 ANÁLISE TÉCNICA</b>
+<b>🎯 ANÁLISE TÉCNICA AVANÇADA</b>
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-• Volume: ${volumeRatio.toFixed(2)}x | LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
+• Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
+• VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Dist S/R: ${distancePercent}% | Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • Fund. Rate: ${fundingRateText}
+${!isVolumeConfirmed ? `\n<b>⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</b>` : ''}
+        `;
+
+        // APENAS ADICIONAR ALVOS SE O VOLUME ESTIVER CONFIRMADO
+        if (isVolumeConfirmed) {
+            message += `
 <b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
 <b>📍 ENTRADA</b>
 • Liquidez 1: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+            `;
+        } else {
+            message += `
+<b>⚠️ RECOMENDAÇÃO:</b>
+• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
+• Monitorar para possível entrada futura
+            `;
+        }
+
+        message += `
 <i>✨🤖IA Titanium by @J4Rviz</i>
         `;
 
         await sendTelegramAlert(message);
 
-        console.log(`📤 Alerta enviado: ${signal.symbol} ${direction}`);
+        console.log(`📤 ${isVolumeConfirmed ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
+        console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
+        console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
@@ -2563,9 +2678,12 @@ function calculateProbability(signal) {
 
     baseProbability += (signal.qualityScore.score - 70) * 0.4;
 
-    const volumeRatio = signal.marketData.volume?.rawRatio || 0;
-    if (volumeRatio >= 2.0) baseProbability += 8;
-    else if (volumeRatio >= 1.5) baseProbability += 4;
+    const volumeData = signal.marketData.volume?.robustData;
+    const volumeScore = volumeData?.combinedScore || 0;
+    
+    if (volumeScore >= 0.7) baseProbability += 10;
+    else if (volumeScore >= 0.5) baseProbability += 5;
+    else if (volumeScore < 0.3) baseProbability -= 8;
 
     const srData = signal.marketData.supportResistance;
     const nearestLevel = signal.isBullish ?
@@ -2689,6 +2807,377 @@ async function getBinanceLSRValue(symbol, period = '15m') {
         console.error(`❌ Erro ao buscar LSR da Binance para ${symbol}:`, error.message);
         return null;
     }
+}
+
+// =====================================================================
+// 📊 FUNÇÃO ATUALIZADA DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS
+// =====================================================================
+
+async function checkVolumeRobust(symbol) {
+    try {
+        // Buscar candles de 3 minutos
+        const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.maxZScoreLookback);
+        if (candles.length < VOLUME_ROBUST_SETTINGS.emaPeriod) {
+            return {
+                rawRatio: 0,
+                isAbnormal: false,
+                robustData: null
+            };
+        }
+
+        const volumes = candles.map(c => c.volume);
+        const closes = candles.map(c => c.close);
+        
+        // Volume atual e últimos volumes
+        const currentVolume = volumes[volumes.length - 1];
+        const previousVolume = volumes[volumes.length - 2] || currentVolume;
+        
+        // 1. MÉDIA MÓVEL EXPONENCIAL (EMA) DO VOLUME
+        const emaData = calculateVolumeEMA(volumes, VOLUME_ROBUST_SETTINGS.emaPeriod, VOLUME_ROBUST_SETTINGS.emaAlpha);
+        const emaRatio = currentVolume / emaData.currentEMA;
+        const emaScore = calculateEMAScore(emaRatio);
+        
+        // 2. Z-SCORE DO VOLUME COM LOOKBACK DINÂMICO
+        const adaptiveLookback = calculateAdaptiveZScoreLookback(closes);
+        const zScoreData = calculateVolumeZScore(volumes, adaptiveLookback);
+        const zScore = zScoreData.currentZScore;
+        const zScoreScore = calculateZScoreScore(zScore);
+        
+        // 3. VOLUME-PRICE TREND (VPT)
+        const vptData = calculateVolumePriceTrend(volumes, closes);
+        const vptScore = calculateVPTScore(vptData);
+        
+        // 4. CALCULAR SCORE COMBINADO
+        const combinedScore = calculateCombinedVolumeScore({
+            emaScore,
+            zScoreScore,
+            vptScore,
+            emaRatio,
+            zScore
+        });
+        
+        // 5. CLASSIFICAÇÃO
+        const classification = classifyVolumeStrength(combinedScore);
+        
+        // 6. VERIFICAR SE O VOLUME ESTÁ CONFIRMADO
+        const isVolumeConfirmed = checkVolumeRobustConfirmation({
+            combinedScore,
+            classification,
+            emaRatio,
+            zScore
+        });
+        
+        // Razão bruta para compatibilidade
+        const rawRatio = currentVolume / emaData.averageVolume || 1;
+        
+        const robustData = {
+            currentVolume,
+            previousVolume,
+            ema: emaData.currentEMA,
+            emaRatio,
+            zScore,
+            vpt: vptData,
+            emaScore,
+            zScoreScore,
+            vptScore,
+            combinedScore,
+            classification,
+            isVolumeConfirmed,
+            rawRatio,
+            details: {
+                volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(2) + '%',
+                emaPeriod: VOLUME_ROBUST_SETTINGS.emaPeriod,
+                emaAlpha: VOLUME_ROBUST_SETTINGS.emaAlpha,
+                zScoreLookback: adaptiveLookback,
+                isEMAValid: emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio,
+                isZScoreValid: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore,
+                isVPTValid: vptData.priceMovementPercent >= VOLUME_ROBUST_SETTINGS.vptThreshold
+            }
+        };
+        
+        console.log(`📊 Volume Robust ${symbol} (3m):`);
+        console.log(`   Volume: ${currentVolume.toFixed(2)} (${robustData.details.volumeChange})`);
+        console.log(`   EMA: ${emaData.currentEMA.toFixed(2)} (${emaRatio.toFixed(2)}x, α=${VOLUME_ROBUST_SETTINGS.emaAlpha})`);
+        console.log(`   Z-Score: ${zScore.toFixed(2)} (Lookback: ${adaptiveLookback})`);
+        console.log(`   VPT: ${vptData.priceMovementPercent.toFixed(2)}% (${vptData.trendDirection})`);
+        console.log(`   Score Combinado: ${combinedScore.toFixed(2)} (${classification})`);
+        console.log(`   Confirmado: ${isVolumeConfirmed ? '✅' : '❌'}`);
+        
+        return {
+            rawRatio,
+            isAbnormal: combinedScore >= 0.6 || Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
+            robustData
+        };
+        
+    } catch (error) {
+        console.error(`❌ Erro na análise robusta de volume para ${symbol}:`, error.message);
+        return {
+            rawRatio: 0,
+            isAbnormal: false,
+            robustData: null
+        };
+    }
+}
+
+function checkVolumeRobustConfirmation(volumeData) {
+    const {
+        combinedScore,
+        classification,
+        emaRatio,
+        zScore
+    } = volumeData;
+    
+    return (
+        combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
+        emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
+        Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore &&
+        !classification.includes('BAIXO') &&
+        !classification.includes('INSUFICIENTE')
+    );
+}
+
+// Função para calcular EMA do volume
+function calculateVolumeEMA(volumes, period, alpha) {
+    if (volumes.length < period) {
+        return {
+            currentEMA: volumes[volumes.length - 1] || 0,
+            averageVolume: volumes.reduce((a, b) => a + b, 0) / volumes.length || 0,
+            emaHistory: []
+        };
+    }
+    
+    // Inicializar EMA com SMA
+    const initialSMA = volumes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    let ema = initialSMA;
+    const emaHistory = [ema];
+    
+    // Calcular EMA para os volumes restantes
+    for (let i = period; i < volumes.length; i++) {
+        ema = alpha * volumes[i] + (1 - alpha) * ema;
+        emaHistory.push(ema);
+    }
+    
+    // Calcular também a média geral para referência
+    const averageVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+    
+    return {
+        currentEMA: ema,
+        averageVolume: averageVolume,
+        minEMA: Math.min(...emaHistory),
+        maxEMA: Math.max(...emaHistory),
+        emaTrend: ema > emaHistory[emaHistory.length - 2] ? 'rising' : 'falling',
+        emaHistory: emaHistory
+    };
+}
+
+// Função para calcular lookback adaptativo do Z-Score baseado na volatilidade
+function calculateAdaptiveZScoreLookback(closes) {
+    if (closes.length < 10) {
+        return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
+    }
+    
+    // Calcular volatilidade recente
+    const recentCloses = closes.slice(-20);
+    let sumReturns = 0;
+    for (let i = 1; i < recentCloses.length; i++) {
+        const returnVal = Math.abs((recentCloses[i] - recentCloses[i-1]) / recentCloses[i-1]);
+        sumReturns += returnVal;
+    }
+    const volatility = sumReturns / (recentCloses.length - 1) * 100;
+    
+    // Ajustar lookback baseado na volatilidade
+    if (volatility > 2.0) {
+        // Alta volatilidade: usar lookback menor
+        return Math.max(VOLUME_ROBUST_SETTINGS.minZScoreLookback, 
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 0.5);
+    } else if (volatility < 0.5) {
+        // Baixa volatilidade: usar lookback maior
+        return Math.min(VOLUME_ROBUST_SETTINGS.maxZScoreLookback,
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 1.5);
+    }
+    
+    // Volatilidade média: usar lookback base
+    return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
+}
+
+// Função atualizada para calcular Z-Score com lookback dinâmico
+function calculateVolumeZScore(volumes, lookback) {
+    if (volumes.length < lookback) {
+        return {
+            currentZScore: 0,
+            mean: volumes[0] || 0,
+            stdDev: 0
+        };
+    }
+    
+    const recentVolumes = volumes.slice(-lookback);
+    const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    
+    // Calcular desvio padrão
+    const squaredDifferences = recentVolumes.map(v => Math.pow(v - mean, 2));
+    const variance = squaredDifferences.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Z-Score do volume atual
+    const currentVolume = volumes[volumes.length - 1];
+    const zScore = stdDev !== 0 ? (currentVolume - mean) / stdDev : 0;
+    
+    return {
+        currentZScore: zScore,
+        mean: mean,
+        stdDev: stdDev,
+        lookbackUsed: lookback,
+        isOutlier: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold
+    };
+}
+
+function calculateVolumePriceTrend(volumes, closes) {
+    if (volumes.length < 5 || closes.length < 5) {
+        return {
+            priceMovementPercent: 0,
+            volumeTrend: 'neutral',
+            trendDirection: 'neutral',
+            correlation: 0
+        };
+    }
+    
+    // Calcular movimento de preço recente (últimas 5 velas)
+    const recentCloses = closes.slice(-5);
+    const priceChange = ((recentCloses[recentCloses.length - 1] - recentCloses[0]) / recentCloses[0]) * 100;
+    
+    // Calcular tendência de volume
+    const recentVolumes = volumes.slice(-5);
+    const volumeSum = recentVolumes.reduce((a, b) => a + b, 0);
+    const avgVolume = volumeSum / recentVolumes.length;
+    
+    // Verificar se o movimento de preço é significativo
+    const hasSignificantMovement = Math.abs(priceChange) >= VOLUME_ROBUST_SETTINGS.minPriceMovement;
+    
+    // Determinar direção da tendência
+    let trendDirection = 'neutral';
+    if (priceChange > VOLUME_ROBUST_SETTINGS.minPriceMovement) {
+        trendDirection = 'bullish';
+    } else if (priceChange < -VOLUME_ROBUST_SETTINGS.minPriceMovement) {
+        trendDirection = 'bearish';
+    }
+    
+    // Calcular correlação simples entre volume e preço
+    let correlation = 0;
+    if (hasSignificantMovement) {
+        const volumeChanges = [];
+        const priceChanges = [];
+        
+        for (let i = 1; i < recentVolumes.length; i++) {
+            volumeChanges.push(recentVolumes[i] - recentVolumes[i - 1]);
+            priceChanges.push(recentCloses[i] - recentCloses[i - 1]);
+        }
+        
+        // Correlação simples
+        const avgVolumeChange = volumeChanges.reduce((a, b) => a + b, 0) / volumeChanges.length;
+        const avgPriceChange = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
+        
+        let numerator = 0;
+        let denomVolume = 0;
+        let denomPrice = 0;
+        
+        for (let i = 0; i < volumeChanges.length; i++) {
+            numerator += (volumeChanges[i] - avgVolumeChange) * (priceChanges[i] - avgPriceChange);
+            denomVolume += Math.pow(volumeChanges[i] - avgVolumeChange, 2);
+            denomPrice += Math.pow(priceChanges[i] - avgPriceChange, 2);
+        }
+        
+        correlation = numerator / Math.sqrt(denomVolume * denomPrice);
+    }
+    
+    return {
+        priceMovementPercent: priceChange,
+        volumeTrend: recentVolumes[recentVolumes.length - 1] > avgVolume ? 'rising' : 'falling',
+        trendDirection: trendDirection,
+        correlation: isNaN(correlation) ? 0 : correlation,
+        hasSignificantMovement: hasSignificantMovement
+    };
+}
+
+function calculateEMAScore(emaRatio) {
+    if (emaRatio >= 3.0) return 1.0;
+    if (emaRatio >= 2.5) return 0.9;
+    if (emaRatio >= 2.0) return 0.8;
+    if (emaRatio >= 1.8) return 0.7;
+    if (emaRatio >= 1.5) return 0.6;
+    if (emaRatio >= 1.2) return 0.4;
+    if (emaRatio >= 1.0) return 0.2;
+    return 0.0;
+}
+
+function calculateZScoreScore(zScore) {
+    const absZScore = Math.abs(zScore);
+    if (absZScore >= 3.0) return 1.0;
+    if (absZScore >= 2.5) return 0.9;
+    if (absZScore >= 2.0) return 0.8;
+    if (absZScore >= 1.5) return 0.6;
+    if (absZScore >= 1.0) return 0.4;
+    if (absZScore >= 0.5) return 0.2;
+    return 0.0;
+}
+
+function calculateVPTScore(vptData) {
+    let score = 0;
+    
+    // Score baseado no movimento de preço
+    const absPriceMovement = Math.abs(vptData.priceMovementPercent);
+    if (absPriceMovement >= 1.0) score += 0.4;
+    else if (absPriceMovement >= 0.5) score += 0.3;
+    else if (absPriceMovement >= VOLUME_ROBUST_SETTINGS.minPriceMovement) score += 0.2;
+    
+    // Score baseado na correlação
+    if (Math.abs(vptData.correlation) >= 0.7) score += 0.3;
+    else if (Math.abs(vptData.correlation) >= 0.5) score += 0.2;
+    else if (Math.abs(vptData.correlation) >= 0.3) score += 0.1;
+    
+    // Score baseado na consistência da tendência
+    if (vptData.hasSignificantMovement && vptData.volumeTrend === 'rising') {
+        score += 0.3;
+    }
+    
+    return Math.min(1.0, score);
+}
+
+function calculateCombinedVolumeScore(data) {
+    const {
+        emaScore,
+        zScoreScore,
+        vptScore,
+        emaRatio,
+        zScore
+    } = data;
+    
+    // Pesos configuráveis
+    const weights = VOLUME_ROBUST_SETTINGS;
+    
+    // Calcular score ponderado
+    let combinedScore = 
+        (emaScore * weights.emaWeight) +
+        (zScoreScore * weights.zScoreWeight) +
+        (vptScore * weights.vptWeight);
+    
+    // Aplicar bônus para sinais fortes
+    if (emaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
+        combinedScore *= weights.combinedMultiplier;
+    }
+    
+    // Normalizar para 0-1
+    return Math.min(1.0, combinedScore);
+}
+
+function classifyVolumeStrength(score) {
+    if (score >= 0.8) return '🔥 MUITO FORTE';
+    if (score >= 0.7) return '📈 FORTE';
+    if (score >= 0.6) return '📊 MODERADO-ALTO';
+    if (score >= 0.5) return '📊 MODERADO';
+    if (score >= 0.4) return '📉 MODERADO-BAIXO';
+    if (score >= 0.3) return '📉 BAIXO';
+    if (score >= 0.2) return '⚠️ MUITO BAIXO';
+    return '🚫 INSUFICIENTE';
 }
 
 // =====================================================================
@@ -3550,12 +4039,17 @@ async function sendInitializationMessage(allSymbols) {
 ${brazilTime.full}
 🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}
 📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)
-📈 +8 pontos para K cruzando D na direção correta
-🎯 Foco em: Volume, LSR Binance, RSI ajustado, Pivot Points Multi-TF, Funding Rate
+📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)
+🎯 Foco em: Volume Robusto, LSR Binance, RSI ajustado, Pivot Points Multi-TF, Funding Rate
 🔧 LSR: Apenas Binance API (com percentual de mudança)
+🔧 Volume: Média Móvel Exponencial (EMA), Z-Score Adaptativo, Volume-Price Trend
 🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
 🔧 Funding Rate: Emojis coloridos para visualização rápida
 🔧 by @J4Rviz.
+
+<b>⚠️ NOVO SISTEMA DE CLASSIFICAÇÃO:</b>
+• Volume Score ≥ 0.4: Alerta de COMPRA/VENDA
+• Volume Score < 0.4: "🤖 IA ANALISANDO..." (apenas análise)
         `;
 
         console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
@@ -3745,21 +4239,11 @@ async function getRSI1h(symbol) {
 
 async function checkVolume(symbol) {
     try {
-        const candles = await getCandlesCached(symbol, '3m', 50);
-        if (candles.length < 20) return { rawRatio: 0, isAbnormal: false };
-
-        const volumes = candles.map(c => c.volume);
-        const currentVolume = volumes[volumes.length - 1];
-        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-
-        const ratio = currentVolume / avgVolume;
-
-        return {
-            rawRatio: ratio,
-            isAbnormal: ratio >= VOLUME_SETTINGS.baseThreshold
-        };
+        // Usar a nova função robusta de detecção de volume
+        const volumeAnalysis = await checkVolumeRobust(symbol);
+        return volumeAnalysis;
     } catch (error) {
-        return { rawRatio: 0, isAbnormal: false };
+        return { rawRatio: 0, isAbnormal: false, robustData: null };
     }
 }
 
@@ -3839,38 +4323,6 @@ async function checkLSR(symbol, isBullish) {
             isRising: false,
             percentChange: '0.00'
         };
-    }
-}
-
-async function getADX1h(symbol) {
-    try {
-        const candles = await getCandlesCached(symbol, '1h', 80);
-        if (candles.length < ADX_1H_SETTINGS.period + 5) return null;
-
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
-
-        const adxValues = ADX.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: ADX_1H_SETTINGS.period
-        });
-
-        if (!adxValues || adxValues.length === 0) return null;
-
-        const latestADX = adxValues[adxValues.length - 1];
-        const adxValue = typeof latestADX === 'object' ? latestADX.adx : latestADX;
-
-        if (typeof adxValue !== 'number' || isNaN(adxValue)) return null;
-
-        return {
-            raw: adxValue,
-            hasMinimumStrength: adxValue >= ADX_1H_SETTINGS.minStrength
-        };
-    } catch (error) {
-        return null;
     }
 }
 
@@ -4107,14 +4559,16 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     let details = [];
     let failedChecks = [];
 
-    // 1. Volume
-    if (marketData.volume && marketData.volume.rawRatio >= VOLUME_SETTINGS.baseThreshold) {
+    // 1. Volume (ATUALIZADO: usando análise robusta)
+    const volumeData = marketData.volume?.robustData;
+    if (volumeData && volumeData.combinedScore >= 0.5) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume,
-            QUALITY_WEIGHTS.volume * (marketData.volume.rawRatio / 2.0));
+            QUALITY_WEIGHTS.volume * volumeData.combinedScore);
         score += volumeScore;
-        details.push(` Vol 3m: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (${marketData.volume.rawRatio.toFixed(2)}x)`);
+        details.push(` Vol 3m Robusto: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (Score: ${volumeData.combinedScore.toFixed(2)} - ${volumeData.classification})`);
+        details.push(`   EMA: ${volumeData.emaRatio.toFixed(2)}x | Z-Score: ${volumeData.zScore.toFixed(2)} | VPT: ${volumeData.vpt.priceMovementPercent.toFixed(2)}%`);
     } else {
-        failedChecks.push(`Vol 3m: ${marketData.volume?.rawRatio.toFixed(2) || 0}x < ${VOLUME_SETTINGS.baseThreshold}x`);
+        failedChecks.push(`Vol 3m: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
     }
 
     // 2. Volatilidade
@@ -4156,16 +4610,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         score += rsiScore;
     }
 
-    // 5. ADX 1h
-    if (marketData.adx1h && marketData.adx1h.raw >= ADX_1H_SETTINGS.minStrength) {
-        const adxScore = QUALITY_WEIGHTS.adx1h;
-        score += adxScore;
-        details.push(` ADX 1h: ${adxScore}/${QUALITY_WEIGHTS.adx1h} (${marketData.adx1h.raw.toFixed(2)} ≥ ${ADX_1H_SETTINGS.minStrength})`);
-    } else {
-        failedChecks.push(`ADX 1h: ${marketData.adx1h?.raw?.toFixed(2) || 0} < ${ADX_1H_SETTINGS.minStrength}`);
-    }
-
-    // 6. EMA Alignment
+    // 5. EMA Alignment
     if (marketData.ema) {
         const isEmaValid = (isBullish && marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingUp) ||
             (!isBullish && !marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingDown);
@@ -4179,7 +4624,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         }
     }
 
-    // 7. Stochastic 1h (ATUALIZADO: 8 pontos, nova configuração)
+    // 6. Stochastic 1h (ATUALIZADO: 8 pontos, nova configuração)
     if (marketData.stoch && marketData.stoch.isValid) {
         const stochScore = QUALITY_WEIGHTS.stoch1h;
         score += stochScore;
@@ -4189,7 +4634,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Stoch 1h: Sem cruzamento ${isBullish ? 'bullish' : 'bearish'} (K ${isBullish ? '≤' : '≥'} D)`);
     }
 
-    // 8. Stochastic 4h
+    // 7. Stochastic 4h
     if (marketData.stoch4h && marketData.stoch4h.isValid) {
         const stoch4hScore = QUALITY_WEIGHTS.stoch4h;
         score += stoch4hScore;
@@ -4198,7 +4643,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Stoch 4h: ${isBullish ? 'bullish' : 'bearish'} `);
     }
 
-    // 9. CCI 4h
+    // 8. CCI 4h
     if (marketData.cci4h && marketData.cci4h.isValid) {
         const cci4hScore = QUALITY_WEIGHTS.cci4h;
         score += cci4hScore;
@@ -4208,7 +4653,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
     }
 
-    // 10. Open Interest
+    // 9. Open Interest
     if (marketData.oi && marketData.oi.isValid) {
         const oiScore = QUALITY_WEIGHTS.oi;
         score += oiScore;
@@ -4217,7 +4662,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`OI: Tendência ${marketData.oi?.trend || 'indefinida'} não confirma`);
     }
 
-    // 11. Funding Rate
+    // 10. Funding Rate
     if (marketData.funding && marketData.funding.isValid) {
         const fundingScore = QUALITY_WEIGHTS.funding;
         score += fundingScore;
@@ -4242,7 +4687,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Funding Rate: ${isBullish ? 'Não negativo' : 'Não positivo'} suficiente`);
     }
 
-    // 12. Breakout Risk
+    // 11. Breakout Risk
     if (marketData.breakoutRisk) {
         let breakoutScore = 0;
         let breakoutDetail = '';
@@ -4273,7 +4718,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Risco Rompimento: ${breakoutDetail}`);
     }
 
-    // 13. Support/Resistance
+    // 12. Support/Resistance
     if (marketData.supportResistance) {
         let srScore = 0;
         let srDetail = '';
@@ -4308,7 +4753,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Distância S/R: ${srDetail}`);
     }
 
-    // 14. Pivot Points (ATUALIZADO: Com diferenciação de timeframe)
+    // 13. Pivot Points (ATUALIZADO: Com diferenciação de timeframe)
     if (marketData.pivotPoints) {
         let pivotScore = 0;
         let pivotDetail = '';
@@ -4516,11 +4961,10 @@ async function monitorSymbol(symbol) {
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
         const pivotPointsData = await analyzePivotPoints(symbol, emaData.currentPrice, isBullish);
 
-        const [volumeData, volatilityData, lsrData, adx1hData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
+        const [volumeData, volatilityData, lsrData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
             checkVolume(symbol),
             checkVolatility(symbol),
             checkLSR(symbol, isBullish),
-            getADX1h(symbol),
             checkStochastic(symbol, isBullish),
             checkStochastic4h(symbol, isBullish),
             checkCCI4h(symbol, isBullish),
@@ -4528,7 +4972,6 @@ async function monitorSymbol(symbol) {
             checkFundingRate(symbol, isBullish)
         ]);
 
-        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
         if (!lsrData.isValid) return null;
 
         const marketData = {
@@ -4536,7 +4979,6 @@ async function monitorSymbol(symbol) {
             volatility: volatilityData,
             lsr: lsrData,
             rsi: rsiData,
-            adx1h: adx1hData,
             stoch: stochData,
             stoch4h: stoch4hData,
             cci4h: cci4hData,
@@ -4597,9 +5039,19 @@ async function monitorSymbol(symbol) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
             : 'Indisponível';
 
+        // Informações de volume robusto
+        const volumeRobustData = volumeData.robustData;
+        const volumeScore = volumeRobustData?.combinedScore?.toFixed(2) || '0.00';
+        const volumeClassification = volumeRobustData?.classification || 'NORMAL';
+        const emaRatio = volumeRobustData?.emaRatio?.toFixed(2) || 'N/A';
+        const zScore = volumeRobustData?.zScore?.toFixed(2) || 'N/A';
+
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status}) | Vol: ${volumeData.rawRatio.toFixed(2)}x | LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
-        console.log(`   📈 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
+        console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
+        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x (Score: ${volumeScore} - ${volumeClassification})`);
+        console.log(`   📊 EMA: ${emaRatio}x | Z-Score: ${zScore}`);
+        console.log(`   📊 LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
+        console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
         console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   📊 Stoch 1h: ${stochData.isValid ? '✅' : '❌'} (K:${stochData.kValue?.toFixed(1) || 'N/A'}, D:${stochData.dValue?.toFixed(1) || 'N/A'})`);
         console.log(`   💰 Funding: ${fundingRateText}`);
@@ -4669,18 +5121,16 @@ async function mainBotLoop() {
         return;
     }
 
-    console.log(`\n🚀 TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES`);
-    console.log(`📊 ${allSymbols.length} ativos Binance Futures`);
-    console.log(`🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
-    console.log(`📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)`);
-    console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
-    console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
-    console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
+    console.log(`\n TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES`);
+    console.log(` ${allSymbols.length} ativos Binance Futures`);
+    console.log(` RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
+    console.log(`  Score < 0.4: "🤖 IA ANALISANDO...")`);
 
     await sendInitializationMessage(allSymbols);
 
     let consecutiveErrors = 0;
     let totalSignals = 0;
+    let totalAnalysis = 0;
     let lastReportTime = Date.now();
     let lastRiskReportTime = Date.now();
 
@@ -4723,7 +5173,10 @@ async function mainBotLoop() {
 
             for (const signal of signals) {
                 if (signal.qualityScore.score >= QUALITY_THRESHOLD) {
-                    await sendSignalAlertWithRisk(signal);
+                    const alertResult = await sendSignalAlertWithRisk(signal);
+                    if (alertResult && alertResult.type === 'analysis') {
+                        totalAnalysis++;
+                    }
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
@@ -4741,7 +5194,7 @@ async function mainBotLoop() {
             }
 
             const status = symbolManager.getCurrentStatus();
-            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais`);
+            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
 
             consecutiveErrors = 0;
 
@@ -4861,7 +5314,6 @@ function resetLearningData() {
             parameterEvolution: {
                 volumeThreshold: [],
                 qualityThreshold: [],
-                adxThreshold: [],
                 breakoutRisk: [],
                 supportResistance: [],
                 pivotPoints: [],
@@ -4896,12 +5348,9 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
-        console.log(`📊 RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
-        console.log(`📈 Stochastic 1h: 14,3,3 (8 pontos)`);
-        console.log(`📊 LSR: Apenas Binance API (com percentual de mudança)`);
-        console.log(`📊 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados`);
-        console.log(`💰 Funding Rate: Emojis coloridos para visualização rápida`);
+        console.log(' TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
+        console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
+        console.log(` Stochastic 1h: 14,3,3 (8 pontos)`);
         console.log('='.repeat(80) + '\n');
 
         try {
