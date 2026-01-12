@@ -2480,7 +2480,7 @@ async function sendSignalAlertWithRisk(signal) {
             alertType = 'trade';
         } else {
             // VOLUME NÃO CONFIRMADO: Enviar apenas análise da IA
-            alertTitle = `🤖 <i>IA Analizando...  ${signal.symbol}</i>`;
+            alertTitle = `🤖 <i>IA Analisando...  ${signal.symbol}</i>`;
             alertType = 'analysis';
         }
 
