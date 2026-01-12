@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -21,69 +21,58 @@ const PARALLEL_CONFIG = {
 
 // === CONFIGURAÇÃO DE CACHE DIFERENCIADO POR TIPO ===
 const CACHE_CONFIG = {
-    'volume_3m': 12000,       // ↓ 12s → responde mais rápido a mudanças
-    'rsi_1h': 60000,          // 1 minuto
-    'pivot_1d': 3600000,      // 1 hora
-    'candles_15m': 90000,     // ↓ 90s → atualiza candles mais rápido
-    'candles_1h': 300000,     // 5 minutos
-    'lsr': 25000,             // ↓ 25s → LSR mais fresco
-    'funding': 60000,         // 1 minuto
-    'ticker': 25000,          // ↓ 25s → liquidez mais atualizada
-    'exchange_info': 300000   // 5 minutos
+    'volume_3m': 8000,        // ⬇️ de 12s → 8s: responde ainda mais rápido a spikes
+    'rsi_1h': 45000,          // ⬇️ de 60s → 45s: capta mudanças no RSI mais cedo
+    'pivot_1d': 1800000,      // ⬇️ de 1h → 30min: pivots diários atualizados com mais frequência
+    'candles_15m': 60000,     // ⬇️ de 90s → 60s: candles frescos para reentradas rápidas
+    'candles_1h': 180000,     // ⬇️ de 5min → 3min
+    'lsr': 15000,             // ⬇️ de 25s → 15s: LSR quase em tempo real
+    'funding': 30000,         // ⬇️ de 60s → 30s
+    'ticker': 15000,          // ⬇️ de 25s → 15s: liquidez atualizada constantemente
+    'exchange_info': 300000   // mantido (não crítico para alertas)
 };
 
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.25,      // ↓ aceita volume "baixo-moderado" se outros fatores confirmarem
-    combinedScore: 0.35,      // ↓ ligeiramente mais flexível
-    classification: 'BAIXO',  // ↓ agora aceita até "BAIXO" com confirmação cruzada
-    requireConfirmation: true
+    absoluteScore: 0.20,      // ⬇️ aceita volume "muito baixo" se houver forte confirmação cruzada
+    combinedScore: 0.30,      // ⬇️ mais flexível
+    classification: 'BAIXO',  
+    requireConfirmation: true // mantém a exigência de confirmação (ex: EMA + LSR + RSI)
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
-const VOLUME_SETTINGS = {
-    baseThreshold: 1.7,       // ↓ de 1.9 → aceita setups iniciais mais suaves
-    minThreshold: 1.5,        // ↓
-    maxThreshold: 2.8,
-    volatilityMultiplier: 0.35, // ↑ ligeiramente mais sensível em dias voláteis
-    useAdaptive: true
-};
-
-// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO (3m) ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 18,            // ↓ mais responsivo (de 20 → 18)
-    emaAlpha: 0.28,           // ↑ mais peso no volume recente
-    baseZScoreLookback: 30,   // ↓ mais ágil (de 35 → 30)
-    minZScoreLookback: 12,    // ↓
-    maxZScoreLookback: 50,    // ↓
-    zScoreThreshold: 1.6,     // ↓ aceita volumes "acima do normal", não só outliers
-    vptThreshold: 0.35,       // ↓ mais sensível a micro-movimentos com volume
-    minPriceMovement: 0.10,   // ↓ de 0.12% → captura movimentos menores
-    combinedMultiplier: 1.2,  // ↑ bônus maior para volume + preço alinhados
+    emaPeriod: 15,            // ⬇️ mais responsivo
+    emaAlpha: 0.32,           // ⬆️ peso maior no volume recente
+    baseZScoreLookback: 25,   // ⬇️ janela menor → detecta spikes mais cedo
+    minZScoreLookback: 10,
+    maxZScoreLookback: 40,
+    zScoreThreshold: 1.3,     // ⬇️ aceita "volume acima do normal" com mais facilidade
+    vptThreshold: 0.25,       // ⬇️ sensível a micro-movimentos
+    minPriceMovement: 0.07,   // ⬇️ captura movimentos menores (0.07%)
+    combinedMultiplier: 1.3,  // ⬆️ bônus maior quando volume + preço alinhados
     volumeWeight: 0.35,
     emaWeight: 0.35,
     zScoreWeight: 0.2,
     vptWeight: 0.1,
     minimumThresholds: {
-        combinedScore: 0.25,  // ↓ voltar para 0.25 (mas com early exit inteligente)
-        emaRatio: 1.15,       // ↓ de 1.2 → aceita setups mais iniciais
-        zScore: 0.35,         // ↓
+        combinedScore: 0.20,  // ⬇️ permite setups iniciais com score mínimo
+        emaRatio: 1.10,       // ⬇️ aceita volume 10% acima da média
+        zScore: 0.30,         // ⬇️
         classification: 'BAIXO'
     }
 };
 
-const VOLATILITY_PERIOD = 20;
-const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.6; // ↓ de 0.8 → aceita mercados menos voláteis
+// === VOLATILIDADE ===
+const VOLATILITY_THRESHOLD = 0.45; // ⬇️ aceita mercados ainda menos voláteis
 
-// === CONFIGURAÇÕES LSR AJUSTADAS ===
-const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.8;   // ↑ um pouco mais rigoroso na compra (evita pumps falsos)
-const LSR_SELL_THRESHOLD = 2.2;  // ↓ mais flexível na venda (captura quedas rápidas)
+// === LSR (Long/Short Ratio) ===
+const LSR_BUY_THRESHOLD = 3.0;    // ⬆️ mais rigoroso na compra (evita fakeouts)
+const LSR_SELL_THRESHOLD = 2.0;   // ⬇️ mais agressivo na venda (captura quedas)
 
-// === CONFIGURAÇÕES RSI OTIMIZADAS PARA MAIOR LUCRATIVIDADE ===
-const RSI_BUY_MAX = 65;   // ↑ de 62 → ainda mais cedo em tendências fortes
-const RSI_SELL_MIN = 62;  // ↓ de 65 → entra antes na reversão
+// === RSI ===
+const RSI_BUY_MAX = 62;   // ⬆️ entra ainda mais cedo em tendências fortes
+const RSI_SELL_MIN = 70;  // ⬇️ antecipa reversões
 
 const COOLDOWN_SETTINGS = {
     sameDirection: 20 * 60 * 1000, // ↓ de 30 → permite reentrada mais rápida
@@ -91,22 +80,23 @@ const COOLDOWN_SETTINGS = {
     useDifferentiated: true
 };
 
-// === QUALITY SCORE AJUSTADO - FOCO EM MOMENTUM INICIAL ===
-const QUALITY_THRESHOLD = 70; // ↓ de 75 → permite setups promissores em formação
+// === QUALITY SCORE AJUSTADO - FOCO EM MOMENTUM INICIAL + MAIS ALERTAS ===
+const QUALITY_THRESHOLD = 65; // ↓ de 70 → aceita setups promissores com confirmação cruzada
+
 const QUALITY_WEIGHTS = {
-    volume: 38,           // ↑ volume é seu núcleo absoluto
-    oi: 10,               // ↓ ligeiramente menos peso
-    volatility: 7,
-    lsr: 10,              // ↓
-    rsi: 13,              // ↑ RSI bem posicionado ganha mais peso
-    emaAlignment: 15,     // ↑ mantém como pilar
-    stoch1h: 9,           // ↑ Stoch 1h confirma momentum curto
-    stoch4h: 4,           // ↓ quase desativado (só para validação secundária)
-    cci4h: 6,             // ↓
-    breakoutRisk: 13,     // ↑ risco de rompimento mal gerenciado é crítico
-    supportResistance: 13, // ↑ distância de S/R é vital
-    pivotPoints: 11,      // ↓ ligeiramente menos crítico
-    funding: 10
+    volume: 40,           // ↑ ainda mais foco no volume (seu núcleo)
+    oi: 8,                // ↓ menos peso (OI é ruidoso)
+    volatility: 6,        // ↓ volatilidade moderada já basta
+    lsr: 10,              // mantido (filtro importante)
+    rsi: 14,              // ↑ RSI bem posicionado ganha destaque
+    emaAlignment: 16,     // ↑ alinhamento EMA é sinal precoce forte
+    stoch1h: 10,          // ↑ Stoch 1h como confirmação rápida
+    stoch4h: 2,           // ↓ quase ignorado (só se estiver alinhado)
+    cci4h: 4,             // ↓ peso mínimo
+    breakoutRisk: 14,     // ↑ penalização forte por risco alto
+    supportResistance: 14, // ↑ distância segura de S/R é vital
+    pivotPoints: 8,       // ↓ pivots são contextuais, não decisivos
+    funding: 10           // mantido (funding adverso pode matar trade)
 };
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
