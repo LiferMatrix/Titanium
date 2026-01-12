@@ -1,13 +1,13 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
-const { SMA, EMA, RSI, Stochastic, ATR, ADX, CCI } = require('technicalindicators');
+const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6';
-const TELEGRAM_CHAT_ID = '-1002559';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -21,97 +21,95 @@ const PARALLEL_CONFIG = {
 
 // === CONFIGURAÇÃO DE CACHE DIFERENCIADO POR TIPO ===
 const CACHE_CONFIG = {
-    'volume_3m': 15000,       // 15 segundos (volume muda rápido)
-    'rsi_1h': 60000,          // 1 minuto
-    'pivot_1d': 3600000,      // 1 hora
-    'candles_15m': 120000,    // 2 minutos
-    'candles_1h': 300000,     // 5 minutos
-    'ticker': 30000,          // 30 segundos
-    'exchange_info': 300000   // 5 minutos
+    'volume_3m': 10000,       // 10 segundos (volume muda rápido) - REDUZIDO
+    'rsi_1h': 30000,          // 30 segundos - REDUZIDO
+    'pivot_1d': 1800000,      // 30 minutos - REDUZIDO
+    'candles_15m': 60000,     // 1 minuto - REDUZIDO
+    'candles_1h': 120000,     // 2 minutos - REDUZIDO
+    'ticker': 15000,          // 15 segundos - REDUZIDO
+    'exchange_info': 180000   // 3 minutos - REDUZIDO
 };
 
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.3,
-    combinedScore: 0.4,
-    classification: 'MODERADO',
-    requireConfirmation: true
+    absoluteScore: 0.25,      // REDUZIDO de 0.3 para 0.25
+    combinedScore: 0.3,       // REDUZIDO de 0.4 para 0.3
+    classification: 'MODERADO-BAIXO', // AJUSTADO
+    requireConfirmation: false // DESATIVADO para gerar mais alertas
 };
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.9,
-    minThreshold: 1.6,
-    maxThreshold: 2.8,
-    volatilityMultiplier: 0.3,
+    baseThreshold: 1.5,       // REDUZIDO de 1.9 para 1.5
+    minThreshold: 1.3,        // REDUZIDO de 1.6 para 1.3
+    maxThreshold: 2.2,        // REDUZIDO de 2.8 para 2.2
+    volatilityMultiplier: 0.5, // AUMENTADO de 0.3 para 0.5
     useAdaptive: true
 };
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 20,
-    emaAlpha: 0.25,
-    baseZScoreLookback: 35,
-    minZScoreLookback: 15,
-    maxZScoreLookback: 60,
-    zScoreThreshold: 1.8,
-    vptThreshold: 0.4,
-    minPriceMovement: 0.12,
-    combinedMultiplier: 1.15,
-    volumeWeight: 0.35,
-    emaWeight: 0.35,
-    zScoreWeight: 0.2,
-    vptWeight: 0.1,
+    emaPeriod: 15,            // REDUZIDO de 20 para 15
+    emaAlpha: 0.35,           // AUMENTADO de 0.25 para 0.35
+    baseZScoreLookback: 25,   // REDUZIDO de 35 para 25
+    minZScoreLookback: 10,    // REDUZIDO de 15 para 10
+    maxZScoreLookback: 40,    // REDUZIDO de 60 para 40
+    zScoreThreshold: 1.5,     // REDUZIDO de 1.8 para 1.5
+    vptThreshold: 0.3,        // REDUZIDO de 0.4 para 0.3
+    minPriceMovement: 0.08,   // REDUZIDO de 0.12 para 0.08
+    combinedMultiplier: 1.3,  // AUMENTADO de 1.15 para 1.3
+    volumeWeight: 0.4,        // AUMENTADO de 0.35 para 0.4
+    emaWeight: 0.3,           // REDUZIDO de 0.35 para 0.3
+    zScoreWeight: 0.15,       // REDUZIDO de 0.2 para 0.15
+    vptWeight: 0.15,          // AUMENTADO de 0.1 para 0.15
     minimumThresholds: {
-        combinedScore: 0.25,
-        emaRatio: 1.2,
-        zScore: 0.4,
-        classification: 'BAIXO'
+        combinedScore: 0.2,   // REDUZIDO de 0.25 para 0.2
+        emaRatio: 1.1,        // REDUZIDO de 1.2 para 1.1
+        zScore: 0.3,          // REDUZIDO de 0.4 para 0.3
+        classification: 'MUITO BAIXO' // AJUSTADO
     }
 };
 
-const VOLATILITY_PERIOD = 20;
+const VOLATILITY_PERIOD = 15;             // REDUZIDO de 20 para 15
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.8;
+const VOLATILITY_THRESHOLD = 0.6;         // REDUZIDO de 0.8 para 0.6
 
 // === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 56; 
-const RSI_SELL_MIN = 70;
+const RSI_BUY_MAX = 60;                   // AUMENTADO de 56 para 60
+const RSI_SELL_MIN = 65;                  // REDUZIDO de 70 para 65
 
 const COOLDOWN_SETTINGS = {
-    sameDirection: 30 * 60 * 1000,
-    oppositeDirection: 10 * 60 * 1000,
+    sameDirection: 15 * 60 * 1000,       // REDUZIDO de 30 para 15 minutos
+    oppositeDirection: 5 * 60 * 1000,    // REDUZIDO de 10 para 5 minutos
     useDifferentiated: true
 };
 
 // === QUALITY SCORE AJUSTADO PARA SPOT ===
-const QUALITY_THRESHOLD = 75; // Reduzido ligeiramente para spot
+const QUALITY_THRESHOLD = 65;            // REDUZIDO de 75 para 65
 const QUALITY_WEIGHTS = {
-    volume: 35,       // Aumentado - mais importante no spot
-    volatility: 15,   // Aumentado
-    rsi: 15,          // Aumentado
-    emaAlignment: 15, // Aumentado
-    adx1h: 20,        // Aumentado
-    stoch1h: 10,      // Mantido
-    stoch4h: 5,       // Mantido
-    cci4h: 10,        // Mantido
-    breakoutRisk: 15, // Aumentado
-    supportResistance: 15, // Aumentado
-    pivotPoints: 15   // Aumentado
-    // Removidos: oi, lsr, funding
+    volume: 35,                          // REDUZIDO de 40 para 35
+    volatility: 15,                      // REDUZIDO de 20 para 15
+    rsi: 25,                             // AUMENTADO de 20 para 25
+    emaAlignment: 25,                    // AUMENTADO de 20 para 25
+    stoch1h: 15,                         // AUMENTADO de 10 para 15
+    stoch4h: 10,                         // AUMENTADO de 5 para 10
+    cci4h: 15,                           // AUMENTADO de 10 para 15
+    breakoutRisk: 10,                    // REDUZIDO de 15 para 10
+    supportResistance: 10,               // REDUZIDO de 15 para 10
+    pivotPoints: 10                      // REDUZIDO de 15 para 10
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
-    requestsPerMinute: 1200,   // Aumentado para spot
-    requestsPerSecond: 20,     // Reduzido um pouco
+    requestsPerMinute: 1200,
+    requestsPerSecond: 20,
     weightPerRequest: {
         exchangeInfo: 10,
         klines: 1,
         ticker24hr: 1,
         ping: 1
     },
-    maxWeightPerMinute: 2400,  // Ajustado
+    maxWeightPerMinute: 2400,
     maxWeightPerSecond: 40,
     retryConfig: {
         maxRetries: 3,
@@ -209,20 +207,6 @@ const MAX_CACHE_AGE = 30 * 60 * 1000;
 // Cache adicional para volume analysis
 const volumeAnalysisCache = {};
 const VOLUME_CACHE_TTL = 30000;
-
-// === CONFIGURAÇÕES TÉCNICAS ===
-const ADX_SETTINGS = {
-    period: 14,
-    timeframe: '15m',
-    strongTrendThreshold: 28
-};
-
-const ADX_1H_SETTINGS = {
-    period: 14,
-    timeframe: '1h',
-    strongTrendThreshold: 25,
-    minStrength: 22
-};
 
 // Stochastic 1h
 const STOCH_SETTINGS = {
@@ -1479,7 +1463,6 @@ class AdvancedLearningSystem {
         this.parameterEvolution = {
             volumeThreshold: [],
             qualityThreshold: [],
-            adxThreshold: [],
             breakoutRisk: [],
             supportResistance: [],
             pivotPoints: [],
@@ -1827,7 +1810,6 @@ class AdvancedLearningSystem {
                     volumeRatio: marketData.volume?.rawRatio || 0,
                     volumeRobust: marketData.volume?.robustData || null,
                     rsi: marketData.rsi?.raw || 0,
-                    adx1h: marketData.adx1h?.raw || 0,
                     volatility: marketData.volatility?.rawVolatility || 0,
                     emaAlignment: marketData.ema?.isAboveEMA55 || false,
                     stoch1hValid: marketData.stoch?.isValid || false,
@@ -1940,11 +1922,11 @@ class AdvancedLearningSystem {
         if (data.volumeRobust?.combinedScore >= 0.7) {
             patterns.push('ROBUST_VOLUME');
         }
-        if (data.volumeRatio >= 1.8 && data.adx1h >= 25) {
-            patterns.push('HIGH_VOL_STRONG_TREND');
+        if (data.volumeRatio >= 1.8) {
+            patterns.push('HIGH_VOLUME');
         }
-        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8 && data.adx1h >= 22) {
-            patterns.push('MOD_VOL_GOOD_TREND');
+        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8) {
+            patterns.push('MOD_VOLUME');
         }
         
         if (data.volatility >= 1.0 && data.volatility <= 1.5) {
@@ -2002,26 +1984,6 @@ class AdvancedLearningSystem {
                 });
             }
 
-            const adxAnalysis = this.analyzeParameter(
-                closedTrades,
-                t => t.marketData.adx1h,
-                [20, 22, 24, 26, 28],
-                ADX_1H_SETTINGS.minStrength
-            );
-
-            if (adxAnalysis.bestValue && adxAnalysis.winRate > 0.4) {
-                const adjustment = (adxAnalysis.bestValue - ADX_1H_SETTINGS.minStrength) * 0.1;
-                ADX_1H_SETTINGS.minStrength += adjustment;
-                ADX_1H_SETTINGS.minStrength = Math.max(20, Math.min(30, ADX_1H_SETTINGS.minStrength));
-
-                this.parameterEvolution.adxThreshold.push({
-                    timestamp: Date.now(),
-                    old: ADX_1H_SETTINGS.minStrength - adjustment,
-                    new: ADX_1H_SETTINGS.minStrength,
-                    winRate: adxAnalysis.winRate
-                });
-            }
-
             const breakoutAnalysis = this.analyzeBreakoutRisk(closedTrades);
             if (breakoutAnalysis.bestWinRate > 0.4) {
                 this.parameterEvolution.breakoutRisk.push({
@@ -2040,7 +2002,7 @@ class AdvancedLearningSystem {
                 });
             }
 
-            console.log(`⚙️  Parâmetros otimizados: Volume=${VOLUME_SETTINGS.baseThreshold.toFixed(2)}, ADX=${ADX_1H_SETTINGS.minStrength.toFixed(1)}`);
+            console.log(`⚙️  Parâmetros otimizados: Volume=${VOLUME_SETTINGS.baseThreshold.toFixed(2)}`);
             this.saveLearningData();
 
         } catch (error) {
@@ -4245,38 +4207,6 @@ async function checkVolatility(symbol) {
     }
 }
 
-async function getADX1h(symbol) {
-    try {
-        const candles = await getCandlesCached(symbol, '1h', 50);
-        if (candles.length < ADX_1H_SETTINGS.period + 5) return null;
-
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
-
-        const adxValues = ADX.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: ADX_1H_SETTINGS.period
-        });
-
-        if (!adxValues || adxValues.length === 0) return null;
-
-        const latestADX = adxValues[adxValues.length - 1];
-        const adxValue = typeof latestADX === 'object' ? latestADX.adx : latestADX;
-
-        if (typeof adxValue !== 'number' || isNaN(adxValue)) return null;
-
-        return {
-            raw: adxValue,
-            hasMinimumStrength: adxValue >= ADX_1H_SETTINGS.minStrength
-        };
-    } catch (error) {
-        return null;
-    }
-}
-
 async function checkStochastic(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '1h', 25);
@@ -4441,18 +4371,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         };
     }
 
-    if (!marketData.adx1h || !marketData.adx1h.hasMinimumStrength) {
-        return {
-            score: 0,
-            grade: "D",
-            emoji: "❌",
-            isAcceptable: false,
-            message: "❌ ADX 1h fraco",
-            details: [],
-            failedChecks: ['ADX 1h < mínimo']
-        };
-    }
-
     const rsiValue = marketData.rsi?.value || 50;
     if ((isBullish && rsiValue > RSI_BUY_MAX) || (!isBullish && rsiValue < RSI_SELL_MIN)) {
         return {
@@ -4509,9 +4427,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` RSI: ${rsiScore}/${QUALITY_WEIGHTS.rsi}`);
     }
     score += rsiScore;
-
-    score += QUALITY_WEIGHTS.adx1h;
-    details.push(` ADX 1h: ${QUALITY_WEIGHTS.adx1h}/${QUALITY_WEIGHTS.adx1h}`);
 
     score += QUALITY_WEIGHTS.emaAlignment;
     details.push(` EMA 3m: ${QUALITY_WEIGHTS.emaAlignment}/${QUALITY_WEIGHTS.emaAlignment}`);
@@ -4834,22 +4749,17 @@ async function monitorSymbol(symbol) {
         const [
             volumeData,
             volatilityData,
-            adx1hData,
             stochData
         ] = await Promise.all([
             checkVolume(symbol),
             checkVolatility(symbol),
-            getADX1h(symbol),
             checkStochastic(symbol, isBullish)
         ]);
-
-        if (!adx1hData || !adx1hData.hasMinimumStrength) return null;
 
         const marketData = {
             volume: volumeData,
             volatility: volatilityData,
             rsi: rsiData,
-            adx1h: adx1hData,
             stoch: stochData,
             ema: analysis.emaData,
             supportResistance: supportResistanceData,
@@ -5122,7 +5032,6 @@ function resetLearningData() {
             parameterEvolution: {
                 volumeThreshold: [],
                 qualityThreshold: [],
-                adxThreshold: [],
                 breakoutRisk: [],
                 supportResistance: [],
                 pivotPoints: [],
