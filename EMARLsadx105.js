@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0J5OE6G1dTJVfP7dGqPQCqPv6A';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -175,16 +175,16 @@ const PIVOT_POINTS_SETTINGS = {
     // Configurações de força por timeframe
     timeframeStrengthWeights: {
         '15m': 1.0,   // Pivot fraco (15 minutos)
-        '1h': 2.0,    // Pivot moderado (1 hora)
-        '4h': 3.0,    // Pivot forte (4 horas)
-        '1d': 5.0     // Pivot muito forte (diário)
+        '1H': 2.0,    // Pivot moderado (1 hora)
+        '✨4H': 3.0,    // Pivot forte (4 horas)
+        '✨1D': 5.0     // Pivot muito forte (diário)
     },
     // Distâncias seguras baseadas na força do pivot
     safeDistanceMultipliers: {
-        'weak': 0.5,      // Pivot fraco: precisa de 0.5% de distância
-        'moderate': 1.0,  // Pivot moderado: precisa de 1.0% de distância
-        'strong': 1.5,    // Pivot forte: precisa de 1.5% de distância
-        'very_strong': 2.0 // Pivot muito forte: precisa de 2.0% de distância
+        'Fraco': 0.5,      // Pivot fraco: precisa de 0.5% de distância
+        'Moderado': 1.0,  // Pivot moderado: precisa de 1.0% de distância
+        'Forte': 1.5,    // Pivot forte: precisa de 1.5% de distância
+        'Muito Forte': 2.0 // Pivot muito forte: precisa de 2.0% de distância
     },
     // Configurações de detecção
     minDistance: 5,        // Distância mínima entre pivots (velas)
@@ -241,16 +241,17 @@ const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
 
 // =====================================================================
-// 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE)
+// 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE) - CORRIGIDO
 // =====================================================================
 
 class SophisticatedRiskLayer {
     constructor() {
+        // CORREÇÃO: Atualizado para usar chaves em português
         this.riskLevels = {
-            LOW: { emoji: '🟢', score: 0, action: 'high_confidence' },
-            MEDIUM: { emoji: '🟡', score: 1, action: 'caution_advised' },
-            HIGH: { emoji: '🟠', score: 2, action: 'extreme_caution' },
-            CRITICAL: { emoji: '🔴', score: 3, action: 'consider_avoiding' }
+            'BAIXO': { emoji: '🟢', score: 0, action: 'high_confidence' },
+            'MEDIANO': { emoji: '🟡', score: 1, action: 'caution_advised' },
+            'ALTO': { emoji: '🟠', score: 2, action: 'extreme_caution' },
+            'CRÍTICO': { emoji: '🔴', score: 3, action: 'consider_avoiding' }
         };
 
         this.riskFactors = {
@@ -275,7 +276,7 @@ class SophisticatedRiskLayer {
         try {
             const riskAssessment = {
                 overallScore: 0,
-                level: 'LOW',
+                level: 'BAIXO',
                 factors: [],
                 warnings: [],
                 recommendations: [],
@@ -860,11 +861,12 @@ class SophisticatedRiskLayer {
         return slice.reduce((a, b) => a + b, 0) / period;
     }
 
+    // CORREÇÃO: Atualizado para retornar em português (compatível com riskLevels)
     determineRiskLevel(score) {
-        if (score >= 12) return 'CRITICAL';
-        if (score >= 8) return 'HIGH';
-        if (score >= 4) return 'MEDIUM';
-        return 'LOW';
+        if (score >= 12) return 'CRÍTICO';
+        if (score >= 8) return 'ALTO';
+        if (score >= 4) return 'MEDIANO';
+        return 'BAIXO';
     }
 
     calculateConfidence(assessment) {
@@ -875,6 +877,7 @@ class SophisticatedRiskLayer {
         return Math.max(60, Math.min(100, Math.round(confidence)));
     }
 
+    // CORREÇÃO: Atualizado para usar as chaves em português
     generateRecommendations(assessment) {
         const recommendations = [];
 
@@ -887,28 +890,28 @@ class SophisticatedRiskLayer {
         });
 
         switch (assessment.level) {
-            case 'CRITICAL':
+            case 'CRÍTICO':
                 recommendations.push('⚠️ <i>CONSIDERE EVITAR ESTE TRADE</i>');
                 recommendations.push('• Reduza tamanho da posição em 75%');
                 recommendations.push('• Use stop loss mais apertado');
                 recommendations.push('• Espere confirmação adicional');
                 break;
 
-            case 'HIGH':
+            case 'ALTO':
                 recommendations.push('🔶 <i>ALTO RISCO - EXTREMA CAUTELA</i>');
                 recommendations.push('• Reduza tamanho da posição em 50%');
                 recommendations.push('• Use stop loss conservador');
                 recommendations.push('• Procure entrada melhor');
                 break;
 
-            case 'MEDIUM':
+            case 'MEDIANO':
                 recommendations.push('🟡 <i>RISCO MODERADO - CAUTELA</i>');
                 recommendations.push('• Reduza tamanho da posição em 25%');
                 recommendations.push('• Aguarde confirmação parcial');
                 recommendations.push('• Considere alvos mais curtos');
                 break;
 
-            case 'LOW':
+            case 'BAIXO':
                 recommendations.push('🟢 <i>RISCO BAIXO - CONFIANÇA</i>');
                 recommendations.push('• Tamanho normal de posição OK');
                 recommendations.push('• Stop loss padrão adequado');
@@ -986,6 +989,7 @@ class SophisticatedRiskLayer {
 
     logRiskAssessment(symbol, assessment) {
         console.log(`\n🛡️  RISK ASSESSMENT: ${symbol}`);
+        // CORREÇÃO: Agora usando chaves em português consistentes
         console.log(`   Nível: ${assessment.level} ${this.riskLevels[assessment.level].emoji}`);
         console.log(`   Score: ${assessment.overallScore.toFixed(2)}`);
         console.log(`   Confiança: ${assessment.confidence}%`);
@@ -1005,7 +1009,7 @@ class SophisticatedRiskLayer {
     getDefaultRiskAssessment() {
         return {
             overallScore: 1,
-            level: 'LOW',
+            level: 'BAIXO',
             factors: [],
             warnings: ['Sistema de risco indisponível'],
             recommendations: ['Use cautela padrão'],
@@ -2441,9 +2445,9 @@ async function sendSignalAlertWithRisk(signal) {
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
-        const riskEmoji = riskAssessment.level === 'CRITICAL' ? '🚨' :
-            riskAssessment.level === 'HIGH' ? '🔴' :
-                riskAssessment.level === 'MEDIUM' ? '🟡' : '🟢';
+        const riskEmoji = riskAssessment.level === 'CRÍTICO' ? '🚨' :
+            riskAssessment.level === 'ALTO' ? '🔴' :
+                riskAssessment.level === 'MEDIANO' ? '🟡' : '🟢';
 
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
@@ -2491,7 +2495,7 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 • Preço: $${signal.price.toFixed(6)}
-⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Vol Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • Dist. Suport/Resist.: ${distancePercent}%
 • Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
