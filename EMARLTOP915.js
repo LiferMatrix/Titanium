@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZ';
+const TELEGRAM_CHAT_ID = '-10019';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
