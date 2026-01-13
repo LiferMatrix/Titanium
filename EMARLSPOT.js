@@ -12,104 +12,96 @@ const TELEGRAM_CHAT_ID = '-1002554953979';
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
 
-// === NOVO: SISTEMA DE PARALELISMO COM THREADS VIRTUAIS ===
-const PARALLEL_CONFIG = {
-    enabled: true,
-    maxConcurrentCalculations: 4,
-    calculationTimeout: 5000
-};
-
-// === CONFIGURAÇÃO DE CACHE DIFERENCIADO POR TIPO ===
-const CACHE_CONFIG = {
-    'volume_3m': 10000,       // 10 segundos (volume muda rápido) - REDUZIDO
-    'rsi_1h': 30000,          // 30 segundos - REDUZIDO
-    'pivot_1d': 1800000,      // 30 minutos - REDUZIDO
-    'candles_15m': 60000,     // 1 minuto - REDUZIDO
-    'candles_1h': 120000,     // 2 minutos - REDUZIDO
-    'ticker': 15000,          // 15 segundos - REDUZIDO
-    'exchange_info': 180000   // 3 minutos - REDUZIDO
-};
-
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.25,      // REDUZIDO de 0.3 para 0.25
-    combinedScore: 0.3,       // REDUZIDO de 0.4 para 0.3
-    classification: 'MODERADO-BAIXO', // AJUSTADO
-    requireConfirmation: false // DESATIVADO para gerar mais alertas
+    absoluteScore: 0.25,          // ↓ Reduzido para permitir sinais com volume inicial mais fraco
+    combinedScore: 0.3,           // ↓ Flexibilizado levemente
+    classification: 'BAIXO',      // ✅ Aceita até "BAIXO" se outros fatores confirmarem
+    requireConfirmation: true     // Mantido – confirmação ainda obrigatória
 };
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.5,       // REDUZIDO de 1.9 para 1.5
-    minThreshold: 1.3,        // REDUZIDO de 1.6 para 1.3
-    maxThreshold: 2.2,        // REDUZIDO de 2.8 para 2.2
-    volatilityMultiplier: 0.5, // AUMENTADO de 0.3 para 0.5
+    baseThreshold: 1.8,           // ⬇️ Mais sensível a setups de qualidade
+    minThreshold: 1.5,            // ⬇️ Aceita movimentos iniciais suaves
+    maxThreshold: 2.9,            // ⬆️ Captura pumps reais sem cortar
+    volatilityMultiplier: 0.35,   // ⬆️ Melhor adaptação em alta volatilidade
     useAdaptive: true
 };
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 15,            // REDUZIDO de 20 para 15
-    emaAlpha: 0.35,           // AUMENTADO de 0.25 para 0.35
-    baseZScoreLookback: 25,   // REDUZIDO de 35 para 25
-    minZScoreLookback: 10,    // REDUZIDO de 15 para 10
-    maxZScoreLookback: 40,    // REDUZIDO de 60 para 40
-    zScoreThreshold: 1.5,     // REDUZIDO de 1.8 para 1.5
-    vptThreshold: 0.3,        // REDUZIDO de 0.4 para 0.3
-    minPriceMovement: 0.08,   // REDUZIDO de 0.12 para 0.08
-    combinedMultiplier: 1.3,  // AUMENTADO de 1.15 para 1.3
-    volumeWeight: 0.4,        // AUMENTADO de 0.35 para 0.4
-    emaWeight: 0.3,           // REDUZIDO de 0.35 para 0.3
-    zScoreWeight: 0.15,       // REDUZIDO de 0.2 para 0.15
-    vptWeight: 0.15,          // AUMENTADO de 0.1 para 0.15
+    // Média Móvel Exponencial (EMA) do Volume
+    emaPeriod: 20,
+    emaAlpha: 0.26,               // ↑ Levemente mais responsivo
+
+    // Z-Score do Volume com lookback adaptativo
+    baseZScoreLookback: 40,       // ↓ Responde mais rápido a mudanças
+    minZScoreLookback: 12,        // ↓ Reação ágil em alta volatilidade
+    maxZScoreLookback: 80,        // ↓ Evita over-smoothing
+    zScoreThreshold: 1.7,         // ↓ Aceita volumes "acima do normal"
+
+    // Volume-Price Trend (VPT)
+    vptThreshold: 0.35,           // ↓ Aceita micro-movimentos com volume
+    minPriceMovement: 0.10,       // ↓ Mais sensível a movimentos menores
+
+    // Configurações combinadas – pesos ajustados
+    combinedMultiplier: 1.12,
+    volumeWeight: 0.33,
+    emaWeight: 0.37,              // ↑ Prioriza EMA (sinal mais confiável)
+    zScoreWeight: 0.2,
+    vptWeight: 0.1,
+
+    // Thresholds mínimos – MAIS FLEXÍVEIS, MAS NÃO PERMISSIVOS
     minimumThresholds: {
-        combinedScore: 0.2,   // REDUZIDO de 0.25 para 0.2
-        emaRatio: 1.1,        // REDUZIDO de 1.2 para 1.1
-        zScore: 0.3,          // REDUZIDO de 0.4 para 0.3
-        classification: 'MUITO BAIXO' // AJUSTADO
+        combinedScore: 0.20,      // ✅ Principal ajuste: permite volume "fraco-moderado"
+        emaRatio: 1.1,            // ↓ Aceita setups iniciais mais cedo
+        zScore: 0.3,              // ↓ Filtra ruído, mas capta variações normais
+        classification: 'BAIXO'   // ✅ Aceita classificação "BAIXO" com confirmação cruzada
     }
 };
 
-const VOLATILITY_PERIOD = 15;             // REDUZIDO de 20 para 15
+const VOLATILITY_PERIOD = 20;
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.6;         // REDUZIDO de 0.8 para 0.6
+const VOLATILITY_THRESHOLD = 0.6; // ⬇️ Permite operar em mais ativos com volatilidade moderada
 
-// === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 60;                   // AUMENTADO de 56 para 60
-const RSI_SELL_MIN = 65;                  // REDUZIDO de 70 para 65
+// === ATUALIZADO: CONFIGURAÇÕES RSI ===
+const RSI_BUY_MAX = 60; 
+const RSI_SELL_MIN = 65;
 
 const COOLDOWN_SETTINGS = {
-    sameDirection: 15 * 60 * 1000,       // REDUZIDO de 30 para 15 minutos
-    oppositeDirection: 5 * 60 * 1000,    // REDUZIDO de 10 para 5 minutos
+    sameDirection: 30 * 60 * 1000,
+    oppositeDirection: 10 * 60 * 1000,
     useDifferentiated: true
 };
 
-// === QUALITY SCORE AJUSTADO PARA SPOT ===
-const QUALITY_THRESHOLD = 65;            // REDUZIDO de 75 para 65
+// === QUALITY SCORE AJUSTADO PARA MAIOR LUCRATIVIDADE ===
+const QUALITY_THRESHOLD = 75; // ⬇️ Aumenta número de alertas com boa qualidade
 const QUALITY_WEIGHTS = {
-    volume: 35,                          // REDUZIDO de 40 para 35
-    volatility: 15,                      // REDUZIDO de 20 para 15
-    rsi: 25,                             // AUMENTADO de 20 para 25
-    emaAlignment: 25,                    // AUMENTADO de 20 para 25
-    stoch1h: 15,                         // AUMENTADO de 10 para 15
-    stoch4h: 10,                         // AUMENTADO de 5 para 10
-    cci4h: 15,                           // AUMENTADO de 10 para 15
-    breakoutRisk: 10,                    // REDUZIDO de 15 para 10
-    supportResistance: 10,               // REDUZIDO de 15 para 10
-    pivotPoints: 10                      // REDUZIDO de 15 para 10
+    volume: 38,          // ↑ +3 → volume robusto é seu principal filtro
+    volatility: 8,       // ↓ -2 → volatilidade é contexto, não sinal
+    rsi: 12,             // ↑ +2 → RSI ideal altamente lucrativo
+    emaAlignment: 14,    // ↑ +2 → alinhamento de EMA é sinal forte
+    stoch1h: 8,          // mantido
+    stoch4h: 4,          // ↓ -1 → secundário
+    cci4h: 6,            // ↓ -2 → útil, mas não essencial
+    breakoutRisk: 14,    // ↑ +2 → evitar rompimentos falsos aumenta win rate
+    supportResistance: 14, // ↑ +2 → distância segura = maior margem
+    pivotPoints: 12,     // mantido
+    btcCorrelation: 15   // NOVO: Correlação com BTC
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
-    requestsPerMinute: 1200,
-    requestsPerSecond: 20,
+    requestsPerMinute: 1000,
+    requestsPerSecond: 30,
     weightPerRequest: {
         exchangeInfo: 10,
         klines: 1,
         ticker24hr: 1,
         ping: 1
     },
-    maxWeightPerMinute: 2400,
+    maxWeightPerMinute: 2200,
     maxWeightPerSecond: 40,
     retryConfig: {
         maxRetries: 3,
@@ -170,27 +162,47 @@ const BREAKOUT_RISK_SETTINGS = {
     safeDistance: 3.0
 };
 
-// === CONFIGURAÇÕES PARA PIVOT POINTS MULTI-TIMEFRAME ===
+// === NOVA: CONFIGURAÇÕES PARA PIVOT POINTS MULTI-TIMEFRAME ===
 const PIVOT_POINTS_SETTINGS = {
+    // Configurações de força por timeframe
     timeframeStrengthWeights: {
-        '15m': 1.0,
-        '1h': 2.0,
-        '4h': 3.0,
-        '1d': 5.0
+        '15m': 1.0,   // Pivot fraco (15 minutos)
+        '1H': 2.0,    // Pivot moderado (1 hora)
+        '✨4H': 3.0,    // Pivot forte (4 horas)
+        '✨1D': 5.0     // Pivot muito forte (diário)
     },
+    // Distâncias seguras baseadas na força do pivot
     safeDistanceMultipliers: {
-        'weak': 0.5,
-        'moderate': 1.0,
-        'strong': 1.5,
-        'very_strong': 2.0
+        'Fraco': 0.5,      // Pivot fraco: precisa de 0.5% de distância
+        'Moderado': 1.0,  // Pivot moderado: precisa de 1.0% de distância
+        'Forte': 1.5,    // Pivot forte: precisa de 1.5% de distância
+        'Muito Forte': 2.0 // Pivot muito forte: precisa de 2.0% de distância
     },
-    minDistance: 5,
-    priceTolerance: 0.005,
-    analyzeTimeframes: ['15m', '1h'],
+    // Configurações de detecção
+    minDistance: 5,        // Distância mínima entre pivots (velas)
+    priceTolerance: 0.005, // Tolerância de preço para considerar toque (0.5%)
+    // Configurações de análise
+    analyzeTimeframes: ['15m', '1h', '4h'], // Timeframes a serem analisados
     candlesPerTimeframe: {
-        '15m': 50,
-        '1h': 80,
-        '4h': 80
+        '15m': 70,  // ~17.5 horas
+        '1h': 100,  // ~4 dias
+        '4h': 120   // ~20 dias
+    }
+};
+
+// === CONFIGURAÇÕES PARA ANÁLISE DE PERFORMANCE VS BTC ===
+const BTC_CORRELATION_SETTINGS = {
+    timeframe: '15m',
+    lookbackPeriods: {
+        short: 8,     // Últimas 2 horas (15m candles)
+        medium: 24,   // Últimas 6 horas
+        long: 48      // Últimas 12 horas
+    },
+    thresholds: {
+        highOutperformance: 1.5,   // Altcoin performando 1.5% melhor que BTC
+        mediumOutperformance: 0.8,
+        underperformance: -0.5,    // Altcoin performando pior que BTC
+        strongUnderperformance: -1.0
     }
 };
 
@@ -199,16 +211,14 @@ const LOG_DIR = './logs';
 const LEARNING_DIR = './learning_data';
 const MAX_LOG_FILES = 15;
 
-// === CACHE SETTINGS OTIMIZADOS ===
+// === CACHE SETTINGS ===
 const candleCache = {};
-const CANDLE_CACHE_TTL = 120000;
-const MAX_CACHE_AGE = 30 * 60 * 1000;
+const CANDLE_CACHE_TTL = 60000;
+const MAX_CACHE_AGE = 10 * 60 * 1000;
 
-// Cache adicional para volume analysis
-const volumeAnalysisCache = {};
-const VOLUME_CACHE_TTL = 30000;
+// === ATUALIZADO: CONFIGURAÇÕES TÉCNICAS ===
 
-// Stochastic 1h
+// ATUALIZADO: Stochastic 1h com nova configuração 14,3,3
 const STOCH_SETTINGS = {
     period: 14,
     smooth: 3,
@@ -235,394 +245,7 @@ const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
 
 // =====================================================================
-// 🔄 SISTEMA DE PARALELISMO PARA CÁLCULOS INTENSIVOS
-// =====================================================================
-
-class ParallelCalculationEngine {
-    constructor() {
-        this.taskQueue = [];
-        this.activeTasks = 0;
-        this.maxConcurrent = PARALLEL_CONFIG.maxConcurrentCalculations;
-        this.results = new Map();
-        this.isProcessing = false;
-        
-        console.log('⚡ Engine de Cálculo Paralelo inicializada');
-    }
-
-    async executeParallelCalculations(tasks) {
-        if (!PARALLEL_CONFIG.enabled || tasks.length === 0) {
-            const results = [];
-            for (const task of tasks) {
-                results.push(await this.executeTask(task));
-            }
-            return results;
-        }
-
-        return new Promise((resolve) => {
-            const taskPromises = [];
-            const batchSize = Math.min(this.maxConcurrent, tasks.length);
-            
-            for (let i = 0; i < batchSize; i++) {
-                taskPromises.push(this.processTaskBatch(tasks, i, batchSize));
-            }
-            
-            Promise.all(taskPromises).then((batchResults) => {
-                const allResults = [];
-                batchResults.forEach(batch => {
-                    allResults.push(...batch);
-                });
-                resolve(allResults);
-            }).catch(() => {
-                this.executeSequentialFallback(tasks).then(resolve);
-            });
-        });
-    }
-
-    async processTaskBatch(tasks, startIndex, step) {
-        const results = [];
-        for (let i = startIndex; i < tasks.length; i += step) {
-            try {
-                const result = await this.executeTaskWithTimeout(tasks[i]);
-                results.push(result);
-            } catch (error) {
-                console.log(`⚠️ Erro no cálculo paralelo: ${error.message}`);
-                const fallbackResult = await this.executeTask(tasks[i]);
-                results.push(fallbackResult);
-            }
-        }
-        return results;
-    }
-
-    async executeTaskWithTimeout(task) {
-        return new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-                reject(new Error('Timeout no cálculo'));
-            }, PARALLEL_CONFIG.calculationTimeout);
-
-            this.executeTask(task).then(result => {
-                clearTimeout(timeoutId);
-                resolve(result);
-            }).catch(error => {
-                clearTimeout(timeoutId);
-                reject(error);
-            });
-        });
-    }
-
-    async executeTask(task) {
-        try {
-            switch (task.type) {
-                case 'VOLUME_ZSCORE':
-                    return this.calculateVolumeZScore(task.data);
-                case 'PIVOT_POINTS':
-                    return this.analyzePivotPointsInTimeframe(task.data);
-                case 'EMA_CALCULATION':
-                    return this.calculateEMAs(task.data);
-                case 'ATR_CALCULATION':
-                    return this.calculateATR(task.data);
-                case 'RSI_CALCULATION':
-                    return this.calculateRSI(task.data);
-                case 'STOCH_CALCULATION':
-                    return this.calculateStochastic(task.data);
-                case 'CCI_CALCULATION':
-                    return this.calculateCCI(task.data);
-                default:
-                    throw new Error(`Tipo de cálculo não suportado: ${task.type}`);
-            }
-        } catch (error) {
-            console.error(`Erro no cálculo ${task.type}:`, error.message);
-            throw error;
-        }
-    }
-
-    calculateVolumeZScore(data) {
-        const { volumes, lookback } = data;
-        
-        if (volumes.length < lookback) {
-            return {
-                currentZScore: 0,
-                mean: volumes[0] || 0,
-                stdDev: 0,
-                lookbackUsed: lookback,
-                isOutlier: false
-            };
-        }
-        
-        const recentVolumes = volumes.slice(-lookback);
-        const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
-        
-        let sumSquaredDifferences = 0;
-        for (const volume of recentVolumes) {
-            sumSquaredDifferences += Math.pow(volume - mean, 2);
-        }
-        const variance = sumSquaredDifferences / recentVolumes.length;
-        const stdDev = Math.sqrt(variance);
-        
-        const currentVolume = volumes[volumes.length - 1];
-        const zScore = stdDev !== 0 ? (currentVolume - mean) / stdDev : 0;
-        
-        return {
-            currentZScore: zScore,
-            mean: mean,
-            stdDev: stdDev,
-            lookbackUsed: lookback,
-            isOutlier: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold
-        };
-    }
-
-    analyzePivotPointsInTimeframe(data) {
-        const { highs, lows, timeframe } = data;
-        const minDistance = PIVOT_POINTS_SETTINGS.minDistance;
-        
-        const pivotHighs = this.findPivotHighs(highs, minDistance);
-        const pivotLows = this.findPivotLows(lows, minDistance);
-        
-        return {
-            pivotHighs,
-            pivotLows,
-            timeframe,
-            count: pivotHighs.length + pivotLows.length
-        };
-    }
-
-    findPivotHighs(highs, minDistance) {
-        const pivots = [];
-        
-        for (let i = minDistance; i < highs.length - minDistance; i++) {
-            let isPivot = true;
-            
-            for (let j = i - minDistance; j <= i + minDistance; j++) {
-                if (j !== i && highs[j] > highs[i]) {
-                    isPivot = false;
-                    break;
-                }
-            }
-            
-            if (isPivot) {
-                pivots.push({
-                    index: i,
-                    price: highs[i],
-                    type: 'resistance'
-                });
-            }
-        }
-        
-        return pivots;
-    }
-
-    findPivotLows(lows, minDistance) {
-        const pivots = [];
-        
-        for (let i = minDistance; i < lows.length - minDistance; i++) {
-            let isPivot = true;
-            
-            for (let j = i - minDistance; j <= i + minDistance; j++) {
-                if (j !== i && lows[j] < lows[i]) {
-                    isPivot = false;
-                    break;
-                }
-            }
-            
-            if (isPivot) {
-                pivots.push({
-                    index: i,
-                    price: lows[i],
-                    type: 'support'
-                });
-            }
-        }
-        
-        return pivots;
-    }
-
-    calculateEMAs(data) {
-        const { values, periods } = data;
-        const results = {};
-        
-        for (const period of periods) {
-            if (values.length >= period) {
-                const emaValues = EMA.calculate({ period, values });
-                results[`ema${period}`] = emaValues[emaValues.length - 1];
-                results[`ema${period}_previous`] = emaValues[emaValues.length - 2] || emaValues[emaValues.length - 1];
-            }
-        }
-        
-        return results;
-    }
-
-    calculateATR(data) {
-        const { highs, lows, closes, period } = data;
-        
-        if (highs.length < period || lows.length < period || closes.length < period) {
-            return null;
-        }
-        
-        const atrValues = ATR.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: period
-        });
-        
-        if (!atrValues || atrValues.length === 0) {
-            return null;
-        }
-        
-        const latestATR = atrValues[atrValues.length - 1];
-        const avgATR = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
-        const atrPercentage = (latestATR / closes[closes.length - 1]) * 100;
-        
-        let volatilityLevel = 'medium';
-        if (atrPercentage < 1.0) volatilityLevel = 'low';
-        else if (atrPercentage > 2.5) volatilityLevel = 'high';
-        
-        return {
-            value: latestATR,
-            average: avgATR,
-            percentage: atrPercentage,
-            volatilityLevel: volatilityLevel,
-            raw: atrValues
-        };
-    }
-
-    calculateRSI(data) {
-        const { values, period } = data;
-        
-        if (values.length < period) {
-            return {
-                value: 50,
-                previous: 50,
-                raw: 50,
-                status: 'NEUTRAL'
-            };
-        }
-        
-        const rsiValues = RSI.calculate({ values, period });
-        
-        if (!rsiValues || rsiValues.length < 2) {
-            return {
-                value: 50,
-                previous: 50,
-                raw: 50,
-                status: 'NEUTRAL'
-            };
-        }
-        
-        const latestRSI = rsiValues[rsiValues.length - 1];
-        const previousRSI = rsiValues[rsiValues.length - 2];
-        
-        let status = 'NEUTRAL';
-        if (latestRSI < 30) status = 'OVERSOLD';
-        else if (latestRSI > 70) status = 'OVERBOUGHT';
-        
-        return {
-            value: latestRSI,
-            previous: previousRSI,
-            raw: latestRSI,
-            status: status,
-            isExitingExtreme: (previousRSI < 30 && latestRSI > 30) || 
-                             (previousRSI > 70 && latestRSI < 70)
-        };
-    }
-
-    calculateStochastic(data) {
-        const { highs, lows, closes, period, smooth, signalPeriod } = data;
-        
-        if (highs.length < period || lows.length < period || closes.length < period) {
-            return { isValid: false };
-        }
-        
-        const stochValues = Stochastic.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: period,
-            smooth: smooth,
-            signalPeriod: signalPeriod
-        });
-        
-        if (!stochValues || stochValues.length < 2) {
-            return { isValid: false };
-        }
-        
-        const current = stochValues[stochValues.length - 1];
-        const previous = stochValues[stochValues.length - 2];
-        
-        return {
-            isValid: true,
-            kValue: current.k,
-            dValue: current.d,
-            kPrevious: previous.k,
-            dPrevious: previous.d,
-            isBullish: previous.k <= previous.d && current.k > current.d,
-            isBearish: previous.k >= previous.d && current.k < current.d
-        };
-    }
-
-    calculateCCI(data) {
-        const { highs, lows, closes, period, maPeriod } = data;
-        
-        if (highs.length < period || lows.length < period || closes.length < period) {
-            return {
-                value: 0,
-                maValue: 0,
-                isValid: false
-            };
-        }
-        
-        const cciValues = CCI.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: period
-        });
-        
-        if (!cciValues || cciValues.length === 0) {
-            return {
-                value: 0,
-                maValue: 0,
-                isValid: false
-            };
-        }
-        
-        const latestCCI = cciValues[cciValues.length - 1];
-        const cciForMA = cciValues.slice(-maPeriod);
-        const cciMA = cciForMA.reduce((sum, value) => sum + value, 0) / cciForMA.length;
-        
-        return {
-            value: latestCCI,
-            maValue: cciMA,
-            isValid: true,
-            deviation: Math.abs(latestCCI - cciMA)
-        };
-    }
-
-    async executeSequentialFallback(tasks) {
-        const results = [];
-        for (const task of tasks) {
-            try {
-                const result = await this.executeTask(task);
-                results.push(result);
-            } catch (error) {
-                console.log(`⚠️ Erro no fallback sequencial: ${error.message}`);
-                results.push(null);
-            }
-        }
-        return results;
-    }
-
-    getStatus() {
-        return {
-            activeTasks: this.activeTasks,
-            maxConcurrent: this.maxConcurrent,
-            queueLength: this.taskQueue.length,
-            isEnabled: PARALLEL_CONFIG.enabled
-        };
-    }
-}
-
-// =====================================================================
-// 🛡️ SISTEMA DE RISK LAYER AVANÇADO
+// 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE)
 // =====================================================================
 
 class SophisticatedRiskLayer {
@@ -642,7 +265,9 @@ class SophisticatedRiskLayer {
             TIME_RISK: { weight: 0.8 },
             SUPPORT_RESISTANCE_RISK: { weight: 1.4 },
             MARKET_CONDITION_RISK: { weight: 1.6 },
-            PIVOT_RISK: { weight: 1.2 }
+            PIVOT_RISK: { weight: 1.2 },
+            RSI_EXTREME_RISK: { weight: 1.5 },
+            BTC_CORRELATION_RISK: { weight: 1.4 } // NOVO: Risco de correlação com BTC
         };
 
         this.riskHistory = new Map();
@@ -663,6 +288,11 @@ class SophisticatedRiskLayer {
                 shouldAlert: true,
                 shouldBlock: false
             };
+
+            // Verificar risco de RSI extremo primeiro
+            const rsiExtremeRisk = this.analyzeRSIExtremeRisk(signal);
+            riskAssessment.factors.push(rsiExtremeRisk);
+            riskAssessment.overallScore += rsiExtremeRisk.score * this.riskFactors.RSI_EXTREME_RISK.weight;
 
             const volatilityRisk = await this.analyzeVolatilityRisk(signal);
             riskAssessment.factors.push(volatilityRisk);
@@ -700,6 +330,11 @@ class SophisticatedRiskLayer {
             riskAssessment.factors.push(pivotRisk);
             riskAssessment.overallScore += pivotRisk.score * this.riskFactors.PIVOT_RISK.weight;
 
+            // NOVO: Análise de correlação com BTC
+            const btcCorrelationRisk = await this.analyzeBTCCorrelationRisk(signal);
+            riskAssessment.factors.push(btcCorrelationRisk);
+            riskAssessment.overallScore += btcCorrelationRisk.score * this.riskFactors.BTC_CORRELATION_RISK.weight;
+
             riskAssessment.level = this.determineRiskLevel(riskAssessment.overallScore);
             riskAssessment.confidence = this.calculateConfidence(riskAssessment);
 
@@ -717,6 +352,126 @@ class SophisticatedRiskLayer {
         }
     }
 
+    async analyzeBTCCorrelationRisk(signal) {
+        try {
+            const symbol = signal.symbol;
+            if (!symbol.endsWith('BTC')) {
+                return { type: 'BTC_CORRELATION', score: 0, message: 'Não é par BTC' };
+            }
+
+            // Obter preços do altcoin e BTC
+            const altcoinCandles = await getCandlesCached(symbol, '15m', 48);
+            const btcCandles = await getCandlesCached('BTCUSDT', '15m', 48);
+
+            if (altcoinCandles.length < 24 || btcCandles.length < 24) {
+                return { type: 'BTC_CORRELATION', score: 1, message: 'Dados insuficientes' };
+            }
+
+            // Calcular performance relativa
+            const altcoinPriceChange = ((altcoinCandles[altcoinCandles.length - 1].close - altcoinCandles[altcoinCandles.length - 24].close) / 
+                                       altcoinCandles[altcoinCandles.length - 24].close) * 100;
+            
+            const btcPriceChange = ((btcCandles[btcCandles.length - 1].close - btcCandles[btcCandles.length - 24].close) / 
+                                   btcCandles[btcCandles.length - 24].close) * 100;
+
+            const relativePerformance = altcoinPriceChange - btcPriceChange;
+
+            let score = 0;
+            let message = '';
+
+            // Determinar score baseado na performance relativa
+            if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+                score = -1; // Bônus para altcoin performando bem vs BTC
+                message = `📈 Performando ${relativePerformance.toFixed(2)}% MELHOR que BTC (ALTA RELATIVA)`;
+            } else if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+                score = 0;
+                message = `📊 Performando ${relativePerformance.toFixed(2)}% melhor que BTC`;
+            } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+                score = 2;
+                message = `📉 Performando ${Math.abs(relativePerformance).toFixed(2)}% PIOR que BTC (FRAQUEZA RELATIVA)`;
+            } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+                score = 1;
+                message = `⚠️ Performando ${Math.abs(relativePerformance).toFixed(2)}% pior que BTC`;
+            } else {
+                score = 0;
+                message = `➡️ Performando similar ao BTC (${relativePerformance.toFixed(2)}%)`;
+            }
+
+            // Verificar se a direção está alinhada com BTC
+            const isAltcoinBullish = altcoinPriceChange > 0;
+            const isBTCBullish = btcPriceChange > 0;
+            
+            if (isAltcoinBullish !== isBTCBullish) {
+                score += 1;
+                message += ` | 🚨 DIRECÇÃO OPOSTA AO BTC!`;
+            }
+
+            return {
+                type: 'BTC_CORRELATION',
+                score: Math.min(3, score),
+                message: message,
+                data: {
+                    relativePerformance: relativePerformance,
+                    altcoinChange: altcoinPriceChange,
+                    btcChange: btcPriceChange,
+                    isOutperforming: relativePerformance > 0,
+                    performanceLevel: this.getPerformanceLevel(relativePerformance)
+                }
+            };
+
+        } catch (error) {
+            return { type: 'BTC_CORRELATION', score: 1, message: 'Erro análise' };
+        }
+    }
+
+    getPerformanceLevel(relativePerformance) {
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) return 'HIGH_OUTPERFORMANCE';
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) return 'MEDIUM_OUTPERFORMANCE';
+        if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) return 'STRONG_UNDERPERFORMANCE';
+        if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) return 'UNDERPERFORMANCE';
+        return 'NEUTRAL';
+    }
+
+    analyzeRSIExtremeRisk(signal) {
+        const rsiData = signal.marketData.rsi;
+        if (!rsiData) {
+            return { type: 'RSI_EXTREME', score: 0, message: 'Sem dados de RSI' };
+        }
+
+        const rsiValue = rsiData.value;
+        const isBullish = signal.isBullish;
+        
+        let score = 0;
+        let message = '';
+        
+        if (rsiValue < 25 || rsiValue > 75) {
+            score = 3;
+            message = `RSI EXTREMO: ${rsiValue.toFixed(1)} (Padrão PERDEDOR confirmado)`;
+        } else if (isBullish && rsiValue > RSI_BUY_MAX) {
+            score = 2;
+            message = `RSI muito alto para compra: ${rsiValue.toFixed(1)} > ${RSI_BUY_MAX}`;
+        } else if (!isBullish && rsiValue < RSI_SELL_MIN) {
+            score = 2;
+            message = `RSI muito baixo para venda: ${rsiValue.toFixed(1)} < ${RSI_SELL_MIN}`;
+        } else if (isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) {
+            score = -1;
+            message = `RSI ideal para compra: ${rsiValue.toFixed(1)} (≤ ${RSI_BUY_MAX})`;
+        } else if (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75) {
+            score = -1;
+            message = `RSI ideal para venda: ${rsiValue.toFixed(1)} (≥ ${RSI_SELL_MIN})`;
+        } else {
+            score = 0;
+            message = `RSI neutro: ${rsiValue.toFixed(1)}`;
+        }
+
+        return {
+            type: 'RSI_EXTREME',
+            score: Math.max(-2, Math.min(3, score)),
+            message: message,
+            data: { rsiValue: rsiValue, isExtreme: rsiValue < 25 || rsiValue > 75 }
+        };
+    }
+
     analyzePivotRisk(signal) {
         const pivotData = signal.marketData.pivotPoints;
         if (!pivotData) {
@@ -731,6 +486,7 @@ class SophisticatedRiskLayer {
             const pivotType = pivotData.nearestPivot.type;
             const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
             
+            // Calcular risco baseado na força do pivot e distância
             const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
             
             if (distancePercent < safeDistance * 0.5) {
@@ -749,6 +505,7 @@ class SophisticatedRiskLayer {
                 message += ' | TESTANDO PIVOT!';
             }
             
+            // Adicionar peso baseado no timeframe do pivot
             if (pivotData.nearestPivot.timeframe) {
                 const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
                 if (timeframeWeight >= 2.0) {
@@ -767,8 +524,8 @@ class SophisticatedRiskLayer {
 
     async analyzeVolatilityRisk(signal) {
         try {
-            const candles = await getCandlesCached(signal.symbol, '15m', 30);
-            if (candles.length < 15) {
+            const candles = await getCandlesCached(signal.symbol, '15m', 50);
+            if (candles.length < 20) {
                 return { type: 'VOLATILITY', score: 1, message: 'Dados insuficientes' };
             }
 
@@ -786,13 +543,13 @@ class SophisticatedRiskLayer {
             }
             const historicalVol = (sumReturns / (closes.length - 1)) * 100;
 
-            const recentCloses = closes.slice(-5);
+            const recentCloses = closes.slice(-6);
             let recentVol = 0;
             for (let i = 1; i < recentCloses.length; i++) {
                 const returnVal = Math.abs((recentCloses[i] - recentCloses[i - 1]) / recentCloses[i - 1]);
                 recentVol += returnVal;
             }
-            recentVol = (recentVol / (recentCloses.length - 1)) * 100;
+            recentVol = (recentVol / 5) * 100;
 
             const volatilitySpike = recentVol / Math.max(historicalVol, 0.1);
 
@@ -876,13 +633,6 @@ class SophisticatedRiskLayer {
 
     async analyzeLiquidityRisk(symbol) {
         try {
-            const cacheKey = `liquidity_${symbol}`;
-            const now = Date.now();
-            
-            if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < 300000) {
-                return candleCache[cacheKey].data;
-            }
-
             const tickerData = await rateLimiter.makeRequest(
                 `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
                 {},
@@ -908,16 +658,12 @@ class SophisticatedRiskLayer {
                 message = `Liquidez boa: $${(quoteVolume / 1000000).toFixed(2)}M`;
             }
 
-            const result = {
+            return {
                 type: 'LIQUIDITY',
                 score: score,
                 message: message,
                 data: { quoteVolume: quoteVolume }
             };
-
-            candleCache[cacheKey] = { data: result, timestamp: now };
-
-            return result;
 
         } catch (error) {
             return { type: 'LIQUIDITY', score: 1, message: 'Dados não disponíveis' };
@@ -927,18 +673,16 @@ class SophisticatedRiskLayer {
     async analyzeCorrelationRisk(signal) {
         try {
             const symbol = signal.symbol;
-            const btcSymbol = 'BTCUSDT';
-
-            if (symbol === btcSymbol) {
-                return { type: 'CORRELATION', score: 0, message: 'BTC não tem correlação' };
+            
+            // Para pares BTC, não calcular correlação
+            if (symbol.endsWith('BTC')) {
+                return { type: 'CORRELATION', score: 0, message: 'Par BTC - análise específica' };
             }
 
-            const [symbolCandles, btcCandles] = await Promise.all([
-                getCandlesCached(symbol, '15m', 6),
-                getCandlesCached(btcSymbol, '15m', 6)
-            ]);
+            const symbolCandles = await getCandlesCached(symbol, '15m', 8);
+            const btcCandles = await getCandlesCached('BTCUSDT', '15m', 8);
 
-            if (symbolCandles.length < 4 || btcCandles.length < 4) {
+            if (symbolCandles.length < 5 || btcCandles.length < 5) {
                 return { type: 'CORRELATION', score: 1, message: 'Dados insuficientes' };
             }
 
@@ -1049,7 +793,7 @@ class SophisticatedRiskLayer {
     analyzeSupportResistanceRisk(signal) {
         const srData = signal.marketData.supportResistance;
         if (!srData || !srData.breakoutRisk) {
-            return { type: 'S/R', score: 0, message: 'Dados não disponíveis' };
+            return { type: 'S/R', score: 1, message: 'Dados não disponíveis' };
         }
 
         const breakoutRisk = srData.breakoutRisk;
@@ -1060,7 +804,7 @@ class SophisticatedRiskLayer {
             case 'low': score = 0; break;
             case 'medium': score = 1; break;
             case 'high': score = 2; break;
-            default: score = 0;
+            default: score = 1;
         }
 
         const nearestLevel = signal.isBullish ?
@@ -1083,16 +827,9 @@ class SophisticatedRiskLayer {
 
     async analyzeMarketConditionRisk() {
         try {
-            const cacheKey = 'market_condition';
-            const now = Date.now();
-            
-            if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < 900000) {
-                return candleCache[cacheKey].data;
-            }
+            const btcCandles = await getCandlesCached('BTCUSDT', '1h', 24);
 
-            const btcCandles = await getCandlesCached('BTCUSDT', '1h', 20);
-
-            if (btcCandles.length < 15) {
+            if (btcCandles.length < 20) {
                 return { type: 'MARKET', score: 1, message: 'Dados insuficientes' };
             }
 
@@ -1121,7 +858,7 @@ class SophisticatedRiskLayer {
                 message = `Mercado estável: BTC ${drawdown > 0 ? '-' : '+'}${Math.abs(drawdown).toFixed(1)}%`;
             }
 
-            const result = {
+            return {
                 type: 'MARKET',
                 score: score,
                 message: message,
@@ -1132,10 +869,6 @@ class SophisticatedRiskLayer {
                 }
             };
 
-            candleCache[cacheKey] = { data: result, timestamp: now };
-
-            return result;
-
         } catch (error) {
             return { type: 'MARKET', score: 1, message: 'Erro análise' };
         }
@@ -1143,18 +876,18 @@ class SophisticatedRiskLayer {
 
     async analyzeTrendRisk(signal) {
         try {
-            const timeframes = ['15m', '1h'];
+            const timeframes = ['15m', '1h', '4h'];
             let conflictingTrends = 0;
             let totalTrends = 0;
             let trendMessages = [];
 
             for (const tf of timeframes) {
-                const candles = await getCandlesCached(signal.symbol, tf, 30);
-                if (candles.length < 15) continue;
+                const candles = await getCandlesCached(signal.symbol, tf, 50);
+                if (candles.length < 20) continue;
 
                 const closes = candles.map(c => c.close);
-                const sma20 = this.calculateSMA(closes, 15);
-                const sma50 = this.calculateSMA(closes, 30);
+                const sma20 = this.calculateSMA(closes, 20);
+                const sma50 = this.calculateSMA(closes, 50);
 
                 if (sma20 && sma50) {
                     const currentPrice = closes[closes.length - 1];
@@ -1207,7 +940,7 @@ class SophisticatedRiskLayer {
             };
 
         } catch (error) {
-            return { type: 'TREND', score: 0, message: 'Erro análise' };
+            return { type: 'TREND', score: 1, message: 'Erro análise' };
         }
     }
 
@@ -1234,6 +967,28 @@ class SophisticatedRiskLayer {
 
     generateRecommendations(assessment) {
         const recommendations = [];
+
+        assessment.factors.forEach(factor => {
+            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
+                recommendations.push('🚨 <i>EVITAR: RSI EXTREMO (Padrão PERDEDOR confirmado)</i>');
+                recommendations.push('• Considere cancelar o trade');
+                recommendations.push('• Aguarde RSI retornar à zona neutra (25-75)');
+            }
+            if (factor.type === 'BTC_CORRELATION' && factor.score >= 1) {
+                if (factor.data.performanceLevel === 'STRONG_UNDERPERFORMANCE') {
+                    recommendations.push('⚠️ <i>ATENÇÃO: Altcoin performando MUITO PIOR que BTC</i>');
+                    recommendations.push('• Considere reduzir posição');
+                    recommendations.push('• Aguarde recuperação relativa vs BTC');
+                } else if (factor.data.performanceLevel === 'UNDERPERFORMANCE') {
+                    recommendations.push('⚠️ <i>Altcoin performando pior que BTC</i>');
+                    recommendations.push('• Monitorar performance relativa');
+                }
+            }
+            if (factor.type === 'BTC_CORRELATION' && factor.score <= -1) {
+                recommendations.push('✅ <i>Altcoin performando MELHOR que BTC</i>');
+                recommendations.push('• Oportunidade de alta relativa');
+            }
+        });
 
         switch (assessment.level) {
             case 'CRITICAL':
@@ -1268,6 +1023,9 @@ class SophisticatedRiskLayer {
         assessment.factors.forEach(factor => {
             if (factor.score >= 2) {
                 switch (factor.type) {
+                    case 'RSI_EXTREME':
+                        recommendations.push(`• <b>RSI extremo:</b> Evitar trade (padrão perdedor)`);
+                        break;
                     case 'VOLATILITY':
                         recommendations.push(`• <b>Volatilidade alta:</b> Use stop mais largo`);
                         break;
@@ -1277,10 +1035,8 @@ class SophisticatedRiskLayer {
                     case 'LIQUIDITY':
                         recommendations.push(`• <b>Liquidez baixa:</b> Reduza tamanho`);
                         break;
-                    case 'CORRELATION':
-                        if (factor.message.includes('CONTRA BTC')) {
-                            recommendations.push(`• <b>Indo contra BTC:</b> Cuidado extra`);
-                        }
+                    case 'BTC_CORRELATION':
+                        recommendations.push(`• <b>Performance vs BTC:</b> ${factor.message}`);
                         break;
                     case 'PIVOT':
                         if (factor.message.includes('TESTANDO PIVOT')) {
@@ -1298,9 +1054,18 @@ class SophisticatedRiskLayer {
         const warnings = [];
 
         assessment.factors.forEach(factor => {
-            if (factor.score >= 2.5) {
+            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
+                warnings.push(`🚨 ${factor.message}`);
+            }
+            if (factor.type === 'BTC_CORRELATION' && factor.score >= 2) {
+                warnings.push(`📉 ${factor.message}`);
+            }
+        });
+
+        assessment.factors.forEach(factor => {
+            if (factor.score >= 2.5 && factor.type !== 'RSI_EXTREME' && factor.type !== 'BTC_CORRELATION') {
                 warnings.push(`⚠️ ${factor.message}`);
-            } else if (factor.score >= 2) {
+            } else if (factor.score >= 2 && factor.type !== 'RSI_EXTREME' && factor.type !== 'BTC_CORRELATION') {
                 warnings.push(`🔶 ${factor.message}`);
             }
         });
@@ -1325,10 +1090,22 @@ class SophisticatedRiskLayer {
     }
 
     logRiskAssessment(symbol, assessment) {
+        // CORREÇÃO: Usar as chaves corretas do objeto riskLevels
+        const riskLevelInfo = this.riskLevels[assessment.level] || { emoji: '⚫' };
+        
         console.log(`\n🛡️  RISK ASSESSMENT: ${symbol}`);
-        console.log(`   Nível: ${assessment.level} ${this.riskLevels[assessment.level].emoji}`);
+        console.log(`   Nível: ${assessment.level} ${riskLevelInfo.emoji}`);
         console.log(`   Score: ${assessment.overallScore.toFixed(2)}`);
         console.log(`   Confiança: ${assessment.confidence}%`);
+
+        assessment.factors.forEach(factor => {
+            if (factor.type === 'RSI_EXTREME') {
+                console.log(`   RSI: ${factor.message}`);
+            }
+            if (factor.type === 'BTC_CORRELATION') {
+                console.log(`   BTC Correlation: ${factor.message}`);
+            }
+        });
 
         if (assessment.warnings.length > 0) {
             console.log(`   Warnings:`);
@@ -1451,7 +1228,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION (CORRIGIDO)
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -1466,7 +1243,8 @@ class AdvancedLearningSystem {
             breakoutRisk: [],
             supportResistance: [],
             pivotPoints: [],
-            rsiSettings: []
+            rsiSettings: [],
+            btcCorrelation: [] // NOVO: Evolução da correlação com BTC
         };
 
         this.learningEnabled = true;
@@ -1475,14 +1253,14 @@ class AdvancedLearningSystem {
 
         this.trailingConfig = {
             timeframe: '5m',
-            candlesToSimulate: 200,
+            candlesToSimulate: 288,
             partialTargets: [
                 { percentage: 20, positionSize: 0.25 },
                 { percentage: 40, positionSize: 0.25 },
                 { percentage: 60, positionSize: 0.25 },
                 { percentage: 80, positionSize: 0.25 }
             ],
-            fees: 0.001 // 0.1% para spot
+            fees: 0.0004
         };
 
         this.loadLearningData();
@@ -1779,8 +1557,10 @@ class AdvancedLearningSystem {
         this.symbolPerformance[trade.symbol] = symbolStats;
         this.openTrades.delete(trade.id || trade.timestamp);
         
+        // Adicionar ao histórico de trades
         this.tradeHistory.push(trade);
         
+        // Limitar o histórico para evitar sobrecarga
         if (this.tradeHistory.length > 1000) {
             this.tradeHistory = this.tradeHistory.slice(-500);
         }
@@ -1819,7 +1599,8 @@ class AdvancedLearningSystem {
                     cci4hMA: marketData.cci4h?.maValue || 0,
                     breakoutRisk: marketData.breakoutRisk || {},
                     supportResistance: marketData.supportResistance || {},
-                    pivotPoints: marketData.pivotPoints || {}
+                    pivotPoints: marketData.pivotPoints || {},
+                    btcCorrelation: marketData.btcCorrelation || {} // NOVO: Dados de correlação com BTC
                 },
                 status: 'OPEN',
                 outcome: null,
@@ -1887,6 +1668,14 @@ class AdvancedLearningSystem {
                 t.outcome === 'TIMEOUT_EXIT'
             );
 
+            const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
+            console.log(`📊 Análise RSI: ${rsiAnalysis.extremeWinners.length} vencedores extremos vs ${rsiAnalysis.extremeLosers.length} perdedores extremos`);
+
+            // NOVO: Análise de correlação com BTC
+            const btcCorrelationAnalysis = this.analyzeBTCCorrelationPatterns(closedTrades);
+            console.log(`📊 Análise BTC Correlation: ${btcCorrelationAnalysis.highOutperformWinners.length} vencedores com alta performance vs BTC`);
+
+            // Resetar padrões para evitar contagem incorreta
             this.patterns.winning = {};
             this.patterns.losing = {};
 
@@ -1915,6 +1704,70 @@ class AdvancedLearningSystem {
         }
     }
 
+    analyzeBTCCorrelationPatterns(trades) {
+        const highOutperformWinners = [];
+        const underperformLosers = [];
+        const neutralWinners = [];
+        const neutralLosers = [];
+
+        trades.forEach(trade => {
+            const btcCorrelation = trade.marketData.btcCorrelation;
+            const isWinner = trade.outcome === 'SUCCESS' || 
+                           trade.outcome === 'ALL_TARGETS_HIT' || 
+                           trade.outcome === 'PARTIAL_TARGETS_HIT';
+
+            if (btcCorrelation?.relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+                if (isWinner) highOutperformWinners.push(trade);
+            } else if (btcCorrelation?.relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+                if (!isWinner) underperformLosers.push(trade);
+            } else {
+                if (isWinner) neutralWinners.push(trade);
+                else neutralLosers.push(trade);
+            }
+        });
+
+        return {
+            highOutperformWinners,
+            underperformLosers,
+            neutralWinners,
+            neutralLosers,
+            highOutperformWinRate: highOutperformWinners.length / (highOutperformWinners.length + underperformLosers.length) || 0
+        };
+    }
+
+    analyzeRSIPatterns(trades) {
+        const extremeWinners = [];
+        const extremeLosers = [];
+        const idealWinners = [];
+        const idealLosers = [];
+
+        trades.forEach(trade => {
+            const rsiValue = trade.marketData.rsi;
+            const isWinner = trade.outcome === 'SUCCESS' || 
+                           trade.outcome === 'ALL_TARGETS_HIT' || 
+                           trade.outcome === 'PARTIAL_TARGETS_HIT';
+            const isBullish = trade.direction === 'BUY';
+
+            if (rsiValue < 25 || rsiValue > 75) {
+                if (isWinner) extremeWinners.push(trade);
+                else extremeLosers.push(trade);
+            } else if ((isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) || 
+                      (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75)) {
+                if (isWinner) idealWinners.push(trade);
+                else idealLosers.push(trade);
+            }
+        });
+
+        return {
+            extremeWinners,
+            extremeLosers,
+            idealWinners,
+            idealLosers,
+            extremeWinRate: extremeWinners.length / (extremeWinners.length + extremeLosers.length) || 0,
+            idealWinRate: idealWinners.length / (idealWinners.length + idealLosers.length) || 0
+        };
+    }
+
     extractPatterns(trade) {
         const patterns = [];
         const data = trade.marketData;
@@ -1922,11 +1775,18 @@ class AdvancedLearningSystem {
         if (data.volumeRobust?.combinedScore >= 0.7) {
             patterns.push('ROBUST_VOLUME');
         }
-        if (data.volumeRatio >= 1.8) {
-            patterns.push('HIGH_VOLUME');
+        if (data.volumeRatio >= 1.8 && data.rsi <= RSI_BUY_MAX) {
+            patterns.push('HIGH_VOL_GOOD_RSI');
         }
-        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8) {
-            patterns.push('MOD_VOLUME');
+        if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8 && data.rsi <= RSI_BUY_MAX) {
+            patterns.push('MOD_VOL_GOOD_RSI');
+        }
+        
+        if (data.rsi < 25 || data.rsi > 75) {
+            patterns.push('RSI_EXTREME');
+        } else if ((trade.direction === 'BUY' && data.rsi >= 25 && data.rsi <= RSI_BUY_MAX) ||
+                   (trade.direction === 'SELL' && data.rsi >= RSI_SELL_MIN && data.rsi <= 75)) {
+            patterns.push('RSI_IDEAL');
         }
         
         if (data.volatility >= 1.0 && data.volatility <= 1.5) {
@@ -1959,11 +1819,41 @@ class AdvancedLearningSystem {
             patterns.push(`TESTING_PIVOT`);
         }
 
+        // NOVO: Padrão de correlação com BTC
+        if (data.btcCorrelation?.relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            patterns.push('HIGH_OUTPERFORM_BTC');
+        } else if (data.btcCorrelation?.relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            patterns.push('UNDERPERFORM_BTC');
+        }
+
         return patterns;
     }
 
     async optimizeParameters(closedTrades) {
         try {
+            const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
+            if (rsiAnalysis.extremeWinRate < 0.3) {
+                this.parameterEvolution.rsiSettings.push({
+                    timestamp: Date.now(),
+                    message: 'RSI_EXTREME é padrão perdedor. Evitar trades com RSI < 25 ou > 75',
+                    extremeWinRate: rsiAnalysis.extremeWinRate,
+                    idealWinRate: rsiAnalysis.idealWinRate
+                });
+                console.log('⚠️  RSI_EXTREME: Padrão PERDEDOR confirmado. Win rate: ' + (rsiAnalysis.extremeWinRate * 100).toFixed(1) + '%');
+            }
+
+            // NOVO: Análise de correlação com BTC
+            const btcCorrelationAnalysis = this.analyzeBTCCorrelationPatterns(closedTrades);
+            if (btcCorrelationAnalysis.highOutperformWinRate > 0.6) {
+                this.parameterEvolution.btcCorrelation.push({
+                    timestamp: Date.now(),
+                    message: 'Altcoins com alta performance vs BTC têm melhor win rate',
+                    winRate: btcCorrelationAnalysis.highOutperformWinRate,
+                    highOutperformCount: btcCorrelationAnalysis.highOutperformWinners.length
+                });
+                console.log('✅ BTC Correlation: Altcoins performando bem vs BTC têm win rate de ' + (btcCorrelationAnalysis.highOutperformWinRate * 100).toFixed(1) + '%');
+            }
+
             const volumeAnalysis = this.analyzeParameter(
                 closedTrades,
                 t => t.marketData.volumeRatio,
@@ -2179,6 +2069,7 @@ class AdvancedLearningSystem {
             if (fs.existsSync(learningFile)) {
                 const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
 
+                // Corrigir: carregar apenas os dados que existem
                 this.tradeHistory = data.tradeHistory || [];
                 this.symbolPerformance = data.symbolPerformance || {};
                 this.patterns = data.patterns || { winning: {}, losing: {} };
@@ -2186,11 +2077,16 @@ class AdvancedLearningSystem {
 
                 console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
                 
+                // Corrigir contagens inconsistentes
                 this.fixPatternCounts();
                 
+                if (this.patterns.losing.RSI_EXTREME > 20) {
+                    console.log('⚠️  Padrão aprendido: RSI_EXTREME é PERDEDOR (' + this.patterns.losing.RSI_EXTREME + ' trades)');
+                }
             }
         } catch (error) {
             console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
+            // Resetar dados se houver erro
             this.tradeHistory = [];
             this.symbolPerformance = {};
             this.patterns = { winning: {}, losing: {} };
@@ -2199,6 +2095,7 @@ class AdvancedLearningSystem {
     }
 
     fixPatternCounts() {
+        // Corrigir contagens inconsistentes nos padrões
         const totalTrades = this.tradeHistory.length;
         
         Object.keys(this.patterns.winning).forEach(pattern => {
@@ -2216,10 +2113,11 @@ class AdvancedLearningSystem {
 
     saveLearningData() {
         try {
+            // Corrigir: garantir que os dados sejam consistentes antes de salvar
             this.fixPatternCounts();
             
             const data = {
-                tradeHistory: this.tradeHistory.slice(-500),
+                tradeHistory: this.tradeHistory.slice(-500), // Limitar histórico
                 symbolPerformance: this.symbolPerformance,
                 patterns: {
                     winning: this.patterns.winning,
@@ -2271,6 +2169,7 @@ class AdvancedLearningSystem {
             t.status === 'CLOSED' || t.status === 'SIMULATED'
         );
         
+        // Corrigir: usar apenas trades fechados com resultados válidos
         const validClosedTrades = closedTrades.filter(t => 
             t.outcome && t.profitPercentage !== null && t.profitPercentage !== undefined
         );
@@ -2294,6 +2193,7 @@ class AdvancedLearningSystem {
 
         const profitFactor = avgLoss !== 0 ? Math.abs(avgProfit / avgLoss) : 0;
 
+        // Corrigir: filtrar padrões com contagens válidas
         const winningPatterns = Object.entries(this.patterns.winning)
             .filter(([pattern, count]) => count >= 1 && count <= validClosedTrades.length)
             .sort((a, b) => b[1] - a[1])
@@ -2314,6 +2214,9 @@ class AdvancedLearningSystem {
             ).length
         };
 
+        const rsiAnalysis = this.analyzeRSIPatterns(validClosedTrades);
+        const btcCorrelationAnalysis = this.analyzeBTCCorrelationPatterns(validClosedTrades);
+
         return {
             totalTrades: validClosedTrades.length,
             winningTrades: winners.length,
@@ -2326,7 +2229,17 @@ class AdvancedLearningSystem {
             worstPatterns: losingPatterns,
             simulationStats: simulationStats,
             openTrades: this.openTrades.size,
-            monitoredSymbols: Object.keys(this.symbolPerformance).length
+            monitoredSymbols: Object.keys(this.symbolPerformance).length,
+            rsiAnalysis: {
+                extremeWinRate: (rsiAnalysis.extremeWinRate * 100).toFixed(1),
+                idealWinRate: (rsiAnalysis.idealWinRate * 100).toFixed(1),
+                extremeTrades: rsiAnalysis.extremeWinners.length + rsiAnalysis.extremeLosers.length,
+                idealTrades: rsiAnalysis.idealWinners.length + rsiAnalysis.idealLosers.length
+            },
+            btcCorrelationAnalysis: {
+                highOutperformWinRate: (btcCorrelationAnalysis.highOutperformWinRate * 100).toFixed(1),
+                highOutperformTrades: btcCorrelationAnalysis.highOutperformWinners.length
+            }
         };
     }
 
@@ -2355,9 +2268,9 @@ class AdaptiveRateLimiter {
         this.isProcessing = false;
         this.lastStatusLog = Date.now();
 
-        this.adaptiveDelay = 80;
-        this.minDelay = 30;
-        this.maxDelay = 300;
+        this.adaptiveDelay = 100;
+        this.minDelay = 50;
+        this.maxDelay = 500;
         this.usageThreshold = 0.7;
 
         console.log('🚀 Rate Limiter Adaptativo inicializado');
@@ -2410,7 +2323,7 @@ class AdaptiveRateLimiter {
 
                 const request = this.queue.shift();
                 if (!request) {
-                    await this.delay(80);
+                    await this.delay(100);
                     continue;
                 }
 
@@ -2485,11 +2398,11 @@ class AdaptiveRateLimiter {
         const secondUsage = this.secondWindow.usedWeight / BINANCE_RATE_LIMIT.maxWeightPerSecond;
 
         if (minuteUsage > 0.85) {
-            await this.delay(minuteRemaining + 100);
+            await this.delay(minuteRemaining + 200);
         } else if (secondUsage > 0.8) {
-            await this.delay(secondRemaining + 100);
+            await this.delay(secondRemaining + 200);
         } else {
-            await this.delay(this.adaptiveDelay * 1.5);
+            await this.delay(this.adaptiveDelay * 2);
         }
     }
 
@@ -2508,7 +2421,7 @@ class AdaptiveRateLimiter {
                 this.updateCounters(request.weight);
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 20000);
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
 
                 const response = await fetch(request.url, {
                     ...request.options,
@@ -2595,7 +2508,7 @@ async function sendTelegramAlert(message) {
         const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         const response = await fetch(url, {
             method: 'POST',
@@ -2638,6 +2551,7 @@ function checkVolumeConfirmation(volumeData) {
     const emaRatio = volumeData.emaRatio || 0;
     const zScore = volumeData.zScore || 0;
 
+    // Verificar se o volume está confirmado
     const isConfirmed = 
         combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
         emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
@@ -2648,7 +2562,7 @@ function checkVolumeConfirmation(volumeData) {
 }
 
 // =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
@@ -2657,9 +2571,10 @@ async function sendSignalAlertWithRisk(signal) {
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
+        // VERIFICAR SE O VOLUME É SUFICIENTE PARA SINAL DE COMPRA/VENDA
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         
-        const direction = signal.isBullish ? 'COMPRA -Spot' : 'VENDA -Spot';
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
         
@@ -2679,20 +2594,53 @@ async function sendSignalAlertWithRisk(signal) {
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
+        // CORREÇÃO: Usar emoji correspondente ao nível de risco (agora em inglês)
         const riskEmoji = riskAssessment.level === 'CRITICAL' ? '🚨' :
             riskAssessment.level === 'HIGH' ? '🔴' :
                 riskAssessment.level === 'MEDIUM' ? '🟡' : '🟢';
 
         const now = getBrazilianDateTime();
-        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol}&interval=15`;
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
+        // NOVO: Obter performance vs BTC
+        const btcCorrelationData = signal.marketData.btcCorrelation;
+        const relativePerformance = btcCorrelationData?.relativePerformance || 0;
+        let btcPerformanceEmoji = '➡️';
+        let btcPerformanceText = '';
+        
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            btcPerformanceEmoji = '📈📈';
+            btcPerformanceText = `📈 Performando ${relativePerformance.toFixed(2)}% MELHOR que BTC`;
+        } else if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+            btcPerformanceEmoji = '📈';
+            btcPerformanceText = `Performando ${relativePerformance.toFixed(2)}% melhor que BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+            btcPerformanceEmoji = '📉📉';
+            btcPerformanceText = `📉 Performando ${Math.abs(relativePerformance).toFixed(2)}% PIOR que BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            btcPerformanceEmoji = '📉';
+            btcPerformanceText = `Performando ${Math.abs(relativePerformance).toFixed(2)}% pior que BTC`;
+        } else {
+            btcPerformanceText = `Performando similar ao BTC (${relativePerformance.toFixed(2)}%)`;
+        }
+        
+        let rsiWarning = '';
+        riskAssessment.factors.forEach(factor => {
+            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
+                rsiWarning = `\n🚨 <b>ALERTA RSI: ${factor.message}</b>`;
+            }
+        });
+
+        // DECIDIR SE É UM ALERTA DE COMPRA/VENDA OU APENAS ANÁLISE
         let alertTitle = '';
         let alertType = '';
         
         if (isVolumeConfirmed) {
+            // VOLUME CONFIRMADO: Enviar alerta de COMPRA/VENDA
             alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
             alertType = 'trade';
         } else {
+            // VOLUME NÃO CONFIRMADO: Enviar apenas análise da IA
             alertTitle = `🤖 <i>IA Analisando...  ${signal.symbol}</i>`;
             alertType = 'analysis';
         }
@@ -2703,26 +2651,29 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <i> Indicadores Técnicos</i>
 ⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
-• Preço: $${signal.price.toFixed(6)}
-⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) -Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• Preço: ${signal.price.toFixed(8)} BTC
+${btcPerformanceEmoji} ${btcPerformanceText}
+⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • Dist. Suport/Resist.: ${distancePercent}%
 • Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-<i>🤖 IA Momentum/Risco </i>
+${rsiWarning}
+<i>🤖 IA Operação/Risco </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
-⚠️ IA Opinião/Confiança: ${riskAssessment.confidence}%
+⚠️ Confiança da IA: ${riskAssessment.confidence}%
 ${!isVolumeConfirmed ? `• 🔶 ATENÇÃO NO VOLUME: Score ${volumeScore.toFixed(2)} - Aguarde confirmação` : ''}
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
         `;
 
+        // APENAS ADICIONAR DICAS DE ENTRADA E ALVOS SE O VOLUME ESTIVER CONFIRMADO
         if (isVolumeConfirmed) {
             message += `
 <i> 💡Dica de Entrada : </i>
-• Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+• Liquidez 1 : ${signal.targetsData.retracementData.minRetracementPrice.toFixed(8)} BTC
+• Liquidez 2: ${signal.targetsData.retracementData.maxRetracementPrice.toFixed(8)} BTC
 <i> Alvos:</i>
-${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: ${target.price} BTC`).join('\n')}
+⛔Stop: ${signal.targetsData.stopPrice.toFixed(8)} BTC
             `;
         } else {
             message += `
@@ -2749,7 +2700,9 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
+        console.log(`   Performance vs BTC: ${btcPerformanceText}`);
 
+        // Retornar o tipo de alerta enviado
         return {
             type: alertType,
             volumeConfirmed: isVolumeConfirmed,
@@ -2768,20 +2721,21 @@ async function sendSignalAlert(signal) {
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
+        // VERIFICAR SE O VOLUME É SUFICIENTE
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         
-        const direction = signal.isBullish ? 'COMPRA -SPOT' : 'VENDA -SPOT';
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         
         let alertTitle = '';
         if (isVolumeConfirmed) {
             alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}</b>`;
         } else {
-            alertTitle = `🤖 <b>IA Analisando... #${signal.symbol}</b>`;
+            alertTitle = `🤖 <b>IA ANALISANDO: ${signal.symbol}</b>`;
         }
 
         const now = getBrazilianDateTime();
-        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol}&interval=15`;
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
@@ -2797,13 +2751,36 @@ async function sendSignalAlert(signal) {
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
+        // NOVO: Performance vs BTC
+        const btcCorrelationData = signal.marketData.btcCorrelation;
+        const relativePerformance = btcCorrelationData?.relativePerformance || 0;
+        let btcPerformanceEmoji = '➡️';
+        let btcPerformanceText = '';
+        
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            btcPerformanceEmoji = '📈📈';
+            btcPerformanceText = `Performando ${relativePerformance.toFixed(2)}% MELHOR que BTC`;
+        } else if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+            btcPerformanceEmoji = '📈';
+            btcPerformanceText = `Performando ${relativePerformance.toFixed(2)}% melhor que BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+            btcPerformanceEmoji = '📉📉';
+            btcPerformanceText = `Performando ${Math.abs(relativePerformance).toFixed(2)}% PIOR que BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            btcPerformanceEmoji = '📉';
+            btcPerformanceText = `Performando ${Math.abs(relativePerformance).toFixed(2)}% pior que BTC`;
+        } else {
+            btcPerformanceText = `Similar ao BTC (${relativePerformance.toFixed(2)}%)`;
+        }
+
         let message = `
 ${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <b>🎯 ANÁLISE TÉCNICA AVANÇADA</b>
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
-• Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
+• Preço: ${signal.price.toFixed(8)} BTC | Stop: ${signal.targetsData.stopPrice.toFixed(8)} BTC
+${btcPerformanceEmoji} <b>Performance vs BTC:</b> ${btcPerformanceText}
 • Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
 • VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
@@ -2811,13 +2788,14 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ${!isVolumeConfirmed ? `\n<b>⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</b>` : ''}
         `;
 
+        // APENAS ADICIONAR ALVOS SE O VOLUME ESTIVER CONFIRMADO
         if (isVolumeConfirmed) {
             message += `
 <b> Alvos </b>
-${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
+${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: ${target.price} BTC (RR:${target.riskReward}x)`).join('\n')}
 <b>📍 ENTRADA</b>
-• Liquidez 1: $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
-• Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
+• Liquidez 1: ${signal.targetsData.retracementData.minRetracementPrice.toFixed(8)} BTC
+• Liquidez 2: ${signal.targetsData.retracementData.maxRetracementPrice.toFixed(8)} BTC
             `;
         } else {
             message += `
@@ -2835,6 +2813,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 
         console.log(`📤 ${isVolumeConfirmed ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
+        console.log(`   Performance vs BTC: ${btcPerformanceText}`);
         console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
@@ -2843,6 +2822,14 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
     } catch (error) {
         console.error('Erro ao enviar alerta:', error.message);
     }
+}
+
+function getVolumeClassification(volumeRatio) {
+    if (volumeRatio >= 2.5) return '🔥 MUITO ALTO';
+    if (volumeRatio >= 2.0) return '📈 ALTO';
+    if (volumeRatio >= 1.5) return '📊 MODERADO';
+    if (volumeRatio >= 1.2) return '📉 BAIXO';
+    return '⚠️ MUITO BAIXO';
 }
 
 function calculateProbability(signal) {
@@ -2870,8 +2857,10 @@ function calculateProbability(signal) {
     if (signal.marketData.breakoutRisk?.level === 'low') baseProbability += 5;
 
     const rsiValue = signal.marketData.rsi?.value || 50;
-    if ((signal.isBullish && rsiValue <= RSI_BUY_MAX) ||
-               (!signal.isBullish && rsiValue >= RSI_SELL_MIN)) {
+    if (rsiValue < 25 || rsiValue > 75) {
+        baseProbability -= 20;
+    } else if ((signal.isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) ||
+               (!signal.isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75)) {
         baseProbability += 8;
     }
 
@@ -2880,25 +2869,43 @@ function calculateProbability(signal) {
         const pivotDistance = pivotData.nearestPivot.distancePercent || 0;
         const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
         
+        // Obter distância segura baseada na força do pivot
         const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
         
         if (pivotDistance < safeDistance * 0.5) {
-            baseProbability -= 15;
+            baseProbability -= 15; // Muito próximo
         } else if (pivotDistance < safeDistance) {
-            baseProbability -= 8;
+            baseProbability -= 8;  // Próximo
         } else if (pivotDistance > safeDistance * 1.5) {
-            baseProbability += 5;
+            baseProbability += 5;  // Boa distância
         }
         
         if (pivotData.nearestPivot.isTesting) {
             baseProbability -= 12;
         }
         
+        // Adicionar peso baseado no timeframe
         if (pivotData.nearestPivot.timeframe) {
             const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
             if (timeframeWeight >= 2.0 && pivotDistance < safeDistance) {
-                baseProbability -= 5;
+                baseProbability -= 5; // Pivot forte muito próximo
             }
+        }
+    }
+
+    // NOVO: Adicionar probabilidade baseada na performance vs BTC
+    const btcCorrelationData = signal.marketData.btcCorrelation;
+    if (btcCorrelationData) {
+        const relativePerformance = btcCorrelationData.relativePerformance || 0;
+        
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            baseProbability += 10; // Bônus para altcoin performando muito bem vs BTC
+        } else if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+            baseProbability += 5; // Bônus para altcoin performando bem vs BTC
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+            baseProbability -= 15; // Penalidade para altcoin performando muito mal vs BTC
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            baseProbability -= 8; // Penalidade para altcoin performando mal vs BTC
         }
     }
 
@@ -2906,59 +2913,189 @@ function calculateProbability(signal) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS
+// 📊 NOVA FUNÇÃO PARA ANALISAR PERFORMANCE VS BTC (CORRIGIDA)
+// =====================================================================
+
+async function analyzeBTCCorrelation(symbol, currentPrice, isBullish) {
+    try {
+        if (!symbol.endsWith('BTC')) {
+            return { 
+                relativePerformance: 0,
+                altcoinChange: 0,
+                btcChange: 0,
+                isOutperforming: false,
+                performanceLevel: 'NOT_BTC_PAIR'
+            };
+        }
+
+        // Obter candles do altcoin
+        const altcoinCandles = await getCandlesCached(symbol, '15m', 48);
+        
+        // Para pares BTC, precisamos do BTCUSDT para comparar
+        const btcCandles = await getCandlesCached('BTCUSDT', '15m', 48);
+
+        if (altcoinCandles.length < 24 || btcCandles.length < 24) {
+            return { 
+                relativePerformance: 0,
+                altcoinChange: 0,
+                btcChange: 0,
+                isOutperforming: false,
+                performanceLevel: 'INSUFFICIENT_DATA'
+            };
+        }
+
+        // Calcular mudanças de preço em diferentes períodos
+        const periods = BTC_CORRELATION_SETTINGS.lookbackPeriods;
+        const results = {};
+
+        for (const [periodName, periodLength] of Object.entries(periods)) {
+            if (altcoinCandles.length >= periodLength && btcCandles.length >= periodLength) {
+                const altcoinPriceChange = ((altcoinCandles[altcoinCandles.length - 1].close - altcoinCandles[altcoinCandles.length - periodLength].close) / 
+                                          altcoinCandles[altcoinCandles.length - periodLength].close) * 100;
+                
+                const btcPriceChange = ((btcCandles[btcCandles.length - 1].close - btcCandles[btcCandles.length - periodLength].close) / 
+                                       btcCandles[btcCandles.length - periodLength].close) * 100;
+
+                const relativePerformance = altcoinPriceChange - btcPriceChange;
+
+                results[periodName] = {
+                    altcoinChange: altcoinPriceChange,
+                    btcChange: btcPriceChange,
+                    relativePerformance: relativePerformance,
+                    isOutperforming: relativePerformance > 0,
+                    periodLength: periodLength,
+                    timeframe: `${periodLength * 15} minutos`
+                };
+            }
+        }
+
+        // Usar o período médio como principal
+        const mainResult = results['medium'] || results['short'] || results['long'];
+        
+        if (!mainResult) {
+            return { 
+                relativePerformance: 0,
+                altcoinChange: 0,
+                btcChange: 0,
+                isOutperforming: false,
+                performanceLevel: 'NO_VALID_DATA'
+            };
+        }
+
+        // Determinar nível de performance
+        let performanceLevel = 'NEUTRAL';
+        if (mainResult.relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            performanceLevel = 'HIGH_OUTPERFORMANCE';
+        } else if (mainResult.relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+            performanceLevel = 'MEDIUM_OUTPERFORMANCE';
+        } else if (mainResult.relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+            performanceLevel = 'STRONG_UNDERPERFORMANCE';
+        } else if (mainResult.relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            performanceLevel = 'UNDERPERFORMANCE';
+        }
+
+        console.log(`📊 BTC Correlation ${symbol}:`);
+        console.log(`   Altcoin: ${mainResult.altcoinChange.toFixed(2)}% | BTC: ${mainResult.btcChange.toFixed(2)}%`);
+        console.log(`   Relative: ${mainResult.relativePerformance.toFixed(2)}% (${performanceLevel})`);
+        console.log(`   Outperforming: ${mainResult.isOutperforming ? '✅' : '❌'}`);
+
+        return {
+            ...mainResult,
+            performanceLevel: performanceLevel,
+            allPeriods: results,
+            currentPrice: currentPrice,
+            symbol: symbol,
+            isBullish: isBullish,
+            analysis: getBTCCorrelationAnalysis(mainResult.relativePerformance, performanceLevel)
+        };
+
+    } catch (error) {
+        console.log(`⚠️ Erro análise BTC correlation ${symbol}: ${error.message}`);
+        return { 
+            relativePerformance: 0,
+            altcoinChange: 0,
+            btcChange: 0,
+            isOutperforming: false,
+            performanceLevel: 'ERROR',
+            error: error.message
+        };
+    }
+}
+
+function getBTCCorrelationAnalysis(relativePerformance, performanceLevel) {
+    const analysis = [];
+    
+    switch (performanceLevel) {
+        case 'HIGH_OUTPERFORMANCE':
+            analysis.push(`🚀 ALTA PERFORMANCE RELATIVA vs BTC`);
+            analysis.push(`✅ Altcoin liderando o mercado`);
+            analysis.push(`📈 Tendência de alta mais forte que BTC`);
+            break;
+        case 'MEDIUM_OUTPERFORMANCE':
+            analysis.push(`📈 Performando melhor que BTC`);
+            analysis.push(`✅ Momento positivo relativo`);
+            analysis.push(`🔍 Monitorar continuidade`);
+            break;
+        case 'UNDERPERFORMANCE':
+            analysis.push(`⚠️ Performando pior que BTC`);
+            analysis.push(`🔻 Fraqueza relativa`);
+            analysis.push(`📉 Pode precisar de mais atenção`);
+            break;
+        case 'STRONG_UNDERPERFORMANCE':
+            analysis.push(`🚨 FORTE FRAQUEZA RELATIVA vs BTC`);
+            analysis.push(`❌ Altcoin em desvantagem`);
+            analysis.push(`📉 Risco elevado de queda contínua`);
+            break;
+        default:
+            analysis.push(`➡️ Performance similar ao BTC`);
+            analysis.push(`⚖️ Movendo-se em linha com o mercado`);
+            analysis.push(`📊 Sem vantagem/desvantagem clara`);
+    }
+    
+    analysis.push(`Performance relativa: ${relativePerformance.toFixed(2)}%`);
+    
+    return analysis;
+}
+
+// =====================================================================
+// 📊 FUNÇÃO ATUALIZADA DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS (CORRIGIDA)
 // =====================================================================
 
 async function checkVolumeRobust(symbol) {
     try {
-        const cacheKey = `volume_${symbol}`;
-        const now = Date.now();
-        
-        if (volumeAnalysisCache[cacheKey] && now - volumeAnalysisCache[cacheKey].timestamp < VOLUME_CACHE_TTL) {
-            return volumeAnalysisCache[cacheKey].data;
-        }
-        
-        const parallelEngine = new ParallelCalculationEngine();
-        
+        // Buscar candles de 3 minutos
         const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.maxZScoreLookback);
-        if (candles.length < 20) {
-            const result = {
+        if (candles.length < VOLUME_ROBUST_SETTINGS.emaPeriod) {
+            return {
                 rawRatio: 0,
                 isAbnormal: false,
                 robustData: null
             };
-            volumeAnalysisCache[cacheKey] = { data: result, timestamp: now };
-            return result;
         }
 
         const volumes = candles.map(c => c.volume);
         const closes = candles.map(c => c.close);
         
+        // Volume atual e últimos volumes
         const currentVolume = volumes[volumes.length - 1];
         const previousVolume = volumes[volumes.length - 2] || currentVolume;
         
-        const calculationTasks = [
-            {
-                type: 'VOLUME_ZSCORE',
-                data: { 
-                    volumes: volumes, 
-                    lookback: calculateAdaptiveZScoreLookback(closes) 
-                }
-            }
-        ];
-        
-        const [zScoreResult] = await parallelEngine.executeParallelCalculations(calculationTasks);
-        
+        // 1. MÉDIA MÓVEL EXPONENCIAL (EMA) DO VOLUME
         const emaData = calculateVolumeEMA(volumes, VOLUME_ROBUST_SETTINGS.emaPeriod, VOLUME_ROBUST_SETTINGS.emaAlpha);
         const emaRatio = currentVolume / emaData.currentEMA;
         const emaScore = calculateEMAScore(emaRatio);
         
-        const zScore = zScoreResult?.currentZScore || 0;
+        // 2. Z-SCORE DO VOLUME COM LOOKBACK DINÂMICO
+        const adaptiveLookback = calculateAdaptiveZScoreLookback(closes);
+        const zScoreData = calculateVolumeZScore(volumes, adaptiveLookback);
+        const zScore = zScoreData.currentZScore;
         const zScoreScore = calculateZScoreScore(zScore);
         
+        // 3. VOLUME-PRICE TREND (VPT)
         const vptData = calculateVolumePriceTrend(volumes, closes);
         const vptScore = calculateVPTScore(vptData);
         
+        // 4. CALCULAR SCORE COMBINADO
         const combinedScore = calculateCombinedVolumeScore({
             emaScore,
             zScoreScore,
@@ -2967,7 +3104,10 @@ async function checkVolumeRobust(symbol) {
             zScore
         });
         
+        // 5. CLASSIFICAÇÃO
         const classification = classifyVolumeStrength(combinedScore);
+        
+        // 6. VERIFICAR SE O VOLUME ESTÁ CONFIRMADO
         const isVolumeConfirmed = checkVolumeRobustConfirmation({
             combinedScore,
             classification,
@@ -2975,6 +3115,7 @@ async function checkVolumeRobust(symbol) {
             zScore
         });
         
+        // Razão bruta para compatibilidade
         const rawRatio = currentVolume / emaData.averageVolume || 1;
         
         const robustData = {
@@ -2995,24 +3136,26 @@ async function checkVolumeRobust(symbol) {
                 volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(2) + '%',
                 emaPeriod: VOLUME_ROBUST_SETTINGS.emaPeriod,
                 emaAlpha: VOLUME_ROBUST_SETTINGS.emaAlpha,
-                zScoreLookback: calculateAdaptiveZScoreLookback(closes),
+                zScoreLookback: adaptiveLookback,
                 isEMAValid: emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio,
                 isZScoreValid: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore,
                 isVPTValid: vptData.priceMovementPercent >= VOLUME_ROBUST_SETTINGS.vptThreshold
             }
         };
         
-        const result = {
+        console.log(`📊 Volume Robust ${symbol} (3m):`);
+        console.log(`   Volume: ${currentVolume.toFixed(2)} (${robustData.details.volumeChange})`);
+        console.log(`   EMA: ${emaData.currentEMA.toFixed(2)} (${emaRatio.toFixed(2)}x, α=${VOLUME_ROBUST_SETTINGS.emaAlpha})`);
+        console.log(`   Z-Score: ${zScore.toFixed(2)} (Lookback: ${adaptiveLookback})`);
+        console.log(`   VPT: ${vptData.priceMovementPercent.toFixed(2)}% (${vptData.trendDirection})`);
+        console.log(`   Score Combinado: ${combinedScore.toFixed(2)} (${classification})`);
+        console.log(`   Confirmado: ${isVolumeConfirmed ? '✅' : '❌'}`);
+        
+        return {
             rawRatio,
             isAbnormal: combinedScore >= 0.6 || Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold,
             robustData
         };
-        
-        volumeAnalysisCache[cacheKey] = { data: result, timestamp: now };
-        
-        console.log(`📊 Volume Robust ${symbol} (3m): Score ${combinedScore.toFixed(2)} (${classification})`);
-        
-        return result;
         
     } catch (error) {
         console.error(`❌ Erro na análise robusta de volume para ${symbol}:`, error.message);
@@ -3041,6 +3184,7 @@ function checkVolumeRobustConfirmation(volumeData) {
     );
 }
 
+// Função para calcular EMA do volume
 function calculateVolumeEMA(volumes, period, alpha) {
     if (volumes.length < period) {
         return {
@@ -3050,29 +3194,38 @@ function calculateVolumeEMA(volumes, period, alpha) {
         };
     }
     
-    const recentVolumes = volumes.slice(-period * 2);
-    const initialSMA = recentVolumes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    // Inicializar EMA com SMA
+    const initialSMA = volumes.slice(0, period).reduce((a, b) => a + b, 0) / period;
     let ema = initialSMA;
+    const emaHistory = [ema];
     
-    for (let i = period; i < recentVolumes.length; i++) {
-        ema = alpha * recentVolumes[i] + (1 - alpha) * ema;
+    // Calcular EMA para os volumes restantes
+    for (let i = period; i < volumes.length; i++) {
+        ema = alpha * volumes[i] + (1 - alpha) * ema;
+        emaHistory.push(ema);
     }
     
-    const averageVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    // Calcular também a média geral para referência
+    const averageVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
     
     return {
         currentEMA: ema,
         averageVolume: averageVolume,
-        emaTrend: ema > initialSMA ? 'rising' : 'falling'
+        minEMA: Math.min(...emaHistory),
+        maxEMA: Math.max(...emaHistory),
+        emaTrend: ema > emaHistory[emaHistory.length - 2] ? 'rising' : 'falling',
+        emaHistory: emaHistory
     };
 }
 
+// Função para calcular lookback adaptativo do Z-Score baseado na volatilidade
 function calculateAdaptiveZScoreLookback(closes) {
-    if (closes.length < 8) {
+    if (closes.length < 10) {
         return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
     }
     
-    const recentCloses = closes.slice(-15);
+    // Calcular volatilidade recente
+    const recentCloses = closes.slice(-20);
     let sumReturns = 0;
     for (let i = 1; i < recentCloses.length; i++) {
         const returnVal = Math.abs((recentCloses[i] - recentCloses[i-1]) / recentCloses[i-1]);
@@ -3080,19 +3233,54 @@ function calculateAdaptiveZScoreLookback(closes) {
     }
     const volatility = sumReturns / (recentCloses.length - 1) * 100;
     
+    // Ajustar lookback baseado na volatilidade
     if (volatility > 2.0) {
+        // Alta volatilidade: usar lookback menor
         return Math.max(VOLUME_ROBUST_SETTINGS.minZScoreLookback, 
-                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 0.6);
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 0.5);
     } else if (volatility < 0.5) {
+        // Baixa volatilidade: usar lookback maior
         return Math.min(VOLUME_ROBUST_SETTINGS.maxZScoreLookback,
-                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 1.3);
+                       VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 1.5);
     }
     
+    // Volatilidade média: usar lookback base
     return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
 }
 
+// Função atualizada para calcular Z-Score com lookback dinâmico
+function calculateVolumeZScore(volumes, lookback) {
+    if (volumes.length < lookback) {
+        return {
+            currentZScore: 0,
+            mean: volumes[0] || 0,
+            stdDev: 0
+        };
+    }
+    
+    const recentVolumes = volumes.slice(-lookback);
+    const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    
+    // Calcular desvio padrão
+    const squaredDifferences = recentVolumes.map(v => Math.pow(v - mean, 2));
+    const variance = squaredDifferences.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Z-Score do volume atual
+    const currentVolume = volumes[volumes.length - 1];
+    const zScore = stdDev !== 0 ? (currentVolume - mean) / stdDev : 0;
+    
+    return {
+        currentZScore: zScore,
+        mean: mean,
+        stdDev: stdDev,
+        lookbackUsed: lookback,
+        isOutlier: Math.abs(zScore) >= VOLUME_ROBUST_SETTINGS.zScoreThreshold
+    };
+}
+
 function calculateVolumePriceTrend(volumes, closes) {
-    if (volumes.length < 4 || closes.length < 4) {
+    if (volumes.length < 5 || closes.length < 5) {
         return {
             priceMovementPercent: 0,
             volumeTrend: 'neutral',
@@ -3101,15 +3289,19 @@ function calculateVolumePriceTrend(volumes, closes) {
         };
     }
     
-    const recentCloses = closes.slice(-4);
+    // Calcular movimento de preço recente (últimas 5 velas)
+    const recentCloses = closes.slice(-5);
     const priceChange = ((recentCloses[recentCloses.length - 1] - recentCloses[0]) / recentCloses[0]) * 100;
     
-    const recentVolumes = volumes.slice(-4);
-    const currentVolume = recentVolumes[recentVolumes.length - 1];
-    const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    // Calcular tendência de volume
+    const recentVolumes = volumes.slice(-5);
+    const volumeSum = recentVolumes.reduce((a, b) => a + b, 0);
+    const avgVolume = volumeSum / recentVolumes.length;
     
+    // Verificar se o movimento de preço é significativo
     const hasSignificantMovement = Math.abs(priceChange) >= VOLUME_ROBUST_SETTINGS.minPriceMovement;
     
+    // Determinar direção da tendência
     let trendDirection = 'neutral';
     if (priceChange > VOLUME_ROBUST_SETTINGS.minPriceMovement) {
         trendDirection = 'bullish';
@@ -3117,16 +3309,37 @@ function calculateVolumePriceTrend(volumes, closes) {
         trendDirection = 'bearish';
     }
     
+    // Calcular correlação simples entre volume e preço
     let correlation = 0;
     if (hasSignificantMovement) {
-        const volumeChange = currentVolume - avgVolume;
-        const priceChangeAbs = Math.abs(priceChange);
-        correlation = Math.min(1, Math.max(-1, volumeChange / (avgVolume * 0.1) * (priceChange / priceChangeAbs)));
+        const volumeChanges = [];
+        const priceChanges = [];
+        
+        for (let i = 1; i < recentVolumes.length; i++) {
+            volumeChanges.push(recentVolumes[i] - recentVolumes[i - 1]);
+            priceChanges.push(recentCloses[i] - recentCloses[i - 1]);
+        }
+        
+        // Correlação simples
+        const avgVolumeChange = volumeChanges.reduce((a, b) => a + b, 0) / volumeChanges.length;
+        const avgPriceChange = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
+        
+        let numerator = 0;
+        let denomVolume = 0;
+        let denomPrice = 0;
+        
+        for (let i = 0; i < volumeChanges.length; i++) {
+            numerator += (volumeChanges[i] - avgVolumeChange) * (priceChanges[i] - avgPriceChange);
+            denomVolume += Math.pow(volumeChanges[i] - avgVolumeChange, 2);
+            denomPrice += Math.pow(priceChanges[i] - avgPriceChange, 2);
+        }
+        
+        correlation = numerator / Math.sqrt(denomVolume * denomPrice);
     }
     
     return {
         priceMovementPercent: priceChange,
-        volumeTrend: currentVolume > avgVolume ? 'rising' : 'falling',
+        volumeTrend: recentVolumes[recentVolumes.length - 1] > avgVolume ? 'rising' : 'falling',
         trendDirection: trendDirection,
         correlation: isNaN(correlation) ? 0 : correlation,
         hasSignificantMovement: hasSignificantMovement
@@ -3158,15 +3371,18 @@ function calculateZScoreScore(zScore) {
 function calculateVPTScore(vptData) {
     let score = 0;
     
+    // Score baseado no movimento de preço
     const absPriceMovement = Math.abs(vptData.priceMovementPercent);
     if (absPriceMovement >= 1.0) score += 0.4;
     else if (absPriceMovement >= 0.5) score += 0.3;
     else if (absPriceMovement >= VOLUME_ROBUST_SETTINGS.minPriceMovement) score += 0.2;
     
+    // Score baseado na correlação
     if (Math.abs(vptData.correlation) >= 0.7) score += 0.3;
     else if (Math.abs(vptData.correlation) >= 0.5) score += 0.2;
     else if (Math.abs(vptData.correlation) >= 0.3) score += 0.1;
     
+    // Score baseado na consistência da tendência
     if (vptData.hasSignificantMovement && vptData.volumeTrend === 'rising') {
         score += 0.3;
     }
@@ -3183,17 +3399,21 @@ function calculateCombinedVolumeScore(data) {
         zScore
     } = data;
     
+    // Pesos configuráveis
     const weights = VOLUME_ROBUST_SETTINGS;
     
+    // Calcular score ponderado
     let combinedScore = 
         (emaScore * weights.emaWeight) +
         (zScoreScore * weights.zScoreWeight) +
         (vptScore * weights.vptWeight);
     
+    // Aplicar bônus para sinais fortes
     if (emaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
         combinedScore *= weights.combinedMultiplier;
     }
     
+    // Normalizar para 0-1
     return Math.min(1.0, combinedScore);
 }
 
@@ -3209,83 +3429,72 @@ function classifyVolumeStrength(score) {
 }
 
 // =====================================================================
-// 📊 NOVAS FUNÇÕES PARA PONTOS DE PIVÔ MULTI-TIMEFRAME
+// 📊 NOVAS FUNÇÕES PARA PONTOS DE PIVÔ MULTI-TIMEFRAME (ATUALIZADO)
 // =====================================================================
 
 async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     try {
-        const parallelEngine = new ParallelCalculationEngine();
         const allPivots = [];
         
-        const pivotTasks = [];
-        
+        // Analisar pivots em múltiplos timeframes
         for (const timeframe of PIVOT_POINTS_SETTINGS.analyzeTimeframes) {
             try {
                 const candles = await getCandlesCached(
                     symbol, 
                     timeframe, 
-                    PIVOT_POINTS_SETTINGS.candlesPerTimeframe[timeframe] || 50
+                    PIVOT_POINTS_SETTINGS.candlesPerTimeframe[timeframe] || 70
                 );
 
-                if (candles.length < 30) continue;
+                if (candles.length < 50) continue;
 
-                const highs = candles.map(c => c.high);
-                const lows = candles.map(c => c.low);
+                const timeframePivots = await analyzePivotPointsInTimeframe(
+                    symbol,
+                    timeframe,
+                    candles,
+                    currentPrice
+                );
                 
-                pivotTasks.push({
-                    type: 'PIVOT_POINTS',
-                    data: {
-                        highs: highs,
-                        lows: lows,
-                        timeframe: timeframe
-                    }
+                // Adicionar timeframe a cada pivot
+                timeframePivots.supports.forEach(pivot => {
+                    pivot.timeframe = timeframe;
+                    pivot.strength = calculatePivotStrength(pivot, timeframe);
+                    allPivots.push(pivot);
+                });
+                
+                timeframePivots.resistances.forEach(pivot => {
+                    pivot.timeframe = timeframe;
+                    pivot.strength = calculatePivotStrength(pivot, timeframe);
+                    allPivots.push(pivot);
                 });
                 
             } catch (error) {
-                console.log(`⚠️ Erro preparação pivot ${timeframe} ${symbol}: ${error.message}`);
+                console.log(`⚠️ Erro análise pivot ${timeframe} ${symbol}: ${error.message}`);
                 continue;
             }
         }
-
-        const pivotResults = await parallelEngine.executeParallelCalculations(pivotTasks);
-        
-        pivotResults.forEach((result, index) => {
-            if (!result) return;
-            
-            const timeframe = pivotTasks[index].data.timeframe;
-            
-            result.pivotLows.forEach(pivot => {
-                pivot.timeframe = timeframe;
-                pivot.strength = calculatePivotStrength(pivot, timeframe);
-                pivot.type = 'support';
-                allPivots.push(pivot);
-            });
-            
-            result.pivotHighs.forEach(pivot => {
-                pivot.timeframe = timeframe;
-                pivot.strength = calculatePivotStrength(pivot, timeframe);
-                pivot.type = 'resistance';
-                allPivots.push(pivot);
-            });
-        });
 
         if (allPivots.length === 0) {
             return { error: 'Nenhum pivot detectado' };
         }
 
+        // Separar supports e resistances
         const supportPivots = allPivots.filter(p => p.type === 'support');
         const resistancePivots = allPivots.filter(p => p.type === 'resistance');
 
+        // Encontrar pivots mais próximos
         const nearestSupportPivot = findNearestPivotMultiTimeframe(supportPivots, currentPrice, true);
         const nearestResistancePivot = findNearestPivotMultiTimeframe(resistancePivots, currentPrice, false);
 
+        // Verificar se está testando algum pivot
         const testingPivot = checkTestingPivotMultiTimeframe(currentPrice, allPivots);
 
+        // Calcular distâncias
         const supportDistancePercent = nearestSupportPivot ?
             ((currentPrice - nearestSupportPivot.price) / currentPrice) * 100 : null;
         const resistanceDistancePercent = nearestResistancePivot ?
             ((nearestResistancePivot.price - currentPrice) / currentPrice) * 100 : null;
 
+        // Determinar pivot mais próximo
         let nearestPivot = null;
         if (nearestSupportPivot && nearestResistancePivot) {
             const supportDistance = Math.abs(currentPrice - nearestSupportPivot.price);
@@ -3353,7 +3562,8 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
             totalPivots: allPivots.length,
             timeframeAnalysis: {
                 '15m': allPivots.filter(p => p.timeframe === '15m').length,
-                '1h': allPivots.filter(p => p.timeframe === '1h').length
+                '1h': allPivots.filter(p => p.timeframe === '1h').length,
+                '4h': allPivots.filter(p => p.timeframe === '4h').length
             }
         };
 
@@ -3363,9 +3573,28 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     }
 }
 
+async function analyzePivotPointsInTimeframe(symbol, timeframe, candles, currentPrice) {
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+
+    const pivotHighs = findPivotHighs(highs, PIVOT_POINTS_SETTINGS.minDistance);
+    const pivotLows = findPivotLows(lows, PIVOT_POINTS_SETTINGS.minDistance);
+
+    const supportPivots = classifyPivots(pivotLows, 'support', candles, timeframe);
+    const resistancePivots = classifyPivots(pivotHighs, 'resistance', candles, timeframe);
+
+    return {
+        supports: supportPivots,
+        resistances: resistancePivots,
+        timeframe: timeframe,
+        candlesAnalyzed: candles.length
+    };
+}
+
 function calculatePivotStrength(pivot, timeframe) {
     let baseStrength = 'weak';
     
+    // Baseado no número de toques
     if (pivot.touches >= 4) {
         baseStrength = 'very_strong';
     } else if (pivot.touches >= 3) {
@@ -3374,9 +3603,11 @@ function calculatePivotStrength(pivot, timeframe) {
         baseStrength = 'moderate';
     }
     
+    // Ajustar baseado no timeframe
     const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
     
     if (timeframeWeight >= 3.0 && baseStrength !== 'weak') {
+        // Upgrade de força para timeframes maiores
         if (baseStrength === 'moderate') return 'strong';
         if (baseStrength === 'strong') return 'very_strong';
     }
@@ -3393,6 +3624,7 @@ function findNearestPivotMultiTimeframe(pivots, currentPrice, isSupport) {
     for (const pivot of pivots) {
         const distance = Math.abs(currentPrice - pivot.price);
         
+        // Aplicar peso do timeframe na distância
         const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0;
         const adjustedDistance = distance / timeframeWeight;
         
@@ -3428,6 +3660,83 @@ function checkTestingPivotMultiTimeframe(currentPrice, allPivots) {
     return null;
 }
 
+function findPivotHighs(highs, minDistance) {
+    const pivots = [];
+    
+    for (let i = minDistance; i < highs.length - minDistance; i++) {
+        let isPivot = true;
+        
+        for (let j = i - minDistance; j <= i + minDistance; j++) {
+            if (j !== i && highs[j] > highs[i]) {
+                isPivot = false;
+                break;
+            }
+        }
+        
+        if (isPivot) {
+            pivots.push({
+                index: i,
+                price: highs[i],
+                type: 'resistance'
+            });
+        }
+    }
+    
+    return pivots;
+}
+
+function findPivotLows(lows, minDistance) {
+    const pivots = [];
+    
+    for (let i = minDistance; i < lows.length - minDistance; i++) {
+        let isPivot = true;
+        
+        for (let j = i - minDistance; j <= i + minDistance; j++) {
+            if (j !== i && lows[j] < lows[i]) {
+                isPivot = false;
+                break;
+            }
+        }
+        
+        if (isPivot) {
+            pivots.push({
+                index: i,
+                price: lows[i],
+                type: 'support'
+            });
+        }
+    }
+    
+    return pivots;
+}
+
+function classifyPivots(pivots, type, candles, timeframe) {
+    const classified = [];
+    
+    for (const pivot of pivots) {
+        let touches = 1;
+        for (let i = pivot.index + 1; i < candles.length; i++) {
+            const candle = candles[i];
+            const priceRange = pivot.price * PIVOT_POINTS_SETTINGS.priceTolerance;
+            
+            if ((type === 'support' && candle.low <= pivot.price + priceRange && candle.low >= pivot.price - priceRange) ||
+                (type === 'resistance' && candle.high <= pivot.price + priceRange && candle.high >= pivot.price - priceRange)) {
+                touches++;
+            }
+        }
+        
+        classified.push({
+            price: pivot.price,
+            type: type,
+            touches: touches,
+            index: pivot.index,
+            timeframe: timeframe
+        });
+    }
+    
+    return classified;
+}
+
 // =====================================================================
 // 📊 FUNÇÃO PARA DETECTAR SUPORTES E RESISTÊNCIAS
 // =====================================================================
@@ -3435,14 +3744,15 @@ function checkTestingPivotMultiTimeframe(currentPrice, allPivots) {
 async function analyzeSupportResistance(symbol, currentPrice, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, SUPPORT_RESISTANCE_SETTINGS.timeframe,
-            SUPPORT_RESISTANCE_SETTINGS.lookbackPeriod + 10);
+            SUPPORT_RESISTANCE_SETTINGS.lookbackPeriod + 20);
 
-        if (candles.length < 30) {
+        if (candles.length < SUPPORT_RESISTANCE_SETTINGS.lookbackPeriod) {
             return { error: 'Dados insuficientes' };
         }
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
 
         const supportLevels = findSupportLevels(lows, candles);
         const resistanceLevels = findResistanceLevels(highs, candles);
@@ -3503,7 +3813,7 @@ async function analyzeSupportResistance(symbol, currentPrice, isBullish) {
 
 function findSupportLevels(lows, candles) {
     const levels = [];
-    const window = 4;
+    const window = 5;
 
     for (let i = window; i < lows.length - window; i++) {
         const currentLow = lows[i];
@@ -3523,11 +3833,13 @@ function findSupportLevels(lows, candles) {
 
             if (existingLevel) {
                 existingLevel.touchCount++;
+                existingLevel.timestamps.push(candles[i].time);
                 existingLevel.strength = calculateLevelStrength(existingLevel.touchCount);
             } else {
                 levels.push({
                     price: currentLow,
                     touchCount: 1,
+                    timestamps: [candles[i].time],
                     strength: calculateLevelStrength(1),
                     type: 'support'
                 });
@@ -3540,7 +3852,7 @@ function findSupportLevels(lows, candles) {
 
 function findResistanceLevels(highs, candles) {
     const levels = [];
-    const window = 4;
+    const window = 5;
 
     for (let i = window; i < highs.length - window; i++) {
         const currentHigh = highs[i];
@@ -3560,11 +3872,13 @@ function findResistanceLevels(highs, candles) {
 
             if (existingLevel) {
                 existingLevel.touchCount++;
+                existingLevel.timestamps.push(candles[i].time);
                 existingLevel.strength = calculateLevelStrength(existingLevel.touchCount);
             } else {
                 levels.push({
                     price: currentHigh,
                     touchCount: 1,
+                    timestamps: [candles[i].time],
                     strength: calculateLevelStrength(1),
                     type: 'resistance'
                 });
@@ -3584,7 +3898,7 @@ function calculateLevelStrength(touchCount) {
 
 function filterRelevantLevels(levels, currentPrice, isSupport) {
     return levels
-        .filter(level => level.touchCount >= 2)
+        .filter(level => level.touchCount >= SUPPORT_RESISTANCE_SETTINGS.minTouchPoints)
         .filter(level => {
             if (isSupport) {
                 return level.price < currentPrice;
@@ -3625,30 +3939,27 @@ function analyzeRecentBreakouts(recentCandles, supportLevels, resistanceLevels) 
         const candle = recentCandles[i];
         const prevCandle = recentCandles[i - 1];
 
-        const strongResistance = resistanceLevels.filter(r => r.strength === 'strong' || r.strength === 'very_strong');
-        const strongSupport = supportLevels.filter(s => s.strength === 'strong' || s.strength === 'very_strong');
-
-        for (const resistance of strongResistance) {
+        for (const resistance of resistanceLevels) {
             if (prevCandle.high < resistance.price && candle.high > resistance.price) {
                 breakouts.push({
                     type: 'resistance_breakout',
                     level: resistance.price,
                     strength: resistance.strength,
+                    time: candle.time,
                     candle: i
                 });
-                break;
             }
         }
 
-        for (const support of strongSupport) {
+        for (const support of supportLevels) {
             if (prevCandle.low > support.price && candle.low < support.price) {
                 breakouts.push({
                     type: 'support_breakout',
                     level: support.price,
                     strength: support.strength,
+                    time: candle.time,
                     candle: i
                 });
-                break;
             }
         }
     }
@@ -3724,7 +4035,7 @@ function getSupportResistanceAnalysis(nearestSupport, nearestResistance, isBulli
     const analysis = [];
 
     if (nearestSupport) {
-        analysis.push(`Suporte mais próximo: ${nearestSupport.price.toFixed(6)} (${nearestSupport.strength})`);
+        analysis.push(`Suporte mais próximo: ${nearestSupport.price.toFixed(8)} (${nearestSupport.strength})`);
         analysis.push(`Distância ao suporte: ${((nearestSupport.distancePercent || 0).toFixed(2))}%`);
 
         if (nearestSupport.distancePercent <= SUPPORT_RESISTANCE_SETTINGS.proximityThreshold) {
@@ -3733,7 +4044,7 @@ function getSupportResistanceAnalysis(nearestSupport, nearestResistance, isBulli
     }
 
     if (nearestResistance) {
-        analysis.push(`Resistência mais próximo: ${nearestResistance.price.toFixed(6)} (${nearestResistance.strength})`);
+        analysis.push(`Resistência mais próximo: ${nearestResistance.price.toFixed(8)} (${nearestResistance.strength})`);
         analysis.push(`Distância à resistência: ${((nearestResistance.distancePercent || 0).toFixed(2))}%`);
 
         if (nearestResistance.distancePercent <= SUPPORT_RESISTANCE_SETTINGS.proximityThreshold) {
@@ -3741,46 +4052,52 @@ function getSupportResistanceAnalysis(nearestSupport, nearestResistance, isBulli
         }
     }
 
+    if (isBullish && nearestResistance) {
+        const upsidePotential = nearestResistance.distancePercent || 0;
+        analysis.push(`Potencial de alta até resistência: ${upsidePotential.toFixed(2)}%`);
+    }
+
+    if (!isBullish && nearestSupport) {
+        const downsidePotential = nearestSupport.distancePercent || 0;
+        analysis.push(`Potencial de baixa até suporte: ${downsidePotential.toFixed(2)}%`);
+    }
+
     return analysis;
 }
 
 async function getATRData(symbol, timeframe = '15m', period = 14) {
     try {
-        const candles = await getCandlesCached(symbol, timeframe, period + 10);
+        const candles = await getCandlesCached(symbol, timeframe, period + 20);
         if (candles.length < period) return null;
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
         const closes = candles.map(c => c.close);
 
-        const parallelEngine = new ParallelCalculationEngine();
-        
-        const atrTask = {
-            type: 'ATR_CALCULATION',
-            data: {
-                highs: highs,
-                lows: lows,
-                closes: closes,
-                period: period
-            }
-        };
-        
-        const [atrResult] = await parallelEngine.executeParallelCalculations([atrTask]);
-        
-        if (!atrResult) return null;
+        const atrValues = ATR.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: period
+        });
 
-        const atrPercentage = (atrResult.value / closes[closes.length - 1]) * 100;
+        if (!atrValues || atrValues.length === 0) return null;
+
+        const latestATR = atrValues[atrValues.length - 1];
+        const avgATR = atrValues.reduce((a, b) => a + b, 0) / atrValues.length;
+
+        const atrPercentage = (latestATR / closes[closes.length - 1]) * 100;
 
         let volatilityLevel = 'medium';
         if (atrPercentage < 1.0) volatilityLevel = 'low';
         else if (atrPercentage > 2.5) volatilityLevel = 'high';
 
         return {
-            value: atrResult.value,
-            average: atrResult.average,
+            value: latestATR,
+            average: avgATR,
             percentage: atrPercentage,
             volatilityLevel: volatilityLevel,
-            raw: atrResult.raw
+            raw: atrValues
         };
     } catch (error) {
         return null;
@@ -3904,7 +4221,7 @@ async function calculateAdvancedTargetsAndStop(price, isBullish, symbol) {
 
             return {
                 target: percent.toFixed(1),
-                price: targetPrice.toFixed(6),
+                price: targetPrice.toFixed(8),
                 riskReward: riskReward.toFixed(2),
                 distance: distanceToTarget
             };
@@ -3941,8 +4258,8 @@ function getDefaultTargets(price, isBullish) {
     const targets = TARGET_PERCENTAGES.map(percent => ({
         target: percent.toFixed(1),
         price: isBullish ?
-            (price * (1 + percent / 100)).toFixed(6) :
-            (price * (1 - percent / 100)).toFixed(6),
+            (price * (1 + percent / 100)).toFixed(8) :
+            (price * (1 - percent / 100)).toFixed(8),
         riskReward: (percent / stopPercentage).toFixed(2)
     }));
 
@@ -3957,43 +4274,133 @@ function getDefaultTargets(price, isBullish) {
 }
 
 // =====================================================================
-// 🚀 FUNÇÃO PARA MENSAGEM DE INICIALIZAÇÃO SIMPLES
+// 🚀 FUNÇÃO ESPECIAL PARA MENSAGEM DE INICIALIZAÇÃO
 // =====================================================================
 
-async function sendSimpleActivationMessage(symbolCount) {
+async function sendInitializationMessage(allSymbols) {
     try {
-        const now = getBrazilianDateTime();
-        const message = `🚀 <b>Titanium ativado - SPOT BTC</b>\n\n📊 Monitorando ${symbolCount} pares\n⏰ ${now.full}\n\n✨ by @J4Rviz`;
-        
-        await sendTelegramAlert(message);
-        console.log('✅ Titanium ativado para SPOT!');
-        return true;
+        const brazilTime = getBrazilianDateTime();
+
+        const message = `
+🚀 <b>TITANIUM SPOT BTC - ANÁLISE DE PERFORMANCE RELATIVA</b>
+
+${brazilTime.full}
+🎯 <b>FOCO: Pares BTC Spot da Binance</b>
+📊 <b>ANÁLISE: Performance vs Bitcoin</b>
+
+🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}
+📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)
+📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)
+
+🔧 <b>NOVO SISTEMA DE PERFORMANCE VS BTC:</b>
+• 📈 +${BTC_CORRELATION_SETTINGS.thresholds.highOutperformance}%: Alta performance relativa
+• 📊 +${BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance}%: Performance positiva
+• 📉 ${BTC_CORRELATION_SETTINGS.thresholds.underperformance}%: Performance negativa
+• 🚨 ${BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance}%: Forte fraqueza relativa
+
+🔧 Volume: Média Móvel Exponencial (EMA), Z-Score Adaptativo, Volume-Price Trend
+🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
+🔧 <b>by @J4Rviz</b>
+
+<b>⚠️ SISTEMA DE CLASSIFICAÇÃO:</b>
+• Volume Score ≥ 0.4: Alerta de COMPRA/VENDA
+• Volume Score < 0.4: "🤖 IA ANALISANDO..." (apenas análise)
+• 📈 Performance vs BTC: Destaque para altcoins liderando o mercado
+        `;
+
+        console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
+
+        let success = false;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!success && attempts < maxAttempts) {
+            attempts++;
+
+            try {
+                const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: TELEGRAM_CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML',
+                        disable_web_page_preview: true
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    success = true;
+                    console.log('✅ Mensagem de inicialização enviada para Telegram!');
+                } else {
+                    console.log(`⚠️ Tentativa ${attempts}/${maxAttempts}: HTTP ${response.status}`);
+                    if (attempts < maxAttempts) {
+                        await new Promise(r => setTimeout(r, 2000 * attempts));
+                    }
+                }
+
+            } catch (error) {
+                console.log(`⚠️ Tentativa ${attempts}/${maxAttempts}: ${error.message}`);
+                if (attempts < maxAttempts) {
+                    await new Promise(r => setTimeout(r, 2000 * attempts));
+                }
+            }
+        }
+
+        if (!success) {
+            console.log('📋 Mensagem que seria enviada:');
+            console.log('\n' + '='.repeat(60));
+            console.log('🚀 TITANIUM SPOT BTC - ANÁLISE DE PERFORMANCE RELATIVA');
+            console.log(`⏰ ${brazilTime.full}`);
+            console.log('='.repeat(60) + '\n');
+        }
+
+        return success;
+
     } catch (error) {
-        console.log('⚠️ Mensagem de ativação não enviada:', error.message);
+        console.error('❌ Erro ao enviar mensagem de inicialização:', error.message);
         return false;
     }
 }
 
 // =====================================================================
-// 📊 FUNÇÕES DE ANÁLISE TÉCNICA OTIMIZADAS
+// 📊 FUNÇÕES DE ANÁLISE TÉCNICA
 // =====================================================================
 
 let rateLimiter = new AdaptiveRateLimiter();
 let learningSystem = new AdvancedLearningSystem();
-let parallelEngine = new ParallelCalculationEngine();
 
-const optimalLimits = {
-    '1m': 40,
-    '3m': 50,
-    '5m': 45,
-    '15m': 40,
-    '30m': 35,
-    '1h': 30,
-    '2h': 25,
-    '4h': 20
-};
+async function fetchAllSpotSymbols() {
+    try {
+        const data = await rateLimiter.makeRequest(
+            'https://api.binance.com/api/v3/exchangeInfo',
+            {},
+            'exchangeInfo'
+        );
 
-async function getCandlesCached(symbol, timeframe, limit = 50) {
+        // Filtrar apenas pares BTC spot (ex: ETHBTC, SOLBTC, etc)
+        const symbols = data.symbols
+            .filter(s => s.symbol.endsWith('BTC') && s.status === 'TRADING')
+            .map(s => s.symbol);
+
+        console.log(`✅ ${symbols.length} pares BTC spot encontrados`);
+        return symbols;
+
+    } catch (error) {
+        console.log('❌ Erro ao buscar símbolos spot, usando fallback');
+        return ['ETHBTC', 'BNBBTC', 'SOLBTC', 'XRPBTC', 'ADABTC', 'DOTBTC', 'DOGEBTC', 'MATICBTC'];
+    }
+}
+
+async function getCandlesCached(symbol, timeframe, limit = 80) {
     try {
         const cacheKey = `${symbol}_${timeframe}_${limit}`;
         const now = Date.now();
@@ -4008,8 +4415,7 @@ async function getCandlesCached(symbol, timeframe, limit = 50) {
         };
 
         const interval = intervalMap[timeframe] || '15m';
-        const actualLimit = optimalLimits[timeframe] || Math.min(limit, 40);
-        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${actualLimit}`;
+        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
 
         const data = await rateLimiter.makeRequest(url, {}, 'klines');
 
@@ -4029,140 +4435,29 @@ async function getCandlesCached(symbol, timeframe, limit = 50) {
     }
 }
 
-async function batchTechnicalAnalysis(symbol, isBullish) {
-    try {
-        const [candles3m, candles1h, candles15m, candles4h] = await Promise.all([
-            getCandlesCached(symbol, '3m', 55),
-            getCandlesCached(symbol, '1h', 40),
-            getCandlesCached(symbol, '15m', 40),
-            getCandlesCached(symbol, '4h', 30)
-        ]);
-
-        if (candles3m.length < 20 || candles1h.length < 14) {
-            return null;
-        }
-
-        const currentPrice = candles3m[candles3m.length - 1].close;
-        
-        const calculationTasks = [];
-        
-        const closes3m = candles3m.map(c => c.close);
-        calculationTasks.push({
-            type: 'EMA_CALCULATION',
-            data: {
-                values: closes3m,
-                periods: [13, 34, 55]
-            }
-        });
-        
-        const closes1h = candles1h.map(c => c.close);
-        calculationTasks.push({
-            type: 'RSI_CALCULATION',
-            data: {
-                values: closes1h,
-                period: 14
-            }
-        });
-        
-        const [emaResults, rsiResult] = await parallelEngine.executeParallelCalculations(calculationTasks);
-        
-        if (!emaResults || !rsiResult) {
-            return null;
-        }
-        
-        const latestEma13 = emaResults.ema13;
-        const latestEma34 = emaResults.ema34;
-        const latestEma55 = emaResults.ema55;
-        const previousEma13 = emaResults.ema13_previous;
-        const previousEma34 = emaResults.ema34_previous;
-        
-        const isAboveEMA55 = currentPrice > latestEma55;
-        const isBullishEMA = isAboveEMA55 && previousEma13 <= previousEma34 && latestEma13 > latestEma34;
-        const isBearishEMA = !isAboveEMA55 && previousEma13 >= previousEma34 && latestEma13 < latestEma34;
-        
-        if (!isBullishEMA && !isBearishEMA) {
-            return null;
-        }
-        
-        const isBullishSignal = isBullishEMA;
-        
-        if (isBullishSignal && rsiResult.value > RSI_BUY_MAX) {
-            console.log(`⚠️ ${symbol}: RSI alto para compra (${rsiResult.value.toFixed(1)} > ${RSI_BUY_MAX})`);
-            return null;
-        }
-        if (!isBullishSignal && rsiResult.value < RSI_SELL_MIN) {
-            console.log(`⚠️ ${symbol}: RSI baixo para venda (${rsiResult.value.toFixed(1)} < ${RSI_SELL_MIN})`);
-            return null;
-        }
-        
-        return {
-            currentPrice,
-            isBullish: isBullishSignal,
-            emaData: {
-                isAboveEMA55,
-                isEMA13CrossingUp: isBullishEMA,
-                isEMA13CrossingDown: isBearishEMA
-            },
-            rsiData: {
-                value: rsiResult.value,
-                previous: rsiResult.previous,
-                raw: rsiResult.raw,
-                status: rsiResult.status,
-                isExitingExtreme: rsiResult.isExitingExtreme
-            },
-            candles3m,
-            candles1h,
-            candles15m,
-            candles4h
-        };
-
-    } catch (error) {
-        console.log(`⚠️ Erro análise batch ${symbol}: ${error.message}`);
-        return null;
-    }
-}
-
-async function fetchAllSpotSymbols() {
-    try {
-        const cacheKey = 'all_spot_symbols';
-        const now = Date.now();
-        
-        if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < 300000) {
-            return candleCache[cacheKey].data;
-        }
-
-        const data = await rateLimiter.makeRequest(
-            'https://api.binance.com/api/v3/exchangeInfo',
-            {},
-            'exchangeInfo'
-        );
-
-        const symbols = data.symbols
-            .filter(s => s.symbol.endsWith('BTC') && s.status === 'TRADING')
-            .map(s => s.symbol);
-
-        console.log(`✅ ${symbols.length} pares SPOT BTC encontrados`);
-        
-        candleCache[cacheKey] = { data: symbols, timestamp: now };
-        
-        return symbols;
-
-    } catch (error) {
-        console.log('❌ Erro ao buscar símbolos, usando fallback');
-        return ['BTCUSDT'];
-    }
-}
-
 async function getEMAs3m(symbol) {
     try {
-        const analysis = await batchTechnicalAnalysis(symbol, true);
-        if (!analysis) return null;
-        
+        const candles = await getCandlesCached(symbol, '3m', 80);
+        if (candles.length < 55) return null;
+
+        const closes = candles.map(c => c.close);
+        const currentPrice = closes[closes.length - 1];
+
+        const ema13 = EMA.calculate({ period: 13, values: closes });
+        const ema34 = EMA.calculate({ period: 34, values: closes });
+        const ema55 = EMA.calculate({ period: 55, values: closes });
+
+        const latestEma13 = ema13[ema13.length - 1];
+        const latestEma34 = ema34[ema34.length - 1];
+        const latestEma55 = ema55[ema55.length - 1];
+        const previousEma13 = ema13[ema13.length - 2];
+        const previousEma34 = ema34[ema34.length - 2];
+
         return {
-            currentPrice: analysis.currentPrice,
-            isAboveEMA55: analysis.emaData.isAboveEMA55,
-            isEMA13CrossingUp: analysis.emaData.isEMA13CrossingUp,
-            isEMA13CrossingDown: analysis.emaData.isEMA13CrossingDown
+            currentPrice: currentPrice,
+            isAboveEMA55: currentPrice > latestEma55,
+            isEMA13CrossingUp: previousEma13 <= previousEma34 && latestEma13 > latestEma34,
+            isEMA13CrossingDown: previousEma13 >= previousEma34 && latestEma13 < latestEma34
         };
     } catch (error) {
         return null;
@@ -4171,32 +4466,57 @@ async function getEMAs3m(symbol) {
 
 async function getRSI1h(symbol) {
     try {
-        const analysis = await batchTechnicalAnalysis(symbol, true);
-        if (!analysis) return null;
+        const candles = await getCandlesCached(symbol, '1h', 80);
+        if (candles.length < 14) return null;
+
+        const closes = candles.map(c => c.close);
+        const rsiValues = RSI.calculate({ values: closes, period: 14 });
+
+        if (!rsiValues || rsiValues.length === 0) return null;
+
+        const latestRSI = rsiValues[rsiValues.length - 1];
+        const previousRSI = rsiValues[rsiValues.length - 2];
         
-        return analysis.rsiData;
+        let status = 'NEUTRAL';
+        if (latestRSI < 25) status = 'OVERSOLD';
+        else if (latestRSI > 75) status = 'OVERBOUGHT';
+        
+        return {
+            value: latestRSI,
+            previous: previousRSI,
+            raw: latestRSI,
+            status: status,
+            isExitingExtreme: (previousRSI < 25 && latestRSI > 25) || 
+                             (previousRSI > 75 && latestRSI < 75)
+        };
     } catch (error) {
         return null;
     }
 }
 
 async function checkVolume(symbol) {
-    return await checkVolumeRobust(symbol);
+    try {
+        // Usar a nova função robusta de detecção de volume
+        const volumeAnalysis = await checkVolumeRobust(symbol);
+        return volumeAnalysis;
+    } catch (error) {
+        return { rawRatio: 0, isAbnormal: false, robustData: null };
+    }
 }
 
 async function checkVolatility(symbol) {
     try {
-        const candles = await getCandlesCached(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD + 5);
-        if (candles.length < 15) return { rawVolatility: 0, isValid: false };
+        const candles = await getCandlesCached(symbol, VOLATILITY_TIMEFRAME, VOLATILITY_PERIOD + 10);
+        if (candles.length < VOLATILITY_PERIOD) return { rawVolatility: 0, isValid: false };
 
         const closes = candles.map(c => c.close);
-        let sumReturns = 0;
+        const returns = [];
 
         for (let i = 1; i < closes.length; i++) {
-            sumReturns += Math.abs((closes[i] - closes[i - 1]) / closes[i - 1]);
+            returns.push(Math.abs((closes[i] - closes[i - 1]) / closes[i - 1]));
         }
 
-        const volatility = sumReturns / (closes.length - 1) * 100;
+        const volatility = returns.reduce((a, b) => a + b, 0) / returns.length * 100;
 
         return {
             rawVolatility: volatility,
@@ -4207,48 +4527,45 @@ async function checkVolatility(symbol) {
     }
 }
 
+// ATUALIZADO: Função checkStochastic com nova configuração
 async function checkStochastic(symbol, isBullish) {
     try {
-        const candles = await getCandlesCached(symbol, '1h', 25);
+        const candles = await getCandlesCached(symbol, '1h', 30);
         if (candles.length < STOCH_SETTINGS.period + 5) return { isValid: false };
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
         const closes = candles.map(c => c.close);
-        
-        const stochTask = {
-            type: 'STOCH_CALCULATION',
-            data: {
-                highs: highs,
-                lows: lows,
-                closes: closes,
-                period: STOCH_SETTINGS.period,
-                smooth: STOCH_SETTINGS.smooth,
-                signalPeriod: STOCH_SETTINGS.signalPeriod
-            }
-        };
-        
-        const [stochResult] = await parallelEngine.executeParallelCalculations([stochTask]);
-        
-        if (!stochResult || !stochResult.isValid) {
-            return { isValid: false };
-        }
-        
+
+        const stochValues = Stochastic.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: STOCH_SETTINGS.period,
+            smooth: STOCH_SETTINGS.smooth,
+            signalPeriod: STOCH_SETTINGS.signalPeriod
+        });
+
+        if (!stochValues || stochValues.length < 2) return { isValid: false };
+
+        const current = stochValues[stochValues.length - 1];
+        const previous = stochValues[stochValues.length - 2];
+
         if (isBullish) {
             return {
-                isValid: stochResult.isBullish,
-                kValue: stochResult.kValue,
-                dValue: stochResult.dValue,
-                kPrevious: stochResult.kPrevious,
-                dPrevious: stochResult.dPrevious
+                isValid: previous.k <= previous.d && current.k > current.d,
+                kValue: current.k,
+                dValue: current.d,
+                kPrevious: previous.k,
+                dPrevious: previous.d
             };
         } else {
             return {
-                isValid: stochResult.isBearish,
-                kValue: stochResult.kValue,
-                dValue: stochResult.dValue,
-                kPrevious: stochResult.kPrevious,
-                dPrevious: stochResult.dPrevious
+                isValid: previous.k >= previous.d && current.k < current.d,
+                kValue: current.k,
+                dValue: current.d,
+                kPrevious: previous.k,
+                dPrevious: previous.d
             };
         }
     } catch (error) {
@@ -4258,42 +4575,38 @@ async function checkStochastic(symbol, isBullish) {
 
 async function checkStochastic4h(symbol, isBullish) {
     try {
-        const candles = await getCandlesCached(symbol, '4h', 30);
+        const candles = await getCandlesCached(symbol, '4h', 40);
         if (candles.length < STOCH_4H_SETTINGS.period + 5) return { isValid: false };
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
         const closes = candles.map(c => c.close);
-        
-        const stochTask = {
-            type: 'STOCH_CALCULATION',
-            data: {
-                highs: highs,
-                lows: lows,
-                closes: closes,
-                period: STOCH_4H_SETTINGS.period,
-                smooth: STOCH_4H_SETTINGS.smooth,
-                signalPeriod: STOCH_4H_SETTINGS.signalPeriod
-            }
-        };
-        
-        const [stochResult] = await parallelEngine.executeParallelCalculations([stochTask]);
-        
-        if (!stochResult || !stochResult.isValid) {
-            return { isValid: false };
-        }
-        
+
+        const stochValues = Stochastic.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: STOCH_4H_SETTINGS.period,
+            signalPeriod: STOCH_4H_SETTINGS.signalPeriod,
+            smooth: STOCH_4H_SETTINGS.smooth
+        });
+
+        if (!stochValues || stochValues.length < 2) return { isValid: false };
+
+        const current = stochValues[stochValues.length - 1];
+        const previous = stochValues[stochValues.length - 2];
+
         if (isBullish) {
             return {
-                isValid: stochResult.isBullish,
-                kValue: stochResult.kValue,
-                dValue: stochResult.dValue
+                isValid: previous.k <= previous.d && current.k > current.d,
+                kValue: current.k,
+                dValue: current.d
             };
         } else {
             return {
-                isValid: stochResult.isBearish,
-                kValue: stochResult.kValue,
-                dValue: stochResult.dValue
+                isValid: previous.k >= previous.d && current.k < current.d,
+                kValue: current.k,
+                dValue: current.d
             };
         }
     } catch (error) {
@@ -4303,7 +4616,7 @@ async function checkStochastic4h(symbol, isBullish) {
 
 async function checkCCI4h(symbol, isBullish) {
     try {
-        const candles = await getCandlesCached(symbol, '4h', 40);
+        const candles = await getCandlesCached(symbol, '4h', 50);
         if (candles.length < CCI_4H_SETTINGS.period + 10) return {
             value: 0,
             maValue: 0,
@@ -4313,37 +4626,34 @@ async function checkCCI4h(symbol, isBullish) {
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
         const closes = candles.map(c => c.close);
-        
-        const cciTask = {
-            type: 'CCI_CALCULATION',
-            data: {
-                highs: highs,
-                lows: lows,
-                closes: closes,
-                period: CCI_4H_SETTINGS.period,
-                maPeriod: CCI_4H_SETTINGS.maPeriod
-            }
+
+        const cciValues = CCI.calculate({
+            high: highs,
+            low: lows,
+            close: closes,
+            period: CCI_4H_SETTINGS.period
+        });
+
+        if (!cciValues || cciValues.length === 0) return {
+            value: 0,
+            maValue: 0,
+            isValid: false
         };
-        
-        const [cciResult] = await parallelEngine.executeParallelCalculations([cciTask]);
-        
-        if (!cciResult || !cciResult.isValid) {
-            return {
-                value: 0,
-                maValue: 0,
-                isValid: false
-            };
-        }
-        
+
+        const latestCCI = cciValues[cciValues.length - 1];
+
+        const cciForMA = cciValues.slice(-CCI_4H_SETTINGS.maPeriod);
+        const cciMA = cciForMA.reduce((sum, value) => sum + value, 0) / cciForMA.length;
+
         const isValid = isBullish ?
-            cciResult.value > cciResult.maValue :
-            cciResult.value < cciResult.maValue;
-            
+            latestCCI > cciMA :
+            latestCCI < cciMA;
+
         return {
-            value: cciResult.value,
-            maValue: cciResult.maValue,
+            value: latestCCI,
+            maValue: cciMA,
             isValid: isValid,
-            deviation: cciResult.deviation
+            deviation: Math.abs(latestCCI - cciMA)
         };
     } catch (error) {
         return {
@@ -4355,168 +4665,263 @@ async function checkCCI4h(symbol, isBullish) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE
+// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM AS ALTERAÇÕES
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
-    if (marketData.volume?.robustData?.combinedScore < 0.3) {
-        return {
-            score: 0,
-            grade: "D",
-            emoji: "❌",
-            isAcceptable: false,
-            message: "❌ Volume insuficiente",
-            details: [],
-            failedChecks: ['Volume Score < 0.3']
-        };
-    }
-
-    const rsiValue = marketData.rsi?.value || 50;
-    if ((isBullish && rsiValue > RSI_BUY_MAX) || (!isBullish && rsiValue < RSI_SELL_MIN)) {
-        return {
-            score: 0,
-            grade: "D",
-            emoji: "❌",
-            isAcceptable: false,
-            message: "❌ RSI fora da zona",
-            details: [],
-            failedChecks: ['RSI fora da zona ideal']
-        };
-    }
-
-    if (marketData.ema) {
-        const isEmaValid = (isBullish && marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingUp) ||
-            (!isBullish && !marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingDown);
-
-        if (!isEmaValid) {
-            return {
-                score: 0,
-                grade: "D",
-                emoji: "❌",
-                isAcceptable: false,
-                message: "❌ EMA não alinhada",
-                details: [],
-                failedChecks: ['EMA não alinhada']
-            };
-        }
-    }
-
     let score = 0;
     let details = [];
     let failedChecks = [];
 
+    // 1. Volume (ATUALIZADO: usando análise robusta)
     const volumeData = marketData.volume?.robustData;
     if (volumeData && volumeData.combinedScore >= 0.5) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume,
             QUALITY_WEIGHTS.volume * volumeData.combinedScore);
         score += volumeScore;
-        details.push(` Vol 3m Robusto: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (Score: ${volumeData.combinedScore.toFixed(2)})`);
+        details.push(` Vol 3m Robusto: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volume} (Score: ${volumeData.combinedScore.toFixed(2)} - ${volumeData.classification})`);
+        details.push(`   EMA: ${volumeData.emaRatio.toFixed(2)}x | Z-Score: ${volumeData.zScore.toFixed(2)} | VPT: ${volumeData.vpt.priceMovementPercent.toFixed(2)}%`);
+    } else {
+        failedChecks.push(`Vol 3m: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
     }
 
+    // 2. Volatilidade
     if (marketData.volatility && marketData.volatility.isValid) {
-        score += QUALITY_WEIGHTS.volatility;
-        details.push(` Volatilidade: ${QUALITY_WEIGHTS.volatility}/${QUALITY_WEIGHTS.volatility}`);
+        const volScore = QUALITY_WEIGHTS.volatility;
+        score += volScore;
+        details.push(` Volatilidade 15m: ${volScore}/${QUALITY_WEIGHTS.volatility} (${marketData.volatility.rawVolatility.toFixed(2)}%)`);
+    } else {
+        failedChecks.push(`Volatilidade 15m: ${marketData.volatility?.rawVolatility.toFixed(2) || 0}% < ${VOLATILITY_THRESHOLD}%`);
     }
 
-    let rsiScore = 0;
-    if (isBullish && rsiValue <= RSI_BUY_MAX) {
-        rsiScore = QUALITY_WEIGHTS.rsi;
-        details.push(` RSI: ${rsiScore}/${QUALITY_WEIGHTS.rsi}`);
-    } else if (!isBullish && rsiValue >= RSI_SELL_MIN) {
-        rsiScore = QUALITY_WEIGHTS.rsi;
-        details.push(` RSI: ${rsiScore}/${QUALITY_WEIGHTS.rsi}`);
+    // 3. RSI (ATUALIZADO: novos limites)
+    if (marketData.rsi) {
+        const rsiValue = marketData.rsi.value;
+        let rsiScore = 0;
+
+        if (rsiValue < 25 || rsiValue > 75) {
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(1)} (EXTREMO - Padrão PERDEDOR)`);
+            rsiScore = 0;
+        } else if (isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) {
+            rsiScore = QUALITY_WEIGHTS.rsi;
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(1)} ≤ ${RSI_BUY_MAX} Ideal para compra)`);
+        } else if (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75) {
+            rsiScore = QUALITY_WEIGHTS.rsi;
+            details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(1)} ≥ ${RSI_SELL_MIN} Ideal para venda)`);
+        } else {
+            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(1)} (Fora da zona ideal)`);
+        }
+        score += rsiScore;
     }
-    score += rsiScore;
 
-    score += QUALITY_WEIGHTS.emaAlignment;
-    details.push(` EMA 3m: ${QUALITY_WEIGHTS.emaAlignment}/${QUALITY_WEIGHTS.emaAlignment}`);
+    // 4. EMA Alignment
+    if (marketData.ema) {
+        const isEmaValid = (isBullish && marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingUp) ||
+            (!isBullish && !marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingDown);
 
+        if (isEmaValid) {
+            const emaScore = QUALITY_WEIGHTS.emaAlignment;
+            score += emaScore;
+            details.push(` EMA 3m: ${emaScore}/${QUALITY_WEIGHTS.emaAlignment} ${isBullish ? 'bullish' : 'bearish'})`);
+        } else {
+            failedChecks.push(`EMA 3m: Alinhamento incorreto`);
+        }
+    }
+
+    // 5. Stochastic 1h (ATUALIZADO: 8 pontos, nova configuração)
     if (marketData.stoch && marketData.stoch.isValid) {
-        score += QUALITY_WEIGHTS.stoch1h;
-        details.push(` Stoch 1h: ${QUALITY_WEIGHTS.stoch1h}/${QUALITY_WEIGHTS.stoch1h}`);
+        const stochScore = QUALITY_WEIGHTS.stoch1h;
+        score += stochScore;
+        const direction = isBullish ? 'K > D (cruzamento bullish)' : 'K < D (cruzamento bearish)';
+        details.push(` Stoch 1h (14,3,3): ${stochScore}/${QUALITY_WEIGHTS.stoch1h} (${direction})`);
+    } else {
+        failedChecks.push(`Stoch 1h: Sem cruzamento ${isBullish ? 'bullish' : 'bearish'} (K ${isBullish ? '≤' : '≥'} D)`);
     }
 
+    // 6. Stochastic 4h
+    if (marketData.stoch4h && marketData.stoch4h.isValid) {
+        const stoch4hScore = QUALITY_WEIGHTS.stoch4h;
+        score += stoch4hScore;
+        details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h} ${isBullish ? 'bullish' : 'bearish'} `);
+    } else {
+        failedChecks.push(`Stoch 4h: ${isBullish ? 'bullish' : 'bearish'} `);
+    }
+
+    // 7. CCI 4h
+    if (marketData.cci4h && marketData.cci4h.isValid) {
+        const cci4hScore = QUALITY_WEIGHTS.cci4h;
+        score += cci4hScore;
+        const deviation = marketData.cci4h.deviation.toFixed(2);
+        details.push(` CCI 4h: ${cci4hScore}/${QUALITY_WEIGHTS.cci4h} (${marketData.cci4h.value.toFixed(2)} ${isBullish ? '>' : '<'} ${marketData.cci4h.maValue.toFixed(2)} MMS, dev: ${deviation})`);
+    } else {
+        failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
+    }
+
+    // 8. Breakout Risk
     if (marketData.breakoutRisk) {
         let breakoutScore = 0;
-        
+        let breakoutDetail = '';
+
         switch (marketData.breakoutRisk.level) {
             case 'very_low':
                 breakoutScore = QUALITY_WEIGHTS.breakoutRisk;
+                breakoutDetail = `${breakoutScore}/${QUALITY_WEIGHTS.breakoutRisk} (Risco muito baixo)`;
                 break;
             case 'low':
                 breakoutScore = QUALITY_WEIGHTS.breakoutRisk * 0.8;
+                breakoutDetail = `${breakoutScore.toFixed(1)}/${QUALITY_WEIGHTS.breakoutRisk} (Risco baixo)`;
                 break;
             case 'medium':
                 breakoutScore = QUALITY_WEIGHTS.breakoutRisk * 0.5;
+                breakoutDetail = `${breakoutScore.toFixed(1)}/${QUALITY_WEIGHTS.breakoutRisk} (Risco médio)`;
                 break;
             case 'high':
-                failedChecks.push(`Risco Rompimento: ALTO`);
+                breakoutScore = 0;
+                breakoutDetail = `0/${QUALITY_WEIGHTS.breakoutRisk} (ALTO RISCO DE ROMPIMENTO!)`;
+                failedChecks.push(`Risco Rompimento: ${marketData.breakoutRisk.reason}`);
                 break;
+            default:
+                breakoutDetail = `0/${QUALITY_WEIGHTS.breakoutRisk} (Não analisado)`;
         }
-        
+
         score += breakoutScore;
-        if (breakoutScore > 0) {
-            details.push(` Risco Rompimento: ${breakoutScore.toFixed(1)}/${QUALITY_WEIGHTS.breakoutRisk}`);
-        }
+        details.push(` Risco Rompimento: ${breakoutDetail}`);
     }
 
+    // 9. Support/Resistance
     if (marketData.supportResistance) {
+        let srScore = 0;
+        let srDetail = '';
+
         const nearestLevel = isBullish ?
             marketData.supportResistance.nearestResistance :
             marketData.supportResistance.nearestSupport;
 
         if (nearestLevel) {
             const distance = nearestLevel.distancePercent || 0;
-            let srScore = 0;
 
             if (distance >= 3.0) {
                 srScore = QUALITY_WEIGHTS.supportResistance;
+                srDetail = `${srScore}/${QUALITY_WEIGHTS.supportResistance} (Boa distância: ${distance.toFixed(2)}%)`;
             } else if (distance >= 1.5) {
                 srScore = QUALITY_WEIGHTS.supportResistance * 0.7;
+                srDetail = `${srScore.toFixed(1)}/${QUALITY_WEIGHTS.supportResistance} (Distância ok: ${distance.toFixed(2)}%)`;
             } else if (distance >= 0.8) {
                 srScore = QUALITY_WEIGHTS.supportResistance * 0.3;
+                srDetail = `${srScore.toFixed(1)}/${QUALITY_WEIGHTS.supportResistance} (Próximo: ${distance.toFixed(2)}%)`;
             } else {
-                failedChecks.push(`S/R: Muito próximo (${distance.toFixed(2)}%)`);
+                srScore = 0;
+                srDetail = `0/${QUALITY_WEIGHTS.supportResistance} (MUITO PRÓXIMO: ${distance.toFixed(2)}%!)`;
+                failedChecks.push(`S/R: ${isBullish ? 'Resistência' : 'Suporte'} muito próximo (${distance.toFixed(2)}%)`);
             }
-            
-            score += srScore;
-            if (srScore > 0) {
-                details.push(` Distância S/R: ${srScore.toFixed(1)}/${QUALITY_WEIGHTS.supportResistance}`);
-            }
+        } else {
+            srScore = QUALITY_WEIGHTS.supportResistance * 0.5;
+            srDetail = `${srScore.toFixed(1)}/${QUALITY_WEIGHTS.supportResistance} (Sem nível próximo)`;
         }
+
+        score += srScore;
+        details.push(` Distância S/R: ${srDetail}`);
     }
 
+    // 10. Pivot Points (ATUALIZADO: Com diferenciação de timeframe)
     if (marketData.pivotPoints) {
+        let pivotScore = 0;
+        let pivotDetail = '';
+
         const nearestPivot = marketData.pivotPoints.nearestPivot;
         
         if (nearestPivot) {
             const distance = nearestPivot.distancePercent || 0;
             const pivotStrength = nearestPivot.strength || 'unknown';
+            const timeframe = nearestPivot.timeframe || 'unknown';
+            const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
             const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
+            
+            // Calcular score baseado na distância relativa à distância segura
             const distanceRatio = distance / safeDistance;
             
-            let pivotScore = 0;
-            
             if (distanceRatio >= 1.5) {
+                // Muito longe - ponto positivo
                 pivotScore = QUALITY_WEIGHTS.pivotPoints;
+                pivotDetail = `${pivotScore}/${QUALITY_WEIGHTS.pivotPoints} (Excelente distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% > ${safeDistance.toFixed(1)}%)`;
             } else if (distanceRatio >= 1.0) {
+                // Distância segura
                 pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.8;
+                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Boa distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% ≥ ${safeDistance.toFixed(1)}%)`;
             } else if (distanceRatio >= 0.5) {
+                // Próximo mas não crítico
                 pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.4;
+                pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Próximo do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
             } else {
-                failedChecks.push(`Pivot: Muito próximo (${distance.toFixed(2)}%)`);
+                // Muito próximo
+                pivotScore = 0;
+                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (MUITO PRÓXIMO DO PIVOT ${pivotStrength.toUpperCase()} ${timeframe.toUpperCase()}!)`;
+                failedChecks.push(`Pivot ${pivotStrength} ${timeframe}: Muito próximo (${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`);
+            }
+            
+            // Penalizar pivots fortes muito próximos
+            if (timeframeWeight >= 2.0 && distanceRatio < 0.8) {
+                pivotScore = Math.max(0, pivotScore - 2);
+                pivotDetail += ` | PIVOT FORTE PRÓXIMO`;
             }
             
             if (nearestPivot.isTesting) {
-                failedChecks.push(`Pivot: Testando nível`);
                 pivotScore = 0;
+                pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (TESTANDO PIVOT ${pivotStrength.toUpperCase()} ${timeframe.toUpperCase()}!)`;
+                failedChecks.push(`Pivot ${pivotStrength} ${timeframe}: Testando nível`);
             }
-            
-            score += pivotScore;
-            if (pivotScore > 0) {
-                details.push(` Pivot: ${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints}`);
-            }
+        } else {
+            pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.5;
+            pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Sem pivot próximo detectado)`;
         }
+        
+        score += pivotScore;
+        details.push(` Pivot Points: ${pivotDetail}`);
+    } else {
+        failedChecks.push(`Pivot Points: Não analisado`);
+    }
+
+    // 11. NOVO: BTC Correlation Score
+    if (marketData.btcCorrelation) {
+        const btcCorrelationData = marketData.btcCorrelation;
+        const relativePerformance = btcCorrelationData.relativePerformance || 0;
+        const performanceLevel = btcCorrelationData.performanceLevel || 'NEUTRAL';
+        
+        let btcScore = 0;
+        let btcDetail = '';
+
+        switch (performanceLevel) {
+            case 'HIGH_OUTPERFORMANCE':
+                btcScore = QUALITY_WEIGHTS.btcCorrelation;
+                btcDetail = `${btcScore}/${QUALITY_WEIGHTS.btcCorrelation} (📈 ALTA PERFORMANCE vs BTC: +${relativePerformance.toFixed(2)}%)`;
+                details.push(` 🚀 PERFORMANCE VS BTC: Altcoin liderando o mercado!`);
+                break;
+            case 'MEDIUM_OUTPERFORMANCE':
+                btcScore = QUALITY_WEIGHTS.btcCorrelation * 0.8;
+                btcDetail = `${btcScore.toFixed(1)}/${QUALITY_WEIGHTS.btcCorrelation} (📊 Performance positiva vs BTC: +${relativePerformance.toFixed(2)}%)`;
+                break;
+            case 'NEUTRAL':
+                btcScore = QUALITY_WEIGHTS.btcCorrelation * 0.5;
+                btcDetail = `${btcScore.toFixed(1)}/${QUALITY_WEIGHTS.btcCorrelation} (➡️ Performance similar ao BTC: ${relativePerformance.toFixed(2)}%)`;
+                break;
+            case 'UNDERPERFORMANCE':
+                btcScore = 0;
+                btcDetail = `0/${QUALITY_WEIGHTS.btcCorrelation} (⚠️ Performando pior que BTC: ${relativePerformance.toFixed(2)}%)`;
+                failedChecks.push(`Performance vs BTC: Altcoin em desvantagem (${relativePerformance.toFixed(2)}%)`);
+                break;
+            case 'STRONG_UNDERPERFORMANCE':
+                btcScore = 0;
+                btcDetail = `0/${QUALITY_WEIGHTS.btcCorrelation} (🚨 FORTE FRAQUEZA vs BTC: ${relativePerformance.toFixed(2)}%)`;
+                failedChecks.push(`Performance vs BTC: Altcoin muito fraco vs BTC (${relativePerformance.toFixed(2)}%)`);
+                break;
+            default:
+                btcDetail = `0/${QUALITY_WEIGHTS.btcCorrelation} (Não analisado)`;
+        }
+
+        score += btcScore;
+        details.push(` Performance vs BTC: ${btcDetail}`);
+    } else {
+        failedChecks.push(`Performance vs BTC: Não analisado`);
     }
 
     let grade, emoji;
@@ -4547,7 +4952,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
 }
 
 // =====================================================================
-// 🔄 MONITORAMENTO PRINCIPAL COM OTIMIZAÇÕES
+// 🔄 MONITORAMENTO PRINCIPAL COM DELAY ADAPTATIVO
 // =====================================================================
 
 class AdaptiveSymbolGroupManager {
@@ -4555,33 +4960,26 @@ class AdaptiveSymbolGroupManager {
         this.symbolGroups = [];
         this.currentGroupIndex = 0;
         this.totalCycles = 0;
-        this.groupSize = 30;
+        this.groupSize = 25;
         this.signalsDetected = 0;
-        this.baseDelay = 4000;
-        this.minDelay = 2000;
-        this.maxDelay = 8000;
+        this.baseDelay = 8000;
+        this.minDelay = 4000;
+        this.maxDelay = 15000;
         this.consecutiveNoSignals = 0;
-        this.lastPerformanceLog = Date.now();
-        
-        this.globalMarketData = {
-            btcPrice: null,
-            btcCandles1h: null,
-            btcVolatility: null,
-            lastUpdate: 0
-        };
     }
 
     async initializeSymbols() {
         try {
             const allSymbols = await fetchAllSpotSymbols();
 
-            const filteredSymbols = await this.filterActiveSymbols(allSymbols);
+            const filteredSymbols = allSymbols.filter(symbol => {
+                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN', 'MOVR'];
+                return !blacklist.some(term => symbol.includes(term));
+            });
 
             this.symbolGroups = this.createGroups(filteredSymbols, this.groupSize);
 
-            console.log(`📊 ${filteredSymbols.length} ativos ativos divididos em ${this.symbolGroups.length} grupos (${this.groupSize} cada)`);
-
-            await this.preloadGlobalData();
+            console.log(`📊 ${filteredSymbols.length} pares BTC spot divididos em ${this.symbolGroups.length} grupos`);
 
             return filteredSymbols;
 
@@ -4589,81 +4987,6 @@ class AdaptiveSymbolGroupManager {
             console.error('Erro ao inicializar símbolos:', error.message);
             return [];
         }
-    }
-
-    async filterActiveSymbols(symbols) {
-        try {
-            const volumePromises = symbols.map(async symbol => {
-                try {
-                    const candles = await getCandlesCached(symbol, '15m', 3);
-                    if (candles.length < 3) return { symbol, volumeScore: 0 };
-                    
-                    const volumes = candles.map(c => c.volume);
-                    const avgVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
-                    
-                    const priceChange = Math.abs((candles[2].close - candles[0].close) / candles[0].close) * 100;
-                    
-                    const volumeScore = avgVolume * (1 + Math.min(priceChange, 5) / 10);
-                    return { symbol, volumeScore };
-                } catch (error) {
-                    return { symbol, volumeScore: 0 };
-                }
-            });
-            
-            const volumeResults = await Promise.all(volumePromises);
-            
-            const sortedSymbols = volumeResults
-                .filter(r => r.volumeScore > 0)
-                .sort((a, b) => b.volumeScore - a.volumeScore)
-                .slice(0, 30)
-                .map(r => r.symbol);
-            
-            return sortedSymbols;
-            
-        } catch (error) {
-            console.error('Erro ao filtrar símbolos:', error.message);
-            return symbols.slice(0, 30);
-        }
-    }
-
-    async preloadGlobalData() {
-        try {
-            console.log('🔄 Pré-carregando dados globais...');
-            
-            const [btcCandles, btcTicker] = await Promise.all([
-                getCandlesCached('BTCUSDT', '1h', 24),
-                rateLimiter.makeRequest(
-                    'https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT',
-                    {},
-                    'ticker24hr'
-                )
-            ]);
-            
-            this.globalMarketData = {
-                btcPrice: parseFloat(btcTicker.lastPrice),
-                btcCandles1h: btcCandles,
-                btcVolatility: this.calculateBTCVolatility(btcCandles),
-                lastUpdate: Date.now()
-            };
-            
-            console.log('✅ Dados globais pré-carregados');
-            
-        } catch (error) {
-            console.error('Erro ao pré-carregar dados globais:', error.message);
-        }
-    }
-
-    calculateBTCVolatility(candles) {
-        if (!candles || candles.length < 10) return 0;
-        
-        const closes = candles.map(c => c.close);
-        let sumReturns = 0;
-        
-        for (let i = 1; i < closes.length; i++) {
-            sumReturns += Math.abs((closes[i] - closes[i - 1]) / closes[i - 1]);
-        }
-        
-        return (sumReturns / (closes.length - 1)) * 100;
     }
 
     createGroups(symbols, groupSize) {
@@ -4680,15 +5003,11 @@ class AdaptiveSymbolGroupManager {
 
         if (this.currentGroupIndex === 0) {
             this.totalCycles++;
-            
+
             this.adjustDelayBasedOnUsage();
-            
+
             if (this.totalCycles % 5 === 0) {
-                this.preloadGlobalData();
-            }
-            
-            if (this.totalCycles % 5 === 0) {
-                return { symbols: [], pause: 15000 };
+                return { symbols: [], pause: 30000 };
             }
         }
 
@@ -4696,25 +5015,14 @@ class AdaptiveSymbolGroupManager {
     }
 
     adjustDelayBasedOnUsage() {
-        const now = Date.now();
-        
-        if (now - this.lastPerformanceLog >= 60000) {
-            console.log(`📊 Performance: ${this.signalsDetected} sinais nos últimos ${this.totalCycles} ciclos`);
-            console.log(`⏱️  Delay atual: ${this.baseDelay}ms, Grupos sem sinais: ${this.consecutiveNoSignals}`);
-            this.lastPerformanceLog = now;
-        }
-
-        if (this.consecutiveNoSignals > 2) {
-            this.baseDelay = Math.max(this.minDelay, this.baseDelay * 0.7);
-            console.log(`⚡ Delay reduzido para ${this.baseDelay}ms (${this.consecutiveNoSignals} grupos sem sinais)`);
+        if (this.consecutiveNoSignals > 3) {
+            this.baseDelay = Math.max(this.minDelay, this.baseDelay * 0.8);
+            console.log(`⚡ Reduzindo delay para ${this.baseDelay}ms (poucos sinais)`);
             this.consecutiveNoSignals = 0;
         }
 
         if (this.signalsDetected > 0) {
             this.consecutiveNoSignals = 0;
-            if (this.baseDelay > this.minDelay * 1.5) {
-                this.baseDelay = Math.max(this.minDelay, this.baseDelay * 0.9);
-            }
         }
     }
 
@@ -4736,24 +5044,45 @@ class AdaptiveSymbolGroupManager {
 
 async function monitorSymbol(symbol) {
     try {
-        const analysis = await batchTechnicalAnalysis(symbol, true);
-        if (!analysis) return null;
+        const emaData = await getEMAs3m(symbol);
+        if (!emaData) return null;
 
-        const { currentPrice, isBullish, rsiData } = analysis;
+        const rsiData = await getRSI1h(symbol);
+        if (!rsiData) return null;
 
-        const [supportResistanceData, pivotPointsData] = await Promise.all([
-            analyzeSupportResistance(symbol, currentPrice, isBullish),
-            analyzePivotPoints(symbol, currentPrice, isBullish)
-        ]);
+        const isBullish = emaData.isAboveEMA55 && emaData.isEMA13CrossingUp;
+        const isBearish = !emaData.isAboveEMA55 && emaData.isEMA13CrossingDown;
 
-        const [
-            volumeData,
-            volatilityData,
-            stochData
-        ] = await Promise.all([
+        if (!isBullish && !isBearish) return null;
+
+        // FILTRO CRÍTICO: EVITAR RSI EXTREMO
+        if (rsiData.value < 25 || rsiData.value > 75) {
+            console.log(`❌ ${symbol}: RSI extremo detectado (${rsiData.value.toFixed(1)}) - Padrão PERDEDOR`);
+            return null;
+        }
+
+        // FILTRO ADICIONAL: RSI com novos limites
+        if (isBullish && rsiData.value > RSI_BUY_MAX) {
+            console.log(`❌ ${symbol}: RSI alto para compra (${rsiData.value.toFixed(1)} > ${RSI_BUY_MAX})`);
+            return null;
+        }
+        if (isBearish && rsiData.value < RSI_SELL_MIN) {
+            console.log(`❌ ${symbol}: RSI baixo para venda (${rsiData.value.toFixed(1)} < ${RSI_SELL_MIN})`);
+            return null;
+        }
+
+        // NOVO: Análise de performance vs BTC
+        const btcCorrelationData = await analyzeBTCCorrelation(symbol, emaData.currentPrice, isBullish);
+        
+        const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
+        const pivotPointsData = await analyzePivotPoints(symbol, emaData.currentPrice, isBullish);
+
+        const [volumeData, volatilityData, stochData, stoch4hData, cci4hData] = await Promise.all([
             checkVolume(symbol),
             checkVolatility(symbol),
-            checkStochastic(symbol, isBullish)
+            checkStochastic(symbol, isBullish),
+            checkStochastic4h(symbol, isBullish),
+            checkCCI4h(symbol, isBullish)
         ]);
 
         const marketData = {
@@ -4761,22 +5090,29 @@ async function monitorSymbol(symbol) {
             volatility: volatilityData,
             rsi: rsiData,
             stoch: stochData,
-            ema: analysis.emaData,
+            stoch4h: stoch4hData,
+            cci4h: cci4hData,
+            ema: {
+                isAboveEMA55: emaData.isAboveEMA55,
+                isEMA13CrossingUp: emaData.isEMA13CrossingUp,
+                isEMA13CrossingDown: emaData.isEMA13CrossingDown
+            },
             supportResistance: supportResistanceData,
             breakoutRisk: supportResistanceData?.breakoutRisk,
             pivotPoints: pivotPointsData,
+            btcCorrelation: btcCorrelationData // NOVO: Adicionar dados de correlação com BTC
         };
 
         const qualityScore = await calculateSignalQuality(symbol, isBullish, marketData);
 
         if (!qualityScore.isAcceptable) return null;
 
-        const targetsData = await calculateAdvancedTargetsAndStop(currentPrice, isBullish, symbol);
+        const targetsData = await calculateAdvancedTargetsAndStop(emaData.currentPrice, isBullish, symbol);
 
         const signal = {
             symbol: symbol,
             isBullish: isBullish,
-            price: currentPrice,
+            price: emaData.currentPrice,
             qualityScore: qualityScore,
             targetsData: targetsData,
             marketData: marketData,
@@ -4787,7 +5123,46 @@ async function monitorSymbol(symbol) {
             await learningSystem.recordSignal(signal, marketData);
         }
 
+        const srInfo = supportResistanceData?.nearestSupport || supportResistanceData?.nearestResistance;
+        const srDistance = srInfo?.distancePercent?.toFixed(2) || 'N/A';
+        const breakoutRisk = supportResistanceData?.breakoutRisk?.level || 'N/A';
+        
+        const pivotInfo = pivotPointsData?.nearestPivot;
+        const pivotDistance = pivotInfo?.distancePercent?.toFixed(2) || 'N/A';
+        const pivotType = pivotInfo?.type || 'N/A';
+        const pivotStrength = pivotInfo?.strength || 'N/A';
+        const pivotTimeframe = pivotInfo?.timeframe || 'N/A';
+
+        // Informações de volume robusto
+        const volumeRobustData = volumeData.robustData;
+        const volumeScore = volumeRobustData?.combinedScore?.toFixed(2) || '0.00';
+        const volumeClassification = volumeRobustData?.classification || 'NORMAL';
+        const emaRatio = volumeRobustData?.emaRatio?.toFixed(2) || 'N/A';
+        const zScore = volumeRobustData?.zScore?.toFixed(2) || 'N/A';
+
+        // Informações de performance vs BTC
+        const relativePerformance = btcCorrelationData?.relativePerformance || 0;
+        let performanceText = '';
+        if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.highOutperformance) {
+            performanceText = `📈 +${relativePerformance.toFixed(2)}% vs BTC`;
+        } else if (relativePerformance >= BTC_CORRELATION_SETTINGS.thresholds.mediumOutperformance) {
+            performanceText = `📊 +${relativePerformance.toFixed(2)}% vs BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.strongUnderperformance) {
+            performanceText = `📉 ${relativePerformance.toFixed(2)}% vs BTC`;
+        } else if (relativePerformance <= BTC_CORRELATION_SETTINGS.thresholds.underperformance) {
+            performanceText = `⚠️ ${relativePerformance.toFixed(2)}% vs BTC`;
+        } else {
+            performanceText = `➡️ ${relativePerformance.toFixed(2)}% vs BTC`;
+        }
+
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
+        console.log(`   ${performanceText}`);
+        console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
+        console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x (Score: ${volumeScore} - ${volumeClassification})`);
+        console.log(`   📊 EMA: ${emaRatio}x | Z-Score: ${zScore}`);
+        console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
+        console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
+        console.log(`   📊 Stoch 1h: ${stochData.isValid ? '✅' : '❌'} (K:${stochData.kValue?.toFixed(1) || 'N/A'}, D:${stochData.dValue?.toFixed(1) || 'N/A'})`);
 
         return signal;
 
@@ -4799,19 +5174,14 @@ async function monitorSymbol(symbol) {
 
 async function processSymbolGroup(symbols) {
     const results = [];
-    const batchSize = 5;
 
-    for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize);
-        const batchPromises = batch.map(symbol => 
-            monitorSymbol(symbol).catch(() => null)
-        );
-
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults.filter(r => r !== null));
-
-        if (i + batchSize < symbols.length) {
-            await new Promise(r => setTimeout(r, 100));
+    for (const symbol of symbols) {
+        try {
+            await new Promise(r => setTimeout(r, 200));
+            const signal = await monitorSymbol(symbol);
+            if (signal) results.push(signal);
+        } catch (error) {
+            continue;
         }
     }
 
@@ -4820,29 +5190,22 @@ async function processSymbolGroup(symbols) {
 
 function cleanupCaches() {
     const now = Date.now();
-    const cleanupThreshold = 15 * 60 * 1000;
 
     Object.keys(candleCache).forEach(key => {
-        if (now - candleCache[key].timestamp > cleanupThreshold) {
+        if (now - candleCache[key].timestamp > MAX_CACHE_AGE) {
             delete candleCache[key];
-        }
-    });
-
-    Object.keys(volumeAnalysisCache).forEach(key => {
-        if (now - volumeAnalysisCache[key].timestamp > cleanupThreshold) {
-            delete volumeAnalysisCache[key];
         }
     });
 }
 
 // =====================================================================
-// 🔄 LOOP PRINCIPAL DO BOT OTIMIZADO
+// 🔄 LOOP PRINCIPAL DO BOT
 // =====================================================================
 
 async function checkInternetConnection() {
     try {
         const response = await fetch('https://api.binance.com/api/v3/ping', {
-            signal: AbortSignal.timeout(3000)
+            signal: AbortSignal.timeout(5000)
         });
         return response.ok;
     } catch (error) {
@@ -4860,19 +5223,19 @@ async function mainBotLoop() {
         return;
     }
 
-    console.log(`\n🚀 TITANIUM ATIVADO - SISTEMA SPOT BTC`);
-    console.log(`📊 ${allSymbols.length} ativos Binance SPOT BTC`);
-    console.log(`⚡ Engine Paralela: ${PARALLEL_CONFIG.enabled ? 'ATIVADA' : 'DESATIVADA'}`);
-    console.log(`📈 Grupos de ${symbolManager.groupSize} símbolos`);
+    console.log(`\n TITANIUM SPOT BTC - ANÁLISE DE PERFORMANCE RELATIVA`);
+    console.log(` ${allSymbols.length} pares BTC spot Binance`);
+    console.log(` RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
+    console.log(`  Score < 0.4: "🤖 IA ANALISANDO...")`);
+    console.log(`  Performance vs BTC: Destacando altcoins liderando o mercado`);
 
-    await sendSimpleActivationMessage(allSymbols.length);
+    await sendInitializationMessage(allSymbols);
 
     let consecutiveErrors = 0;
     let totalSignals = 0;
     let totalAnalysis = 0;
     let lastReportTime = Date.now();
     let lastRiskReportTime = Date.now();
-    let cycleStartTime = Date.now();
 
     while (true) {
         try {
@@ -4888,10 +5251,11 @@ async function mainBotLoop() {
             if (currentSymbols.length === 0) continue;
 
             console.log(`\n🔄 Ciclo ${symbolManager.totalCycles}, Grupo ${symbolManager.currentGroupIndex}/${symbolManager.symbolGroups.length}`);
+            console.log(`📊 ${currentSymbols.length} pares BTC | Delay: ${symbolManager.getCurrentDelay()}ms`);
 
             if (!await checkInternetConnection()) {
-                console.log('🌐 Sem conexão. Aguardando 15s...');
-                await new Promise(r => setTimeout(r, 15000));
+                console.log('🌐 Sem conexão. Aguardando 30s...');
+                await new Promise(r => setTimeout(r, 30000));
                 continue;
             }
 
@@ -4899,7 +5263,6 @@ async function mainBotLoop() {
             const signals = await processSymbolGroup(currentSymbols);
             const endTime = Date.now();
 
-            const processingTime = endTime - startTime;
             totalSignals += signals.length;
             symbolManager.signalsDetected += signals.length;
 
@@ -4909,7 +5272,7 @@ async function mainBotLoop() {
                 symbolManager.consecutiveNoSignals = 0;
             }
 
-            console.log(`✅ ${(processingTime / 1000).toFixed(1)}s | Sinais: ${signals.length} (Total: ${totalSignals})`);
+            console.log(`✅ ${((endTime - startTime) / 1000).toFixed(1)}s | Sinais: ${signals.length} (Total: ${totalSignals})`);
 
             for (const signal of signals) {
                 if (signal.qualityScore.score >= QUALITY_THRESHOLD) {
@@ -4917,14 +5280,11 @@ async function mainBotLoop() {
                     if (alertResult && alertResult.type === 'analysis') {
                         totalAnalysis++;
                     }
-                    await new Promise(r => setTimeout(r, 800));
+                    await new Promise(r => setTimeout(r, 1000));
                 }
             }
 
-            if (Date.now() - cycleStartTime >= 300000) {
-                cleanupCaches();
-                cycleStartTime = Date.now();
-            }
+            cleanupCaches();
 
             if (Date.now() - lastReportTime >= 3600000) {
                 await learningSystem.sendPerformanceReport();
@@ -4937,7 +5297,7 @@ async function mainBotLoop() {
             }
 
             const status = symbolManager.getCurrentStatus();
-            console.log(`📊 Status: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
+            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
 
             consecutiveErrors = 0;
 
@@ -4950,12 +5310,12 @@ async function mainBotLoop() {
             console.error(`❌ Erro (${consecutiveErrors}):`, error.message);
 
             if (consecutiveErrors >= 3) {
-                console.log('🔄 Muitos erros. Pausa de 30s...');
-                await new Promise(r => setTimeout(r, 30000));
+                console.log('🔄 Muitos erros. Pausa de 60s...');
+                await new Promise(r => setTimeout(r, 60000));
                 consecutiveErrors = 0;
             }
 
-            await new Promise(r => setTimeout(r, Math.min(5000 * consecutiveErrors, 30000)));
+            await new Promise(r => setTimeout(r, Math.min(10000 * consecutiveErrors, 60000)));
         }
     }
 }
@@ -4978,6 +5338,7 @@ ${now.full}
 • <i>Nível de Risco Geral:</i> ${marketRisk.riskLevel} ${marketRisk.riskLevel === 'CRITICAL' ? '🚨' : marketRisk.riskLevel === 'HIGH' ? '🔴' : marketRisk.riskLevel === 'MEDIUM' ? '🟡' : '🟢'}
 • <i>Score Médio de Risco:</i> ${marketRisk.averageRiskScore.toFixed(2)}/15
 • <i>Símbolos Monitorados:</i> ${marketRisk.monitoredSymbols}
+• <i>Horário:</I> ${now.full}
 
 <i>✨Titanium Risk Management by @J4Rviz✨</i>
         `;
@@ -4997,14 +5358,36 @@ async function sendLearningReport() {
         const report = learningSystem.getPerformanceReport();
         const now = getBrazilianDateTime();
 
+        const bestPatterns = report.bestPatterns.map(([pattern, count]) => `${pattern}: ${count} trades`).join('\n');
+        const worstPatterns = report.worstPatterns.map(([pattern, count]) => `${pattern}: ${count} trades`).join('\n');
+
         const message = `
-🧠 <i>RELATÓRIO DE APRENDIZADO</i>
+🧠 <i>RELATÓRIO DE PERFORMANCE VS BTC</i>
 ${now.full}
 
 • <b>Trades Totais:</b> ${report.totalTrades}
 • <b>Taxa de Acerto:</b> ${report.winRate.toFixed(1)}%
 • <b>Fator de Lucro:</b> ${report.profitFactor}
-• <b>Lucro Médio:</b> ${report.avgProfit}%
+• <b>Lucro Médio:</b> ${report.avgProfit}% | <b>Perda Média:</b> ${report.avgLoss}%
+
+<b>📊 Análise RSI (${RSI_BUY_MAX}/${RSI_SELL_MIN}):</b>
+• Win Rate RSI Extremo: ${report.rsiAnalysis.extremeWinRate}%
+• Win Rate RSI Ideal: ${report.rsiAnalysis.idealWinRate}%
+
+<b>🚀 Análise Performance vs BTC:</b>
+• Win Rate com alta performance: ${report.btcCorrelationAnalysis.highOutperformWinRate}%
+• Trades com alta performance: ${report.btcCorrelationAnalysis.highOutperformTrades}
+
+<b>📈 Padrões Vencedores (Top 5):</b>
+${bestPatterns || 'Nenhum padrão identificado ainda'}
+
+<b>📉 Padrões Perdedores (Top 5):</b>
+${worstPatterns || 'Nenhum padrão identificado ainda'}
+
+<b>📊 Simulação Trailing:</b>
+• Total: ${report.simulationStats.totalSimulated}
+• Stop Primeiro: ${report.simulationStats.stopFirst}
+• Alvo Primeiro: ${report.simulationStats.targetFirst}
 
 <i>✨Titanium System by @J4Rviz✨</i>
         `;
@@ -5017,12 +5400,18 @@ ${now.full}
     }
 }
 
+// =====================================================================
+// 🆕 FUNÇÃO PARA RESETAR APRENDIZADO
+// =====================================================================
+
 function resetLearningData() {
     try {
         console.log('🔄 RESETANDO DADOS DE APRENDIZADO...');
         
+        // Resetar sistema de aprendizado
         learningSystem = new AdvancedLearningSystem();
         
+        // Criar arquivo de aprendizado limpo
         const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
         
         const cleanData = {
@@ -5035,17 +5424,19 @@ function resetLearningData() {
                 breakoutRisk: [],
                 supportResistance: [],
                 pivotPoints: [],
-                rsiSettings: []
+                rsiSettings: [],
+                btcCorrelation: []
             },
             lastUpdated: Date.now(),
             trailingConfig: learningSystem.trailingConfig,
             resetTimestamp: Date.now(),
-            resetNote: 'Sistema resetado para otimização'
+            resetNote: 'Sistema resetado para análise de pares BTC spot'
         };
         
         fs.writeFileSync(learningFile, JSON.stringify(cleanData, null, 2));
         
         console.log('✅ Dados de aprendizado resetados com sucesso!');
+        console.log('📊 Novo relatório será gerado com dados de pares BTC spot.');
         
         return true;
         
@@ -5056,7 +5447,7 @@ function resetLearningData() {
 }
 
 // =====================================================================
-// ▶️ INICIALIZAÇÃO
+// ▶️ INICIALIZAÇÃO COM OPÇÃO DE RESET
 // =====================================================================
 
 async function startBot() {
@@ -5065,7 +5456,10 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - SISTEMA SPOT BTC OTIMIZADO');
+        console.log(' TITANIUM SPOT BTC - ANÁLISE DE PERFORMANCE RELATIVA');
+        console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
+        console.log(` Stochastic 1h: 14,3,3 (8 pontos)`);
+        console.log(` Performance vs BTC: Destacando oportunidades relativas`);
         console.log('='.repeat(80) + '\n');
 
         try {
@@ -5075,6 +5469,7 @@ async function startBot() {
             process.exit(1);
         }
 
+        // Verificar se deve resetar o aprendizado
         const args = process.argv.slice(2);
         if (args.includes('--reset-learning')) {
             console.log('🔄 Opção de reset detectada...');
@@ -5088,7 +5483,7 @@ async function startBot() {
                 connected = true;
                 break;
             }
-            await new Promise(r => setTimeout(r, 3000));
+            await new Promise(r => setTimeout(r, 5000));
         }
 
         if (!connected) {
@@ -5097,25 +5492,19 @@ async function startBot() {
         }
 
         global.riskLayer = new SophisticatedRiskLayer();
-        console.log('🛡️  Risk Layer ativado');
-        
-        console.log('⚡ Engine de Cálculo Paralelo ativada');
-        console.log('✅ Tudo pronto! Iniciando monitoramento SPOT...\n');
+        console.log('🛡️  Risk Layer Sofisticado ativado (com análise de performance vs BTC)');
+
+        console.log('✅ Tudo pronto! Iniciando monitoramento de pares BTC spot...');
 
         await mainBotLoop();
 
     } catch (error) {
         console.error(`🚨 ERRO CRÍTICO: ${error.message}`);
-        console.log('🔄 Reiniciando em 60 segundos...');
-        await new Promise(r => setTimeout(r, 60000));
+        console.log('🔄 Reiniciando em 120 segundos...');
+        await new Promise(r => setTimeout(r, 120000));
         await startBot();
     }
 }
 
-// =====================================================================
-// 🚀 INICIAR BOT
-// =====================================================================
-
-if (require.main === module) {
-    startBot();
-}
+// Iniciar
+startBot();
