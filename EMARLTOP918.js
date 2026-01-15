@@ -6,96 +6,103 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVF';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
 
-// === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
+// === CONFIGURAÇÕES DE VOLUME MÍNIMO REVISTAS ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.25,          // Mantido
-    combinedScore: 0.25,          // ↓ Para captar mais setups moderados
-    classification: 'BAIXO',      // Mantido, mas com Z-Score >0.4 implícito na confirmação
-    requireConfirmation: true     // Mantido
+    absoluteScore: 0.35,          // ↑ Aumentado para filtrar volume fraco
+    combinedScore: 0.40,          // ↑ Exigir volume mais consistente
+    classification: 'MODERADO',   // ↑ Não aceitar "BAIXO" (só MODERADO ou acima)
+    requireConfirmation: true,    // Mantido
+    minZScore: 1.0,               // NOVO: Exigir z-score mínimo de 1.0
+    requireVolumeTrend: true      // NOVO: Exigir tendência de volume crescente
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS CONSERVADORAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.6,           // ↓ Mais sensível
-    minThreshold: 1.5,            // Mantido
-    maxThreshold: 2.9,            // Mantido
-    volatilityMultiplier: 0.4,    // ↑ Melhor adaptação
-    useAdaptive: true
+    baseThreshold: 1.8,           // ↑ Aumentado para filtrar melhor
+    minThreshold: 1.7,            // ↑ Aumentado
+    maxThreshold: 3.2,            // ↑ Aumentado
+    volatilityMultiplier: 0.3,    // ↓ Reduzido para menos falsos em alta volat
+    useAdaptive: true,
+    adaptiveSensitivity: 0.7      // NOVO: Sensibilidade adaptativa
 };
 
-// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    // Média Móvel Exponencial (EMA) do Volume
-    emaPeriod: 20,
-    emaAlpha: 0.30,               // ↑ Mais responsivo
+    // EMA do Volume - mais conservador
+    emaPeriod: 24,                // ↑ Período maior para evitar ruído
+    emaAlpha: 0.25,               // ↓ Menos responsivo, mais suave
 
-    // Z-Score do Volume com lookback adaptativo
-    baseZScoreLookback: 40,       // Mantido
-    minZScoreLookback: 12,        // Mantido
-    maxZScoreLookback: 80,        // Mantido
-    zScoreThreshold: 1.5,         // ↓ Aceita mais "acima normal"
+    // Z-Score do Volume - mais exigente
+    baseZScoreLookback: 50,       // ↑ Maior lookback
+    minZScoreLookback: 20,        // ↑ Aumentado
+    maxZScoreLookback: 100,       // ↑ Aumentado
+    zScoreThreshold: 1.8,         // ↑ Aumentado para significativo
 
-    // Volume-Price Trend (VPT)
-    vptThreshold: 0.30,           // ↓ Mais sensível
-    minPriceMovement: 0.10,       // Mantido
+    // Volume-Price Trend (VPT) - mais exigente
+    vptThreshold: 0.40,           // ↑ Exigir movimento real de preço
+    minPriceMovement: 0.15,       // ↑ Exigir movimento mínimo maior
+    requirePositiveCorrelation: true, // NOVO: Exigir correlação positiva
 
-    // Configurações combinadas – pesos ajustados
-    combinedMultiplier: 1.12,
-    volumeWeight: 0.33,
-    emaWeight: 0.40,              // ↑ Prioriza ainda mais EMA
-    zScoreWeight: 0.2,
-    vptWeight: 0.1,
-
-    // Thresholds mínimos – MAIS FLEXÍVEIS
+    // Configurações combinadas - pesos otimizados
+    combinedMultiplier: 1.08,     // ↓ Reduzido bônus para evitar falsos
+    volumeWeight: 0.30,
+    emaWeight: 0.35,
+    zScoreWeight: 0.25,           // ↑ Mais peso no z-score (confiabilidade)
+    vptWeight: 0.10,
+    
+    // Thresholds mínimos - MAIS EXIGENTES
     minimumThresholds: {
-        combinedScore: 0.18,      // ↓ Permite fraco-moderado com confirmação
-        emaRatio: 1.1,            // Mantido
-        zScore: 0.25,             // ↓ Mais variações normais
-        classification: 'BAIXO'   // Mantido
+        combinedScore: 0.35,      // ↑ Aumentado significativamente
+        emaRatio: 1.4,            // ↑ Exigir pelo menos 40% acima da EMA
+        zScore: 1.0,              // ↑ Exigir desvio mínimo de 1 sigma
+        classification: 'MODERADO' // ↑ Não aceitar "BAIXO"
     }
 };
 
-const VOLATILITY_PERIOD = 20;
+// === CONFIGURAÇÕES DE VOLATILIDADE - MAIS CONSERVADOR ===
+const VOLATILITY_PERIOD = 25;     // ↑ Período maior
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.5; // ↓ Opera em mais moderados
+const VOLATILITY_THRESHOLD = 0.7; // ↑ Aumentado para filtrar mercados muito calmos
 
-// === CONFIGURAÇÕES LSR AJUSTADAS ===
+// === CONFIGURAÇÕES LSR OTIMIZADAS ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.5;    // ↓ Mais fácil pra buy (bullish bias)
-const LSR_SELL_THRESHOLD = 2.8;   // ↑ Mais rigor pra sell
+const LSR_BUY_THRESHOLD = 2.6;    // ↑ Mais conservador para buy
+const LSR_SELL_THRESHOLD = 2.9;   // ↑ Mais exigente para sell
 
-// === ATUALIZADO: CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 62;           // ↑ Mais flex pra buy
-const RSI_SELL_MIN = 65;          // ↓ Mais flex pra sell
+// === CONFIGURAÇÕES RSI OTIMIZADAS ===
+const RSI_BUY_MAX = 60;           // ↓ Reduzido para evitar overbought
+const RSI_SELL_MIN = 67;          // ↑ Aumentado para evitar oversold
 
+// === COOLDOWN REVISADO ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 20 * 60 * 1000,   // ↓ Mais ágil pós-falha
-    oppositeDirection: 5 * 60 * 1000, // ↓ Rápida reversão
-    useDifferentiated: true
+    sameDirection: 25 * 60 * 1000,   // ↑ Aumentado para evitar saturação
+    oppositeDirection: 8 * 60 * 1000, // ↑ Aumentado
+    useDifferentiated: true,
+    symbolCooldown: 30 * 60 * 1000   // NOVO: Cooldown por símbolo
 };
 
-// === QUALITY SCORE AJUSTADO PARA MAIOR LUCRATIVIDADE ===
-const QUALITY_THRESHOLD = 70; // ↓ Mais alertas de qualidade ok
+// === QUALITY SCORE REVISADO - MAIS EXIGENTE ===
+const QUALITY_THRESHOLD = 80; // ↑ Aumentado para menos alertas, mais qualidade
 const QUALITY_WEIGHTS = {
-    volume: 36,          // ↓ -2 (ainda prioridade, mas equilibra)
-    oi: 10,              // Mantido
-    volatility: 8,       // Mantido
-    lsr: 10,             // Mantido
-    rsi: 15,             // ↑ +3 (altamente lucrativo)
-    emaAlignment: 14,    // Mantido
-    stoch1h: 8,          // Mantido
-    stoch4h: 4,          // Mantido
-    cci4h: 6,            // Mantido
-    breakoutRisk: 16,    // ↑ +2 (aumenta win rate)
-    supportResistance: 14, // Mantido
-    pivotPoints: 15,     // ↑ +3 (evita falsos melhor)
-    funding: 10          // Mantido
+    volume: 40,          // ↑ +2 (volume é crítico para evitar falsos)
+    oi: 8,               // ↓ -2 (menos peso - pode ser enganoso)
+    volatility: 9,       // ↑ +1 (importante para timing)
+    lsr: 12,             // ↑ +2 (LSR confiável para evitar falsos)
+    rsi: 16,             // ↑ +1 (RSI é fundamental)
+    emaAlignment: 12,    // ↓ -2 (menos peso - pode dar sinais precoces)
+    stoch1h: 9,          // ↑ +1 (stoch importante)
+    stoch4h: 5,          // ↑ +1 (confirmação 4h)
+    cci4h: 7,            // ↑ +1 (tendência maior)
+    breakoutRisk: 14,    // ↓ -2 (reduzido - muitas vezes dá falsos)
+    supportResistance: 15, // ↑ +1 (mais importante)
+    pivotPoints: 18,     // ↑ +1 (pivots ajudam a evitar falsos)
+    funding: 10           // ↓ -2 (menos peso - pode mudar rapidamente)
 };
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
