@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -88,21 +88,20 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE REVISADO - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 80; // ↑ Aumentado para menos alertas, mais qualidade
+const QUALITY_THRESHOLD = 85; // ↑ Aumentado para menos alertas, mais qualidade
 const QUALITY_WEIGHTS = {
     volume: 40,          // ↑ +2 (volume é crítico para evitar falsos)
-    oi: 8,               // ↓ -2 (menos peso - pode ser enganoso)
+    oi: 5,               // ↓ -2 (menos peso - pode ser enganoso)
     volatility: 9,       // ↑ +1 (importante para timing)
     lsr: 12,             // ↑ +2 (LSR confiável para evitar falsos)
     rsi: 16,             // ↑ +1 (RSI é fundamental)
     emaAlignment: 12,    // ↓ -2 (menos peso - pode dar sinais precoces)
-    stoch1h: 8,          // ↑ +1 (stoch importante)
+    stoch1h: 10,          // ↑ +1 (stoch importante)
     stoch4h: 10,          // ↑ +1 (confirmação 4h)
-    cci4h: 0,            // ↓ REMOVIDO (não mais usado)
     breakoutRisk: 14,    // ↓ -2 (reduzido - muitas vezes dá falsos)
     supportResistance: 15, // ↑ +1 (mais importante)
     pivotPoints: 18,     // ↑ +1 (pivots ajudam a evitar falsos)
-    funding: 8,         // ↓ -2 (menos peso - pode mudar rapidamente)
+    funding: 5,         // ↓ -2 (menos peso - pode mudar rapidamente)
     stochastic12h: 10,    // Bônus tendência
     stochasticDaily: 10   // Bônus tendência forte
 };
@@ -2624,27 +2623,27 @@ async function sendSignalAlertWithRisk(signal) {
                     // Batendo em um pivot de resistência
                     if (parseFloat(pivotDistance) < 0.3) {
                         // Muito próximo - possivelmente falso rompimento
-                        analysisType = `REVERSÃO/FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
                         // Próximo mas não muito
-                        analysisType = `REVERSÃO (Pivot Bull ${pivotStrengthText})`;
+                        analysisType = `Analisando...REVERSÃO (Pivot Bull ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue <= RSI_BUY_MAX && stochValid && emaAlignment) {
                     // Próximo de suporte ou situação normal
                     if (isNearPivot && pivotType === 'Suporte') {
-                        analysisType = `REVERSÃO/COMPRA (Pivot Bull ${pivotStrengthText})`;
+                        analysisType = `Analisando...COMPRA (Pivot Bull ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     } else {
-                        analysisType = 'REVERSÃO/COMPRA';
+                        analysisType = 'Analisando...COMPRA';
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue > RSI_BUY_MAX && rsiValue <= 75) {
-                    analysisType = 'EXAUSTÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             } else {
@@ -2653,27 +2652,27 @@ async function sendSignalAlertWithRisk(signal) {
                     // Batendo em um pivot de suporte
                     if (parseFloat(pivotDistance) < 0.3) {
                         // Muito próximo - possivelmente falso rompimento
-                        analysisType = `EXAUSTÃO/FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
                         // Próximo mas não muito
-                        analysisType = `EXAUSTÃO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...EXAUSTÃO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= RSI_SELL_MIN && rsiValue <= 75 && !stochValid && !emaAlignment) {
                     // Próximo de resistência ou situação normal
                     if (isNearPivot && pivotType === 'Resistência') {
-                        analysisType = `EXAUSTÃO/VENDA (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...VENDA (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     } else {
-                        analysisType = 'EXAUSTÃO/VENDA';
+                        analysisType = 'Analisando...VENDA';
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue < RSI_SELL_MIN) {
-                    analysisType = 'REVERSÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             }
@@ -2736,7 +2735,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
             `;
         } else {
             message += `
-<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</i>
+<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAR</i>
 • Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
 • EMA Ratio: ${volumeData?.emaRatio?.toFixed(2) || 'N/A'}x (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio}x)
 • Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'} (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore})
@@ -2818,56 +2817,56 @@ async function sendSignalAlert(signal) {
                     // Batendo em um pivot de resistência
                     if (parseFloat(pivotDistance) < 0.3) {
                         // Muito próximo - possivelmente falso rompimento
-                        analysisType = `REVERSÃO/FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
                         // Próximo mas não muito
-                        analysisType = `REVERSÃO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue <= RSI_BUY_MAX && stochValid && emaAlignment) {
                     // Próximo de suporte ou situação normal
-                    if (isNearPivot && pivotType === 'support') {
-                        analysisType = `REVERSÃO/COMPRA (Pivot ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Suporte') {
+                        analysisType = `Analisando...COMPRA (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     } else {
-                        analysisType = 'REVERSÃO/COMPRA';
+                        analysisType = 'Analisando...COMPRA';
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue > RSI_BUY_MAX && rsiValue <= 75) {
-                    analysisType = 'EXAUSTÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             } else {
                 // Análise para VENDA/EXAUSTÃO
-                if (isNearPivot && pivotType === 'support') {
+                if (isNearPivot && pivotType === 'Suporte') {
                     // Batendo em um pivot de suporte
                     if (parseFloat(pivotDistance) < 0.3) {
                         // Muito próximo - possivelmente falso rompimento
-                        analysisType = `EXAUSTÃO/FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
                         // Próximo mas não muito
-                        analysisType = `EXAUSTÃO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...EXAUSTÃO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= RSI_SELL_MIN && rsiValue <= 75 && !stochValid && !emaAlignment) {
                     // Próximo de resistência ou situação normal
-                    if (isNearPivot && pivotType === 'resistance') {
-                        analysisType = `EXAUSTÃO/VENDA (Pivot ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Resistência') {
+                        analysisType = `Analisando...VENDA (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     } else {
-                        analysisType = 'EXAUSTÃO/VENDA';
+                        analysisType = 'Analisando...VENDA';
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue < RSI_SELL_MIN) {
-                    analysisType = 'REVERSÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             }
