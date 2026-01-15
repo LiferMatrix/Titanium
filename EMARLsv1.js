@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs';
-const TELEGRAM_CHAT_ID = '-10017';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -90,14 +90,14 @@ const COOLDOWN_SETTINGS = {
 // === QUALITY SCORE REVISADO - MAIS EXIGENTE ===
 const QUALITY_THRESHOLD = 80; // ↑ Aumentado para menos alertas, mais qualidade
 const QUALITY_WEIGHTS = {
-    volume: 38,          // ↑ +2 (volume é crítico para evitar falsos)
+    volume: 40,          // ↑ +2 (volume é crítico para evitar falsos)
     oi: 8,               // ↓ -2 (menos peso - pode ser enganoso)
     volatility: 9,       // ↑ +1 (importante para timing)
     lsr: 12,             // ↑ +2 (LSR confiável para evitar falsos)
     rsi: 16,             // ↑ +1 (RSI é fundamental)
     emaAlignment: 12,    // ↓ -2 (menos peso - pode dar sinais precoces)
-    stoch1h: 5,          // ↑ +1 (stoch importante)
-    stoch4h: 9,          // ↑ +1 (confirmação 4h)
+    stoch1h: 8,          // ↑ +1 (stoch importante)
+    stoch4h: 10,          // ↑ +1 (confirmação 4h)
     cci4h: 0,            // ↓ REMOVIDO (não mais usado)
     breakoutRisk: 14,    // ↓ -2 (reduzido - muitas vezes dá falsos)
     supportResistance: 15, // ↑ +1 (mais importante)
