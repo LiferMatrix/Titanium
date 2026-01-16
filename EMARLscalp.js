@@ -6,8 +6,8 @@ const { EMA, RSI, Stochastic, ATR, MACD, SMA } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
-const TELEGRAM_CHAT_ID = '-1002554953979';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx';
+const TELEGRAM_CHAT_ID = '-100255';
 
 // === CONFIGURAÇÕES PARA ANÁLISE DE TODOS PARES ===
 const ALL_PAIRS_SETTINGS = {
