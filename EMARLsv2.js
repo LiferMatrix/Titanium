@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -88,22 +88,22 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE OTIMIZADO PARA TRADES RÁPIDOS COM CONTROLE ===
-const QUALITY_THRESHOLD = 80; // ↓ Reduzido para permitir trades mais rápidos
+const QUALITY_THRESHOLD = 75; // ↓ Reduzido para permitir trades mais rápidos
 const QUALITY_WEIGHTS = {
-    volume: 45,          // ↑↑↑ (VOLUME É CRÍTICO - evita falsos em trades rápidos)
-    oi: 3,               // ↓↓↓ (Quase ignorado - muito ruidoso)
-    volatility: 10,      // ↑ (Bom para timing, mas não excessivo)
-    lsr: 10,             // ↓ (Sentimento ainda importante)
-    rsi: 18,             // ↑↑ (RSI FUNDAMENTAL para timing rápido)
-    emaAlignment: 18,    // ↑↑↑ (EMA alignment ESSENCIAL para trades rápidos)
-    stoch1h: 15,         // ↑ (Importante, mas não exagerado)
-    stoch4h: 12,         // ↑ (Confirmação, mas menos peso que 1h)
-    breakoutRisk: 8,     // ↓↓↓ (Breakout pouco relevante para trades rápidos)
-    supportResistance: 10, // ↓ (Níveis menos críticos em scalping)
-    pivotPoints: 12,     // ↓ (Ainda útil, mas menos peso)
-    funding: 3,          // ↓↓↓ (Quase irrelevante para trades rápidos)
-    stochastic12h: 6,    // ↓↓↓ (Tendência longa pouco importante)
-    stochasticDaily: 5    // ↓↓↓ (Mínimo - foco no curto prazo)
+     volume: 50,          // ⚡⚡⚡ (VOLUME ABSOLUTO)
+    oi: 0,               // ❌ (remove)
+    volatility: 9,       // ⚡ (volatilidade média)
+    lsr: 8,              // ⚡ (sentimento básico)
+    rsi: 20,             // ⚡⚡⚡ (RSI SUPER IMPORTANTE)
+    emaAlignment: 20,    // ⚡⚡⚡ (EMA ESSENCIAL)
+    stoch1h: 18,         // ⚡⚡ (Stochastic rápido)
+    stoch4h: 12,         // ⚡ (confirmação leve)
+    breakoutRisk: 5,     // ⚡ (quase ignorado)
+    supportResistance: 8, // ⚡ (básico)
+    pivotPoints: 10,     // ⚡ (moderado)
+    funding: 4,          // ⚡ (mínimo)
+    stochastic12h: 3,    // ⚡ (quase zero)
+    stochasticDaily: 2    // ⚡ (mínimo)
 };
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
@@ -2514,7 +2514,7 @@ async function sendSignalAlertWithRisk(signal) {
         // VERIFICAR SE O VOLUME É SUFICIENTE PARA SINAL DE COMPRA/VENDA
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         
-        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
+        const direction = signal.isBullish ? 'Scalp COMPRA ' : 'Scalp VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
         
