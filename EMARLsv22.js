@@ -6,97 +6,97 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '8010060485:AAESqJMqL0';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
 
-// === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
+// === CONFIGURAÇÕES DE VOLUME MÍNIMO REVISTAS ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.25,          // ↓ Reduzido para permitir sinais com volume inicial mais fraco
-    combinedScore: 0.3,           // ↓ Flexibilizado levemente
-    classification: 'BAIXO',      // ✅ Aceita até "BAIXO" se outros fatores confirmarem
-    requireConfirmation: true     // Mantido – confirmação ainda obrigatória
+    absoluteScore: 0.35,
+    combinedScore: 0.40,
+    classification: 'MODERADO',
+    requireConfirmation: true,
+    minZScore: 0.4,
+    requireVolumeTrend: true
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS CONSERVADORAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.8,           // ⬇️ Mais sensível a setups de qualidade
-    minThreshold: 1.5,            // ⬇️ Aceita movimentos iniciais suaves
-    maxThreshold: 2.9,            // ⬆️ Captura pumps reais sem cortar
-    volatilityMultiplier: 0.35,   // ⬆️ Melhor adaptação em alta volatilidade
-    useAdaptive: true
+    baseThreshold: 1.8,
+    minThreshold: 1.7,
+    maxThreshold: 3.2,
+    volatilityMultiplier: 0.3,
+    useAdaptive: true,
+    adaptiveSensitivity: 0.7
 };
 
-// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m ===
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    // Média Móvel Exponencial (EMA) do Volume
-    emaPeriod: 20,
-    emaAlpha: 0.26,               // ↑ Levemente mais responsivo
-
-    // Z-Score do Volume com lookback adaptativo
-    baseZScoreLookback: 40,       // ↓ Responde mais rápido a mudanças
-    minZScoreLookback: 12,        // ↓ Reação ágil em alta volatilidade
-    maxZScoreLookback: 80,        // ↓ Evita over-smoothing
-    zScoreThreshold: 1.7,         // ↓ Aceita volumes "acima do normal"
-
-    // Volume-Price Trend (VPT)
-    vptThreshold: 0.35,           // ↓ Aceita micro-movimentos com volume
-    minPriceMovement: 0.10,       // ↓ Mais sensível a movimentos menores
-
-    // Configurações combinadas – pesos ajustados
-    combinedMultiplier: 1.12,
-    volumeWeight: 0.33,
-    emaWeight: 0.37,              // ↑ Prioriza EMA (sinal mais confiável)
-    zScoreWeight: 0.2,
-    vptWeight: 0.1,
-
-    // Thresholds mínimos – MAIS FLEXÍVEIS, MAS NÃO PERMISSIVOS
+    emaPeriod: 24,
+    emaAlpha: 0.25,
+    baseZScoreLookback: 50,
+    minZScoreLookback: 20,
+    maxZScoreLookback: 100,
+    zScoreThreshold: 1.8,
+    vptThreshold: 0.40,
+    minPriceMovement: 0.15,
+    requirePositiveCorrelation: true,
+    combinedMultiplier: 1.08,
+    volumeWeight: 0.30,
+    emaWeight: 0.35,
+    zScoreWeight: 0.25,
+    vptWeight: 0.10,
     minimumThresholds: {
-        combinedScore: 0.20,      // ✅ Principal ajuste: permite volume "fraco-moderado"
-        emaRatio: 1.1,            // ↓ Aceita setups iniciais mais cedo
-        zScore: 0.3,              // ↓ Filtra ruído, mas capta variações normais
-        classification: 'BAIXO'   // ✅ Aceita classificação "BAIXO" com confirmação cruzada
+        combinedScore: 0.35,
+        emaRatio: 1.4,
+        zScore: 1.0,
+        classification: 'MODERADO'
     }
 };
 
-const VOLATILITY_PERIOD = 20;
+// === CONFIGURAÇÕES DE VOLATILIDADE - MAIS CONSERVADOR ===
+const VOLATILITY_PERIOD = 25;
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.6; // ⬇️ Permite operar em mais ativos com volatilidade moderada
+const VOLATILITY_THRESHOLD = 0.7;
 
-// === CONFIGURAÇÕES LSR AJUSTADAS ===
+// === CONFIGURAÇÕES LSR OTIMIZADAS ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.5;
-const LSR_SELL_THRESHOLD = 2.5;
+const LSR_BUY_THRESHOLD = 2.6;
+const LSR_SELL_THRESHOLD = 2.9;
 
-// === ATUALIZADO: CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 60; 
-const RSI_SELL_MIN = 65;
+// === CONFIGURAÇÕES RSI OTIMIZADAS ===
+const RSI_BUY_MAX = 60;
+const RSI_SELL_MIN = 67;
 
+// === COOLDOWN REVISADO ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 30 * 60 * 1000,
-    oppositeDirection: 10 * 60 * 1000,
-    useDifferentiated: true
+    sameDirection: 25 * 60 * 1000,
+    oppositeDirection: 8 * 60 * 1000,
+    useDifferentiated: true,
+    symbolCooldown: 30 * 60 * 1000
 };
 
-// === QUALITY SCORE AJUSTADO PARA MAIOR LUCRATIVIDADE ===
-const QUALITY_THRESHOLD = 75; // ⬇️ Aumenta número de alertas com boa qualidade
+// === QUALITY SCORE REVISADO - MAIS EXIGENTE ===
+const QUALITY_THRESHOLD = 80;
 const QUALITY_WEIGHTS = {
-    volume: 38,          // ↑ +3 → volume robusto é seu principal filtro
-    oi: 10,              // ↓ -2 → Open Interest menos crítico
-    volatility: 8,       // ↓ -2 → volatilidade é contexto, não sinal
-    lsr: 10,             // mantido
-    rsi: 12,             // ↑ +2 → RSI ideal altamente lucrativo
-    emaAlignment: 14,    // ↑ +2 → alinhamento de EMA é sinal forte
-    stoch1h: 8,          // mantido
-    stoch4h: 4,          // ↓ -1 → secundário
-    cci4h: 6,            // ↓ -2 → útil, mas não essencial
-    breakoutRisk: 14,    // ↑ +2 → evitar rompimentos falsos aumenta win rate
-    supportResistance: 14, // ↑ +2 → distância segura = maior margem
-    pivotPoints: 12,     // mantido
-    funding: 10          // mantido
+    volume: 40,
+    oi: 2,
+    volatility: 9,
+    lsr: 9,
+    rsi: 16,
+    emaAlignment: 12,
+    stoch1h: 12,
+    stoch4h: 12,
+    breakoutRisk: 14,
+    supportResistance: 15,
+    pivotPoints: 18,
+    funding: 3,
+    stochastic12h: 10,
+    stochasticDaily: 10
 };
+
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
     requestsPerMinute: 1000,
@@ -170,35 +170,43 @@ const BREAKOUT_RISK_SETTINGS = {
     safeDistance: 3.0
 };
 
-// === NOVA: CONFIGURAÇÕES PARA PIVOT POINTS MULTI-TIMEFRAME ===
+// === CONFIGURAÇÕES APRIMORADAS PARA PIVOT POINTS MULTI-TIMEFRAME ===
 const PIVOT_POINTS_SETTINGS = {
     // Configurações de força por timeframe
     timeframeStrengthWeights: {
-        '15m': 1.0,   // Pivot fraco (15 minutos)
-        '1H': 2.0,    // Pivot moderado (1 hora)
-        '✨4H': 3.0,    // Pivot forte (4 horas)
-        '✨1D': 5.0     // Pivot muito forte (diário)
+        '15m': 1.0,
+        '1h': 2.0,
+        '4h': 3.0,
+        '1d': 5.0
     },
     // Distâncias seguras baseadas na força do pivot
     safeDistanceMultipliers: {
-        'Fraco': 0.5,      // Pivot fraco: precisa de 0.5% de distância
-        'Moderado': 1.0,  // Pivot moderado: precisa de 1.0% de distância
-        'Forte': 1.5,    // Pivot forte: precisa de 1.5% de distância
-        'Muito Forte': 2.0 // Pivot muito forte: precisa de 2.0% de distância
+        'Fraco': 0.5,
+        'Moderado': 1.0,
+        'Forte': 1.5,
+        'Muito Forte': 2.0
     },
-    // Configurações de detecção
-    minDistance: 5,        // Distância mínima entre pivots (velas)
-    priceTolerance: 0.005, // Tolerância de preço para considerar toque (0.5%)
+    // Configurações de detecção - aprimoradas
+    minDistance: 7,
+    priceTolerance: 0.003,
     // Configurações de análise
-    analyzeTimeframes: ['15m', '1h', '4h'], // Timeframes a serem analisados
+    analyzeTimeframes: ['15m', '1h', '4h'],
     candlesPerTimeframe: {
-        '15m': 70,  // ~17.5 horas
-        '1h': 100,  // ~4 dias
-        '4h': 120   // ~20 dias
+        '15m': 100,
+        '1h': 120,
+        '4h': 150
+    },
+    // Configurações aprimoradas de detecção
+    detection: {
+        windowSize: 11,
+        requiredHigherLows: 3,
+        requiredLowerHighs: 3,
+        minAmplitude: 0.002,
+        confirmationCandles: 2
     }
 };
 
-// === NOVAS CONFIGURAÇÕES PARA STOCHASTIC 12H E DIÁRIO (5.3.3) ===
+// === NOVAS CONFIGURAÇÕES PARA STOCHASTIC 12H E DIÁRIO ===
 const STOCHASTIC_12H_SETTINGS = {
     period: 5,
     smooth: 3,
@@ -229,9 +237,7 @@ const oiCache = {};
 const OI_CACHE_TTL = 2 * 60 * 1000;
 const OI_HISTORY_SIZE = 20;
 
-// === ATUALIZADO: CONFIGURAÇÕES TÉCNICAS ===
-
-// ATUALIZADO: Stochastic 1h com nova configuração 14,3,3
+// === CONFIGURAÇÕES TÉCNICAS ===
 const STOCH_SETTINGS = {
     period: 14,
     smooth: 3,
@@ -246,24 +252,16 @@ const STOCH_4H_SETTINGS = {
     timeframe: '4h'
 };
 
-const CCI_4H_SETTINGS = {
-    period: 20,
-    maPeriod: 14,
-    timeframe: '4h'
-};
-
-// AJUSTAR TARGETS PARA MAIS REALISTAS
 const TARGET_PERCENTAGES = [1.5, 3.0, 5.0, 8.0, 12.0];
 const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
 
 // =====================================================================
-// 🛡️ SISTEMA DE RISK LAYER AVANÇADO (NÃO-BLOQUEANTE) - CORRIGIDO
+// 🛡️ SISTEMA DE RISK LAYER AVANÇADO
 // =====================================================================
 
 class SophisticatedRiskLayer {
     constructor() {
-        // CORREÇÃO: Atualizado para usar chaves em português
         this.riskLevels = {
             'BAIXO': { emoji: '🟢', score: 0, action: 'high_confidence' },
             'MEDIANO': { emoji: '🟡', score: 1, action: 'caution_advised' },
@@ -303,12 +301,6 @@ class SophisticatedRiskLayer {
                 shouldBlock: false
             };
 
-            // Verificar risco de RSI extremo primeiro
-            const rsiExtremeRisk = this.analyzeRSIExtremeRisk(signal);
-            riskAssessment.factors.push(rsiExtremeRisk);
-            riskAssessment.overallScore += rsiExtremeRisk.score * this.riskFactors.RSI_EXTREME_RISK.weight;
-
-            // Adicionar análise de tendência do Stochastic
             const stochasticTrendRisk = await this.analyzeStochasticTrendRisk(signal);
             riskAssessment.factors.push(stochasticTrendRisk);
             riskAssessment.overallScore += stochasticTrendRisk.score * this.riskFactors.STOCHASTIC_TREND_RISK.weight;
@@ -368,7 +360,6 @@ class SophisticatedRiskLayer {
 
     async analyzeStochasticTrendRisk(signal) {
         try {
-            // Analisar tendências maiores usando Stochastic 12h e Diário
             const stoch12hData = await checkStochasticWithTimeframe(
                 signal.symbol, 
                 signal.isBullish, 
@@ -385,29 +376,28 @@ class SophisticatedRiskLayer {
             let message = '';
             let trendDirection = '';
 
-            // Determinar tendência com base nos timeframes maiores
             if (stochDailyData.isValid) {
                 if (signal.isBullish && stochDailyData.kValue > stochDailyData.dValue) {
-                    score -= 0.5; // Tendência de alta confirmada - risco reduzido
+                    score -= 0.5;
                     trendDirection = 'ALTA (Diário)';
                 } else if (!signal.isBullish && stochDailyData.kValue < stochDailyData.dValue) {
-                    score -= 0.5; // Tendência de baixa confirmada - risco reduzido
+                    score -= 0.5;
                     trendDirection = 'BAIXA (Diário)';
                 } else {
-                    score += 1; // Tendência contrária
+                    score += 1;
                     trendDirection = 'CONTRÁRIA (Diário)';
                 }
             }
 
             if (stoch12hData.isValid) {
                 if (signal.isBullish && stoch12hData.kValue > stoch12hData.dValue) {
-                    score -= 0.3; // Tendência de alta 12h confirmada
+                    score -= 0.3;
                     trendDirection += trendDirection ? ' + ALTA (12h)' : 'ALTA (12h)';
                 } else if (!signal.isBullish && stoch12hData.kValue < stoch12hData.dValue) {
-                    score -= 0.3; // Tendência de baixa 12h confirmada
+                    score -= 0.3;
                     trendDirection += trendDirection ? ' + BAIXA (12h)' : 'BAIXA (12h)';
                 } else {
-                    score += 0.5; // Tendência contrária 12h
+                    score += 0.5;
                     trendDirection += trendDirection ? ' + CONTRÁRIA (12h)' : 'CONTRÁRIA (12h)';
                 }
             }
@@ -443,93 +433,64 @@ class SophisticatedRiskLayer {
         }
     }
 
-    analyzeRSIExtremeRisk(signal) {
-        const rsiData = signal.marketData.rsi;
-        if (!rsiData) {
-            return { type: 'RSI_EXTREME', score: 0, message: 'Sem dados de RSI' };
-        }
-
-        const rsiValue = rsiData.value;
-        const isBullish = signal.isBullish;
-        
-        let score = 0;
-        let message = '';
-        
-        if (rsiValue < 25 || rsiValue > 75) {
-            score = 3;
-            message = `RSI EXTREMO: ${rsiValue.toFixed(1)} (Padrão PERDEDOR confirmado)`;
-        } else if (isBullish && rsiValue > RSI_BUY_MAX) {
-            score = 2;
-            message = `RSI muito alto para compra: ${rsiValue.toFixed(1)} > ${RSI_BUY_MAX}`;
-        } else if (!isBullish && rsiValue < RSI_SELL_MIN) {
-            score = 2;
-            message = `RSI muito baixo para venda: ${rsiValue.toFixed(1)} < ${RSI_SELL_MIN}`;
-        } else if (isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) {
-            score = -1;
-            message = `RSI ideal para compra: ${rsiValue.toFixed(1)} (≤ ${RSI_BUY_MAX})`;
-        } else if (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75) {
-            score = -1;
-            message = `RSI ideal para venda: ${rsiValue.toFixed(1)} (≥ ${RSI_SELL_MIN})`;
-        } else {
-            score = 0;
-            message = `RSI neutro: ${rsiValue.toFixed(1)}`;
-        }
-
-        return {
-            type: 'RSI_EXTREME',
-            score: Math.max(-2, Math.min(3, score)),
-            message: message,
-            data: { rsiValue: rsiValue, isExtreme: rsiValue < 25 || rsiValue > 75 }
-        };
-    }
-
     analyzePivotRisk(signal) {
         const pivotData = signal.marketData.pivotPoints;
-        if (!pivotData) {
+        if (!pivotData || !pivotData.nearestPivot) {
             return { type: 'PIVOT', score: 0, message: 'Sem dados de pivot' };
         }
 
         let score = 0;
         let message = '';
         
-        if (pivotData.nearestPivot) {
-            const distancePercent = pivotData.nearestPivot.distancePercent;
-            const pivotType = pivotData.nearestPivot.type;
-            const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
-            
-            // Calcular risco baseado na força do pivot e distância
-            const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
-            
-            if (distancePercent < safeDistance * 0.5) {
-                score = 2;
-                message = `MUITO PRÓXIMO de pivot ${pivotType.toUpperCase()} ${pivotStrength} (${distancePercent.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
-            } else if (distancePercent < safeDistance) {
-                score = 1;
-                message = `Próximo de pivot ${pivotType} ${pivotStrength} (${distancePercent.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
-            } else {
-                score = 0;
-                message = `Boa distância de pivot ${pivotType} ${pivotStrength} (${distancePercent.toFixed(2)}%)`;
-            }
-            
-            if (pivotData.nearestPivot.isTesting) {
+        const distancePercent = pivotData.nearestPivot.distancePercent;
+        const pivotType = pivotData.nearestPivot.type;
+        const pivotStrength = pivotData.nearestPivot.strength || 'Fraco';
+        const pivotTimeframe = pivotData.nearestPivot.timeframe || '15m';
+        
+        // Calcular risco baseado na força do pivot e distância
+        const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
+        const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotTimeframe] || 1.0;
+        
+        // Ajustar distância segura pelo peso do timeframe
+        const adjustedSafeDistance = safeDistance * (timeframeWeight >= 3.0 ? 1.5 : 1.0);
+        
+        if (distancePercent < adjustedSafeDistance * 0.3) {
+            score = 2.5;
+            message = `🚨 MUITO PRÓXIMO de pivot ${pivotType.toUpperCase()} ${pivotStrength} ${pivotTimeframe} (${distancePercent.toFixed(2)}%)`;
+        } else if (distancePercent < adjustedSafeDistance * 0.5) {
+            score = 1.5;
+            message = `🔴 Próximo de pivot ${pivotType} ${pivotStrength} ${pivotTimeframe} (${distancePercent.toFixed(2)}%)`;
+        } else if (distancePercent < adjustedSafeDistance) {
+            score = 0.5;
+            message = `🟡 Moderado de pivot ${pivotType} ${pivotStrength} (${distancePercent.toFixed(2)}%)`;
+        } else {
+            score = -0.5;
+            message = `🟢 Boa distância de pivot ${pivotType} (${distancePercent.toFixed(2)}%)`;
+        }
+        
+        if (pivotData.nearestPivot.isTesting) {
+            score += 1.5;
+            message += ' | 🚨 TESTANDO PIVOT!';
+        }
+        
+        // Penalidade adicional para pivots fortes muito próximos
+        if (pivotStrength === 'Forte' || pivotStrength === 'Muito Forte') {
+            if (distancePercent < adjustedSafeDistance) {
                 score += 1;
-                message += ' | TESTANDO PIVOT!';
+                message += ` | PIVOT ${pivotStrength.toUpperCase()} PRÓXIMO`;
             }
-            
-            // Adicionar peso baseado no timeframe do pivot
-            if (pivotData.nearestPivot.timeframe) {
-                const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
-                if (timeframeWeight >= 2.0) {
-                    message += ` | PIVOT ${pivotData.nearestPivot.timeframe.toUpperCase()} (FORTE)`;
-                }
-            }
+        }
+        
+        // Informação sobre timeframe
+        if (timeframeWeight >= 3.0) {
+            message += ` | PIVOT ${pivotTimeframe.toUpperCase()} (ALTA RELEVÂNCIA)`;
         }
 
         return {
             type: 'PIVOT',
             score: Math.min(3, score),
             message: message,
-            data: pivotData.nearestPivot || null
+            data: pivotData.nearestPivot
         };
     }
 
@@ -542,10 +503,6 @@ class SophisticatedRiskLayer {
 
             const closes = candles.map(c => c.close);
             const atr = await getATRData(signal.symbol, '15m', 14);
-
-            if (!atr) {
-                return { type: 'VOLATILITY', score: 1, message: 'ATR não disponível' };
-            }
 
             let sumReturns = 0;
             for (let i = 1; i < closes.length; i++) {
@@ -584,7 +541,7 @@ class SophisticatedRiskLayer {
                 message = `Volatilidade normal: ${recentVol.toFixed(2)}%`;
             }
 
-            if (atr.percentage > 3.0) {
+            if (atr && atr.percentage > 3.0) {
                 score = Math.max(score, 2);
                 message += ` | ATR alto: ${atr.percentage.toFixed(2)}%`;
             }
@@ -597,7 +554,7 @@ class SophisticatedRiskLayer {
                     historicalVol: historicalVol,
                     recentVol: recentVol,
                     volatilitySpike: volatilitySpike,
-                    atrPercentage: atr.percentage
+                    atrPercentage: atr?.percentage
                 }
             };
 
@@ -961,7 +918,6 @@ class SophisticatedRiskLayer {
         return slice.reduce((a, b) => a + b, 0) / period;
     }
 
-    // CORREÇÃO: Atualizado para retornar em português (compatível com riskLevels)
     determineRiskLevel(score) {
         if (score >= 12) return 'CRÍTICO';
         if (score >= 8) return 'ALTO';
@@ -977,17 +933,10 @@ class SophisticatedRiskLayer {
         return Math.max(60, Math.min(100, Math.round(confidence)));
     }
 
-    // CORREÇÃO: Atualizado para usar as chaves em português
     generateRecommendations(assessment) {
         const recommendations = [];
 
         assessment.factors.forEach(factor => {
-            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
-                recommendations.push('🚨 <i>EVITAR: RSI EXTREMO (Padrão PERDEDOR confirmado)</i>');
-                recommendations.push('• Considere cancelar o trade');
-                recommendations.push('• Aguarde RSI retornar à zona neutra (25-75)');
-            }
-            
             if (factor.type === 'STOCHASTIC_TREND' && factor.data.trendDirection.includes('CONTRÁRIA')) {
                 recommendations.push('⚠️ <i>TENDÊNCIA CONTRÁRIA em timeframes maiores</i>');
                 recommendations.push('• Reduza o tamanho da posição');
@@ -1028,9 +977,6 @@ class SophisticatedRiskLayer {
         assessment.factors.forEach(factor => {
             if (factor.score >= 2) {
                 switch (factor.type) {
-                    case 'RSI_EXTREME':
-                        recommendations.push(`• <b>RSI extremo:</b> Evitar trade (padrão perdedor)`);
-                        break;
                     case 'VOLATILITY':
                         recommendations.push(`• <b>Volatilidade alta:</b> Use stop mais largo`);
                         break;
@@ -1062,21 +1008,17 @@ class SophisticatedRiskLayer {
 
     generateWarnings(assessment) {
         const warnings = [];
-
+        
         assessment.factors.forEach(factor => {
-            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
-                warnings.push(`🚨 ${factor.message}`);
-            }
-            
             if (factor.type === 'STOCHASTIC_TREND' && factor.data.trendDirection.includes('CONTRÁRIA')) {
                 warnings.push(`⚠️ Tendência contrária em timeframes maiores: ${factor.data.trendDirection}`);
             }
         });
 
         assessment.factors.forEach(factor => {
-            if (factor.score >= 2.5 && factor.type !== 'RSI_EXTREME' && factor.type !== 'STOCHASTIC_TREND') {
+            if (factor.score >= 2.5 && factor.type !== 'STOCHASTIC_TREND') {
                 warnings.push(`⚠️ ${factor.message}`);
-            } else if (factor.score >= 2 && factor.type !== 'RSI_EXTREME' && factor.type !== 'STOCHASTIC_TREND') {
+            } else if (factor.score >= 2 && factor.type !== 'STOCHASTIC_TREND') {
                 warnings.push(`🔶 ${factor.message}`);
             }
         });
@@ -1102,15 +1044,11 @@ class SophisticatedRiskLayer {
 
     logRiskAssessment(symbol, assessment) {
         console.log(`\n🛡️  RISK ASSESSMENT: ${symbol}`);
-        // CORREÇÃO: Agora usando chaves em português consistentes
         console.log(`   Nível: ${assessment.level} ${this.riskLevels[assessment.level].emoji}`);
         console.log(`   Score: ${assessment.overallScore.toFixed(2)}`);
         console.log(`   Confiança: ${assessment.confidence}%`);
 
         assessment.factors.forEach(factor => {
-            if (factor.type === 'RSI_EXTREME') {
-                console.log(`   RSI: ${factor.message}`);
-            }
             if (factor.type === 'STOCHASTIC_TREND') {
                 console.log(`   Stochastic Trend: ${factor.message}`);
             }
@@ -1237,7 +1175,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION (CORRIGIDO)
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -1566,10 +1504,8 @@ class AdvancedLearningSystem {
         this.symbolPerformance[trade.symbol] = symbolStats;
         this.openTrades.delete(trade.id || trade.timestamp);
         
-        // Adicionar ao histórico de trades
         this.tradeHistory.push(trade);
         
-        // Limitar o histórico para evitar sobrecarga
         if (this.tradeHistory.length > 1000) {
             this.tradeHistory = this.tradeHistory.slice(-500);
         }
@@ -1604,9 +1540,6 @@ class AdvancedLearningSystem {
                     emaAlignment: marketData.ema?.isAboveEMA55 || false,
                     stoch1hValid: marketData.stoch?.isValid || false,
                     stoch4hValid: marketData.stoch4h?.isValid || false,
-                    cci4hValid: marketData.cci4h?.isValid || false,
-                    cci4hValue: marketData.cci4h?.value || 0,
-                    cci4hMA: marketData.cci4h?.maValue || 0,
                     breakoutRisk: marketData.breakoutRisk || {},
                     supportResistance: marketData.supportResistance || {},
                     pivotPoints: marketData.pivotPoints || {},
@@ -1680,13 +1613,9 @@ class AdvancedLearningSystem {
                 t.outcome === 'TIMEOUT_EXIT'
             );
 
-            const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
-            console.log(`📊 Análise RSI: ${rsiAnalysis.extremeWinners.length} vencedores extremos vs ${rsiAnalysis.extremeLosers.length} perdedores extremos`);
-            
             const stochasticAnalysis = this.analyzeStochasticPatterns(closedTrades);
             console.log(`📊 Análise Stochastic: ${stochasticAnalysis.winnersWithTrend.length} vencedores com tendência vs ${stochasticAnalysis.losersAgainstTrend.length} perdedores contra tendência`);
 
-            // Resetar padrões para evitar contagem incorreta
             this.patterns.winning = {};
             this.patterns.losing = {};
 
@@ -1761,39 +1690,6 @@ class AdvancedLearningSystem {
         };
     }
 
-    analyzeRSIPatterns(trades) {
-        const extremeWinners = [];
-        const extremeLosers = [];
-        const idealWinners = [];
-        const idealLosers = [];
-
-        trades.forEach(trade => {
-            const rsiValue = trade.marketData.rsi;
-            const isWinner = trade.outcome === 'SUCCESS' || 
-                           trade.outcome === 'ALL_TARGETS_HIT' || 
-                           trade.outcome === 'PARTIAL_TARGETS_HIT';
-            const isBullish = trade.direction === 'BUY';
-
-            if (rsiValue < 25 || rsiValue > 75) {
-                if (isWinner) extremeWinners.push(trade);
-                else extremeLosers.push(trade);
-            } else if ((isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) || 
-                      (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75)) {
-                if (isWinner) idealWinners.push(trade);
-                else idealLosers.push(trade);
-            }
-        });
-
-        return {
-            extremeWinners,
-            extremeLosers,
-            idealWinners,
-            idealLosers,
-            extremeWinRate: extremeWinners.length / (extremeWinners.length + extremeLosers.length) || 0,
-            idealWinRate: idealWinners.length / (idealWinners.length + idealLosers.length) || 0
-        };
-    }
-
     extractPatterns(trade) {
         const patterns = [];
         const data = trade.marketData;
@@ -1807,15 +1703,7 @@ class AdvancedLearningSystem {
         if (data.volumeRatio >= 1.5 && data.volumeRatio < 1.8 && data.rsi <= RSI_BUY_MAX) {
             patterns.push('MOD_VOL_GOOD_RSI');
         }
-        
-        if (data.rsi < 25 || data.rsi > 75) {
-            patterns.push('RSI_EXTREME');
-        } else if ((trade.direction === 'BUY' && data.rsi >= 25 && data.rsi <= RSI_BUY_MAX) ||
-                   (trade.direction === 'SELL' && data.rsi >= RSI_SELL_MIN && data.rsi <= 75)) {
-            patterns.push('RSI_IDEAL');
-        }
-        
-        // Padrões de Stochastic
+
         if (data.stochastic12h?.isValid && data.stochastic12h.lastCross) {
             patterns.push(`STOCH_12H_${data.stochastic12h.lastCross.direction.toUpperCase()}`);
         }
@@ -1848,9 +1736,6 @@ class AdvancedLearningSystem {
         if (data.stoch1hValid && data.stoch4hValid) {
             patterns.push('STOCH_BOTH_BULLISH');
         }
-        if (data.cci4hValid) {
-            patterns.push('CCI_BULLISH');
-        }
 
         if (data.supportResistance?.nearestSupport?.distancePercent <= 1.0) {
             patterns.push('NEAR_SUPPORT');
@@ -1872,7 +1757,6 @@ class AdvancedLearningSystem {
             patterns.push(`TESTING_PIVOT`);
         }
 
-        // Padrão de Funding Rate
         if (trade.direction === 'BUY' && data.fundingRate < 0) {
             patterns.push('NEGATIVE_FUNDING_BUY');
         }
@@ -1885,17 +1769,6 @@ class AdvancedLearningSystem {
 
     async optimizeParameters(closedTrades) {
         try {
-            const rsiAnalysis = this.analyzeRSIPatterns(closedTrades);
-            if (rsiAnalysis.extremeWinRate < 0.3) {
-                this.parameterEvolution.rsiSettings.push({
-                    timestamp: Date.now(),
-                    message: 'RSI_EXTREME é padrão perdedor. Evitar trades com RSI < 25 ou > 75',
-                    extremeWinRate: rsiAnalysis.extremeWinRate,
-                    idealWinRate: rsiAnalysis.idealWinRate
-                });
-                console.log('⚠️  RSI_EXTREME: Padrão PERDEDOR confirmado. Win rate: ' + (rsiAnalysis.extremeWinRate * 100).toFixed(1) + '%');
-            }
-
             const stochasticAnalysis = this.analyzeStochasticPatterns(closedTrades);
             if (stochasticAnalysis.trendWinRate > stochasticAnalysis.againstTrendWinRate) {
                 this.parameterEvolution.stochasticSettings.push({
@@ -2124,7 +1997,6 @@ class AdvancedLearningSystem {
             if (fs.existsSync(learningFile)) {
                 const data = JSON.parse(fs.readFileSync(learningFile, 'utf8'));
 
-                // Corrigir: carregar apenas os dados que existem
                 this.tradeHistory = data.tradeHistory || [];
                 this.symbolPerformance = data.symbolPerformance || {};
                 this.patterns = data.patterns || { winning: {}, losing: {} };
@@ -2132,12 +2004,7 @@ class AdvancedLearningSystem {
 
                 console.log(`📊 Aprendizado: ${this.tradeHistory.length} trades carregados`);
                 
-                // Corrigir contagens inconsistentes
                 this.fixPatternCounts();
-                
-                if (this.patterns.losing.RSI_EXTREME > 20) {
-                    console.log('⚠️  Padrão aprendido: RSI_EXTREME é PERDEDOR (' + this.patterns.losing.RSI_EXTREME + ' trades)');
-                }
                 
                 if (this.patterns.winning.STOCH_TREND_ALIGNED > this.patterns.losing.STOCH_TREND_ALIGNED) {
                     console.log('📈 Padrão aprendido: Trades com tendência Stochastic alinhada têm melhor performance');
@@ -2145,7 +2012,6 @@ class AdvancedLearningSystem {
             }
         } catch (error) {
             console.log('⚠️ Erro ao carregar dados de aprendizado:', error.message);
-            // Resetar dados se houver erro
             this.tradeHistory = [];
             this.symbolPerformance = {};
             this.patterns = { winning: {}, losing: {} };
@@ -2154,7 +2020,6 @@ class AdvancedLearningSystem {
     }
 
     fixPatternCounts() {
-        // Corrigir contagens inconsistentes nos padrões
         const totalTrades = this.tradeHistory.length;
         
         Object.keys(this.patterns.winning).forEach(pattern => {
@@ -2172,11 +2037,10 @@ class AdvancedLearningSystem {
 
     saveLearningData() {
         try {
-            // Corrigir: garantir que os dados sejam consistentes antes de salvar
             this.fixPatternCounts();
             
             const data = {
-                tradeHistory: this.tradeHistory.slice(-500), // Limitar histórico
+                tradeHistory: this.tradeHistory.slice(-500),
                 symbolPerformance: this.symbolPerformance,
                 patterns: {
                     winning: this.patterns.winning,
@@ -2228,7 +2092,6 @@ class AdvancedLearningSystem {
             t.status === 'CLOSED' || t.status === 'SIMULATED'
         );
         
-        // Corrigir: usar apenas trades fechados com resultados válidos
         const validClosedTrades = closedTrades.filter(t => 
             t.outcome && t.profitPercentage !== null && t.profitPercentage !== undefined
         );
@@ -2252,7 +2115,6 @@ class AdvancedLearningSystem {
 
         const profitFactor = avgLoss !== 0 ? Math.abs(avgProfit / avgLoss) : 0;
 
-        // Corrigir: filtrar padrões com contagens válidas
         const winningPatterns = Object.entries(this.patterns.winning)
             .filter(([pattern, count]) => count >= 1 && count <= validClosedTrades.length)
             .sort((a, b) => b[1] - a[1])
@@ -2273,7 +2135,6 @@ class AdvancedLearningSystem {
             ).length
         };
 
-        const rsiAnalysis = this.analyzeRSIPatterns(validClosedTrades);
         const stochasticAnalysis = this.analyzeStochasticPatterns(validClosedTrades);
 
         return {
@@ -2289,12 +2150,6 @@ class AdvancedLearningSystem {
             simulationStats: simulationStats,
             openTrades: this.openTrades.size,
             monitoredSymbols: Object.keys(this.symbolPerformance).length,
-            rsiAnalysis: {
-                extremeWinRate: (rsiAnalysis.extremeWinRate * 100).toFixed(1),
-                idealWinRate: (rsiAnalysis.idealWinRate * 100).toFixed(1),
-                extremeTrades: rsiAnalysis.extremeWinners.length + rsiAnalysis.extremeLosers.length,
-                idealTrades: rsiAnalysis.idealWinners.length + rsiAnalysis.idealLosers.length
-            },
             stochasticAnalysis: {
                 trendWinRate: (stochasticAnalysis.trendWinRate * 100).toFixed(1),
                 againstTrendWinRate: (stochasticAnalysis.againstTrendWinRate * 100).toFixed(1),
@@ -2598,10 +2453,6 @@ async function sendTelegramAlert(message) {
     }
 }
 
-// =====================================================================
-// 📊 FUNÇÃO PARA VERIFICAR CONFIRMAÇÃO DE VOLUME
-// =====================================================================
-
 function checkVolumeConfirmation(volumeData) {
     if (!volumeData) {
         return false;
@@ -2612,7 +2463,6 @@ function checkVolumeConfirmation(volumeData) {
     const emaRatio = volumeData.emaRatio || 0;
     const zScore = volumeData.zScore || 0;
 
-    // Verificar se o volume está confirmado
     const isConfirmed = 
         combinedScore >= VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore &&
         emaRatio >= VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio &&
@@ -2623,7 +2473,7 @@ function checkVolumeConfirmation(volumeData) {
 }
 
 // =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO FORMATO E INFORMAÇÕES STOCHASTIC
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
@@ -2632,7 +2482,6 @@ async function sendSignalAlertWithRisk(signal) {
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
-        // VERIFICAR SE O VOLUME É SUFICIENTE PARA SINAL DE COMPRA/VENDA
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
@@ -2641,7 +2490,6 @@ async function sendSignalAlertWithRisk(signal) {
         
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
-        // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
         const binanceLSRValue = lsrData?.binanceLSR?.lsrValue?.toFixed(3) || 'N/A';
         const lsrPercentChange = lsrData?.percentChange || '0.00';
@@ -2661,7 +2509,6 @@ async function sendSignalAlertWithRisk(signal) {
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
-        // NOVO: Obter informações do Stochastic 12h e Diário
         const stoch12hData = signal.marketData.stochastic12h;
         const stochDailyData = signal.marketData.stochasticDaily;
         
@@ -2701,7 +2548,6 @@ async function sendSignalAlertWithRisk(signal) {
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
-        // Obter funding rate com emojis
         const fundingRate = signal.marketData.funding?.raw || 0;
         let fundingRateEmoji = '';
         if (fundingRate <= -0.002) fundingRateEmoji = '🟢🟢🟢';
@@ -2716,19 +2562,14 @@ async function sendSignalAlertWithRisk(signal) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
             : '🔹 Indisp.';
 
-        let rsiWarning = '';
         let stochasticTrendWarning = '';
         
         riskAssessment.factors.forEach(factor => {
-            if (factor.type === 'RSI_EXTREME' && factor.score >= 2) {
-                rsiWarning = `\n🚨 <b>ALERTA RSI: ${factor.message}</b>`;
-            }
             if (factor.type === 'STOCHASTIC_TREND' && factor.data.trendDirection.includes('CONTRÁRIA')) {
                 stochasticTrendWarning = `\n⚠️ <b>ALERTA TENDÊNCIA: ${factor.message}</b>`;
             }
         });
 
-        // DETERMINAR O TIPO DE ANÁLISE BASEADO NOS INDICADORES E PIVÔS
         let analysisType = '';
         let analysisEmoji = '🤖';
 
@@ -2737,79 +2578,65 @@ async function sendSignalAlertWithRisk(signal) {
             const stochValid = signal.marketData.stoch?.isValid || false;
             const emaAlignment = signal.marketData.ema?.isAboveEMA55 || false;
             
-            // Verificar se está próximo de um pivot
             const isNearPivot = pivotDistance && parseFloat(pivotDistance) < 0.8;
             const pivotStrengthText = pivotStrength === 'Forte' ? 'FORTE' : 
                                     pivotStrength === 'Muito Forte' ? 'MUITO FORTE' : '';
 
             if (signal.isBullish) {
-                // Análise para COMPRA/REVERSÃO
                 if (isNearPivot && pivotType === 'resistance') {
-                    // Batendo em um pivot de resistência
                     if (parseFloat(pivotDistance) < 0.3) {
-                        // Muito próximo - possivelmente falso rompimento
-                        analysisType = `REVERSÃO/FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
-                        // Próximo mas não muito
-                        analysisType = `REVERSÃO (Pivot Bull ${pivotStrengthText})`;
+                        analysisType = `Analisando...REVERSÃO (Pivot Bull ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue <= RSI_BUY_MAX && stochValid && emaAlignment) {
-                    // Próximo de suporte ou situação normal
-                    if (isNearPivot && pivotType === 'support') {
-                        analysisType = `REVERSÃO/COMPRA (Pivot Bull ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Suporte') {
+                        analysisType = `Analisando...COMPRA (Pivot Bull ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     } else {
-                        analysisType = 'REVERSÃO/COMPRA';
+                        analysisType = 'Analisando...COMPRA';
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue > RSI_BUY_MAX && rsiValue <= 75) {
-                    analysisType = 'EXAUSTÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             } else {
-                // Análise para VENDA/EXAUSTÃO
-                if (isNearPivot && pivotType === 'support') {
-                    // Batendo em um pivot de suporte
+                if (isNearPivot && pivotType === 'Suporte') {
                     if (parseFloat(pivotDistance) < 0.3) {
-                        // Muito próximo - possivelmente falso rompimento
-                        analysisType = `EXAUSTÃO/FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
-                        // Próximo mas não muito
-                        analysisType = `EXAUSTÃO (Pivot Bear ${pivotStrengthText})`;
+                        analysisType = `Analisando...EXAUSTÃO (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= RSI_SELL_MIN && rsiValue <= 75 && !stochValid && !emaAlignment) {
-                    // Próximo de resistência ou situação normal
-                    if (isNearPivot && pivotType === 'resistance') {
-                        analysisType = `EXAUSTÃO/VENDA (Pivot Bear ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Resistência') {
+                        analysisType = `Analisando...VENDA (Pivot Bear ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     } else {
-                        analysisType = 'EXAUSTÃO/VENDA';
+                        analysisType = 'Analisando...VENDA';
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue < RSI_SELL_MIN) {
-                    analysisType = 'REVERSÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             }
         }
 
-        // DECIDIR SE É UM ALERTA DE COMPRA/VENDA OU APENAS ANÁLISE
         let alertTitle = '';
         let alertType = '';
         
         if (isVolumeConfirmed) {
-            // VOLUME CONFIRMADO: Enviar alerta de COMPRA/VENDA
-            // Adicionar informação do pivot na mensagem
             let pivotInfo = '';
             if (nearestPivot && parseFloat(pivotDistance) < 1.0) {
                 const pivotStrengthText = pivotStrength === 'Forte' ? '🔴 FORTE' : 
@@ -2820,8 +2647,7 @@ async function sendSignalAlertWithRisk(signal) {
             alertTitle = `${directionEmoji} <b>${signal.symbol} - ${direction}${pivotInfo}</b>`;
             alertType = 'trade';
         } else {
-            // VOLUME NÃO CONFIRMADO: Enviar apenas análise da IA
-            alertTitle = `${analysisEmoji} <i>IA Analisando... ${analysisType}: ${signal.symbol}</i>`;
+            alertTitle = `${analysisEmoji} <i>IA... ${analysisType}: ${signal.symbol}</i>`;
             alertType = 'analysis';
         }
 
@@ -2829,18 +2655,17 @@ async function sendSignalAlertWithRisk(signal) {
 ${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 <i> Indicadores Técnicos</i>
-⚠️ Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+⚠️ SCORE: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 💲 Preço: $${signal.price.toFixed(6)}
-⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+⚠️ VOL: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • Dist. Suport/Resist: ${distancePercent}%
-🔹*🔹Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
+🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
 ⚠️ LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|🔹RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
 <i>🔹Estocástico </i>
 • 12h: ${stoch12hInfo}
 • 1D: ${stochDailyInfo}
-${rsiWarning}
 ${stochasticTrendWarning}
 <i>🤖 IA Operação/Risco </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
@@ -2849,7 +2674,6 @@ ${!isVolumeConfirmed ? `• 🔶 ATENÇÃO NO VOLUME: Score ${volumeScore.toFixe
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
         `;
 
-        // APENAS ADICIONAR DICAS DE ENTRADA E ALVOS SE O VOLUME ESTIVER CONFIRMADO
         if (isVolumeConfirmed) {
             message += `
 <i> 💡Dica de Entrada : </i>
@@ -2861,7 +2685,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
             `;
         } else {
             message += `
-<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAÇÃO</i>
+<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAR</i>
 • Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
 • EMA Ratio: ${volumeData?.emaRatio?.toFixed(2) || 'N/A'}x (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio}x)
 • Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'} (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore})
@@ -2891,7 +2715,6 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Stochastic 12h: ${stoch12hInfo}`);
         console.log(`   Stochastic Diário: ${stochDailyInfo}`);
 
-        // Retornar o tipo de alerta enviado
         return {
             type: alertType,
             volumeConfirmed: isVolumeConfirmed,
@@ -2911,7 +2734,6 @@ async function sendSignalAlert(signal) {
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
-        // VERIFICAR SE O VOLUME É SUFICIENTE
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
@@ -2923,7 +2745,6 @@ async function sendSignalAlert(signal) {
         const pivotType = nearestPivot?.type || 'N/A';
         const pivotStrength = nearestPivot?.strength || 'N/A';
         
-        // DETERMINAR O TIPO DE ANÁLISE BASEADO NOS INDICADORES E PIVÔS
         let analysisType = '';
         let analysisEmoji = '🤖';
         
@@ -2932,67 +2753,56 @@ async function sendSignalAlert(signal) {
             const stochValid = signal.marketData.stoch?.isValid || false;
             const emaAlignment = signal.marketData.ema?.isAboveEMA55 || false;
             
-            // Verificar se está próximo de um pivot
             const isNearPivot = pivotDistance && parseFloat(pivotDistance) < 0.8;
             const pivotStrengthText = pivotStrength === 'Forte' ? 'FORTE' : 
                                     pivotStrength === 'Muito Forte' ? 'MUITO FORTE' : '';
 
             if (signal.isBullish) {
-                // Análise para COMPRA/REVERSÃO
                 if (isNearPivot && pivotType === 'resistance') {
-                    // Batendo em um pivot de resistência
                     if (parseFloat(pivotDistance) < 0.3) {
-                        // Muito próximo - possivelmente falso rompimento
-                        analysisType = `REVERSÃO/FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
-                        // Próximo mas não muito
-                        analysisType = `REVERSÃO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue <= RSI_BUY_MAX && stochValid && emaAlignment) {
-                    // Próximo de suporte ou situação normal
-                    if (isNearPivot && pivotType === 'support') {
-                        analysisType = `REVERSÃO/COMPRA (Pivot ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Suporte') {
+                        analysisType = `Analisando...COMPRA (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟢🔍';
                     } else {
-                        analysisType = 'REVERSÃO/COMPRA';
+                        analysisType = 'Analisando...COMPRA';
                         analysisEmoji = '🟢🔍';
                     }
                 } else if (rsiValue > RSI_BUY_MAX && rsiValue <= 75) {
-                    analysisType = 'EXAUSTÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             } else {
-                // Análise para VENDA/EXAUSTÃO
-                if (isNearPivot && pivotType === 'support') {
-                    // Batendo em um pivot de suporte
+                if (isNearPivot && pivotType === 'Suporte') {
                     if (parseFloat(pivotDistance) < 0.3) {
-                        // Muito próximo - possivelmente falso rompimento
-                        analysisType = `EXAUSTÃO/FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...FALSO ROMPIMENTO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🟡⚠️';
                     } else {
-                        // Próximo mas não muito
-                        analysisType = `EXAUSTÃO (Pivot ${pivotStrengthText})`;
+                        analysisType = `Analisando...EXAUSTÃO (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= RSI_SELL_MIN && rsiValue <= 75 && !stochValid && !emaAlignment) {
-                    // Próximo de resistência ou situação normal
-                    if (isNearPivot && pivotType === 'resistance') {
-                        analysisType = `EXAUSTÃO/VENDA (Pivot ${pivotStrengthText})`;
+                    if (isNearPivot && pivotType === 'Resistência') {
+                        analysisType = `Analisando...VENDA (Pivot ${pivotStrengthText})`;
                         analysisEmoji = '🔴🔍';
                     } else {
-                        analysisType = 'EXAUSTÃO/VENDA';
+                        analysisType = 'Analisando...VENDA';
                         analysisEmoji = '🔴🔍';
                     }
                 } else if (rsiValue >= 25 && rsiValue < RSI_SELL_MIN) {
-                    analysisType = 'REVERSÃO/CORREÇÃO';
+                    analysisType = 'Analisando...CORREÇÃO';
                     analysisEmoji = '🟡⚠️';
                 } else {
-                    analysisType = 'ANÁLISE NEUTRA';
+                    analysisType = 'Análise...NEUTRA';
                     analysisEmoji = '🤖';
                 }
             }
@@ -3000,7 +2810,6 @@ async function sendSignalAlert(signal) {
 
         let alertTitle = '';
         if (isVolumeConfirmed) {
-            // Adicionar informação do pivot na mensagem
             let pivotInfo = '';
             if (nearestPivot && parseFloat(pivotDistance) < 1.0) {
                 const pivotStrengthText = pivotStrength === 'Forte' ? '🔴 FORTE' : 
@@ -3018,7 +2827,6 @@ async function sendSignalAlert(signal) {
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
-        // Obter LSR da Binance
         const lsrData = signal.marketData.lsr;
         const binanceLSRValue = lsrData?.binanceLSR?.lsrValue?.toFixed(3) || 'N/A';
         const lsrPercentChange = lsrData?.percentChange || '0.00';
@@ -3032,7 +2840,6 @@ async function sendSignalAlert(signal) {
 
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
 
-        // NOVO: Obter informações do Stochastic 12h e Diário
         const stoch12hData = signal.marketData.stochastic12h;
         const stochDailyData = signal.marketData.stochasticDaily;
         
@@ -3065,7 +2872,6 @@ async function sendSignalAlert(signal) {
             }
         }
 
-        // Obter funding rate com emojis
         const fundingRate = signal.marketData.funding?.raw || 0;
         let fundingRateEmoji = '';
         if (fundingRate <= -0.002) fundingRateEmoji = '🟢🟢🟢';
@@ -3099,7 +2905,6 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ${!isVolumeConfirmed ? `\n<b>⚠️ ${analysisType} - VOLUME INSUFICIENTE PARA OPERAÇÃO</b>` : ''}
         `;
 
-        // APENAS ADICIONAR ALVOS SE O VOLUME ESTIVER CONFIRMADO
         if (isVolumeConfirmed) {
             message += `
 <b> Alvos </b>
@@ -3174,10 +2979,8 @@ function calculateProbability(signal) {
     if (signal.marketData.breakoutRisk?.level === 'low') baseProbability += 5;
 
     const rsiValue = signal.marketData.rsi?.value || 50;
-    if (rsiValue < 25 || rsiValue > 75) {
-        baseProbability -= 20;
-    } else if ((signal.isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) ||
-               (!signal.isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75)) {
+    if ((signal.isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) ||
+        (!signal.isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75)) {
         baseProbability += 8;
     }
 
@@ -3186,49 +2989,46 @@ function calculateProbability(signal) {
         const pivotDistance = pivotData.nearestPivot.distancePercent || 0;
         const pivotStrength = pivotData.nearestPivot.strength || 'unknown';
         
-        // Obter distância segura baseada na força do pivot
         const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
         
         if (pivotDistance < safeDistance * 0.5) {
-            baseProbability -= 15; // Muito próximo
+            baseProbability -= 15;
         } else if (pivotDistance < safeDistance) {
-            baseProbability -= 8;  // Próximo
+            baseProbability -= 8;
         } else if (pivotDistance > safeDistance * 1.5) {
-            baseProbability += 5;  // Boa distância
+            baseProbability += 5;
         }
         
         if (pivotData.nearestPivot.isTesting) {
             baseProbability -= 12;
         }
         
-        // Adicionar peso baseado no timeframe
         if (pivotData.nearestPivot.timeframe) {
             const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivotData.nearestPivot.timeframe] || 1.0;
             if (timeframeWeight >= 2.0 && pivotDistance < safeDistance) {
-                baseProbability -= 5; // Pivot forte muito próximo
+                baseProbability -= 5;
             }
         }
     }
 
-    // NOVO: Considerar tendência do Stochastic
     const stoch12h = signal.marketData.stochastic12h;
     const stochDaily = signal.marketData.stochasticDaily;
     
     if (stochDaily?.isValid) {
         if ((signal.isBullish && stochDaily.kValue > stochDaily.dValue) ||
             (!signal.isBullish && stochDaily.kValue < stochDaily.dValue)) {
-            baseProbability += 8; // Tendência alinhada
+            baseProbability += 8;
         } else {
-            baseProbability -= 10; // Tendência contrária
+            baseProbability -= 10;
         }
     }
     
     if (stoch12h?.isValid) {
         if ((signal.isBullish && stoch12h.kValue > stoch12h.dValue) ||
             (!signal.isBullish && stoch12h.kValue < stoch12h.dValue)) {
-            baseProbability += 5; // Tendência 12h alinhada
+            baseProbability += 5;
         } else {
-            baseProbability -= 6; // Tendência 12h contrária
+            baseProbability -= 6;
         }
     }
 
@@ -3236,7 +3036,7 @@ function calculateProbability(signal) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO PARA BUSCAR LSR DA BINANCE (CORRIGIDA)
+// 📊 FUNÇÃO PARA BUSCAR LSR DA BINANCE
 // =====================================================================
 
 async function getBinanceLSRValue(symbol, period = '15m') {
@@ -3244,17 +3044,14 @@ async function getBinanceLSRValue(symbol, period = '15m') {
         const cacheKey = `binance_lsr_${symbol}_${period}`;
         const now = Date.now();
         
-        // Verificar cache (1 minuto)
         if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < 60000) {
             return candleCache[cacheKey].data;
         }
         
-        // URL CORRIGIDA: endpoint correto da Binance para LSR
         const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`;
         
         const response = await rateLimiter.makeRequest(url, {}, 'klines');
         
-        // Verificação robusta da resposta
         if (!response || !Array.isArray(response) || response.length === 0) {
             console.log(`⚠️  Resposta da API LSR vazia para ${symbol}.`);
             return null;
@@ -3262,7 +3059,6 @@ async function getBinanceLSRValue(symbol, period = '15m') {
         
         const latestData = response[0];
         
-        // Validação dos campos esperados
         if (!latestData.longShortRatio || !latestData.longAccount || !latestData.shortAccount) {
             console.log(`⚠️  Estrutura de dados LSR inesperada para ${symbol}:`, latestData);
             return null;
@@ -3270,7 +3066,6 @@ async function getBinanceLSRValue(symbol, period = '15m') {
         
         const currentLSR = parseFloat(latestData.longShortRatio);
         
-        // Calcular percentual de mudança se tivermos dados anteriores
         let percentChange = '0.00';
         let isRising = false;
         
@@ -3294,7 +3089,6 @@ async function getBinanceLSRValue(symbol, period = '15m') {
             raw: latestData
         };
         
-        // Armazenar em cache
         candleCache[cacheKey] = { data: result, timestamp: now };
         
         console.log(`📊 Binance LSR ${symbol} (${period}): ${result.lsrValue.toFixed(3)} (${percentChange}%) ${isRising ? '⬆️' : '⬇️'}`);
@@ -3308,12 +3102,11 @@ async function getBinanceLSRValue(symbol, period = '15m') {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS
+// 📊 FUNÇÃO DE DETECÇÃO DE VOLUME ROBUSTA 3 MINUTOS
 // =====================================================================
 
 async function checkVolumeRobust(symbol) {
     try {
-        // Buscar candles de 3 minutos
         const candles = await getCandlesCached(symbol, '3m', VOLUME_ROBUST_SETTINGS.maxZScoreLookback);
         if (candles.length < VOLUME_ROBUST_SETTINGS.emaPeriod) {
             return {
@@ -3326,26 +3119,21 @@ async function checkVolumeRobust(symbol) {
         const volumes = candles.map(c => c.volume);
         const closes = candles.map(c => c.close);
         
-        // Volume atual e últimos volumes
         const currentVolume = volumes[volumes.length - 1];
         const previousVolume = volumes[volumes.length - 2] || currentVolume;
         
-        // 1. MÉDIA MÓVEL EXPONENCIAL (EMA) DO VOLUME
         const emaData = calculateVolumeEMA(volumes, VOLUME_ROBUST_SETTINGS.emaPeriod, VOLUME_ROBUST_SETTINGS.emaAlpha);
         const emaRatio = currentVolume / emaData.currentEMA;
         const emaScore = calculateEMAScore(emaRatio);
         
-        // 2. Z-SCORE DO VOLUME COM LOOKBACK DINÂMICO
         const adaptiveLookback = calculateAdaptiveZScoreLookback(closes);
         const zScoreData = calculateVolumeZScore(volumes, adaptiveLookback);
         const zScore = zScoreData.currentZScore;
         const zScoreScore = calculateZScoreScore(zScore);
         
-        // 3. VOLUME-PRICE TREND (VPT)
         const vptData = calculateVolumePriceTrend(volumes, closes);
         const vptScore = calculateVPTScore(vptData);
         
-        // 4. CALCULAR SCORE COMBINADO
         const combinedScore = calculateCombinedVolumeScore({
             emaScore,
             zScoreScore,
@@ -3354,10 +3142,8 @@ async function checkVolumeRobust(symbol) {
             zScore
         });
         
-        // 5. CLASSIFICAÇÃO
         const classification = classifyVolumeStrength(combinedScore);
         
-        // 6. VERIFICAR SE O VOLUME ESTÁ CONFIRMADO
         const isVolumeConfirmed = checkVolumeRobustConfirmation({
             combinedScore,
             classification,
@@ -3365,7 +3151,6 @@ async function checkVolumeRobust(symbol) {
             zScore
         });
         
-        // Razão bruta para compatibilidade
         const rawRatio = currentVolume / emaData.averageVolume || 1;
         
         const robustData = {
@@ -3434,7 +3219,6 @@ function checkVolumeRobustConfirmation(volumeData) {
     );
 }
 
-// Função para calcular EMA do volume
 function calculateVolumeEMA(volumes, period, alpha) {
     if (volumes.length < period) {
         return {
@@ -3444,18 +3228,15 @@ function calculateVolumeEMA(volumes, period, alpha) {
         };
     }
     
-    // Inicializar EMA com SMA
     const initialSMA = volumes.slice(0, period).reduce((a, b) => a + b, 0) / period;
     let ema = initialSMA;
     const emaHistory = [ema];
     
-    // Calcular EMA para os volumes restantes
     for (let i = period; i < volumes.length; i++) {
         ema = alpha * volumes[i] + (1 - alpha) * ema;
         emaHistory.push(ema);
     }
     
-    // Calcular também a média geral para referência
     const averageVolume = volumes.reduce((a, b) => a + b, 0) / volumes.length;
     
     return {
@@ -3468,13 +3249,11 @@ function calculateVolumeEMA(volumes, period, alpha) {
     };
 }
 
-// Função para calcular lookback adaptativo do Z-Score baseado na volatilidade
 function calculateAdaptiveZScoreLookback(closes) {
     if (closes.length < 10) {
         return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
     }
     
-    // Calcular volatilidade recente
     const recentCloses = closes.slice(-20);
     let sumReturns = 0;
     for (let i = 1; i < recentCloses.length; i++) {
@@ -3483,22 +3262,17 @@ function calculateAdaptiveZScoreLookback(closes) {
     }
     const volatility = sumReturns / (recentCloses.length - 1) * 100;
     
-    // Ajustar lookback baseado na volatilidade
     if (volatility > 2.0) {
-        // Alta volatilidade: usar lookback menor
         return Math.max(VOLUME_ROBUST_SETTINGS.minZScoreLookback, 
                        VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 0.5);
     } else if (volatility < 0.5) {
-        // Baixa volatilidade: usar lookback maior
         return Math.min(VOLUME_ROBUST_SETTINGS.maxZScoreLookback,
                        VOLUME_ROBUST_SETTINGS.baseZScoreLookback * 1.5);
     }
     
-    // Volatilidade média: usar lookback base
     return VOLUME_ROBUST_SETTINGS.baseZScoreLookback;
 }
 
-// Função atualizada para calcular Z-Score com lookback dinâmico
 function calculateVolumeZScore(volumes, lookback) {
     if (volumes.length < lookback) {
         return {
@@ -3511,12 +3285,10 @@ function calculateVolumeZScore(volumes, lookback) {
     const recentVolumes = volumes.slice(-lookback);
     const mean = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
     
-    // Calcular desvio padrão
     const squaredDifferences = recentVolumes.map(v => Math.pow(v - mean, 2));
     const variance = squaredDifferences.reduce((a, b) => a + b, 0) / recentVolumes.length;
     const stdDev = Math.sqrt(variance);
     
-    // Z-Score do volume atual
     const currentVolume = volumes[volumes.length - 1];
     const zScore = stdDev !== 0 ? (currentVolume - mean) / stdDev : 0;
     
@@ -3539,19 +3311,15 @@ function calculateVolumePriceTrend(volumes, closes) {
         };
     }
     
-    // Calcular movimento de preço recente (últimas 5 velas)
     const recentCloses = closes.slice(-5);
     const priceChange = ((recentCloses[recentCloses.length - 1] - recentCloses[0]) / recentCloses[0]) * 100;
     
-    // Calcular tendência de volume
     const recentVolumes = volumes.slice(-5);
     const volumeSum = recentVolumes.reduce((a, b) => a + b, 0);
     const avgVolume = volumeSum / recentVolumes.length;
     
-    // Verificar se o movimento de preço é significativo
     const hasSignificantMovement = Math.abs(priceChange) >= VOLUME_ROBUST_SETTINGS.minPriceMovement;
     
-    // Determinar direção da tendência
     let trendDirection = 'neutral';
     if (priceChange > VOLUME_ROBUST_SETTINGS.minPriceMovement) {
         trendDirection = 'bullish';
@@ -3559,7 +3327,6 @@ function calculateVolumePriceTrend(volumes, closes) {
         trendDirection = 'bearish';
     }
     
-    // Calcular correlação simples entre volume e preço
     let correlation = 0;
     if (hasSignificantMovement) {
         const volumeChanges = [];
@@ -3570,7 +3337,6 @@ function calculateVolumePriceTrend(volumes, closes) {
             priceChanges.push(recentCloses[i] - recentCloses[i - 1]);
         }
         
-        // Correlação simples
         const avgVolumeChange = volumeChanges.reduce((a, b) => a + b, 0) / volumeChanges.length;
         const avgPriceChange = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
         
@@ -3621,18 +3387,15 @@ function calculateZScoreScore(zScore) {
 function calculateVPTScore(vptData) {
     let score = 0;
     
-    // Score baseado no movimento de preço
     const absPriceMovement = Math.abs(vptData.priceMovementPercent);
     if (absPriceMovement >= 1.0) score += 0.4;
     else if (absPriceMovement >= 0.5) score += 0.3;
     else if (absPriceMovement >= VOLUME_ROBUST_SETTINGS.minPriceMovement) score += 0.2;
     
-    // Score baseado na correlação
     if (Math.abs(vptData.correlation) >= 0.7) score += 0.3;
     else if (Math.abs(vptData.correlation) >= 0.5) score += 0.2;
     else if (Math.abs(vptData.correlation) >= 0.3) score += 0.1;
     
-    // Score baseado na consistência da tendência
     if (vptData.hasSignificantMovement && vptData.volumeTrend === 'rising') {
         score += 0.3;
     }
@@ -3649,21 +3412,17 @@ function calculateCombinedVolumeScore(data) {
         zScore
     } = data;
     
-    // Pesos configuráveis
     const weights = VOLUME_ROBUST_SETTINGS;
     
-    // Calcular score ponderado
     let combinedScore = 
         (emaScore * weights.emaWeight) +
         (zScoreScore * weights.zScoreWeight) +
         (vptScore * weights.vptWeight);
     
-    // Aplicar bônus para sinais fortes
     if (emaRatio >= 2.5 && Math.abs(zScore) >= 2.5) {
         combinedScore *= weights.combinedMultiplier;
     }
     
-    // Normalizar para 0-1
     return Math.min(1.0, combinedScore);
 }
 
@@ -3679,7 +3438,7 @@ function classifyVolumeStrength(score) {
 }
 
 // =====================================================================
-// 📊 NOVAS FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO (5.3.3)
+// 📊 FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO
 // =====================================================================
 
 async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
@@ -3722,15 +3481,12 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
         const kValue = current.k;
         const dValue = current.d;
 
-        // Verificar se há cruzamento recente
         let lastCross = null;
         
-        // Analisar últimos 5 períodos para encontrar cruzamentos
         for (let i = Math.max(0, stochValues.length - 6); i < stochValues.length - 1; i++) {
             const prev = stochValues[i];
             const curr = stochValues[i + 1];
             
-            // Encontrar cruzamento bullish (K cruza acima de D)
             if (prev.k <= prev.d && curr.k > curr.d) {
                 const candleIndex = closes.length - (stochValues.length - (i + 1));
                 const crossTime = timestamps[candleIndex] || Date.now();
@@ -3745,7 +3501,6 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 };
                 break;
             }
-            // Encontrar cruzamento bearish (K cruza abaixo de D)
             else if (prev.k >= prev.d && curr.k < curr.d) {
                 const candleIndex = closes.length - (stochValues.length - (i + 1));
                 const crossTime = timestamps[candleIndex] || Date.now();
@@ -3802,14 +3557,13 @@ function getBrazilianDateTimeFromTimestamp(timestamp) {
 }
 
 // =====================================================================
-// 📊 NOVAS FUNÇÕES PARA PONTOS DE PIVÔ MULTI-TIMEFRAME (ATUALIZADO)
+// 📊 FUNÇÕES APRIMORADAS PARA PONTOS DE PIVÔ MULTI-TIMEFRAME
 // =====================================================================
 
 async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     try {
         const allPivots = [];
         
-        // Analisar pivots em múltiplos timeframes
         for (const timeframe of PIVOT_POINTS_SETTINGS.analyzeTimeframes) {
             try {
                 const candles = await getCandlesCached(
@@ -3827,7 +3581,6 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
                     currentPrice
                 );
                 
-                // Adicionar timeframe a cada pivot
                 timeframePivots.supports.forEach(pivot => {
                     pivot.timeframe = timeframe;
                     pivot.strength = calculatePivotStrength(pivot, timeframe);
@@ -3850,24 +3603,19 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
             return { error: 'Nenhum pivot detectado' };
         }
 
-        // Separar supports e resistances
         const supportPivots = allPivots.filter(p => p.type === 'Suporte');
         const resistancePivots = allPivots.filter(p => p.type === 'Resistência');
 
-        // Encontrar pivots mais próximos
         const nearestSupportPivot = findNearestPivotMultiTimeframe(supportPivots, currentPrice, true);
         const nearestResistancePivot = findNearestPivotMultiTimeframe(resistancePivots, currentPrice, false);
 
-        // Verificar se está testando algum pivot
         const testingPivot = checkTestingPivotMultiTimeframe(currentPrice, allPivots);
 
-        // Calcular distâncias
         const supportDistancePercent = nearestSupportPivot ?
             ((currentPrice - nearestSupportPivot.price) / currentPrice) * 100 : null;
         const resistanceDistancePercent = nearestResistancePivot ?
             ((nearestResistancePivot.price - currentPrice) / currentPrice) * 100 : null;
 
-        // Determinar pivot mais próximo
         let nearestPivot = null;
         if (nearestSupportPivot && nearestResistancePivot) {
             const supportDistance = Math.abs(currentPrice - nearestSupportPivot.price);
@@ -3934,9 +3682,9 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
             currentPrice: currentPrice,
             totalPivots: allPivots.length,
             timeframeAnalysis: {
-                '🔹15m': allPivots.filter(p => p.timeframe === '🔹15m').length,
-                '🔹1h': allPivots.filter(p => p.timeframe === '🔹1h').length,
-                '🔹4h': allPivots.filter(p => p.timeframe === '🔹4h').length
+                '15m': allPivots.filter(p => p.timeframe === '15m').length,
+                '1h': allPivots.filter(p => p.timeframe === '1h').length,
+                '4h': allPivots.filter(p => p.timeframe === '4h').length
             }
         };
 
@@ -3950,11 +3698,11 @@ async function analyzePivotPointsInTimeframe(symbol, timeframe, candles, current
     const highs = candles.map(c => c.high);
     const lows = candles.map(c => c.low);
 
-    const pivotHighs = findPivotHighs(highs, PIVOT_POINTS_SETTINGS.minDistance);
-    const pivotLows = findPivotLows(lows, PIVOT_POINTS_SETTINGS.minDistance);
+    const pivotHighs = findPivotHighsEnhanced(highs, PIVOT_POINTS_SETTINGS.detection);
+    const pivotLows = findPivotLowsEnhanced(lows, PIVOT_POINTS_SETTINGS.detection);
 
-    const supportPivots = classifyPivots(pivotLows, 'Suporte', candles, timeframe);
-    const resistancePivots = classifyPivots(pivotHighs, 'Resisência', candles, timeframe);
+    const supportPivots = classifyPivotsEnhanced(pivotLows, 'Suporte', candles, timeframe);
+    const resistancePivots = classifyPivotsEnhanced(pivotHighs, 'Resistência', candles, timeframe);
 
     return {
         supports: supportPivots,
@@ -3964,25 +3712,162 @@ async function analyzePivotPointsInTimeframe(symbol, timeframe, candles, current
     };
 }
 
+function findPivotHighsEnhanced(highs, detectionSettings) {
+    const pivots = [];
+    const window = detectionSettings.windowSize;
+    
+    for (let i = window; i < highs.length - window; i++) {
+        let isPivot = true;
+        let hasRequiredLowerHighs = true;
+        
+        // Verificar se é máximo local
+        for (let j = i - window; j <= i + window; j++) {
+            if (j !== i && highs[j] > highs[i]) {
+                isPivot = false;
+                break;
+            }
+        }
+        
+        if (isPivot) {
+            // Verificar se tem lower highs suficientes antes do pivot
+            let lowerHighsCount = 0;
+            for (let j = i - window; j < i; j++) {
+                if (highs[j] < highs[i]) {
+                    lowerHighsCount++;
+                }
+            }
+            
+            hasRequiredLowerHighs = lowerHighsCount >= detectionSettings.requiredLowerHighs;
+            
+            // Verificar amplitude mínima
+            const avgBefore = highs.slice(Math.max(0, i - 5), i).reduce((a, b) => a + b, 0) / Math.min(5, i);
+            const amplitude = (highs[i] - avgBefore) / avgBefore;
+            
+            if (hasRequiredLowerHighs && amplitude >= detectionSettings.minAmplitude) {
+                pivots.push({
+                    index: i,
+                    price: highs[i],
+                    type: 'Resistência',
+                    amplitude: amplitude,
+                    confirmation: true
+                });
+            }
+        }
+    }
+    
+    return pivots;
+}
+
+function findPivotLowsEnhanced(lows, detectionSettings) {
+    const pivots = [];
+    const window = detectionSettings.windowSize;
+    
+    for (let i = window; i < lows.length - window; i++) {
+        let isPivot = true;
+        let hasRequiredHigherLows = true;
+        
+        // Verificar se é mínimo local
+        for (let j = i - window; j <= i + window; j++) {
+            if (j !== i && lows[j] < lows[i]) {
+                isPivot = false;
+                break;
+            }
+        }
+        
+        if (isPivot) {
+            // Verificar se tem higher lows suficientes antes do pivot
+            let higherLowsCount = 0;
+            for (let j = i - window; j < i; j++) {
+                if (lows[j] > lows[i]) {
+                    higherLowsCount++;
+                }
+            }
+            
+            hasRequiredHigherLows = higherLowsCount >= detectionSettings.requiredHigherLows;
+            
+            // Verificar amplitude mínima
+            const avgBefore = lows.slice(Math.max(0, i - 5), i).reduce((a, b) => a + b, 0) / Math.min(5, i);
+            const amplitude = (avgBefore - lows[i]) / avgBefore;
+            
+            if (hasRequiredHigherLows && amplitude >= detectionSettings.minAmplitude) {
+                pivots.push({
+                    index: i,
+                    price: lows[i],
+                    type: 'Suporte',
+                    amplitude: amplitude,
+                    confirmation: true
+                });
+            }
+        }
+    }
+    
+    return pivots;
+}
+
+function classifyPivotsEnhanced(pivots, type, candles, timeframe) {
+    const classified = [];
+    
+    for (const pivot of pivots) {
+        let touches = 1;
+        let recentTouches = 0;
+        
+        for (let i = pivot.index + 1; i < candles.length; i++) {
+            const candle = candles[i];
+            const priceRange = pivot.price * PIVOT_POINTS_SETTINGS.priceTolerance;
+            
+            const touched = (type === 'Suporte' && candle.low <= pivot.price + priceRange && candle.low >= pivot.price - priceRange) ||
+                           (type === 'Resistência' && candle.high <= pivot.price + priceRange && candle.high >= pivot.price - priceRange);
+            
+            if (touched) {
+                touches++;
+                
+                // Verificar toques recentes
+                if (i >= candles.length - PIVOT_POINTS_SETTINGS.detection.confirmationCandles) {
+                    recentTouches++;
+                }
+            }
+        }
+        
+        classified.push({
+            price: pivot.price,
+            type: type,
+            touches: touches,
+            recentTouches: recentTouches,
+            index: pivot.index,
+            timeframe: timeframe,
+            amplitude: pivot.amplitude,
+            isConfirmed: recentTouches >= PIVOT_POINTS_SETTINGS.detection.confirmationCandles
+        });
+    }
+    
+    return classified;
+}
+
 function calculatePivotStrength(pivot, timeframe) {
     let baseStrength = 'Fraco';
     
     // Baseado no número de toques
-    if (pivot.touches >= 4) {
+    if (pivot.touches >= 5) {
         baseStrength = 'Muito Forte';
-    } else if (pivot.touches >= 3) {
+    } else if (pivot.touches >= 4) {
         baseStrength = 'Forte';
-    } else if (pivot.touches >= 2) {
+    } else if (pivot.touches >= 3) {
         baseStrength = 'Moderado';
+    } else if (pivot.touches >= 2) {
+        baseStrength = 'Fraco';
     }
     
     // Ajustar baseado no timeframe
     const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
     
     if (timeframeWeight >= 3.0 && baseStrength !== 'Fraco') {
-        // Upgrade de força para timeframes maiores
         if (baseStrength === 'Moderado') return 'Forte';
         if (baseStrength === 'Forte') return 'Muito Forte';
+    }
+    
+    // Considerar amplitude para pivots fracos
+    if (baseStrength === 'Fraco' && pivot.amplitude >= 0.005) {
+        baseStrength = 'Moderado';
     }
     
     return baseStrength;
@@ -3997,7 +3882,6 @@ function findNearestPivotMultiTimeframe(pivots, currentPrice, isSupport) {
     for (const pivot of pivots) {
         const distance = Math.abs(currentPrice - pivot.price);
         
-        // Aplicar peso do timeframe na distância
         const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0;
         const adjustedDistance = distance / timeframeWeight;
         
@@ -4025,89 +3909,13 @@ function checkTestingPivotMultiTimeframe(currentPrice, allPivots) {
                 timeframe: pivot.timeframe,
                 touches: pivot.touches,
                 distance: Math.abs(currentPrice - pivot.price),
-                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0
+                timeframeStrength: PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[pivot.timeframe] || 1.0,
+                isTesting: true
             };
         }
     }
     
     return null;
-}
-
-function findPivotHighs(highs, minDistance) {
-    const pivots = [];
-    
-    for (let i = minDistance; i < highs.length - minDistance; i++) {
-        let isPivot = true;
-        
-        for (let j = i - minDistance; j <= i + minDistance; j++) {
-            if (j !== i && highs[j] > highs[i]) {
-                isPivot = false;
-                break;
-            }
-        }
-        
-        if (isPivot) {
-            pivots.push({
-                index: i,
-                price: highs[i],
-                type: 'Resistência'
-            });
-        }
-    }
-    
-    return pivots;
-}
-
-function findPivotLows(lows, minDistance) {
-    const pivots = [];
-    
-    for (let i = minDistance; i < lows.length - minDistance; i++) {
-        let isPivot = true;
-        
-        for (let j = i - minDistance; j <= i + minDistance; j++) {
-            if (j !== i && lows[j] < lows[i]) {
-                isPivot = false;
-                break;
-            }
-        }
-        
-        if (isPivot) {
-            pivots.push({
-                index: i,
-                price: lows[i],
-                type: 'Suporte'
-            });
-        }
-    }
-    
-    return pivots;
-}
-
-function classifyPivots(pivots, type, candles, timeframe) {
-    const classified = [];
-    
-    for (const pivot of pivots) {
-        let touches = 1;
-        for (let i = pivot.index + 1; i < candles.length; i++) {
-            const candle = candles[i];
-            const priceRange = pivot.price * PIVOT_POINTS_SETTINGS.priceTolerance;
-            
-            if ((type === 'Suporte' && candle.low <= pivot.price + priceRange && candle.low >= pivot.price - priceRange) ||
-                (type === 'Resistência' && candle.high <= pivot.price + priceRange && candle.high >= pivot.price - priceRange)) {
-                touches++;
-            }
-        }
-        
-        classified.push({
-            price: pivot.price,
-            type: type,
-            touches: touches,
-            index: pivot.index,
-            timeframe: timeframe
-        });
-    }
-    
-    return classified;
 }
 
 // =====================================================================
@@ -4647,7 +4455,7 @@ function getDefaultTargets(price, isBullish) {
 }
 
 // =====================================================================
-// 🚀 FUNÇÃO ESPECIAL PARA MENSAGEM DE INICIALIZAÇÃO
+// 🚀 FUNÇÃO ESPECIAL PARA MENSAGEM DE INICIALIZAÇÃO - AJUSTADA
 // =====================================================================
 
 async function sendInitializationMessage(allSymbols) {
@@ -4655,33 +4463,16 @@ async function sendInitializationMessage(allSymbols) {
         const brazilTime = getBrazilianDateTime();
 
         const message = `
-🚀 <b>TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES</b>
+🚀 <b>TITANIUM ATIVADO!</b>
 
 ${brazilTime.full}
-🧠 RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}
-📊 Stochastic 1h: Nova configuração 14,3,3 (8 pontos)
-📈 Volume 3m: Detecção Robusta (EMA + Z-Score Adaptativo + VPT)
-🎯 Foco em: Volume Robusto, LSR Binance, RSI ajustado, Pivot Points Multi-TF, Funding Rate
-🔧 LSR: Apenas Binance API (com percentual de mudança)
-🔧 Volume: Média Móvel Exponencial (EMA), Z-Score Adaptativo, Volume-Price Trend
-🔧 Pivot Points: Multi-timeframe (15m, 1h, 4h) com pesos diferenciados
-🔧 Funding Rate: Emojis coloridos para visualização rápida
-<b>🆕 NOVO: Stochastic Tendência 12h/Diário (5.3.3)</b>
-• Agora mostra cruzamentos e valores do Stochastic em timeframes maiores
-• Informa data/hora exata quando a linha K virou para cima/baixo da linha D
-• Análise de tendência maior para confirmar setups
-<b>🆕 ATUALIZADO: Alertas Específicos para Pivôs</b>
-• "REVERSÃO" ou "FALSO ROMPIMENTO" quando batendo em pivot de resistência
-• "REVERSÃO/COMPRA" quando próximo de suporte
-• "EXAUSTÃO" ou "FALSO ROMPIMENTO" quando batendo em pivot de suporte
-• "EXAUSTÃO/VENDA" quando próximo de resistência
-🔧 by @J4Rviz.
-
-<b>⚠️ NOVO SISTEMA DE CLASSIFICAÇÃO:</b>
-• Volume Score ≥ 0.4: Alerta de COMPRA/VENDA com info do pivot
-• Volume Score < 0.4: "IA ANALISANDO..." com análise específica do pivot
-• <b>ANÁLISE ESPECÍFICA:</b> Agora considera pivôs fortes/fracos na mensagem
-• <b>INFORMAÇÕES STOCHASTIC:</b> Valores K/D e data/hora do último cruzamento
+📊 Sistema aprimorado com:
+• Análise de Pivot Points Multi-Timeframe
+• Detecção Robusta de Volume (3m)
+• Stochastic Tendência 12h/Diário
+• Sistema de Risco Avançado
+• Aprendizado Automático
+✨ by @J4Rviz
         `;
 
         console.log('\n📤 ENVIANDO MENSAGEM DE INICIALIZAÇÃO...');
@@ -4734,7 +4525,7 @@ ${brazilTime.full}
         if (!success) {
             console.log('📋 Mensagem que seria enviada:');
             console.log('\n' + '='.repeat(60));
-            console.log('🚀 TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES');
+            console.log('🚀 TITANIUM ATIVADO!');
             console.log(`⏰ ${brazilTime.full}`);
             console.log('='.repeat(60) + '\n');
         }
@@ -4872,7 +4663,6 @@ async function getRSI1h(symbol) {
 
 async function checkVolume(symbol) {
     try {
-        // Usar a nova função robusta de detecção de volume
         const volumeAnalysis = await checkVolumeRobust(symbol);
         return volumeAnalysis;
     } catch (error) {
@@ -4903,13 +4693,8 @@ async function checkVolatility(symbol) {
     }
 }
 
-// =====================================================================
-// 🔄 FUNÇÃO checkLSR MODIFICADA - APENAS LSR DA BINANCE
-// =====================================================================
-
 async function checkLSR(symbol, isBullish) {
     try {
-        // Usar APENAS o LSR da Binance
         const binanceLSR = await getBinanceLSRValue(symbol, '15m');
         
         if (!binanceLSR || binanceLSR.lsrValue === null) {
@@ -4927,7 +4712,6 @@ async function checkLSR(symbol, isBullish) {
         const isRising = binanceLSR.isRising;
         const percentChange = binanceLSR.percentChange;
         
-        // Critérios ajustados para usar apenas LSR Binance
         const isValid = isBullish ? 
             lsrValue <= LSR_BUY_THRESHOLD :
             lsrValue > LSR_SELL_THRESHOLD;
@@ -4959,7 +4743,6 @@ async function checkLSR(symbol, isBullish) {
     }
 }
 
-// ATUALIZADO: Função checkStochastic com nova configuração
 async function checkStochastic(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '1h', 30);
@@ -5032,67 +4815,21 @@ async function checkStochastic4h(symbol, isBullish) {
             return {
                 isValid: previous.k <= previous.d && current.k > current.d,
                 kValue: current.k,
-                dValue: current.d
+                dValue: current.d,
+                kPrevious: previous.k,
+                dPrevious: previous.d
             };
         } else {
             return {
                 isValid: previous.k >= previous.d && current.k < current.d,
                 kValue: current.k,
-                dValue: current.d
+                dValue: current.d,
+                kPrevious: previous.k,
+                dPrevious: previous.d
             };
         }
     } catch (error) {
         return { isValid: false };
-    }
-}
-
-async function checkCCI4h(symbol, isBullish) {
-    try {
-        const candles = await getCandlesCached(symbol, '4h', 50);
-        if (candles.length < CCI_4H_SETTINGS.period + 10) return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
-
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
-
-        const cciValues = CCI.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: CCI_4H_SETTINGS.period
-        });
-
-        if (!cciValues || cciValues.length === 0) return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
-
-        const latestCCI = cciValues[cciValues.length - 1];
-
-        const cciForMA = cciValues.slice(-CCI_4H_SETTINGS.maPeriod);
-        const cciMA = cciForMA.reduce((sum, value) => sum + value, 0) / cciForMA.length;
-
-        const isValid = isBullish ?
-            latestCCI > cciMA :
-            latestCCI < cciMA;
-
-        return {
-            value: latestCCI,
-            maValue: cciMA,
-            isValid: isValid,
-            deviation: Math.abs(latestCCI - cciMA)
-        };
-    } catch (error) {
-        return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
     }
 }
 
@@ -5156,16 +4893,14 @@ async function checkFundingRate(symbol, isBullish) {
 
         const fundingRate = parseFloat(data[0].fundingRate);
         
-        // Verificar tendência
         let isRising = false;
         if (data.length >= 2) {
             const previousRate = parseFloat(data[1].fundingRate);
             isRising = fundingRate > previousRate;
         }
         
-        // Critério simplificado - apenas verificar se é favorável
         const isFavorable = isBullish ? fundingRate < 0 : fundingRate > 0;
-        const isValid = isFavorable; // Apenas precisa ser favorável
+        const isValid = isFavorable;
 
         return {
             isValid: isValid,
@@ -5184,7 +4919,7 @@ async function checkFundingRate(symbol, isBullish) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM AS ALTERAÇÕES E STOCHASTIC
+// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
@@ -5192,7 +4927,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     let details = [];
     let failedChecks = [];
 
-    // 1. Volume (ATUALIZADO: usando análise robusta)
     const volumeData = marketData.volume?.robustData;
     if (volumeData && volumeData.combinedScore >= 0.5) {
         const volumeScore = Math.min(QUALITY_WEIGHTS.volume,
@@ -5204,7 +4938,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Vol 3m: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
     }
 
-    // 2. Volatilidade
     if (marketData.volatility && marketData.volatility.isValid) {
         const volScore = QUALITY_WEIGHTS.volatility;
         score += volScore;
@@ -5213,7 +4946,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Volatilidade 15m: ${marketData.volatility?.rawVolatility.toFixed(2) || 0}% < ${VOLATILITY_THRESHOLD}%`);
     }
 
-    // 3. LSR (APENAS BINANCE)
     if (marketData.lsr && marketData.lsr.isValid) {
         const lsrScore = QUALITY_WEIGHTS.lsr;
         score += lsrScore;
@@ -5223,15 +4955,11 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`LSR Binance: ${marketData.lsr?.lsrRatio?.toFixed(3) || 0} ${isBullish ? '>' : '≤'} ${LSR_BUY_THRESHOLD}`);
     }
 
-    // 4. RSI (ATUALIZADO: novos limites)
     if (marketData.rsi) {
         const rsiValue = marketData.rsi.value;
         let rsiScore = 0;
 
-        if (rsiValue < 25 || rsiValue > 75) {
-            failedChecks.push(`RSI 1h: ${rsiValue.toFixed(1)} (EXTREMO - Padrão PERDEDOR)`);
-            rsiScore = 0;
-        } else if (isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) {
+        if (isBullish && rsiValue >= 25 && rsiValue <= RSI_BUY_MAX) {
             rsiScore = QUALITY_WEIGHTS.rsi;
             details.push(` RSI 1h: ${rsiScore}/${QUALITY_WEIGHTS.rsi} (${rsiValue.toFixed(1)} ≤ ${RSI_BUY_MAX} Ideal para compra)`);
         } else if (!isBullish && rsiValue >= RSI_SELL_MIN && rsiValue <= 75) {
@@ -5243,7 +4971,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         score += rsiScore;
     }
 
-    // 5. EMA Alignment
     if (marketData.ema) {
         const isEmaValid = (isBullish && marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingUp) ||
             (!isBullish && !marketData.ema.isAboveEMA55 && marketData.ema.isEMA13CrossingDown);
@@ -5257,7 +4984,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         }
     }
 
-    // 6. Stochastic 1h (ATUALIZADO: 8 pontos, nova configuração)
     if (marketData.stoch && marketData.stoch.isValid) {
         const stochScore = QUALITY_WEIGHTS.stoch1h;
         score += stochScore;
@@ -5267,26 +4993,15 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Stoch 1h: Sem cruzamento ${isBullish ? 'bullish' : 'bearish'} (K ${isBullish ? '≤' : '≥'} D)`);
     }
 
-    // 7. Stochastic 4h
     if (marketData.stoch4h && marketData.stoch4h.isValid) {
         const stoch4hScore = QUALITY_WEIGHTS.stoch4h;
         score += stoch4hScore;
-        details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h} ${isBullish ? 'bullish' : 'bearish'} `);
+        const direction = isBullish ? 'K > D (cruzamento bullish)' : 'K < D (cruzamento bearish)';
+        details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h} ${direction}`);
     } else {
-        failedChecks.push(`Stoch 4h: ${isBullish ? 'bullish' : 'bearish'} `);
+        failedChecks.push(`Stoch 4h: Sem cruzamento ${isBullish ? 'bullish' : 'bearish'}`);
     }
 
-    // 8. CCI 4h
-    if (marketData.cci4h && marketData.cci4h.isValid) {
-        const cci4hScore = QUALITY_WEIGHTS.cci4h;
-        score += cci4hScore;
-        const deviation = marketData.cci4h.deviation.toFixed(2);
-        details.push(` CCI 4h: ${cci4hScore}/${QUALITY_WEIGHTS.cci4h} (${marketData.cci4h.value.toFixed(2)} ${isBullish ? '>' : '<'} ${marketData.cci4h.maValue.toFixed(2)} MMS, dev: ${deviation})`);
-    } else {
-        failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
-    }
-
-    // 9. Stochastic 12h (NOVO)
     if (marketData.stochastic12h) {
         const stoch12h = marketData.stochastic12h;
         let stoch12hScore = 0;
@@ -5298,19 +5013,19 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
             
             if ((isBullish && stoch12h.kValue > stoch12h.dValue) ||
                 (!isBullish && stoch12h.kValue < stoch12h.dValue)) {
-                stoch12hScore = 6;
-                stoch12hDetail = `${stoch12hScore}/6 (Tendência ${isBullish ? 'bullish' : 'bearish'} confirmada K:${kValue} > D:${dValue})`;
+                stoch12hScore = QUALITY_WEIGHTS.stochastic12h;
+                stoch12hDetail = `${stoch12hScore}/${QUALITY_WEIGHTS.stochastic12h} (Tendência ${isBullish ? 'bullish' : 'bearish'} confirmada K:${kValue} > D:${dValue})`;
                 
                 if (stoch12h.lastCross) {
                     stoch12hDetail += ` | Cruzamento ${stoch12h.lastCross.direction} às ${stoch12h.lastCross.time}`;
                 }
             } else {
                 stoch12hScore = 2;
-                stoch12hDetail = `${stoch12hScore}/6 (Sem tendência clara K:${kValue} ${isBullish ? '≤' : '≥'} D:${dValue})`;
+                stoch12hDetail = `${stoch12hScore}/${QUALITY_WEIGHTS.stochastic12h} (Sem tendência clara K:${kValue} ${isBullish ? '≤' : '≥'} D:${dValue})`;
                 failedChecks.push(`Stoch 12h: Tendência não confirmada`);
             }
         } else {
-            stoch12hDetail = `0/6 (Dados insuficientes)`;
+            stoch12hDetail = `0/${QUALITY_WEIGHTS.stochastic12h} (Dados insuficientes)`;
             failedChecks.push(`Stoch 12h: Dados insuficientes`);
         }
         
@@ -5318,7 +5033,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Stoch 12h (5.3.3): ${stoch12hDetail}`);
     }
 
-    // 10. Stochastic Diário (NOVO)
     if (marketData.stochasticDaily) {
         const stochDaily = marketData.stochasticDaily;
         let stochDailyScore = 0;
@@ -5330,19 +5044,19 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
             
             if ((isBullish && stochDaily.kValue > stochDaily.dValue) ||
                 (!isBullish && stochDaily.kValue < stochDaily.dValue)) {
-                stochDailyScore = 8;
-                stochDailyDetail = `${stochDailyScore}/8 (TENDÊNCIA FORTE ${isBullish ? 'BULLISH' : 'BEARISH'} K:${kValue} > D:${dValue})`;
+                stochDailyScore = QUALITY_WEIGHTS.stochasticDaily;
+                stochDailyDetail = `${stochDailyScore}/${QUALITY_WEIGHTS.stochasticDaily} (TENDÊNCIA FORTE ${isBullish ? 'BULLISH' : 'BEARISH'} K:${kValue} > D:${dValue})`;
                 
                 if (stochDaily.lastCross) {
                     stochDailyDetail += ` | Cruzamento ${stochDaily.lastCross.direction} às ${stochDaily.lastCross.time}`;
                 }
             } else {
                 stochDailyScore = 1;
-                stochDailyDetail = `${stochDailyScore}/8 (TENDÊNCIA CONTRÁRIA K:${kValue} ${isBullish ? '≤' : '≥'} D:${dValue})`;
+                stochDailyDetail = `${stochDailyScore}/${QUALITY_WEIGHTS.stochasticDaily} (TENDÊNCIA CONTRÁRIA K:${kValue} ${isBullish ? '≤' : '≥'} D:${dValue})`;
                 failedChecks.push(`Stoch Diário: Tendência contrária em timeframe maior`);
             }
         } else {
-            stochDailyDetail = `0/8 (Dados insuficientes)`;
+            stochDailyDetail = `0/${QUALITY_WEIGHTS.stochasticDaily} (Dados insuficientes)`;
             failedChecks.push(`Stoch Diário: Dados insuficientes`);
         }
         
@@ -5350,7 +5064,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Stoch Diário (5.3.3): ${stochDailyDetail}`);
     }
 
-    // 11. Open Interest
     if (marketData.oi && marketData.oi.isValid) {
         const oiScore = QUALITY_WEIGHTS.oi;
         score += oiScore;
@@ -5359,13 +5072,11 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`OI: Tendência ${marketData.oi?.trend || 'indefinida'} não confirma`);
     }
 
-    // 12. Funding Rate
     if (marketData.funding && marketData.funding.isValid) {
         const fundingScore = QUALITY_WEIGHTS.funding;
         score += fundingScore;
         const fundingPercent = (marketData.funding.raw * 100).toFixed(5);
         
-        // Determinar emojis para funding rate
         let fundingRateEmoji = '';
         if (marketData.funding.raw <= -0.002) fundingRateEmoji = '🟢🟢🟢';
         else if (marketData.funding.raw <= -0.001) fundingRateEmoji = '🟢🟢';
@@ -5384,7 +5095,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Funding Rate: ${isBullish ? 'Não negativo' : 'Não positivo'} suficiente`);
     }
 
-    // 13. Breakout Risk
     if (marketData.breakoutRisk) {
         let breakoutScore = 0;
         let breakoutDetail = '';
@@ -5415,7 +5125,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Risco Rompimento: ${breakoutDetail}`);
     }
 
-    // 14. Support/Resistance
     if (marketData.supportResistance) {
         let srScore = 0;
         let srDetail = '';
@@ -5450,7 +5159,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Distância S/R: ${srDetail}`);
     }
 
-    // 15. Pivot Points (ATUALIZADO: Com diferenciação de timeframe)
     if (marketData.pivotPoints) {
         let pivotScore = 0;
         let pivotDetail = '';
@@ -5464,29 +5172,23 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
             const timeframeWeight = PIVOT_POINTS_SETTINGS.timeframeStrengthWeights[timeframe] || 1.0;
             const safeDistance = PIVOT_POINTS_SETTINGS.safeDistanceMultipliers[pivotStrength] || 1.0;
             
-            // Calcular score baseado na distância relativa à distância segura
             const distanceRatio = distance / safeDistance;
             
             if (distanceRatio >= 1.5) {
-                // Muito longe - ponto positivo
                 pivotScore = QUALITY_WEIGHTS.pivotPoints;
                 pivotDetail = `${pivotScore}/${QUALITY_WEIGHTS.pivotPoints} (Excelente distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% > ${safeDistance.toFixed(1)}%)`;
             } else if (distanceRatio >= 1.0) {
-                // Distância segura
                 pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.8;
                 pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Boa distância do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% ≥ ${safeDistance.toFixed(1)}%)`;
             } else if (distanceRatio >= 0.5) {
-                // Próximo mas não crítico
                 pivotScore = QUALITY_WEIGHTS.pivotPoints * 0.4;
                 pivotDetail = `${pivotScore.toFixed(1)}/${QUALITY_WEIGHTS.pivotPoints} (Próximo do pivot ${pivotStrength} ${timeframe}: ${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`;
             } else {
-                // Muito próximo
                 pivotScore = 0;
                 pivotDetail = `0/${QUALITY_WEIGHTS.pivotPoints} (MUITO PRÓXIMO DO PIVOT ${pivotStrength.toUpperCase()} ${timeframe.toUpperCase()}!)`;
                 failedChecks.push(`Pivot ${pivotStrength} ${timeframe}: Muito próximo (${distance.toFixed(2)}% < ${safeDistance.toFixed(1)}%)`);
             }
             
-            // Penalizar pivots fortes muito próximos
             if (timeframeWeight >= 2.0 && distanceRatio < 0.8) {
                 pivotScore = Math.max(0, pivotScore - 2);
                 pivotDetail += ` | PIVOT FORTE PRÓXIMO`;
@@ -5639,13 +5341,6 @@ async function monitorSymbol(symbol) {
 
         if (!isBullish && !isBearish) return null;
 
-        // FILTRO CRÍTICO: EVITAR RSI EXTREMO
-        if (rsiData.value < 25 || rsiData.value > 75) {
-            console.log(`❌ ${symbol}: RSI extremo detectado (${rsiData.value.toFixed(1)}) - Padrão PERDEDOR`);
-            return null;
-        }
-
-        // FILTRO ADICIONAL: RSI com novos limites
         if (isBullish && rsiData.value > RSI_BUY_MAX) {
             console.log(`❌ ${symbol}: RSI alto para compra (${rsiData.value.toFixed(1)} > ${RSI_BUY_MAX})`);
             return null;
@@ -5658,22 +5353,25 @@ async function monitorSymbol(symbol) {
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
         const pivotPointsData = await analyzePivotPoints(symbol, emaData.currentPrice, isBullish);
 
-        // NOVO: Adicionar análise do Stochastic 12h e Diário
         const stoch12hData = await checkStochasticWithTimeframe(symbol, isBullish, STOCHASTIC_12H_SETTINGS);
         const stochDailyData = await checkStochasticWithTimeframe(symbol, isBullish, STOCHASTIC_DAILY_SETTINGS);
 
-        const [volumeData, volatilityData, lsrData, stochData, stoch4hData, cci4hData, oiData, fundingData] = await Promise.all([
+        const [volumeData, volatilityData, lsrData, stochData, stoch4hData, oiData, fundingData] = await Promise.all([
             checkVolume(symbol),
             checkVolatility(symbol),
             checkLSR(symbol, isBullish),
             checkStochastic(symbol, isBullish),
             checkStochastic4h(symbol, isBullish),
-            checkCCI4h(symbol, isBullish),
             checkOpenInterest(symbol, isBullish),
             checkFundingRate(symbol, isBullish)
         ]);
 
         if (!lsrData.isValid) return null;
+        
+        if (!stoch4hData.isValid) {
+            console.log(`❌ ${symbol}: Stochastic 4h não confirmado para ${isBullish ? 'compra' : 'venda'}`);
+            return null;
+        }
 
         const marketData = {
             volume: volumeData,
@@ -5682,7 +5380,6 @@ async function monitorSymbol(symbol) {
             rsi: rsiData,
             stoch: stochData,
             stoch4h: stoch4hData,
-            cci4h: cci4hData,
             oi: oiData,
             funding: fundingData,
             ema: {
@@ -5693,8 +5390,8 @@ async function monitorSymbol(symbol) {
             supportResistance: supportResistanceData,
             breakoutRisk: supportResistanceData?.breakoutRisk,
             pivotPoints: pivotPointsData,
-            stochastic12h: stoch12hData, // NOVO
-            stochasticDaily: stochDailyData // NOVO
+            stochastic12h: stoch12hData,
+            stochasticDaily: stochDailyData
         };
 
         const qualityScore = await calculateSignalQuality(symbol, isBullish, marketData);
@@ -5727,7 +5424,6 @@ async function monitorSymbol(symbol) {
         const pivotStrength = pivotInfo?.strength || 'N/A';
         const pivotTimeframe = pivotInfo?.timeframe || 'N/A';
 
-        // NOVO: Informações do Stochastic 12h e Diário
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
@@ -5755,7 +5451,6 @@ async function monitorSymbol(symbol) {
             }
         }
 
-        // Obter funding rate com emojis
         const fundingRate = fundingData.raw || 0;
         let fundingRateEmoji = '';
         if (fundingRate <= -0.002) fundingRateEmoji = '🟢🟢🟢';
@@ -5770,7 +5465,6 @@ async function monitorSymbol(symbol) {
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
             : 'Indisponível';
 
-        // Informações de volume robusto
         const volumeRobustData = volumeData.robustData;
         const volumeScore = volumeRobustData?.combinedScore?.toFixed(2) || '0.00';
         const volumeClassification = volumeRobustData?.classification || 'NORMAL';
@@ -5785,6 +5479,7 @@ async function monitorSymbol(symbol) {
         console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
         console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   📊 Stoch 1h: ${stochData.isValid ? '✅' : '❌'} (K:${stochData.kValue?.toFixed(1) || 'N/A'}, D:${stochData.dValue?.toFixed(1) || 'N/A'})`);
+        console.log(`   📊 Stoch 4h: ${stoch4hData.isValid ? '✅' : '❌'} (K:${stoch4hData.kValue?.toFixed(1) || 'N/A'}, D:${stoch4hData.dValue?.toFixed(1) || 'N/A'})`);
         console.log(`   📊 Stoch 12h: ${stoch12hInfo}`);
         console.log(`   📊 Stoch Diário: ${stochDailyInfo}`);
         console.log(`   💰 Funding: ${fundingRateText}`);
@@ -5854,13 +5549,11 @@ async function mainBotLoop() {
         return;
     }
 
-    console.log(`\n TITANIUM ATUALIZADO - NOVAS CONFIGURAÇÕES`);
+    console.log(`\n TITANIUM ATIVADO!`);
     console.log(` ${allSymbols.length} ativos Binance Futures`);
-    console.log(` RSI: Compra até ${RSI_BUY_MAX}, Venda acima de ${RSI_SELL_MIN}`);
-    console.log(` Stochastic: Agora com análise 12h/Diário (5.3.3)`);
-    console.log(`  Score < 0.4: "🤖 IA ANALISANDO..." agora com tipo específico (Reversão/Compra ou Exaustão/Correção)`);
-    console.log(`  🆕 NOVO: Informações detalhadas do Stochastic com data/hora dos cruzamentos`);
-    console.log(`  🆕 ATUALIZADO: Alertas específicos para pivôs (Reversão/Falso Rompimento)`);
+    console.log(` Sistema aprimorado com análise avançada de Pivot Points`);
+    console.log(` Sistema de aprendizado automático ativado`);
+    console.log(` Bot iniciando...`);
 
     await sendInitializationMessage(allSymbols);
 
@@ -6003,10 +5696,6 @@ ${now.full}
 • <b>Fator de Lucro:</b> ${report.profitFactor}
 • <b>Lucro Médio:</b> ${report.avgProfit}% | <b>Perda Média:</b> ${report.avgLoss}%
 
-<b>📊 Análise RSI (${RSI_BUY_MAX}/${RSI_SELL_MIN}):</b>
-• Win Rate RSI Extremo: ${report.rsiAnalysis.extremeWinRate}%
-• Win Rate RSI Ideal: ${report.rsiAnalysis.idealWinRate}%
-
 <b>📈 Análise Stochastic Tendência:</b>
 • Win Rate com Tendência: ${report.stochasticAnalysis.trendWinRate}%
 • Win Rate contra Tendência: ${report.stochasticAnalysis.againstTrendWinRate}%
@@ -6035,18 +5724,12 @@ ${worstPatterns || 'Nenhum padrão identificado ainda'}
     }
 }
 
-// =====================================================================
-// 🆕 FUNÇÃO PARA RESETAR APRENDIZADO
-// =====================================================================
-
 function resetLearningData() {
     try {
         console.log('🔄 RESETANDO DADOS DE APRENDIZADO...');
         
-        // Resetar sistema de aprendizado
         learningSystem = new AdvancedLearningSystem();
         
-        // Criar arquivo de aprendizado limpo
         const learningFile = path.join(LEARNING_DIR, 'learning_data.json');
         
         const cleanData = {
@@ -6091,12 +5774,11 @@ async function startBot() {
         if (!fs.existsSync(LEARNING_DIR)) fs.mkdirSync(LEARNING_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log(' TITANIUM - ATUALIZADO COM NOVAS CONFIGURAÇÕES');
-        console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
-        console.log(` Stochastic 1h: 14,3,3 (8 pontos)`);
-        console.log(` Stochastic 12h/Diário: 5.3.3 (Análise de tendência maior)`);
-        console.log(` Análise IA: Agora especifica "REVERSÃO" ou "FALSO ROMPIMENTO" para pivôs de resistência`);
-        console.log(` 🆕 NOVO: Mostra data/hora quando K virou para cima/baixo da linha D`);
+        console.log(' TITANIUM - ATIVADO COM ANÁLISE DE PIVOT POINTS APRIMORADA');
+        console.log(` Sistema de detecção de volume robusto (3m)`);
+        console.log(` Análise multi-timeframe de pivot points`);
+        console.log(` Sistema de aprendizado automático`);
+        console.log(` Bot configurado e pronto para operar`);
         console.log('='.repeat(80) + '\n');
 
         try {
@@ -6106,7 +5788,6 @@ async function startBot() {
             process.exit(1);
         }
 
-        // Verificar se deve resetar o aprendizado
         const args = process.argv.slice(2);
         if (args.includes('--reset-learning')) {
             console.log('🔄 Opção de reset detectada...');
@@ -6129,7 +5810,7 @@ async function startBot() {
         }
 
         global.riskLayer = new SophisticatedRiskLayer();
-        console.log('🛡️  Risk Layer Sofisticado ativado (com detecção de RSI extremo e tendência Stochastic)');
+        console.log('🛡️  Risk Layer Sofisticado ativado');
 
         console.log('✅ Tudo pronto! Iniciando monitoramento...');
 
