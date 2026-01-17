@@ -6,95 +6,95 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
 
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO REVISTAS ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.28,           // Reduzido de 0.35 (mais sinais)
-    combinedScore: 0.32,           // Reduzido de 0.40
-    classification: 'MODERADO-BAIXO', // Mais permissivo
-    requireConfirmation: false,    // Remover confirmação obrigatória
-    minZScore: 0.3,               // Reduzido de 0.4
-    requireVolumeTrend: false     // Não exigir tendência clara
+    absoluteScore: 0.32,           // ↑ de 0.28 (evita ruído)
+    combinedScore: 0.36,           // ↑ de 0.32
+    classification: 'MODERADO',     // ↑ de 'MODERADO-BAIXO' (exige volume mais sólido)
+    requireConfirmation: true,      // ↑ reativa confirmação (reduz falsos)
+    minZScore: 0.4,                // ↑ de 0.3
+    requireVolumeTrend: true        // ↑ exige tendência de volume (confirmação adicional)
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS - MAIS AGRESSIVAS ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS SELETIVAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.5,           // Reduzido de 1.8 (mais sinais)
-    minThreshold: 1.3,            // Reduzido de 1.7
-    maxThreshold: 2.8,            // Reduzido de 3.2
-    volatilityMultiplier: 0.5,    // Aumentado de 0.3 (mais adaptativo)
+    baseThreshold: 1.7,            // ↑ de 1.5 (menos ruído)
+    minThreshold: 1.5,             // ↑ de 1.3
+    maxThreshold: 3.0,             // mantém
+    volatilityMultiplier: 0.5,
     useAdaptive: true,
-    adaptiveSensitivity: 0.85     // Mais sensível (era 0.7)
+    adaptiveSensitivity: 0.80      // ↓ de 0.85 (ligeiramente menos sensível)
 };
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 20,                // Reduzido de 24 (mais sensível)
-    emaAlpha: 0.3,                // Aumentado de 0.25 (peso maior no atual)
-    baseZScoreLookback: 40,       // Reduzido de 50
-    minZScoreLookback: 15,        // Reduzido de 20
-    maxZScoreLookback: 80,        // Reduzido de 100
-    zScoreThreshold: 1.5,         // Reduzido de 1.8 (mais sinais)
-    vptThreshold: 0.25,           // Reduzido de 0.40
-    minPriceMovement: 0.10,       // Reduzido de 0.15
-    requirePositiveCorrelation: false, // Mais flexível
-    combinedMultiplier: 1.05,     // Reduzido de 1.08
-    volumeWeight: 0.35,           // Aumentado de 0.30 (volume mais importante)
-    emaWeight: 0.30,              // Reduzido de 0.35
-    zScoreWeight: 0.25,           // Mantém
-    vptWeight: 0.10,              // Mantém
+    emaPeriod: 20,
+    emaAlpha: 0.3,
+    baseZScoreLookback: 40,
+    minZScoreLookback: 15,
+    maxZScoreLookback: 80,
+    zScoreThreshold: 1.6,          // ↑ de 1.5
+    vptThreshold: 0.30,            // ↑ de 0.25
+    minPriceMovement: 0.12,        // ↑ de 0.10
+    requirePositiveCorrelation: true, // ⚠️ CRUCIAL: só opera se alinhado com BTC
+    combinedMultiplier: 1.05,
+    volumeWeight: 0.35,
+    emaWeight: 0.30,
+    zScoreWeight: 0.25,
+    vptWeight: 0.10,
     minimumThresholds: {
-        combinedScore: 0.28,      // Reduzido de 0.35
-        emaRatio: 1.2,            // Reduzido de 1.4 (volume 20% acima da EMA)
-        zScore: 0.8,              // Reduzido de 1.0
-        classification: 'MODERADO-BAIXO' // Era 'MODERADO'
+        combinedScore: 0.32,       // ↑ de 0.28
+        emaRatio: 1.3,             // ↑ de 1.2
+        zScore: 0.9,               // ↑ de 0.8
+        classification: 'MODERADO' // ↑ de 'MODERADO-BAIXO'
     }
 };
 
-// === CONFIGURAÇÕES DE VOLATILIDADE - MENOS RESTRITIVO ===
-const VOLATILITY_PERIOD = 20;     // Reduzido de 25
+// === CONFIGURAÇÕES DE VOLATILIDADE ===
+const VOLATILITY_PERIOD = 20;
 const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.5; // Reduzido de 0.7 (aceita menos volatilidade)
+const VOLATILITY_THRESHOLD = 0.6; // ↑ de 0.5 (exige volatilidade mínima real)
 
-// === CONFIGURAÇÕES LSR OTIMIZADAS - MAIS SINAIS ===
+// === CONFIGURAÇÕES LSR ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.8;    // Aumentado de 2.6 (mais compras)
-const LSR_SELL_THRESHOLD = 2.9;   // Aumentado de 2.9 (menos vendas)
+const LSR_BUY_THRESHOLD = 2.7;     // ↓ de 2.8 (mais conservador na compra)
+const LSR_SELL_THRESHOLD = 3.0;    // ↑ de 2.9 (mais exigente na venda)
 
-// === CONFIGURAÇÕES RSI OTIMIZADAS - MAIS FLEXÍVEL ===
-const RSI_BUY_MAX = 62;           // Aumentado de 60 (mais compras)
-const RSI_SELL_MIN = 63;          // Reduzido de 67 (mais vendas)
+// === CONFIGURAÇÕES RSI ===
+const RSI_BUY_MAX = 60;            // ↓ de 62 (evita comprar em sobrecompra)
+const RSI_SELL_MIN = 65;           // ↑ de 63 (evita vender cedo demais)
 
-// === COOLDOWN REVISADO - MAIS OPERAÇÕES ===
+// === COOLDOWN ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 15 * 60 * 1000,   // Reduzido de 25min (era 25)
-    oppositeDirection: 5 * 60 * 1000, // Reduzido de 8min (era 8)
+    sameDirection: 20 * 60 * 1000,   // ↑ de 15min (evita overtrade)
+    oppositeDirection: 8 * 60 * 1000, // ↑ de 5min
     useDifferentiated: true,
-    symbolCooldown: 20 * 60 * 1000   // Reduzido de 30min (era 30)
+    symbolCooldown: 25 * 60 * 1000   // ↑ de 20min
 };
 
-// === QUALITY SCORE REVISADO - MENOS EXIGENTE ===
-const QUALITY_THRESHOLD = 70;     // Reduzido de 80
+// === QUALITY SCORE - MAIS EXIGENTE ===
+const QUALITY_THRESHOLD = 75;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
-    volume: 42,                    // Aumentado de 40 (volume mais importante)
-    oi: 1,                         // Reduzido de 2 (menos importante)
-    volatility: 7,                 // Reduzido de 9
-    lsr: 8,                        // Reduzido de 9
-    rsi: 18,                       // Aumentado de 16
-    emaAlignment: 10,              // Reduzido de 12
-    stoch1h: 10,                   // Reduzido de 12
-    stoch4h: 10,                   // Reduzido de 12
-    breakoutRisk: 10,              // Reduzido de 14
-    supportResistance: 12,         // Reduzido de 15
-    pivotPoints: 15,               // Reduzido de 18
-    funding: 2,                    // Reduzido de 3
-    stochastic12h: 8,              // Reduzido de 10
-    stochasticDaily: 8             // Reduzido de 10
+    volume: 45,                    // ↑ de 42 (volume ainda mais crítico)
+    oi: 1,
+    volatility: 8,                 // ↑ de 7
+    lsr: 9,                        // ↑ de 8
+    rsi: 20,                       // ↑ de 18
+    emaAlignment: 12,              // ↑ de 10
+    stoch1h: 11,                   // ↑ de 10
+    stoch4h: 11,                   // ↑ de 10
+    breakoutRisk: 12,              // ↑ de 10
+    supportResistance: 14,          // ↑ de 12
+    pivotPoints: 17,               // ↑ de 15
+    funding: 2,
+    stochastic12h: 10,             // ↑ de 8
+    stochasticDaily: 10            // ↑ de 8
 };
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
