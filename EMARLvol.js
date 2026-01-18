@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSy';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -61,7 +61,7 @@ const LSR_BUY_THRESHOLD = 2.7;
 const LSR_SELL_THRESHOLD = 3.0;
 
 // === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 64;
+const RSI_BUY_MAX = 62;
 const RSI_SELL_MIN = 32;
 
 // === COOLDOWN ===
@@ -72,15 +72,15 @@ const COOLDOWN_SETTINGS = {
     symbolCooldown: 25 * 60 * 1000
 };
 
-// === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 70;
+// === QUALITY SCORE -
+const QUALITY_THRESHOLD = 75;
 const QUALITY_WEIGHTS = {
-    volumeCross: 55,           // Peso para cruzamento de volume (critério principal)
+    volumeCross: 50,           // Peso para cruzamento de volume (critério principal)
     oi: 1,
     volatility: 8,
     lsr: 12,
     rsi: 20,
-    funding: 2,
+    funding: 6,
     supportResistance: 14,
     pivotPoints: 17,
     breakoutRisk: 12
@@ -1508,7 +1508,7 @@ async function sendSignalAlertWithRisk(signal) {
         let adxInfo = '';
         if (adxData) {
             const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
-            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(Forte Tendência)' : '(Tendência Fraca)'} | +DI: ${adxData.plusDI.toFixed(1)} | -DI: ${adxData.minusDI.toFixed(1)}`;
+            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'}}`;
         } else {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
         }
@@ -1621,7 +1621,6 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 💲 Preço: $${signal.price.toFixed(6)}
 ⚠️ VOL: Score: ${volumeScore.toFixed(2)} - ${volumeClassification}
-• Dist. Suport/Resist: ${distancePercent}%
 ${fibInfo}
 ${adxInfo}
 ⚠️ LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|🔹RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
@@ -3665,7 +3664,7 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     if (score >= 85) {
         grade = "A✨";
         emoji = "🏆";
-    } else if (score >= 70) {
+    } else if (score >= 75) {
         grade = "B";
         emoji = "✅";
     } else if (score >= QUALITY_THRESHOLD) {
@@ -4047,36 +4046,7 @@ async function mainBotLoop() {
     }
 }
 
-// =====================================================================
-// 📊 FUNÇÕES FALTANTES
-// =====================================================================
 
-async function sendMarketRiskReport() {
-    try {
-        if (!global.riskLayer) return;
-
-        const marketRisk = global.riskLayer.getOverallMarketRisk();
-        const now = getBrazilianDateTime();
-
-        const message = `
-🛡️ <i>⚠️IA SENSITIVE - RISCO / VOLATILIDADE⚠️</i>
-${now.full}
-
-• <i>Nível de Risco Geral:</i> ${marketRisk.riskLevel} ${marketRisk.riskLevel === 'CRÍTICO' ? '🚨' : marketRisk.riskLevel === 'ALTO' ? '🔴' : marketRisk.riskLevel === 'MEDIANO' ? '🟡' : '🟢'}
-• <i>Score Médio de Risco:</i> ${marketRisk.averageRiskScore.toFixed(2)}/15
-• <i>Símbolos Monitorados:</i> ${marketRisk.monitoredSymbols}
-• <i>Horário:</I> ${now.full}
-
-<i>✨Titanium Risk Management by @J4Rviz✨</i>
-        `;
-
-        await sendTelegramAlert(message);
-        console.log('📊 Relatório de risco de mercado enviado');
-
-    } catch (error) {
-        console.error('Erro ao enviar relatório de risco:', error.message);
-    }
-}
 
 // =====================================================================
 // ▶️ INICIALIZAÇÃO
