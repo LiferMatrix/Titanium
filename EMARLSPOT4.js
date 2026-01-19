@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8p';
-const TELEGRAM_CHAT_ID = '-1002554';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -57,7 +57,7 @@ const VOLATILITY_TIMEFRAME = '10m';  // Reduzido de 15m para 10m
 const VOLATILITY_THRESHOLD = 0.4;    // Reduzido de 0.5 para 0.4
 
 // === CONFIGURAÇÕES RSI - MAIS SENSÍVEIS ===
-const RSI_BUY_MAX = 68;              // Aumentado de 64 para 68
+const RSI_BUY_MAX = 63;              // Aumentado de 64 para 68
 const RSI_SELL_MIN = 32;             // Reduzido de 62 para 32
 
 // === CONFIGURAÇÕES DE SENSIBILIDADE ===
@@ -86,17 +86,17 @@ const QUALITY_THRESHOLD = 65; // Reduzido de 70 para 65
 
 // === PESOS AJUSTADOS PARA MAIOR SENSIBILIDADE ===
 const QUALITY_WEIGHTS = {
-    volume: 30,           // Reduzido de 35 para 30
+    volume: 36,           // Reduzido de 35 para 30
     volatility: 10,       // Aumentado de 8 para 10
     rsi: 16,             // Aumentado de 14 para 16
     emaAlignment: 16,    // Aumentado de 14 para 16
     stoch1h: 10,         // Aumentado de 8 para 10
-    stoch4h: 5,          // Aumentado de 4 para 5
+    stoch4h: 8,          // Aumentado de 4 para 5
     cci4h: 8,            // Aumentado de 6 para 8
     breakoutRisk: 10,     // Reduzido de 15 para 10
     supportResistance: 10, // Reduzido de 14 para 10
     pivotPoints: 10,      // Reduzido de 14 para 10
-    btcCorrelation: 25,   // Aumentado de 18 para 25 (MAIOR FOCO)
+    btcCorrelation: 28,   // Aumentado de 18 para 25 (MAIOR FOCO)
     momentum: 5           // Novo: momentum rápido
 };
 
@@ -4965,7 +4965,7 @@ class AdaptiveSymbolGroupManager {
             const allSymbols = await fetchAllSpotSymbols();
 
             const filteredSymbols = allSymbols.filter(symbol => {
-                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN', 'MOVR'];
+                const blacklist = [  'UP', 'DOWN', ];
                 return !blacklist.some(term => symbol.includes(term));
             });
 
