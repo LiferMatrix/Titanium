@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6A';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -67,8 +67,8 @@ const LSR_BUY_THRESHOLD = 2.7;     // ↓ de 2.8 (mais conservador na compra)
 const LSR_SELL_THRESHOLD = 3.0;    // ↑ de 2.9 (mais exigente na venda)
 
 // === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 60;            // ↓ de 62 (evita comprar em sobrecompra)
-const RSI_SELL_MIN = 65;           // ↑ de 63 (evita vender cedo demais)
+const RSI_BUY_MAX = 62;            // ↓ de 62 (evita comprar em sobrecompra)
+const RSI_SELL_MIN = 32;           // ↑ de 63 (evita vender cedo demais)
 
 // === COOLDOWN ===
 const COOLDOWN_SETTINGS = {
@@ -84,7 +84,7 @@ const QUALITY_WEIGHTS = {
     volume: 45,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 1,
     volatility: 8,                 // ↑ de 7
-    lsr: 9,                        // ↑ de 8
+    lsr: 12,                        // ↑ de 8
     rsi: 20,                       // ↑ de 18
     emaAlignment: 12,              // ↑ de 10
     stoch1h: 11,                   // ↑ de 10
@@ -92,7 +92,7 @@ const QUALITY_WEIGHTS = {
     breakoutRisk: 12,              // ↑ de 10
     supportResistance: 14,          // ↑ de 12
     pivotPoints: 17,               // ↑ de 15
-    funding: 2,
+    funding: 7,
     stochastic12h: 10,             // ↑ de 8
     stochasticDaily: 10            // ↑ de 8
 };
@@ -5538,7 +5538,7 @@ class AdaptiveSymbolGroupManager {
             const allSymbols = await fetchAllFuturesSymbols();
 
             const filteredSymbols = allSymbols.filter(symbol => {
-                const blacklist = ['1000', 'BULL', 'BEAR', 'UP', 'DOWN', 'MOVR'];
+                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN',];
                 return !blacklist.some(term => symbol.includes(term));
             });
 
