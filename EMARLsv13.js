@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfs';
-const TELEGRAM_CHAT_ID = '-10019';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -2760,7 +2760,7 @@ async function sendSignalAlertWithRisk(signal) {
         let adxInfo = '';
         if (adxData) {
             const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
-            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(Forte Tendência)' : '(Tendência Fraca)'} | +DI: ${adxData.plusDI.toFixed(1)} | -DI: ${adxData.minusDI.toFixed(1)}`;
+            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'`;
         } else {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
         }
@@ -2907,7 +2907,6 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 💲 Preço: $${signal.price.toFixed(6)}
 ⚠️ VOL: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
-• Dist. Suport/Resist: ${distancePercent}%
 ${fibInfo}
 ${adxInfo}
 ⚠️ LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|🔹RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
