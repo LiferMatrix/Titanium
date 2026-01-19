@@ -2760,7 +2760,7 @@ async function sendSignalAlertWithRisk(signal) {
         let adxInfo = '';
         if (adxData) {
             const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
-            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'`;
+             adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'}`;
         } else {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
         }
