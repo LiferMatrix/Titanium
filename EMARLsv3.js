@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IO'; //Titanium Testes
-const TELEGRAM_CHAT_ID = '-100369';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium Testes
+const TELEGRAM_CHAT_ID = '-1003694937150';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -24,9 +24,9 @@ const VOLUME_MINIMUM_THRESHOLDS = {
 
 // === CONFIGURAÇÕES OTIMIZADAS - MAIS SELETIVAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.7,
-    minThreshold: 1.5,
-    maxThreshold: 3.0,
+    baseThreshold: 1.5,
+    minThreshold: 1.3,
+    maxThreshold: 2.7,
     volatilityMultiplier: 0.5,
     useAdaptive: true,
     adaptiveSensitivity: 0.80
@@ -64,19 +64,6 @@ const LSR_SELL_THRESHOLD = 3.0;
 const RSI_BUY_MAX = 62;
 const RSI_SELL_MIN = 32;
 
-// === NOVAS CONFIGURAÇÕES EMA CROSS 3M ===
-const EMA_CROSS_SETTINGS = {
-    timeframe: '3m',
-    ema13Period: 13,
-    ema34Period: 34,
-    ema55Period: 55,
-    candles: 100,
-    minCandles: 55,
-    // Critérios de confirmação
-    requireCloseAboveBelowEMA55: true,
-    requireVolumeConfirmation: false // Já temos o sistema de volume separado
-};
-
 // === COOLDOWN ===
 const COOLDOWN_SETTINGS = {
     sameDirection: 15 * 60 * 1000,
@@ -85,18 +72,16 @@ const COOLDOWN_SETTINGS = {
     symbolCooldown: 15 * 60 * 1000
 };
 
-// === QUALITY SCORE - ATUALIZADO PARA GATILHO ÚNICO ===
+// === QUALITY SCORE - ATUALIZADO PARA GATILHO ÚNICO (VOLUME) ===
 const QUALITY_THRESHOLD = 80;
 const QUALITY_WEIGHTS = {
-    dualTrigger: 50,           // Peso principal para gatilho duplo
-    volumeCross: 20,           // Peso reduzido (parte do gatilho duplo)
-    emaCross: 25,              // Peso reduzido (parte do gatilho duplo)
+    volumeTrigger: 55,           // Peso principal apenas para volume
     oi: 1,
     volatility: 8,
     lsr: 12,
     rsi: 20,
-    funding: 6,
-    supportResistance: 14,
+    funding: 8,
+    supportResistance: 18,
     pivotPoints: 17,
     breakoutRisk: 12
 };
@@ -177,10 +162,10 @@ const BREAKOUT_RISK_SETTINGS = {
 // === CONFIGURAÇÕES APRIMORADAS PARA PIVOT POINTS MULTI-TIMEFRAME ===
 const PIVOT_POINTS_SETTINGS = {
     timeframeStrengthWeights: {
-        '3m': 0.3,      // Reduzido: menos importância
-        '15m': 1.0,     // Base
-        '1h': 2.5,      // Aumentado: mais importante
-        '4h': 3.5,      // Aumentado: mais importante
+        '3m': 0.3,
+        '15m': 1.0,
+        '1h': 2.5,
+        '4h': 3.5,
         '1d': 5.0
     },
     safeDistanceMultipliers: {
@@ -191,7 +176,7 @@ const PIVOT_POINTS_SETTINGS = {
     },
     minDistance: 7,
     priceTolerance: 0.003,
-    analyzeTimeframes: ['15m', '1h', '4h'],  // Removido '3m' daqui
+    analyzeTimeframes: ['15m', '1h', '4h'],
     candlesPerTimeframe: {
         '15m': 100,
         '1h': 120,
@@ -223,167 +208,6 @@ const OI_HISTORY_SIZE = 20;
 const TARGET_PERCENTAGES = [1.5, 3.0, 5.0, 8.0, 12.0];
 const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
-
-// =====================================================================
-// 📊 NOVA FUNÇÃO PARA VERIFICAR CRUZAMENTO DE EMA 3M
-// =====================================================================
-
-async function checkEMACross3m(symbol) {
-    try {
-        const candles = await getCandlesCached(symbol, EMA_CROSS_SETTINGS.timeframe, 
-            EMA_CROSS_SETTINGS.candles);
-        
-        if (candles.length < EMA_CROSS_SETTINGS.minCandles) {
-            return {
-                isCrossingUp: false,
-                isCrossingDown: false,
-                isConfirmed: false,
-                details: 'Dados insuficientes',
-                ema13: null,
-                ema34: null,
-                ema55: null,
-                currentPrice: null
-            };
-        }
-        
-        const closes = candles.map(c => c.close);
-        
-        // Calcular EMAs
-        const ema13 = calculateEMA(closes, EMA_CROSS_SETTINGS.ema13Period);
-        const ema34 = calculateEMA(closes, EMA_CROSS_SETTINGS.ema34Period);
-        const ema55 = calculateEMA(closes, EMA_CROSS_SETTINGS.ema55Period);
-        
-        if (!ema13 || !ema34 || !ema55) {
-            return {
-                isCrossingUp: false,
-                isCrossingDown: false,
-                isConfirmed: false,
-                details: 'Erro cálculo EMA',
-                ema13: null,
-                ema34: null,
-                ema55: null,
-                currentPrice: null
-            };
-        }
-        
-        // Pegar valores atuais
-        const currentPrice = closes[closes.length - 1];
-        const currentEma13 = ema13[ema13.length - 1];
-        const currentEma34 = ema34[ema34.length - 1];
-        const currentEma55 = ema55[ema55.length - 1];
-        
-        // Pegar valores anteriores
-        const prevEma13 = ema13[ema13.length - 2];
-        const prevEma34 = ema34[ema34.length - 2];
-        
-        // Verificar cruzamentos
-        const isCrossingUp = prevEma13 <= prevEma34 && currentEma13 > currentEma34;
-        const isCrossingDown = prevEma13 >= prevEma34 && currentEma13 < currentEma34;
-        
-        // Verificar posição do preço em relação à EMA55
-        const isPriceAboveEMA55 = currentPrice > currentEma55;
-        const isPriceBelowEMA55 = currentPrice < currentEma55;
-        
-        // Confirmação final
-        let isConfirmed = false;
-        let details = '';
-        
-        if (isCrossingUp && EMA_CROSS_SETTINGS.requireCloseAboveBelowEMA55) {
-            if (isPriceAboveEMA55) {
-                isConfirmed = true;
-                details = `COMPRA: EMA13 (${currentEma13.toFixed(6)}) cruzou acima EMA34 (${currentEma34.toFixed(6)}), Preço (${currentPrice.toFixed(6)}) acima EMA55 (${currentEma55.toFixed(6)})`;
-            } else {
-                details = `EMA13 cruzou acima EMA34 mas Preço (${currentPrice.toFixed(6)}) está ABAIXO da EMA55 (${currentEma55.toFixed(6)})`;
-            }
-        } else if (isCrossingDown && EMA_CROSS_SETTINGS.requireCloseAboveBelowEMA55) {
-            if (isPriceBelowEMA55) {
-                isConfirmed = true;
-                details = `VENDA: EMA13 (${currentEma13.toFixed(6)}) cruzou abaixo EMA34 (${currentEma34.toFixed(6)}), Preço (${currentPrice.toFixed(6)}) abaixo EMA55 (${currentEma55.toFixed(6)})`;
-            } else {
-                details = `EMA13 cruzou abaixo EMA34 mas Preço (${currentPrice.toFixed(6)}) está ACIMA da EMA55 (${currentEma55.toFixed(6)})`;
-            }
-        } else if (isCrossingUp) {
-            isConfirmed = true;
-            details = `COMPRA: EMA13 cruzou acima EMA34 (sem confirmação EMA55)`;
-        } else if (isCrossingDown) {
-            isConfirmed = true;
-            details = `VENDA: EMA13 cruzou abaixo EMA34 (sem confirmação EMA55)`;
-        }
-        
-        const result = {
-            isCrossingUp: isCrossingUp,
-            isCrossingDown: isCrossingDown,
-            isConfirmed: isConfirmed,
-            details: details,
-            ema13: {
-                current: currentEma13,
-                previous: prevEma13
-            },
-            ema34: {
-                current: currentEma34,
-                previous: prevEma34
-            },
-            ema55: {
-                current: currentEma55
-            },
-            currentPrice: currentPrice,
-            isPriceAboveEMA55: isPriceAboveEMA55,
-            isPriceBelowEMA55: isPriceBelowEMA55,
-            raw: {
-                closes: closes.slice(-10),
-                ema13Values: ema13.slice(-10),
-                ema34Values: ema34.slice(-10),
-                ema55Values: ema55.slice(-10)
-            }
-        };
-        
-        console.log(`📊 EMA Cross 3m ${symbol}:`);
-        console.log(`   EMA13: ${currentEma13.toFixed(6)}`);
-        console.log(`   EMA34: ${currentEma34.toFixed(6)}`);
-        console.log(`   EMA55: ${currentEma55.toFixed(6)}`);
-        console.log(`   Preço: ${currentPrice.toFixed(6)}`);
-        console.log(`   Status: ${details}`);
-        console.log(`   Confirmado: ${isConfirmed ? '✅ SIM' : '❌ NÃO'}`);
-        
-        return result;
-        
-    } catch (error) {
-        console.error(`❌ Erro análise EMA cross ${symbol}:`, error.message);
-        return {
-            isCrossingUp: false,
-            isCrossingDown: false,
-            isConfirmed: false,
-            details: `Erro: ${error.message}`,
-            ema13: null,
-            ema34: null,
-            ema55: null,
-            currentPrice: null
-        };
-    }
-}
-
-function calculateEMA(data, period) {
-    if (data.length < period) return null;
-    
-    const ema = [];
-    const multiplier = 2 / (period + 1);
-    
-    // Primeiro valor é SMA
-    let sma = 0;
-    for (let i = 0; i < period; i++) {
-        sma += data[i];
-    }
-    sma /= period;
-    ema.push(sma);
-    
-    // Calcular EMA para os demais períodos
-    for (let i = period; i < data.length; i++) {
-        const currentEMA = (data[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
-        ema.push(currentEMA);
-    }
-    
-    return ema;
-}
 
 // =====================================================================
 // 🛡️ SISTEMA DE RISK LAYER AVANÇADO
@@ -1406,13 +1230,12 @@ function checkVolumeConfirmation(volumeData) {
 
     const combinedScore = volumeData.combinedScore || 0;
     const classification = volumeData.classification || '';
-    const emaRatio = volumeData.emaRatio || 0;
-    const zScore = volumeData.zScore || 0;
+    const emaRatio = volumeData.timeframe1h?.currentRatio || 0;
+    const zScore = volumeData.timeframe1h?.zScore || 0;
 
     const isConfirmed = 
         combinedScore >= VOLUME_MINIMUM_THRESHOLDS.combinedScore &&
         emaRatio >= 1.3 &&
-        Math.abs(zScore) >= 0.9 &&
         (!classification.includes('BAIXO') && !classification.includes('INSUFICIENTE'));
 
     return isConfirmed;
@@ -1628,18 +1451,16 @@ async function getADX1h(symbol) {
 }
 
 // =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM NOVO GATILHO
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS COM GATILHO ÚNICO (VOLUME)
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
     try {
         const volumeData = signal.marketData.volumeCross;
-        const emaCrossData = signal.marketData.emaCross3m;
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
-        const isEMACrossConfirmed = emaCrossData?.isConfirmed || false;
         
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
@@ -1716,15 +1537,9 @@ async function sendSignalAlertWithRisk(signal) {
         let adxInfo = '';
         if (adxData) {
             const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
-            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'}}`;
+            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'}`;
         } else {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
-        }
-
-        // Info EMA Cross 3m
-        let emaCrossInfo = '';
-        if (emaCrossData) {
-            emaCrossInfo = `\n📊 EMA Cross 3m: ${emaCrossData.details}`;
         }
 
         const riskEmoji = riskAssessment.level === 'CRÍTICO' ? '🚨' :
@@ -1748,13 +1563,10 @@ async function sendSignalAlertWithRisk(signal) {
             ? `${fundingRateEmoji} 0.00500%`
             : '🟢 0.00500%';
 
-        // VERIFICAÇÃO DO GATILHO DUPLO (AMBAS CONDIÇÕES)
-        const hasDualTrigger = isVolumeConfirmed && isEMACrossConfirmed;
-        
         let analysisType = '';
         let analysisEmoji = '🤖';
 
-        if (!hasDualTrigger) {
+        if (!isVolumeConfirmed) {
             const rsiValue = signal.marketData.rsi?.value || 50;
             
             const isNearPivot = pivotDistance && parseFloat(pivotDistance) < 0.8;
@@ -1815,7 +1627,7 @@ async function sendSignalAlertWithRisk(signal) {
         let alertTitle = '';
         let alertType = '';
         
-        if (hasDualTrigger) {
+        if (isVolumeConfirmed) {
             let pivotInfo = '';
             if (nearestPivot && parseFloat(pivotDistance) < 1.0) {
                 const pivotStrengthText = pivotStrength === 'Forte' ? '🔴 FORTE' : 
@@ -1833,13 +1645,12 @@ async function sendSignalAlertWithRisk(signal) {
 
         let message = `
 ${alertTitle}
-${now.full} Gráfico 3m (${tradingViewLink})
+${now.full} Gráfico (${tradingViewLink})
 <b> Indicadores Técnicos</b>
 ⚠️ SCORE: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 💲 Preço: $${signal.price.toFixed(6)}
-${emaCrossInfo}
-⚠️ VOL: Score: ${volumeScore.toFixed(2)} - ${volumeClassification}
+⚠️ VOLUME: Score: ${volumeScore.toFixed(2)} - ${volumeClassification}
 ${allPivotsInfo ? `${allPivotsInfo}` : ''}
 ${fibInfo}
 ${adxInfo}
@@ -1848,12 +1659,11 @@ ${adxInfo}
 <b>🤖 IA Operação/Risco </b>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
-${!hasDualTrigger ? `• 🔶 ATENÇÃO: Aguarde GATILHO DUPLO (Volume + EMA Cross)` : ''}
+${!isVolumeConfirmed ? `• 🔶 ATENÇÃO: Aguarde Volume Confirmado (Score ≥ ${VOLUME_MINIMUM_THRESHOLDS.combinedScore})` : ''}
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
-${volumeScore < 0.3 ? `        \n• 🔶 VOLUME MUITO FRACO: Score ${volumeScore.toFixed(2)}` : ''}
+${volumeScore < 0.3 ? `        \n• 🔶 Volume Baixo: Score ${volumeScore.toFixed(2)}` : ''}
         `;
-
-        if (hasDualTrigger) {
+        if (isVolumeConfirmed) {
             message += `
 <b> 💡Dica de Entrada : </b>
 • Liquidez 1 : $${signal.targetsData.retracementData.minRetracementPrice.toFixed(6)}
@@ -1863,14 +1673,8 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
             `;
         } else {
-            message += `
-<b> ⚠️ AGUARDANDO GATILHO DUPLO PARA OPERAR</b>
-• Gatilho atual: ${isVolumeConfirmed ? '✅ Volume' : '❌ Volume'} | ${isEMACrossConfirmed ? '✅ EMA Cross' : '❌ EMA Cross'}
-• Necessário: Volume confirmado E EMA Cross confirmado
-• Tipo de análise: ${analysisType}
-            `;
+           
         }
-
         message += `
 <b>✨Titanium by @J4Rviz✨</b>
         `;
@@ -1885,8 +1689,6 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Confiança: ${riskAssessment.confidence}%`);
         console.log(`   Volume: Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
-        console.log(`   EMA Cross Confirmado: ${isEMACrossConfirmed ? '✅ SIM' : '❌ NÃO'}`);
-        console.log(`   GATILHO DUPLO: ${hasDualTrigger ? '✅ CONFIRMADO' : '❌ INCOMPLETO'}`);
         console.log(`   Tipo de Análise: ${analysisType}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
@@ -1896,8 +1698,6 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         return {
             type: alertType,
             volumeConfirmed: isVolumeConfirmed,
-            emaCrossConfirmed: isEMACrossConfirmed,
-            dualTrigger: hasDualTrigger,
             volumeScore: volumeScore,
             analysisType: analysisType
         };
@@ -1911,13 +1711,10 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 async function sendSignalAlert(signal) {
     try {
         const volumeData = signal.marketData.volumeCross;
-        const emaCrossData = signal.marketData.emaCross3m;
         const volumeScore = volumeData?.combinedScore || 0;
         const volumeClassification = volumeData?.classification || 'NORMAL';
         
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
-        const isEMACrossConfirmed = emaCrossData?.isConfirmed || false;
-        const hasDualTrigger = isVolumeConfirmed && isEMACrossConfirmed;
         
         const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
@@ -1985,16 +1782,10 @@ async function sendSignalAlert(signal) {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
         }
         
-        // Info EMA Cross 3m
-        let emaCrossInfo = '';
-        if (emaCrossData) {
-            emaCrossInfo = `\n📊 EMA Cross 3m: ${emaCrossData.details}`;
-        }
-        
         let analysisType = '';
         let analysisEmoji = '🤖';
         
-        if (!hasDualTrigger) {
+        if (!isVolumeConfirmed) {
             const rsiValue = signal.marketData.rsi?.value || 50;
             
             const isNearPivot = pivotDistance && parseFloat(pivotDistance) < 0.8;
@@ -2053,7 +1844,7 @@ async function sendSignalAlert(signal) {
         }
 
         let alertTitle = '';
-        if (hasDualTrigger) {
+        if (isVolumeConfirmed) {
             let pivotInfo = '';
             if (nearestPivot && parseFloat(pivotDistance) < 1.0) {
                 const pivotStrengthText = pivotStrength === 'Forte' ? '🔴 FORTE' : 
@@ -2104,7 +1895,6 @@ ${now.full} Gráfico 3m (${tradingViewLink})
 • Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 • Probabilidade de Sucesso: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)} | Stop: $${signal.targetsData.stopPrice.toFixed(6)}
-${emaCrossInfo}
 • Volume: Score: ${volumeScore.toFixed(2)} - ${volumeClassification}
 • LSR: ${binanceLSRValue} ${lsrSymbol} (${lsrPercentChange}%)
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
@@ -2112,10 +1902,10 @@ ${emaCrossInfo}
 ${allPivotsInfo ? `${allPivotsInfo}` : ''}
 ${fibInfo}
 ${adxInfo}
-${!hasDualTrigger ? `\n<b>⚠️ ${analysisType} - Aguardando setup</b>` : ''}
+${!isVolumeConfirmed ? `\n<b>⚠️ ${analysisType} - Aguardando setup</b>` : ''}
         `;
 
-        if (hasDualTrigger) {
+        if (isVolumeConfirmed) {
             message += `
 <b> Alvos </b>
 ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} (RR:${target.riskReward}x)`).join('\n')}
@@ -2126,8 +1916,8 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         } else {
             message += `
 <b>⚠️ RECOMENDAÇÃO:</b>
-• Aguarde GATILHO DUPLO (Volume Score ≥ ${VOLUME_MINIMUM_THRESHOLDS.combinedScore} E EMA Cross 3m confirmado)
-• Gatilho atual: ${isVolumeConfirmed ? '✅ Volume' : '❌ Volume'} | ${isEMACrossConfirmed ? '✅ EMA Cross' : '❌ EMA Cross'}
+• Aguarde GATILHO DE VOLUME (Volume Score ≥ ${VOLUME_MINIMUM_THRESHOLDS.combinedScore})
+• Gatilho atual: ${isVolumeConfirmed ? '✅ Volume' : '❌ Volume'}
 • ${analysisType === 'REVERSÃO/COMPRA' ? 'Monitorar para possível entrada de COMPRA' : 
    analysisType === 'EXAUSTÃO/VENDA' ? 'Monitorar para possível entrada de VENDA' : 
    'Monitorar para desenvolvimento do setup'}
@@ -2140,12 +1930,10 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 
         await sendTelegramAlert(message);
 
-        console.log(`📤 ${hasDualTrigger ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
+        console.log(`📤 ${isVolumeConfirmed ? 'Alerta de TRADE' : 'Análise da IA'} enviado: ${signal.symbol}`);
         console.log(`   Data/Hora: ${now.full} TradingView`);
         console.log(`   Volume: Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
-        console.log(`   EMA Cross Confirmado: ${isEMACrossConfirmed ? '✅ SIM' : '❌ NÃO'}`);
-        console.log(`   GATILHO DUPLO: ${hasDualTrigger ? '✅ CONFIRMADO' : '❌ INCOMPLETO'}`);
         console.log(`   Tipo de Análise: ${analysisType}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} (${lsrPercentChange}%)`);
@@ -2177,15 +1965,9 @@ function calculateProbability(signal) {
     else if (volumeScore >= 0.5) baseProbability += 5;
     else if (volumeScore < 0.3) baseProbability -= 8;
     
-    // Bônus para EMA Cross confirmado
-    const emaCrossData = signal.marketData.emaCross3m;
-    if (emaCrossData?.isConfirmed) {
-        baseProbability += 12;
-    }
-    
-    // BÔNUS EXTRA PARA GATILHO DUPLO
+    // BÔNUS PARA GATILHO DE VOLUME CONFIRMADO
     const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
-    if (isVolumeConfirmed && emaCrossData?.isConfirmed) {
+    if (isVolumeConfirmed) {
         baseProbability += 15;
     }
 
@@ -3390,7 +3172,7 @@ async function sendInitializationMessage(allSymbols) {
 
 ${brazilTime.full}
 📊 Sistema aprimorado com:
-• 🎯 GATILHO ÚNICO: Volume 1h/4h + EMA Cross 3m (AMBOS NECESSÁRIOS)
+• 🎯 GATILHO ÚNICO: Volume 1h/4h confirmado
 • Análise de Pivot Points Multi-Timeframe
 • Sistema de Risco Avançado
 ✨ by @J4Rviz
@@ -3737,7 +3519,7 @@ async function checkFundingRate(symbol, isBullish) {
 }
 
 // =====================================================================
-// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM GATILHO ÚNICO
+// 📊 FUNÇÃO ATUALIZADA PARA CALCULAR QUALIDADE COM GATILHO ÚNICO (VOLUME)
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
@@ -3745,44 +3527,33 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
     let details = [];
     let failedChecks = [];
 
-    // CRITÉRIO PRINCIPAL: GATILHO DUPLO (Volume Cross + EMA Cross 3m)
+    // CRITÉRIO PRINCIPAL: GATILHO DE VOLUME
     const volumeData = marketData.volumeCross;
-    const emaCrossData = marketData.emaCross3m;
     const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
-    const isEMACrossConfirmed = emaCrossData?.isConfirmed || false;
-    const hasDualTrigger = isVolumeConfirmed && isEMACrossConfirmed;
     
-    if (hasDualTrigger) {
-        const dualTriggerScore = QUALITY_WEIGHTS.dualTrigger;
-        score += dualTriggerScore;
-        details.push(`🎯 GATILHO DUPLO: ${dualTriggerScore}/${QUALITY_WEIGHTS.dualTrigger} (Volume + EMA Cross confirmados)`);
+    if (isVolumeConfirmed) {
+        const volumeTriggerScore = QUALITY_WEIGHTS.volumeTrigger;
+        score += volumeTriggerScore;
+        details.push(`🎯 GATILHO DE VOLUME: ${volumeTriggerScore}/${QUALITY_WEIGHTS.volumeTrigger} (Volume confirmado)`);
     } else {
-        failedChecks.push(`GATILHO DUPLO: ${isVolumeConfirmed ? '✅ Volume' : '❌ Volume'} | ${isEMACrossConfirmed ? '✅ EMA Cross' : '❌ EMA Cross'}`);
+        failedChecks.push(`GATILHO DE VOLUME: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < ${VOLUME_MINIMUM_THRESHOLDS.combinedScore}`);
     }
 
-    // Sub-critérios individuais (menor peso agora)
+    // Sub-critérios individuais
     if (volumeData && volumeData.combinedScore >= 0.5) {
-        const volumeScore = Math.min(QUALITY_WEIGHTS.volumeCross,
-            QUALITY_WEIGHTS.volumeCross * volumeData.combinedScore);
+        const volumeScore = Math.min(QUALITY_WEIGHTS.volumeTrigger * 0.4,
+            QUALITY_WEIGHTS.volumeTrigger * 0.4 * volumeData.combinedScore);
         score += volumeScore;
         
         const direction = isBullish ? 
             (volumeData.isCrossingUp ? '⬆️ CRUZANDO CIMA' : '❌ SEM CRUZAMENTO') :
             (volumeData.isCrossingDown ? '⬇️ CRUZANDO BAIXO' : '❌ SEM CRUZAMENTO');
             
-        details.push(` 📊 Volume Cross: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volumeCross} (${direction})`);
+        details.push(` 📊 Volume Cross: ${volumeScore.toFixed(1)}/${QUALITY_WEIGHTS.volumeTrigger * 0.4} (${direction})`);
         details.push(`   1h: ${volumeData.timeframe1h.currentRatio.toFixed(2)}x | 4h: ${volumeData.timeframe4h.currentRatio.toFixed(2)}x`);
         details.push(`   Score: ${volumeData.combinedScore.toFixed(2)} - ${volumeData.classification}`);
     } else {
         failedChecks.push(`Volume Cross: Score ${volumeData?.combinedScore?.toFixed(2) || '0.00'} < 0.5 (${volumeData?.classification || 'FRACO'})`);
-    }
-
-    if (emaCrossData && emaCrossData.isConfirmed) {
-        const emaCrossScore = QUALITY_WEIGHTS.emaCross;
-        score += emaCrossScore;
-        details.push(` 📊 EMA Cross 3m: ${emaCrossScore}/${QUALITY_WEIGHTS.emaCross} (${emaCrossData.details})`);
-    } else {
-        failedChecks.push(`EMA Cross 3m: ${emaCrossData?.details || 'Não confirmado'}`);
     }
 
     if (marketData.volatility && marketData.volatility.isValid) {
@@ -3986,14 +3757,14 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details: details,
         failedChecks: failedChecks,
         isAcceptable: score >= QUALITY_THRESHOLD,
-        hasDualTrigger: hasDualTrigger,
+        hasVolumeTrigger: isVolumeConfirmed,
         threshold: QUALITY_THRESHOLD,
         message: `${emoji} SCORE: ${grade} (${Math.round(score)}/100)`
     };
 }
 
 // =====================================================================
-// 🔄 MONITORAMENTO PRINCIPAL COM GATILHO ÚNICO
+// 🔄 MONITORAMENTO PRINCIPAL COM GATILHO ÚNICO (VOLUME)
 // =====================================================================
 
 class AdaptiveSymbolGroupManager {
@@ -4014,7 +3785,7 @@ class AdaptiveSymbolGroupManager {
             const allSymbols = await fetchAllFuturesSymbols();
 
             const filteredSymbols = allSymbols.filter(symbol => {
-                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN', ];
+                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN'];
                 return !blacklist.some(term => symbol.includes(term));
             });
 
@@ -4085,34 +3856,27 @@ class AdaptiveSymbolGroupManager {
 
 async function monitorSymbol(symbol) {
     try {
-        // Buscar ambos os gatilhos simultaneamente
-        const [volumeData, emaCrossData] = await Promise.all([
-            checkVolumeCross(symbol),
-            checkEMACross3m(symbol)
-        ]);
+        // Buscar gatilho de volume
+        const volumeData = await checkVolumeCross(symbol);
         
-        // VERIFICAÇÃO OBRIGATÓRIA: Ambos os gatilhos devem estar ativos
+        // VERIFICAÇÃO OBRIGATÓRIA: Volume deve estar cruzando
         const isVolumeCrossingUp = volumeData.isCrossingUp;
         const isVolumeCrossingDown = volumeData.isCrossingDown;
-        const isEMACrossingUp = emaCrossData.isCrossingUp;
-        const isEMACrossingDown = emaCrossData.isCrossingDown;
         
-        // Determinar direção baseada no GATILHO DUPLO
+        // Determinar direção baseada no GATILHO DE VOLUME
         let isBullish = null;
-        let hasDualTrigger = false;
+        let hasVolumeTrigger = false;
         
-        if (isVolumeCrossingUp && isEMACrossingUp && 
-            checkVolumeConfirmation(volumeData) && emaCrossData.isConfirmed) {
+        if (isVolumeCrossingUp && checkVolumeConfirmation(volumeData)) {
             isBullish = true;
-            hasDualTrigger = true;
-        } else if (isVolumeCrossingDown && isEMACrossingDown &&
-                  checkVolumeConfirmation(volumeData) && emaCrossData.isConfirmed) {
+            hasVolumeTrigger = true;
+        } else if (isVolumeCrossingDown && checkVolumeConfirmation(volumeData)) {
             isBullish = false;
-            hasDualTrigger = true;
+            hasVolumeTrigger = true;
         }
         
-        // SE NÃO HOUVER GATILHO DUPLO, RETORNAR NULL
-        if (!hasDualTrigger) {
+        // SE NÃO HOUVER GATILHO DE VOLUME, RETORNAR NULL
+        if (!hasVolumeTrigger) {
             return null;
         }
         
@@ -4148,7 +3912,6 @@ async function monitorSymbol(symbol) {
 
         const marketData = {
             volumeCross: volumeData,
-            emaCross3m: emaCrossData,
             volatility: volatilityData,
             lsr: lsrData,
             rsi: rsiData,
@@ -4161,8 +3924,8 @@ async function monitorSymbol(symbol) {
 
         const qualityScore = await calculateSignalQuality(symbol, isBullish, marketData);
 
-        // Apenas aceitar sinais com gatilho duplo
-        if (!qualityScore.hasDualTrigger) return null;
+        // Apenas aceitar sinais com gatilho de volume
+        if (!qualityScore.hasVolumeTrigger) return null;
         
         if (!qualityScore.isAcceptable) return null;
 
@@ -4175,7 +3938,7 @@ async function monitorSymbol(symbol) {
             qualityScore: qualityScore,
             targetsData: targetsData,
             marketData: marketData,
-            hasDualTrigger: hasDualTrigger,
+            hasVolumeTrigger: hasVolumeTrigger,
             timestamp: Date.now()
         };
 
@@ -4206,11 +3969,9 @@ async function monitorSymbol(symbol) {
         const volumeScore = volumeData.combinedScore?.toFixed(2) || '0.00';
         const volumeClassification = volumeData.classification || 'NORMAL';
 
-        console.log(`🚨 ${symbol}: GATILHO DUPLO CONFIRMADO - ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
+        console.log(`🚨 ${symbol}: GATILHO DE VOLUME CONFIRMADO - ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
         console.log(`   🎯 Volume Cross: ${isBullish ? '⬆️ CRUZANDO CIMA' : '⬇️ CRUZANDO BAIXO'} (1h: ${volumeData.timeframe1h.currentRatio.toFixed(2)}x, 4h: ${volumeData.timeframe4h.currentRatio.toFixed(2)}x)`);
-        console.log(`   🎯 EMA Cross 3m: ${isBullish ? '⬆️ CRUZANDO CIMA' : '⬇️ CRUZANDO BAIXO'} (${emaCrossData.details})`);
         console.log(`   📊 Volume Score: ${volumeScore} - ${volumeClassification}`);
-        console.log(`   📊 EMA Cross Confirmado: ✅ SIM`);
         console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
         console.log(`   📊 LSR Binance: ${lsrData.lsrRatio.toFixed(3)}`);
         console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
@@ -4284,7 +4045,7 @@ async function mainBotLoop() {
 
     console.log(`\n TITANIUM ATIVADO!`);
     console.log(` ${allSymbols.length} ativos Binance Futures`);
-    console.log(` 🎯 GATILHO ÚNICO: Volume 1h/4h + EMA Cross 3m (AMBOS NECESSÁRIOS)`);
+    console.log(` 🎯 GATILHO ÚNICO: Volume 1h/4h confirmado`);
     console.log(` Bot iniciando...`);
 
     await sendInitializationMessage(allSymbols);
@@ -4333,7 +4094,7 @@ async function mainBotLoop() {
             console.log(`✅ ${((endTime - startTime) / 1000).toFixed(1)}s | Sinais: ${signals.length} (Total: ${totalSignals})`);
 
             for (const signal of signals) {
-                if (signal.qualityScore.score >= QUALITY_THRESHOLD && signal.hasDualTrigger) {
+                if (signal.qualityScore.score >= QUALITY_THRESHOLD && signal.hasVolumeTrigger) {
                     const alertResult = await sendSignalAlertWithRisk(signal);
                     if (alertResult && alertResult.type === 'analysis') {
                         totalAnalysis++;
@@ -4382,8 +4143,8 @@ async function startBot() {
         if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log(' TITANIUM - SISTEMA COM GATILHO ÚNICO');
-        console.log(` 🎯 GATILHO ÚNICO: Volume 1h/4h + EMA Cross 3m (AMBOS NECESSÁRIOS)`);
+        console.log(' TITANIUM - SISTEMA COM GATILHO ÚNICO (VOLUME)');
+        console.log(` 🎯 GATILHO ÚNICO: Volume 1h/4h confirmado`);
         console.log(` Sistema aprimorado com análise de Pivot Points`);
         console.log(` Bot configurado e pronto para operar`);
         console.log('='.repeat(80) + '\n');
