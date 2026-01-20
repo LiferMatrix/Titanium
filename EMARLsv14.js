@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -34,7 +34,7 @@ const VOLUME_SETTINGS = {
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 20,
+    emaPeriod: 13,
     emaAlpha: 0.3,
     baseZScoreLookback: 40,
     minZScoreLookback: 15,
@@ -63,28 +63,28 @@ const VOLATILITY_THRESHOLD = 0.6; // ↑ de 0.5 (exige volatilidade mínima real
 
 // === CONFIGURAÇÕES LSR ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.7;     // ↓ de 2.8 (mais conservador na compra)
+const LSR_BUY_THRESHOLD = 2.5;     // ↓ de 2.8 (mais conservador na compra)
 const LSR_SELL_THRESHOLD = 3.0;    // ↑ de 2.9 (mais exigente na venda)
 
 // === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 60;            // ↓ de 62 (evita comprar em sobrecompra)
-const RSI_SELL_MIN = 65;           // ↑ de 63 (evita vender cedo demais)
+const RSI_BUY_MAX = 62;            // ↓ de 62 (evita comprar em sobrecompra)
+const RSI_SELL_MIN = 32;           // ↑ de 63 (evita vender cedo demais)
 
 // === COOLDOWN ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 20 * 60 * 1000,   // ↑ de 15min (evita overtrade)
+    sameDirection: 10 * 60 * 1000,   // ↑ de 15min (evita overtrade)
     oppositeDirection: 8 * 60 * 1000, // ↑ de 5min
     useDifferentiated: true,
-    symbolCooldown: 25 * 60 * 1000   // ↑ de 20min
+    symbolCooldown: 15 * 60 * 1000   // ↑ de 20min
 };
 
 // === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 75;       // ↑ de 70 (filtro mais rigoroso)
+const QUALITY_THRESHOLD = 80;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
     volume: 45,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 1,
     volatility: 8,                 // ↑ de 7
-    lsr: 9,                        // ↑ de 8
+    lsr: 12,                        // ↑ de 8
     rsi: 20,                       // ↑ de 18
     emaAlignment: 12,              // ↑ de 10
     stoch1h: 11,                   // ↑ de 10
@@ -92,7 +92,7 @@ const QUALITY_WEIGHTS = {
     breakoutRisk: 12,              // ↑ de 10
     supportResistance: 14,          // ↑ de 12
     pivotPoints: 17,               // ↑ de 15
-    funding: 2,
+    funding: 7,
     stochastic12h: 10,             // ↑ de 8
     stochasticDaily: 10            // ↑ de 8
 };
@@ -2472,6 +2472,233 @@ function checkVolumeConfirmation(volumeData) {
 }
 
 // =====================================================================
+// 🔢 FUNÇÃO PARA CALCULAR PONTOS DE FIBONACCI
+// =====================================================================
+
+async function calculateFibonacciLevels(symbol, currentPrice, pivotType, pivotPrice) {
+    try {
+        // Buscar candles para determinar swing high/low
+        const candles = await getCandlesCached(symbol, '1h', 100);
+        if (candles.length < 50) return null;
+        
+        // Encontrar swing high e swing low recentes
+        let swingHigh = currentPrice;
+        let swingLow = currentPrice;
+        let swingHighIndex = candles.length - 1;
+        let swingLowIndex = candles.length - 1;
+        
+        // Procurar últimos 50 candles
+        for (let i = candles.length - 1; i >= Math.max(0, candles.length - 50); i--) {
+            if (candles[i].high > swingHigh) {
+                swingHigh = candles[i].high;
+                swingHighIndex = i;
+            }
+            if (candles[i].low < swingLow) {
+                swingLow = candles[i].low;
+                swingLowIndex = i;
+            }
+        }
+        
+        // Determinar qual é mais recente
+        const isUptrend = swingHighIndex > swingLowIndex;
+        
+        let fibLevels = {};
+        
+        if (isUptrend) {
+            // Uptrend - Fibonacci retracement de swing low para swing high
+            const diff = swingHigh - swingLow;
+            
+            fibLevels = {
+                '0.0': swingLow,
+                '0.236': swingHigh - diff * 0.236,
+                '0.382': swingHigh - diff * 0.382,
+                '0.5': swingHigh - diff * 0.5,
+                '0.618': swingHigh - diff * 0.618,
+                '0.786': swingHigh - diff * 0.786,
+                '1.0': swingHigh,
+                '1.272': swingHigh + diff * 0.272,
+                '1.618': swingHigh + diff * 0.618
+            };
+        } else {
+            // Downtrend - Fibonacci retracement de swing high para swing low
+            const diff = swingHigh - swingLow;
+            
+            fibLevels = {
+                '0.0': swingHigh,
+                '0.236': swingLow + diff * 0.236,
+                '0.382': swingLow + diff * 0.382,
+                '0.5': swingLow + diff * 0.5,
+                '0.618': swingLow + diff * 0.618,
+                '0.786': swingLow + diff * 0.786,
+                '1.0': swingLow,
+                '1.272': swingLow - diff * 0.272,
+                '1.618': swingLow - diff * 0.618
+            };
+        }
+        
+        // Encontrar nível de Fibonacci mais próximo do pivô
+        let nearestFibLevel = null;
+        let minDistance = Infinity;
+        
+        for (const [level, price] of Object.entries(fibLevels)) {
+            const distance = Math.abs(pivotPrice - price);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestFibLevel = {
+                    level: level,
+                    price: price,
+                    distance: distance,
+                    distancePercent: (distance / pivotPrice) * 100
+                };
+            }
+        }
+        
+        return {
+            swingHigh: swingHigh,
+            swingLow: swingLow,
+            isUptrend: isUptrend,
+            fibLevels: fibLevels,
+            nearestFibLevel: nearestFibLevel,
+            currentPrice: currentPrice,
+            pivotPrice: pivotPrice,
+            pivotType: pivotType
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro cálculo Fibonacci ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 📊 FUNÇÃO PARA OBTER ADX 1H
+// =====================================================================
+
+async function getADX1h(symbol) {
+    try {
+        const candles = await getCandlesCached(symbol, '1h', 28); // 14 períodos + 14 para cálculo
+        if (candles.length < 28) return null;
+        
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        // Calcular ADX manualmente
+        const period = 14;
+        
+        // Calcular True Range
+        let trValues = [];
+        for (let i = 1; i < candles.length; i++) {
+            const tr = Math.max(
+                highs[i] - lows[i],
+                Math.abs(highs[i] - closes[i-1]),
+                Math.abs(lows[i] - closes[i-1])
+            );
+            trValues.push(tr);
+        }
+        
+        // Calcular Directional Movement
+        let plusDM = [];
+        let minusDM = [];
+        
+        for (let i = 1; i < candles.length; i++) {
+            const upMove = highs[i] - highs[i-1];
+            const downMove = lows[i-1] - lows[i];
+            
+            if (upMove > downMove && upMove > 0) {
+                plusDM.push(upMove);
+                minusDM.push(0);
+            } else if (downMove > upMove && downMove > 0) {
+                plusDM.push(0);
+                minusDM.push(downMove);
+            } else {
+                plusDM.push(0);
+                minusDM.push(0);
+            }
+        }
+        
+        // Calcular suavizações (Wilder's smoothing)
+        let atr = [];
+        let plusDI = [];
+        let minusDI = [];
+        let dx = [];
+        let adx = [];
+        
+        // Valores iniciais (SMA dos primeiros 14 períodos)
+        let atrSum = 0;
+        let plusDMSum = 0;
+        let minusDMSum = 0;
+        
+        for (let i = 0; i < period; i++) {
+            atrSum += trValues[i];
+            plusDMSum += plusDM[i];
+            minusDMSum += minusDM[i];
+        }
+        
+        atr.push(atrSum / period);
+        plusDI.push((plusDMSum / period) / (atr[0] / period) * 100);
+        minusDI.push((minusDMSum / period) / (atr[0] / period) * 100);
+        
+        const dxValue = Math.abs(plusDI[0] - minusDI[0]) / (plusDI[0] + minusDI[0]) * 100;
+        dx.push(dxValue);
+        adx.push(dxValue); // Primeiro ADX é igual ao DX
+        
+        // Calcular valores restantes com suavização de Wilder
+        for (let i = period; i < trValues.length; i++) {
+            // ATR suavizado
+            const atrPrev = atr[atr.length - 1];
+            const atrCurrent = (atrPrev * (period - 1) + trValues[i]) / period;
+            atr.push(atrCurrent);
+            
+            // +DI suavizado
+            const plusDIPrev = plusDI[plusDI.length - 1];
+            const plusDICurrent = ((plusDIPrev * (period - 1)) + (plusDM[i] / atrCurrent * 100)) / period;
+            plusDI.push(plusDICurrent);
+            
+            // -DI suavizado
+            const minusDIPrev = minusDI[minusDI.length - 1];
+            const minusDICurrent = ((minusDIPrev * (period - 1)) + (minusDM[i] / atrCurrent * 100)) / period;
+            minusDI.push(minusDICurrent);
+            
+            // DX
+            const dxCurrent = Math.abs(plusDICurrent - minusDICurrent) / (plusDICurrent + minusDICurrent) * 100;
+            dx.push(dxCurrent);
+            
+            // ADX (suavização do DX)
+            if (adx.length < period) {
+                adx.push(dxCurrent);
+            } else {
+                const adxPrev = adx[adx.length - 1];
+                const adxCurrent = (adxPrev * (period - 1) + dxCurrent) / period;
+                adx.push(adxCurrent);
+            }
+        }
+        
+        const currentADX = adx[adx.length - 1];
+        const currentPlusDI = plusDI[plusDI.length - 1];
+        const currentMinusDI = minusDI[minusDI.length - 1];
+        
+        return {
+            adx: currentADX,
+            plusDI: currentPlusDI,
+            minusDI: currentMinusDI,
+            isAbove20: currentADX > 20,
+            isStrongTrend: currentADX > 25,
+            trendDirection: currentPlusDI > currentMinusDI ? 'bullish' : 'bearish',
+            raw: {
+                adxValues: adx.slice(-5),
+                plusDIValues: plusDI.slice(-5),
+                minusDIValues: minusDI.slice(-5)
+            }
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ADX 1h ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
 // 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS
 // =====================================================================
 
@@ -2507,6 +2734,36 @@ async function sendSignalAlertWithRisk(signal) {
         const pivotType = nearestPivot?.type || 'N/A';
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
+        
+        // 🔹 NOVO: Calcular Fibonacci relacionado ao pivô
+        let fibInfo = '';
+        if (nearestPivot && nearestPivot.price) {
+            const fibonacciData = await calculateFibonacciLevels(
+                signal.symbol, 
+                signal.price, 
+                pivotType, 
+                nearestPivot.price
+            );
+            
+            if (fibonacciData && fibonacciData.nearestFibLevel) {
+                const fib = fibonacciData.nearestFibLevel;
+                fibInfo = `🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe}) | Fibonacci ${fib.level}: $${fib.price.toFixed(6)} (${fib.distancePercent.toFixed(2)}% do preço atual)`;
+            } else {
+                fibInfo = `🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe}) | Preço do ativo: $${signal.price.toFixed(6)}`;
+            }
+        } else {
+            fibInfo = `🔹*🔹PIVOT: Não detectado | Preço do ativo: $${signal.price.toFixed(6)}`;
+        }
+        
+        // 🔹 NOVO: Obter ADX 1h
+        const adxData = await getADX1h(signal.symbol);
+        let adxInfo = '';
+        if (adxData) {
+            const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
+             adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(⚪Tendência Fraca)'}`;
+        } else {
+            adxInfo = `\nADX 1h: N/A | Não disponível`;
+        }
 
         const stoch12hData = signal.marketData.stochastic12h;
         const stochDailyData = signal.marketData.stochasticDaily;
@@ -2514,30 +2771,47 @@ async function sendSignalAlertWithRisk(signal) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        // 🔹 AJUSTE CRÍTICO: Verificação robusta dos dados do estocástico
+        if (stoch12hData && stoch12hData.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stoch12hData.lastCross) {
+                const time = stoch12hData.lastCross.time || '';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stoch12hData && stoch12hData.raw && stoch12hData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stoch12hData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stoch12hData.raw.current.d?.toFixed(1) || 'N/A';
+            stoch12hInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stoch12hInfo = 'Dados insuficientes';
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData && stochDailyData.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stochDailyData.lastCross) {
+                const time = stochDailyData.lastCross.time || '';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stochDailyData && stochDailyData.raw && stochDailyData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stochDailyData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stochDailyData.raw.current.d?.toFixed(1) || 'N/A';
+            stochDailyInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stochDailyInfo = 'Dados insuficientes';
         }
 
         const riskEmoji = riskAssessment.level === 'CRÍTICO' ? '🚨' :
@@ -2560,14 +2834,6 @@ async function sendSignalAlertWithRisk(signal) {
         const fundingRateText = fundingRate !== 0
             ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
             : '🔹 Indisp.';
-
-        let stochasticTrendWarning = '';
-        
-        riskAssessment.factors.forEach(factor => {
-            if (factor.type === 'STOCHASTIC_TREND' && factor.data.trendDirection.includes('CONTRÁRIA')) {
-                stochasticTrendWarning = `\n⚠️ <b>ALERTA TENDÊNCIA: ${factor.message}</b>`;
-            }
-        });
 
         let analysisType = '';
         let analysisEmoji = '🤖';
@@ -2658,18 +2924,17 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 ⚠️ Probabilidade: ${riskAdjustedProbability}%
 💲 Preço: $${signal.price.toFixed(6)}
 ⚠️ VOL: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
-• Dist. Suport/Resist: ${distancePercent}%
-🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
+${fibInfo}
+${adxInfo}
 ⚠️ LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|🔹RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
 <i>🔹Estocástico </i>
 • 12h: ${stoch12hInfo}
 • 1D: ${stochDailyInfo}
-${stochasticTrendWarning}
 <i>🤖 IA Operação/Risco </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
-${!isVolumeConfirmed ? `• 🔶 ATENÇÃO NO VOLUME: Score ${volumeScore.toFixed(2)} - Aguarde confirmação` : ''}
+${!isVolumeConfirmed ? `• 🔶 Volume Baixo: Score ${volumeScore.toFixed(2)} - Aguarde confirmação` : ''}
 ${riskAssessment.warnings.length > 0 ? `• ${riskAssessment.warnings[0]}` : ''}
         `;
 
@@ -2683,14 +2948,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 ⛔Stop: $${signal.targetsData.stopPrice.toFixed(6)}
             `;
         } else {
-            message += `
-<i> ⚠️ VOLUME INSUFICIENTE PARA OPERAR</i>
-• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
-• EMA Ratio: ${volumeData?.emaRatio?.toFixed(2) || 'N/A'}x (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.emaRatio}x)
-• Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'} (mínimo: ${VOLUME_ROBUST_SETTINGS.minimumThresholds.zScore})
-• Tipo de análise: ${analysisType}
-            `;
-        }
+            }
 
         message += `
 <i>✨Titanium by @J4Rviz✨</i>
@@ -2743,6 +3001,36 @@ async function sendSignalAlert(signal) {
         const pivotDistance = nearestPivot?.distancePercent?.toFixed(2) || 'N/A';
         const pivotType = nearestPivot?.type || 'N/A';
         const pivotStrength = nearestPivot?.strength || 'N/A';
+        
+        // 🔹 NOVO: Calcular Fibonacci relacionado ao pivô
+        let fibInfo = '';
+        if (nearestPivot && nearestPivot.price) {
+            const fibonacciData = await calculateFibonacciLevels(
+                signal.symbol, 
+                signal.price, 
+                pivotType, 
+                nearestPivot.price
+            );
+            
+            if (fibonacciData && fibonacciData.nearestFibLevel) {
+                const fib = fibonacciData.nearestFibLevel;
+                fibInfo = `🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength}) | Fibonacci ${fib.level}: $${fib.price.toFixed(6)} (${fib.distancePercent.toFixed(2)}% do preço atual)`;
+            } else {
+                fibInfo = `🔹*🔹PIVOT: ${pivotType} ${pivotDistance}% (${pivotStrength}) | Preço do ativo: $${signal.price.toFixed(6)}`;
+            }
+        } else {
+            fibInfo = `🔹*🔹PIVOT: Não detectado | Preço do ativo: $${signal.price.toFixed(6)}`;
+        }
+        
+        // 🔹 NOVO: Obter ADX 1h
+        const adxData = await getADX1h(signal.symbol);
+        let adxInfo = '';
+        if (adxData) {
+            const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
+            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(Forte Tendência)' : '(Tendência Fraca)'} | +DI: ${adxData.plusDI.toFixed(1)} | -DI: ${adxData.minusDI.toFixed(1)}`;
+        } else {
+            adxInfo = `\nADX 1h: N/A | Não disponível`;
+        }
         
         let analysisType = '';
         let analysisEmoji = '🤖';
@@ -2845,30 +3133,47 @@ async function sendSignalAlert(signal) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        // 🔹 AJUSTE CRÍTICO: Verificação robusta dos dados do estocástico
+        if (stoch12hData && stoch12hData.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stoch12hData.lastCross) {
+                const time = stoch12hData.lastCross.time || '';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stoch12hData && stoch12hData.raw && stoch12hData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stoch12hData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stoch12hData.raw.current.d?.toFixed(1) || 'N/A';
+            stoch12hInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stoch12hInfo = 'Dados insuficientes';
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData && stochDailyData.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stochDailyData.lastCross) {
+                const time = stochDailyData.lastCross.time || '';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stochDailyData && stochDailyData.raw && stochDailyData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stochDailyData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stochDailyData.raw.current.d?.toFixed(1) || 'N/A';
+            stochDailyInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stochDailyInfo = 'Dados insuficientes';
         }
 
         const fundingRate = signal.marketData.funding?.raw || 0;
@@ -2896,8 +3201,9 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 • VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-• Dist S/R: ${distancePercent}% | Pivot: ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
-• Fund. Rate: ${fundingRateText}
+• Dist S/R: ${distancePercent}% 
+${fibInfo}
+${adxInfo}
 <b>📊 Stochastic Tendência (5.3.3)</b>
 • 12h: ${stoch12hInfo}
 • Diário: ${stochDailyInfo}
@@ -2913,13 +3219,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
 • Liquidez 2: $${signal.targetsData.retracementData.maxRetracementPrice.toFixed(6)}
             `;
         } else {
-            message += `
-<b>⚠️ RECOMENDAÇÃO:</b>
-• Aguarde confirmação de volume (Score ≥ ${VOLUME_ROBUST_SETTINGS.minimumThresholds.combinedScore})
-• ${analysisType === 'REVERSÃO/COMPRA' ? 'Monitorar para possível entrada de COMPRA' : 
-   analysisType === 'EXAUSTÃO/VENDA' ? 'Monitorar para possível entrada de VENDA' : 
-   'Monitorar para desenvolvimento do setup'}
-            `;
+           
         }
 
         message += `
@@ -3437,7 +3737,7 @@ function classifyVolumeStrength(score) {
 }
 
 // =====================================================================
-// 📊 FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO
+// 📊 FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO - ATUALIZADA
 // =====================================================================
 
 async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
@@ -3448,7 +3748,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 isValid: false,
                 kValue: null,
                 dValue: null,
-                lastCross: null
+                lastCross: null,
+                raw: null
             };
         }
 
@@ -3471,7 +3772,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 isValid: false,
                 kValue: null,
                 dValue: null,
-                lastCross: null
+                lastCross: null,
+                raw: null
             };
         }
 
@@ -3530,7 +3832,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 current: current,
                 previous: previous,
                 values: stochValues.slice(-5)
-            }
+            },
+            timestamp: Date.now()
         };
 
     } catch (error) {
@@ -3539,7 +3842,9 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
             isValid: false,
             kValue: null,
             dValue: null,
-            lastCross: null
+            lastCross: null,
+            raw: null,
+            timestamp: Date.now()
         };
     }
 }
@@ -5258,7 +5563,7 @@ class AdaptiveSymbolGroupManager {
             const allSymbols = await fetchAllFuturesSymbols();
 
             const filteredSymbols = allSymbols.filter(symbol => {
-                const blacklist = ['1000', 'BULL', 'BEAR', 'UP', 'DOWN', 'MOVR'];
+                const blacklist = ['BULL', 'BEAR', 'UP', 'DOWN',];
                 return !blacklist.some(term => symbol.includes(term));
             });
 
@@ -5426,27 +5731,29 @@ async function monitorSymbol(symbol) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        if (stoch12hData?.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${lastCross.time}`;
+            if (stoch12hData.lastCross) {
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${stoch12hData.lastCross.time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData?.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${lastCross.time}`;
+            if (stochDailyData.lastCross) {
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${stochDailyData.lastCross.time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
         }
 
