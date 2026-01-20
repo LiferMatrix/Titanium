@@ -6,100 +6,99 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
 
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.15,      // Reduzido de 0.25 para 0.15
-    combinedScore: 0.15,      // Reduzido de 0.25 para 0.15
-    classification: 'MODERADO-BAIXO', // Mais permissivo
-    requireConfirmation: false // Desligar confirmação para mais sinais
+    absoluteScore: 0.25,      // ↑ aumentado para exigir volume mínimo real
+    combinedScore: 0.25,      // ↑ evita falsos positivos
+    classification: 'MODERADO', // ↑ menos permissivo
+    requireConfirmation: true  // ↑ exige confirmação cruzada
 };
 
 // === CONFIGURAÇÕES OTIMIZADAS BASEADAS NO APRENDIZADO ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.2,      // Reduzido de 1.4 para 1.2
-    minThreshold: 1.0,       // Reduzido de 1.2 para 1.0
-    maxThreshold: 2.0,       // Reduzido de 2.5 para 2.0
-    volatilityMultiplier: 0.6, // Aumentado de 0.5 para 0.6
+    baseThreshold: 1.4,       // ↑ restaurado para evitar ruído
+    minThreshold: 1.2,
+    maxThreshold: 2.5,
+    volatilityMultiplier: 0.5, // ↓ reduzido para evitar overfit em volatilidade
     useAdaptive: true
 };
 
-// === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m - HIPERSENSÍVEIS ===
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO (MAIS CONFIÁVEIS) ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 10,           // Reduzido de 15 para 10 (mais rápido)
-    emaAlpha: 0.4,           // Aumentado de 0.35 para 0.4
-    baseZScoreLookback: 20,  // Reduzido de 30 para 20
-    minZScoreLookback: 6,    // Reduzido de 8 para 6
-    maxZScoreLookback: 40,   // Reduzido de 60 para 40
-    zScoreThreshold: 0.8,    // Reduzido de 1.2 para 0.8
-    vptThreshold: 0.12,      // Reduzido de 0.20 para 0.12
-    minPriceMovement: 0.05,  // Reduzido de 0.08 para 0.05
-    combinedMultiplier: 1.05, // Reduzido de 1.08 para 1.05
-    volumeWeight: 0.40,      // Aumentado de 0.35 para 0.40
-    emaWeight: 0.35,         // Reduzido de 0.40 para 0.35
-    zScoreWeight: 0.15,      // Reduzido de 0.18 para 0.15
-    vptWeight: 0.10,         // Aumentado de 0.07 para 0.10
+    emaPeriod: 15,            // ↑ mais suave
+    emaAlpha: 0.35,           // ↓ menos reativo
+    baseZScoreLookback: 30,   // ↑ janela maior = mais estável
+    minZScoreLookback: 8,
+    maxZScoreLookback: 60,
+    zScoreThreshold: 1.2,     // ↑ só aceita spikes reais
+    vptThreshold: 0.20,       // ↑ movimento mínimo relevante
+    minPriceMovement: 0.08,   // ↑ filtro de ruído
+    combinedMultiplier: 1.08,
+    volumeWeight: 0.35,
+    emaWeight: 0.40,
+    zScoreWeight: 0.18,
+    vptWeight: 0.07,
     minimumThresholds: {
-        combinedScore: 0.10,  // Reduzido de 0.15 para 0.10
-        emaRatio: 1.02,       // Reduzido de 1.05 para 1.02
-        zScore: 0.10,         // Reduzido de 0.15 para 0.10
-        classification: 'MODERADO-BAIXO'
+        combinedScore: 0.35,  // ↑ exigência mínima de qualidade
+        emaRatio: 1.15,       // ↑ spike real de volume
+        zScore: 0.3,          // ↑ evita flutuações normais
+        classification: 'MODERADO'
     }
 };
 
-const VOLATILITY_PERIOD = 12;        // Reduzido de 15 para 12
-const VOLATILITY_TIMEFRAME = '5m';   // Reduzido de 10m para 5m
-const VOLATILITY_THRESHOLD = 0.3;    // Reduzido de 0.4 para 0.3
+const VOLATILITY_PERIOD = 15;
+const VOLATILITY_TIMEFRAME = '10m';
+const VOLATILITY_THRESHOLD = 0.4;
 
-// === CONFIGURAÇÕES RSI - HIPERSENSÍVEIS ===
-const RSI_BUY_MAX = 70;              // Aumentado de 63 para 70
-const RSI_SELL_MIN = 28;             // Reduzido de 32 para 28
+// === CONFIGURAÇÕES RSI - MAIS DISCIPLINADAS ===
+const RSI_BUY_MAX = 62;       // ↓ evita comprar em exaustão
+const RSI_SELL_MIN = 38;      // ↑ evita vender cedo demais
 
-// === CONFIGURAÇÕES DE SENSIBILIDADE - MÁXIMA ===
+// === CONFIGURAÇÕES DE SENSIBILIDADE - BALANCEADAS ===
 const SENSITIVITY_SETTINGS = {
-    scanInterval: 3000,      // Reduzido de 5000ms para 3000ms
-    minScanInterval: 1500,   // Reduzido de 2500ms para 1500ms
-    maxScanInterval: 5000,   // Reduzido de 8000ms para 5000ms
-    symbolGroupSize: 8,      // Reduzido de 15 para 8
-    maxConsecutiveNoSignals: 1, // Reduzido de 2 para 1
+    scanInterval: 5000,       // ↑ mais tempo para confirmação
+    minScanInterval: 2500,
+    maxScanInterval: 8000,
+    symbolGroupSize: 12,      // ↑ eficiência sem sobrecarga
+    maxConsecutiveNoSignals: 2
 };
 
-// === CONFIGURAÇÕES DE COOLDOWN HIPERRÁPIDAS ===
+// === CONFIGURAÇÕES DE COOLDOWN - MAIS PRUDENTES ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 2 * 60 * 1000,    // Reduzido de 5 para 2 minutos
-    oppositeDirection: 0.5 * 60 * 1000, // Reduzido de 2 para 0.5 minutos
+    sameDirection: 5 * 60 * 1000,     // ↑ 5 minutos
+    oppositeDirection: 2 * 60 * 1000, // ↑ 2 minutos
     useDifferentiated: true,
     adaptiveSettings: {
-        highVolumeMultiplier: 0.3,   // Reduzido de 0.5 para 0.3
-        highCorrelationMultiplier: 0.2, // Reduzido de 0.3 para 0.2
-        consecutiveSignalMultiplier: 1.2 // Reduzido de 1.5 para 1.2
+        highVolumeMultiplier: 0.5,
+        highCorrelationMultiplier: 0.3,
+        consecutiveSignalMultiplier: 1.5
     }
 };
 
-// === QUALITY SCORE HIPERPERMISSIVO ===
-const QUALITY_THRESHOLD = 58; // Reduzido de 65 para 58
+// === QUALITY SCORE - MAIS SELETIVO ===
+const QUALITY_THRESHOLD = 60; // ↑ foco em alta probabilidade
 
-// === PESOS REAJUSTADOS PARA MAXIMIZAR SINAIS ===
+// === PESOS REAJUSTADOS PARA QUALIDADE > QUANTIDADE ===
 const QUALITY_WEIGHTS = {
-    volume: 25,           // Reduzido de 36 para 25
-    volatility: 6,        // Reduzido de 10 para 6
-    rsi: 12,             // Reduzido de 16 para 12
-    emaAlignment: 12,    // Reduzido de 16 para 12
-    stoch1h: 8,          // Reduzido de 10 para 8
-    stoch4h: 6,          // Reduzido de 8 para 6
-    cci4h: 6,            // Reduzido de 8 para 6
-    breakoutRisk: 5,      // Reduzido de 10 para 5
-    supportResistance: 5, // Reduzido de 10 para 5
-    pivotPoints: 5,       // Reduzido de 10 para 5
-    btcCorrelation: 35,   // Aumentado de 28 para 35 (FOCO MÁXIMO)
-    momentum: 20          // Aumentado de 5 para 20 (QUADRUPLICADO)
+    volume: 35,               // ↑ volume como pilar
+    volatility: 8,
+    rsi: 14,
+    emaAlignment: 12,
+    stoch1h: 8,
+    stoch4h: 8,
+    cci4h: 8,
+    breakoutRisk: 10,
+    supportResistance: 12,
+    pivotPoints: 12,
+    btcCorrelation: 25,       // ↓ ainda importante, mas não dominante
+    momentum: 10              // ↓ usado como confirmação, não gatilho
 };
-
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
     requestsPerMinute: 1200,     // Aumentado de 1000 para 1200
