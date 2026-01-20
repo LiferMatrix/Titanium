@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -96,6 +96,26 @@ const QUALITY_WEIGHTS = {
     stochastic12h: 10,             // ↑ de 8
     stochasticDaily: 10            // ↑ de 8
 };
+
+// === NOVA CONFIGURAÇÃO: FORÇA RELATIVA BTC ===
+const BTC_STRENGTH_SETTINGS = {
+    timeframe: '15m',              // Timeframe para análise
+    lookbackPeriod: 20,            // Período de candles para análise
+    btcSymbol: 'BTCUSDT',
+    strengthWeights: {
+        priceChange: 0.4,          // Peso da variação de preço
+        volumeRatio: 0.3,          // Peso da relação de volume
+        dominance: 0.3             // Peso da dominância BTC
+    },
+    threshold: {
+        strongBuy: 70,             // Força > 70 = Forte para compra
+        moderateBuy: 55,           // Força 55-70 = Moderado para compra
+        neutral: 45,               // Força 45-55 = Neutro
+        moderateSell: 30,          // Força 30-45 = Moderado para venda
+        strongSell: 30             // Força < 30 = Forte para venda
+    }
+};
+
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 const BINANCE_RATE_LIMIT = {
     requestsPerMinute: 1000,
@@ -254,6 +274,170 @@ const STOCH_4H_SETTINGS = {
 const TARGET_PERCENTAGES = [1.5, 3.0, 5.0, 8.0, 12.0];
 const ATR_PERIOD = 14;
 const ATR_TIMEFRAME = '15m';
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA CALCULAR FORÇA RELATIVA EM RELAÇÃO AO BTC E DOMINÂNCIA
+// =====================================================================
+
+async function calculateBTCRelativeStrength(symbol, isBullish) {
+    try {
+        const settings = BTC_STRENGTH_SETTINGS;
+        
+        // Obter candles do ativo
+        const assetCandles = await getCandlesCached(symbol, settings.timeframe, settings.lookbackPeriod);
+        // Obter candles do BTC
+        const btcCandles = await getCandlesCached(settings.btcSymbol, settings.timeframe, settings.lookbackPeriod);
+        
+        if (assetCandles.length < 5 || btcCandles.length < 5) {
+            return {
+                strengthScore: 50,
+                buyStrength: 50,
+                sellStrength: 50,
+                status: 'NEUTRAL',
+                message: 'Dados insuficientes para análise',
+                details: {}
+            };
+        }
+
+        // 1. Calcular variação percentual do ativo vs BTC
+        const assetPriceChange = ((assetCandles[assetCandles.length - 1].close - assetCandles[0].close) / assetCandles[0].close) * 100;
+        const btcPriceChange = ((btcCandles[btcCandles.length - 1].close - btcCandles[0].close) / btcCandles[0].close) * 100;
+        
+        // Força baseada na variação relativa
+        let priceStrength = 50;
+        const relativeChange = assetPriceChange - btcPriceChange;
+        
+        if (relativeChange > 5) priceStrength = 90;
+        else if (relativeChange > 3) priceStrength = 75;
+        else if (relativeChange > 1) priceStrength = 65;
+        else if (relativeChange > 0) priceStrength = 55;
+        else if (relativeChange > -1) priceStrength = 45;
+        else if (relativeChange > -3) priceStrength = 35;
+        else if (relativeChange > -5) priceStrength = 25;
+        else priceStrength = 10;
+
+        // 2. Calcular relação de volume
+        const assetVolumeAvg = assetCandles.reduce((sum, candle) => sum + candle.volume, 0) / assetCandles.length;
+        const btcVolumeAvg = btcCandles.reduce((sum, candle) => sum + candle.volume, 0) / btcCandles.length;
+        
+        // Volume normalizado
+        const volumeRatio = assetVolumeAvg / btcVolumeAvg;
+        let volumeStrength = 50;
+        
+        if (volumeRatio > 0.05) volumeStrength = 80;
+        else if (volumeRatio > 0.02) volumeStrength = 70;
+        else if (volumeRatio > 0.01) volumeStrength = 60;
+        else if (volumeRatio > 0.005) volumeStrength = 50;
+        else if (volumeRatio > 0.002) volumeStrength = 40;
+        else if (volumeRatio > 0.001) volumeStrength = 30;
+        else volumeStrength = 20;
+
+        // 3. Tentar obter dominância BTC (se disponível)
+        let dominanceStrength = 50;
+        let dominance = null;
+        
+        try {
+            // Tentar obter dados de dominância via API CoinGecko ou similar
+            // Para simplificar, usaremos uma aproximação baseada no preço
+            const btcMarketCapEffect = (btcCandles[btcCandles.length - 1].close / 50000) * 50;
+            dominanceStrength = Math.min(100, Math.max(0, btcMarketCapEffect));
+            dominance = `${((btcCandles[btcCandles.length - 1].close / 50000) * 100).toFixed(1)}%`;
+        } catch (error) {
+            // Fallback se não conseguir obter dominância
+            dominanceStrength = 50;
+            dominance = 'N/A';
+        }
+
+        // 4. Calcular score combinado
+        const weights = settings.strengthWeights;
+        const combinedScore = 
+            (priceStrength * weights.priceChange) + 
+            (volumeStrength * weights.volumeRatio) + 
+            (dominanceStrength * weights.dominance);
+        
+        // 5. Determinar força para compra e venda
+        let buyStrength, sellStrength;
+        
+        if (isBullish) {
+            // Para sinais de compra, score mais alto = melhor
+            buyStrength = combinedScore;
+            sellStrength = 100 - combinedScore;
+        } else {
+            // Para sinais de venda, score mais baixo = melhor
+            sellStrength = 100 - combinedScore;
+            buyStrength = combinedScore;
+        }
+        
+        // 6. Determinar status
+        let status, emoji;
+        if (combinedScore >= settings.threshold.strongBuy) {
+            status = 'FORTE PARA COMPRA';
+            emoji = '🟢🟢🟢';
+        } else if (combinedScore >= settings.threshold.moderateBuy) {
+            status = 'MODERADO PARA COMPRA';
+            emoji = '🟢🟢';
+        } else if (combinedScore >= settings.threshold.neutral) {
+            status = 'NEUTRO';
+            emoji = '⚪';
+        } else if (combinedScore >= settings.threshold.moderateSell) {
+            status = 'MODERADO PARA VENDA';
+            emoji = '🔴🔴';
+        } else {
+            status = 'FORTE PARA VENDA';
+            emoji = '🔴🔴🔴';
+        }
+
+        // 7. Gerar mensagem descritiva
+        let message = '';
+        if (relativeChange > 0) {
+            message = `Ativo superando BTC (+${relativeChange.toFixed(2)}%)`;
+        } else {
+            message = `Ativo underperforming BTC (${relativeChange.toFixed(2)}%)`;
+        }
+        
+        message += ` | Volume: ${(volumeRatio * 100).toFixed(3)}% do BTC`;
+        if (dominance !== 'N/A') {
+            message += ` | Dominância BTC: ${dominance}`;
+        }
+
+        return {
+            strengthScore: Math.round(combinedScore),
+            buyStrength: Math.round(buyStrength),
+            sellStrength: Math.round(sellStrength),
+            status: status,
+            emoji: emoji,
+            message: message,
+            details: {
+                priceChange: {
+                    asset: assetPriceChange.toFixed(2) + '%',
+                    btc: btcPriceChange.toFixed(2) + '%',
+                    relative: relativeChange.toFixed(2) + '%',
+                    strength: priceStrength
+                },
+                volume: {
+                    ratio: volumeRatio.toFixed(6),
+                    strength: volumeStrength
+                },
+                dominance: {
+                    value: dominance,
+                    strength: dominanceStrength
+                },
+                weights: weights
+            }
+        };
+
+    } catch (error) {
+        console.log(`⚠️ Erro cálculo força BTC ${symbol}: ${error.message}`);
+        return {
+            strengthScore: 50,
+            buyStrength: 50,
+            sellStrength: 50,
+            status: 'NEUTRAL',
+            message: 'Erro na análise',
+            details: {}
+        };
+    }
+}
 
 // =====================================================================
 // 🛡️ SISTEMA DE RISK LAYER AVANÇADO
@@ -2699,7 +2883,7 @@ async function getADX1h(symbol) {
 }
 
 // =====================================================================
-// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS
+// 📤 FUNÇÃO ATUALIZADA PARA ENVIAR ALERTAS (COM FORÇA RELATIVA BTC)
 // =====================================================================
 
 async function sendSignalAlertWithRisk(signal) {
@@ -2734,6 +2918,9 @@ async function sendSignalAlertWithRisk(signal) {
         const pivotType = nearestPivot?.type || 'N/A';
         const pivotStrength = nearestPivot?.strength || 'N/A';
         const pivotTimeframe = nearestPivot?.timeframe || 'N/A';
+        
+        // 🔹 NOVO: Calcular força relativa BTC
+        const btcStrength = await calculateBTCRelativeStrength(signal.symbol, signal.isBullish);
         
         // 🔹 NOVO: Calcular Fibonacci relacionado ao pivô
         let fibInfo = '';
@@ -2771,30 +2958,47 @@ async function sendSignalAlertWithRisk(signal) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        // 🔹 AJUSTE CRÍTICO: Verificação robusta dos dados do estocástico
+        if (stoch12hData && stoch12hData.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stoch12hData.lastCross) {
+                const time = stoch12hData.lastCross.time || '';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stoch12hData && stoch12hData.raw && stoch12hData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stoch12hData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stoch12hData.raw.current.d?.toFixed(1) || 'N/A';
+            stoch12hInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stoch12hInfo = 'Dados insuficientes';
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData && stochDailyData.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stochDailyData.lastCross) {
+                const time = stochDailyData.lastCross.time || '';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stochDailyData && stochDailyData.raw && stochDailyData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stochDailyData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stochDailyData.raw.current.d?.toFixed(1) || 'N/A';
+            stochDailyInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stochDailyInfo = 'Dados insuficientes';
         }
 
         const riskEmoji = riskAssessment.level === 'CRÍTICO' ? '🚨' :
@@ -2911,9 +3115,17 @@ ${fibInfo}
 ${adxInfo}
 ⚠️ LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}|🔹RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
+
+<i>🔹Força Relativa vs BTC</i>
+• ${btcStrength.emoji} ${btcStrength.status}
+• Força para COMPRA: ${btcStrength.buyStrength}%
+• Força para VENDA: ${btcStrength.sellStrength}%
+${btcStrength.message ? `• ${btcStrength.message}` : ''}
+
 <i>🔹Estocástico </i>
 • 12h: ${stoch12hInfo}
 • 1D: ${stochDailyInfo}
+
 <i>🤖 IA Operação/Risco </i>
 • Risco: ${riskAssessment.overallScore.toFixed(2)} | Nível: ${riskEmoji} ${riskAssessment.level} 
 ⚠️ Confiança da IA: ${riskAssessment.confidence}%
@@ -2949,6 +3161,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   Tipo de Análise: ${analysisType}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
+        console.log(`   Força BTC: ${btcStrength.status} (Compra: ${btcStrength.buyStrength}%, Venda: ${btcStrength.sellStrength}%)`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Funding: ${fundingRateText}`);
@@ -2959,7 +3172,8 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
             type: alertType,
             volumeConfirmed: isVolumeConfirmed,
             volumeScore: volumeScore,
-            analysisType: analysisType
+            analysisType: analysisType,
+            btcStrength: btcStrength
         };
 
     } catch (error) {
@@ -2984,6 +3198,9 @@ async function sendSignalAlert(signal) {
         const pivotDistance = nearestPivot?.distancePercent?.toFixed(2) || 'N/A';
         const pivotType = nearestPivot?.type || 'N/A';
         const pivotStrength = nearestPivot?.strength || 'N/A';
+        
+        // 🔹 NOVO: Calcular força relativa BTC
+        const btcStrength = await calculateBTCRelativeStrength(signal.symbol, signal.isBullish);
         
         // 🔹 NOVO: Calcular Fibonacci relacionado ao pivô
         let fibInfo = '';
@@ -3116,30 +3333,47 @@ async function sendSignalAlert(signal) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        // 🔹 AJUSTE CRÍTICO: Verificação robusta dos dados do estocástico
+        if (stoch12hData && stoch12hData.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stoch12hData.lastCross) {
+                const time = stoch12hData.lastCross.time || '';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stoch12hData && stoch12hData.raw && stoch12hData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stoch12hData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stoch12hData.raw.current.d?.toFixed(1) || 'N/A';
+            stoch12hInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stoch12hInfo = 'Dados insuficientes';
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData && stochDailyData.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                const time = lastCross.time || '';
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${time}`;
+            if (stochDailyData.lastCross) {
+                const time = stochDailyData.lastCross.time || '';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
+        } else if (stochDailyData && stochDailyData.raw && stochDailyData.raw.current) {
+            // Fallback para dados raw
+            const kValue = stochDailyData.raw.current.k?.toFixed(1) || 'N/A';
+            const dValue = stochDailyData.raw.current.d?.toFixed(1) || 'N/A';
+            stochDailyInfo = `K:${kValue} D:${dValue}`;
+        } else {
+            stochDailyInfo = 'Dados insuficientes';
         }
 
         const fundingRate = signal.marketData.funding?.raw || 0;
@@ -3170,6 +3404,13 @@ ${now.full} <a href="${tradingViewLink}">Gráfico</a>
 • Dist S/R: ${distancePercent}% 
 ${fibInfo}
 ${adxInfo}
+
+<b>📈 FORÇA RELATIVA VS BTC</b>
+• ${btcStrength.emoji} ${btcStrength.status}
+• Força para COMPRA: ${btcStrength.buyStrength}%
+• Força para VENDA: ${btcStrength.sellStrength}%
+${btcStrength.message ? `• ${btcStrength.message}` : ''}
+
 <b>📊 Stochastic Tendência (5.3.3)</b>
 • 12h: ${stoch12hInfo}
 • Diário: ${stochDailyInfo}
@@ -3200,6 +3441,7 @@ ${signal.targetsData.targets.slice(0, 3).map(target => `• ${target.target}%: $
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
         console.log(`   Tipo de Análise: ${analysisType}`);
         console.log(`   Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
+        console.log(`   Força BTC: ${btcStrength.status} (Compra: ${btcStrength.buyStrength}%, Venda: ${btcStrength.sellStrength}%)`);
         console.log(`   LSR Binance: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}`);
         console.log(`   RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}`);
         console.log(`   Funding: ${fundingRateText}`);
@@ -3703,7 +3945,7 @@ function classifyVolumeStrength(score) {
 }
 
 // =====================================================================
-// 📊 FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO
+// 📊 FUNÇÕES PARA STOCHASTIC 12H E DIÁRIO - ATUALIZADA
 // =====================================================================
 
 async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
@@ -3714,7 +3956,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 isValid: false,
                 kValue: null,
                 dValue: null,
-                lastCross: null
+                lastCross: null,
+                raw: null
             };
         }
 
@@ -3737,7 +3980,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 isValid: false,
                 kValue: null,
                 dValue: null,
-                lastCross: null
+                lastCross: null,
+                raw: null
             };
         }
 
@@ -3796,7 +4040,8 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
                 current: current,
                 previous: previous,
                 values: stochValues.slice(-5)
-            }
+            },
+            timestamp: Date.now()
         };
 
     } catch (error) {
@@ -3805,7 +4050,9 @@ async function checkStochasticWithTimeframe(symbol, isBullish, settings) {
             isValid: false,
             kValue: null,
             dValue: null,
-            lastCross: null
+            lastCross: null,
+            raw: null,
+            timestamp: Date.now()
         };
     }
 }
@@ -4737,6 +4984,7 @@ ${brazilTime.full}
 • Stochastic Tendência 12h/Diário
 • Sistema de Risco Avançado
 • Aprendizado Automático
+• Força Relativa vs BTC & Dominância
 ✨ by @J4Rviz
         `;
 
@@ -5692,27 +5940,30 @@ async function monitorSymbol(symbol) {
         let stoch12hInfo = 'N/A';
         let stochDailyInfo = 'N/A';
         
-        if (stoch12hData?.isValid) {
-            const kValue = stoch12hData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stoch12hData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stoch12hData.lastCross;
+        if (stoch12hData?.isValid && stoch12hData.kValue !== null && stoch12hData.dValue !== null) {
+            const kValue = stoch12hData.kValue.toFixed(1);
+            const dValue = stoch12hData.dValue.toFixed(1);
             
-            if (lastCross) {
-                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${lastCross.time}`;
+            if (stoch12hData.lastCross) {
+                stoch12hInfo = `K:${kValue} D:${dValue} | Cruzamento ${stoch12hData.lastCross.direction} às ${stoch12hData.lastCross.time}`;
             } else {
-                stoch12hInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stoch12hData.kValue > stoch12hData.dValue ? 'ALTA' : 'BAIXA';
+                stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
         }
         
-        if (stochDailyData?.isValid) {
-            const kValue = stochDailyData.kValue?.toFixed(1) || 'N/A';
-            const dValue = stochDailyData.dValue?.toFixed(1) || 'N/A';
-            const lastCross = stochDailyData.lastCross;
+        if (stochDailyData?.isValid && stochDailyData.kValue !== null && stochDailyData.dValue !== null) {
+            const kValue = stochDailyData.kValue.toFixed(1);
+            const dValue = stochDailyData.dValue.toFixed(1);
             
-            if (lastCross) {
-                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${lastCross.direction} às ${lastCross.time}`;
+            if (stochDailyData.lastCross) {
+                const time = stochDailyData.lastCross.time || '';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Cruzamento ${stochDailyData.lastCross.direction} às ${time}`;
             } else {
-                stochDailyInfo = `K:${kValue} D:${dValue}`;
+                // Determinar tendência baseada em K e D
+                const trend = stochDailyData.kValue > stochDailyData.dValue ? 'ALTA' : 'BAIXA';
+                stochDailyInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
             }
         }
 
@@ -5818,6 +6069,7 @@ async function mainBotLoop() {
     console.log(` ${allSymbols.length} ativos Binance Futures`);
     console.log(` Sistema aprimorado com análise avançada de Pivot Points`);
     console.log(` Sistema de aprendizado automático ativado`);
+    console.log(` Análise de Força Relativa vs BTC e Dominância ativada`);
     console.log(` Bot iniciando...`);
 
     await sendInitializationMessage(allSymbols);
@@ -6043,6 +6295,7 @@ async function startBot() {
         console.log(` Sistema de detecção de volume robusto (3m)`);
         console.log(` Análise multi-timeframe de pivot points`);
         console.log(` Sistema de aprendizado automático`);
+        console.log(` Análise de Força Relativa vs BTC e Dominância`);
         console.log(` Bot configurado e pronto para operar`);
         console.log('='.repeat(80) + '\n');
 
