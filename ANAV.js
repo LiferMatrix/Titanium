@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -2176,7 +2176,7 @@ async function sendSignalAlert(signal) {
         let adxInfo = '';
         if (adxData) {
             const adxEmoji = adxData.isAbove20 ? '💹 ' : '';
-            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(Forte Tendência)' : '(Tendência Fraca)'} | +DI: ${adxData.plusDI.toFixed(1)} | -DI: ${adxData.minusDI.toFixed(1)}`;
+            adxInfo = `\n${adxEmoji}ADX 1h: ${adxData.adx.toFixed(1)} ${adxData.isAbove20 ? '(💹Forte Tendência)' : '(Tendência Fraca)'}}`;
         } else {
             adxInfo = `\nADX 1h: N/A | Não disponível`;
         }
@@ -2274,25 +2274,24 @@ async function sendSignalAlert(signal) {
         let message = `
 ${alertTitle}
 ${now.full} <a href="${tradingViewLink}">Gráfico</a>
-<b>🎯 ANÁLISE TÉCNICA AVANÇADA</b>
-• Score Técnico: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
-• Probabilidade de Sucesso: ${baseProbability}%
+<i> ANÁLISE TÉCNICA</i>
+• Score: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
+• Probabilidade: ${baseProbability}%
 • Preço: $${signal.price.toFixed(6)}
-• Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
-• VMA: ${volumeData?.vmaRatio?.toFixed(2) || 'N/A'}x | Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
+• Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})
+• Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • LSR: ${binanceLSRValue} ${lsrSymbol} ${lsrPercentChange !== '0.00' ? `(${lsrPercentChange}%)` : ''}
 • RSI: ${signal.marketData.rsi?.value?.toFixed(1) || 'N/A'}
-• Dist S/R: ${distancePercent}% 
 ${fibInfo}
 ${adxInfo}
 
-<b>📈 FORÇA RELATIVA VS BTC</b>
+<i>📈 FORÇA RELATIVA VS BTC</i>
 • ${btcStrength.emoji} ${btcStrength.status}
 • Força para COMPRA: ${btcStrength.buyStrength}%
 • Força para VENDA: ${btcStrength.sellStrength}%
 ${btcStrength.message ? `• ${btcStrength.message}` : ''}
 
-<b>📊 Stochastic Tendência (5.3.3)</b>
+<b>📊 Stochastic</b>
 • 12h: ${stoch12hInfo}
 • Diário: ${stochDailyInfo}
 ${!isVolumeConfirmed ? `\n<b>⚠️ Volume Baixo para Operar</b>` : ''}
