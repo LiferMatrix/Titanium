@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-Ic'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-10036';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -628,13 +628,13 @@ async function getBTCTimingSignal(symbol, isBullish) {
                 // Se dados de correlação inválidos, permite entrada
                 if (!correlation.isValid) return true;
                 
-                // REGRA 1: BTC em tendência favorável
-                if (isBullish && btcTrend !== 'BULLISH') {
-                    console.log(`⏳ ${symbol}: BTC em tendência de baixa, aguardando para COMPRA`);
+                // REGRA 1: Só bloqueia se BTC estiver claramente contra
+                if (isBullish && btcTrend === 'BEARISH' && btcMomentum < -0.8) {
+                    console.log(`⏳ ${symbol}: BTC em BAIXA FORTE, evitando compra`);
                     return false;
                 }
-                if (!isBullish && btcTrend !== 'BEARISH') {
-                    console.log(`⏳ ${symbol}: BTC em tendência de alta, aguardando para VENDA`);
+                if (!isBullish && btcTrend === 'BULLISH' && btcMomentum > 0.8) {
+                    console.log(`⏳ ${symbol}: BTC em ALTA FORTE, evitando venda`);
                     return false;
                 }
                 
@@ -5276,15 +5276,17 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
                 break;
             case 'STRONG_UNDERPERFORMANCE':
                 btcScore = 0;
-                btcDetail = `0/${QUALITY_WEIGHTS.btcCorrelation} (🚨 FORTE FRAQUEZA vs BTC: ${relativePerformance.toFixed(2)}%)`;
-                failedChecks.push(`Performance vs BTC: Altcoin muito fraco vs BTC (${relativePerformance.toFixed(2)}%)`);
+                // Mas NÃO adiciona ao failedChecks (para não matar o sinal se outros fatores forem fortes)
+                details.push(`🚨 Forte underperformance vs BTC (${relativePerformance.toFixed(2)}%)`);
                 break;
             default:
                 btcDetail = `0/${QUALITY_WEIGHTS.btcCorrelation} (Não analisado)`;
         }
 
         score += btcScore;
-        details.push(` Performance vs BTC: ${btcDetail}`);
+        if (performanceLevel !== 'STRONG_UNDERPERFORMANCE') {
+            details.push(` Performance vs BTC: ${btcDetail}`);
+        }
     } else {
         failedChecks.push(`Performance vs BTC: Não analisado`);
     }
