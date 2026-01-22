@@ -1,13 +1,13 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
-const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
+const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -92,8 +92,7 @@ const QUALITY_WEIGHTS = {
     rsi: 14,             // Reduzido de 16 para 14 (menos peso no RSI)
     emaAlignment: 14,    // Reduzido de 16 para 14
     stoch1h: 10,          // Reduzido de 10 para 8
-    stoch4h: 6,          // Reduzido de 8 para 6
-    cci4h: 6,            // Reduzido de 8 para 6
+    stoch4h: 8,          // Reduzido de 8 para 6
     breakoutRisk: 8,      // Reduzido de 10 para 8 (menos restritivo)
     supportResistance: 8, // Reduzido de 10 para 8
     pivotPoints: 8,       // Reduzido de 10 para 8
@@ -560,8 +559,8 @@ const BTC_CORRELATION_ENHANCED = {
             if (alpha < 0) return 'DECOUPLED_UNDERPERFORMING';
             return 'DECOUPLED_NEUTRAL';
         } else {
-            if (alpha > 0.001) return 'MIXED_OUTPERFORMING';
-            if (alpha < -0.001) return 'MIXED_UNDERPERFORMING';
+            if (alpha > 0) return 'MIXED_OUTPERFORMING';
+            if (alpha < 0) return 'MIXED_UNDERPERFORMING';
             return 'MIXED_NEUTRAL';
         }
     }
@@ -765,7 +764,7 @@ class SophisticatedRiskLayer {
         this.riskHistory = new Map();
         this.maxHistorySize = 100;
 
-        console.log('🛡️  Risk Layer Sofisticado inicializado (RSI EXTREME REMOVIDO)');
+        console.log('🛡️  Risk Layer Sofisticado inicializado');
     }
 
     async assessSignalRisk(signal) {
@@ -780,8 +779,6 @@ class SophisticatedRiskLayer {
                 shouldAlert: true,
                 shouldBlock: false
             };
-
-            // REMOVIDO: Análise de RSI Extreme
 
             const volatilityRisk = await this.analyzeVolatilityRisk(signal);
             riskAssessment.factors.push(volatilityRisk);
@@ -1670,7 +1667,7 @@ class CircuitBreaker {
 }
 
 // =====================================================================
-// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION - REMOVIDO RSI EXTREME
+// 🧠 SISTEMA DE APRENDIZADO COMPLETO COM TRAILING SIMULATION - REMOVIDO CCI
 // =====================================================================
 
 class AdvancedLearningSystem {
@@ -1706,7 +1703,7 @@ class AdvancedLearningSystem {
         };
 
         this.loadLearningData();
-        console.log('🧠 Sistema de Aprendizado Avançado com Trailing Simulation inicializado');
+        console.log('🧠 Sistema de Aprendizado Avançado com Trailing Simulation inicializado (CCI REMOVIDO)');
     }
 
     async simulateTradeCandleByCandle(tradeId) {
@@ -2034,9 +2031,6 @@ class AdvancedLearningSystem {
                     emaAlignment: marketData.ema?.isAboveEMA55 || false,
                     stoch1hValid: marketData.stoch?.isValid || false,
                     stoch4hValid: marketData.stoch4h?.isValid || false,
-                    cci4hValid: marketData.cci4h?.isValid || false,
-                    cci4hValue: marketData.cci4h?.value || 0,
-                    cci4hMA: marketData.cci4h?.maValue || 0,
                     breakoutRisk: marketData.breakoutRisk || {},
                     supportResistance: marketData.supportResistance || {},
                     pivotPoints: marketData.pivotPoints || {},
@@ -2228,9 +2222,6 @@ class AdvancedLearningSystem {
         }
         if (data.stoch1hValid && data.stoch4hValid) {
             patterns.push('STOCH_BOTH_BULLISH');
-        }
-        if (data.cci4hValid) {
-            patterns.push('CCI_BULLISH');
         }
 
         if (data.supportResistance?.nearestSupport?.distancePercent <= 1.0) {
@@ -3136,7 +3127,6 @@ async function sendSignalAlertWithRisk(signal) {
         }
 
         const now = getBrazilianDateTime();
-        //const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
         let message = `
 ${alertTitle}
@@ -3233,7 +3223,6 @@ async function sendSignalAlert(signal) {
         }
 
         const now = getBrazilianDateTime();
-        //const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${signal.symbol.replace('/', '')}&interval=15`;
 
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
@@ -4691,10 +4680,11 @@ function calculateDynamicRetracements(price, stopData, isBullish, atrData) {
 
 async function calculateAdvancedTargetsAndStop(price, isBullish, symbol) {
     try {
-        const atrData = await getATRData(symbol, ATR_TIMEFRAME, ATR_PERIOD);
+        const atrData = await getATRData(symbol, '10m', 14);
         const stopData = calculateDynamicStopLoss(price, isBullish, atrData);
         const retracementData = calculateDynamicRetracements(price, stopData, isBullish, atrData);
 
+        const TARGET_PERCENTAGES = [3.0, 5.0, 8.0, 12.0];
         const targets = TARGET_PERCENTAGES.map(percent => {
             const targetPrice = isBullish ?
                 price * (1 + percent / 100) :
@@ -4740,6 +4730,7 @@ function getDefaultTargets(price, isBullish) {
         price * (1 - stopPercentage / 100) :
         price * (1 + stopPercentage / 100);
 
+    const TARGET_PERCENTAGES = [3.0, 5.0, 8.0, 12.0];
     const targets = TARGET_PERCENTAGES.map(percent => ({
         target: percent.toFixed(1),
         price: isBullish ?
@@ -4986,7 +4977,7 @@ async function checkVolatility(symbol) {
 async function checkStochastic(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '1h', 30);
-        if (candles.length < STOCH_SETTINGS.period + 5) return { isValid: false };
+        if (candles.length < 14) return { isValid: false };
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
@@ -4996,9 +4987,9 @@ async function checkStochastic(symbol, isBullish) {
             high: highs,
             low: lows,
             close: closes,
-            period: STOCH_SETTINGS.period,
-            smooth: STOCH_SETTINGS.smooth,
-            signalPeriod: STOCH_SETTINGS.signalPeriod
+            period: 14,
+            smooth: 3,
+            signalPeriod: 3
         });
 
         if (!stochValues || stochValues.length < 2) return { isValid: false };
@@ -5031,7 +5022,7 @@ async function checkStochastic(symbol, isBullish) {
 async function checkStochastic4h(symbol, isBullish) {
     try {
         const candles = await getCandlesCached(symbol, '4h', 40);
-        if (candles.length < STOCH_4H_SETTINGS.period + 5) return { isValid: false };
+        if (candles.length < 20) return { isValid: false };
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
@@ -5041,9 +5032,9 @@ async function checkStochastic4h(symbol, isBullish) {
             high: highs,
             low: lows,
             close: closes,
-            period: STOCH_4H_SETTINGS.period,
-            signalPeriod: STOCH_4H_SETTINGS.signalPeriod,
-            smooth: STOCH_4H_SETTINGS.smooth
+            period: 14,
+            signalPeriod: 3,
+            smooth: 3
         });
 
         if (!stochValues || stochValues.length < 2) return { isValid: false };
@@ -5069,58 +5060,8 @@ async function checkStochastic4h(symbol, isBullish) {
     }
 }
 
-async function checkCCI4h(symbol, isBullish) {
-    try {
-        const candles = await getCandlesCached(symbol, '4h', 50);
-        if (candles.length < CCI_4H_SETTINGS.period + 10) return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
-
-        const highs = candles.map(c => c.high);
-        const lows = candles.map(c => c.low);
-        const closes = candles.map(c => c.close);
-
-        const cciValues = CCI.calculate({
-            high: highs,
-            low: lows,
-            close: closes,
-            period: CCI_4H_SETTINGS.period
-        });
-
-        if (!cciValues || cciValues.length === 0) return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
-
-        const latestCCI = cciValues[cciValues.length - 1];
-
-        const cciForMA = cciValues.slice(-CCI_4H_SETTINGS.maPeriod);
-        const cciMA = cciForMA.reduce((sum, value) => sum + value, 0) / cciForMA.length;
-
-        const isValid = isBullish ?
-            latestCCI > cciMA :
-            latestCCI < cciMA;
-
-        return {
-            value: latestCCI,
-            maValue: cciMA,
-            isValid: isValid,
-            deviation: Math.abs(latestCCI - cciMA)
-        };
-    } catch (error) {
-        return {
-            value: 0,
-            maValue: 0,
-            isValid: false
-        };
-    }
-}
-
 // =====================================================================
-// 📊 FUNÇÃO PARA CALCULAR QUALIDADE DO SINAL
+// 📊 FUNÇÃO PARA CALCULAR QUALIDADE DO SINAL (CCI REMOVIDO)
 // =====================================================================
 
 async function calculateSignalQuality(symbol, isBullish, marketData) {
@@ -5189,15 +5130,6 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         details.push(` Stoch 4h: ${stoch4hScore}/${QUALITY_WEIGHTS.stoch4h} ${isBullish ? 'bullish' : 'bearish'} `);
     } else {
         failedChecks.push(`Stoch 4h: ${isBullish ? 'bullish' : 'bearish'} `);
-    }
-
-    if (marketData.cci4h && marketData.cci4h.isValid) {
-        const cci4hScore = QUALITY_WEIGHTS.cci4h;
-        score += cci4hScore;
-        const deviation = marketData.cci4h.deviation.toFixed(2);
-        details.push(` CCI 4h: ${cci4hScore}/${QUALITY_WEIGHTS.cci4h} (${marketData.cci4h.value.toFixed(2)} ${isBullish ? '>' : '<'} ${marketData.cci4h.maValue.toFixed(2)} MMS, dev: ${deviation})`);
-    } else {
-        failedChecks.push(`CCI 4h: ${marketData.cci4h?.value?.toFixed(2) || 0} ${isBullish ? '≤' : '≥'} ${marketData.cci4h?.maValue?.toFixed(2) || 0} MMS`);
     }
 
     if (marketData.breakoutRisk) {
@@ -5541,12 +5473,11 @@ async function monitorSymbol(symbol) {
         const pivotPointsData = await analyzePivotPoints(symbol, emaData.currentPrice, isBullish);
         const momentumData = await detectMomentumSpike(symbol, '1m');
 
-        const [volumeData, volatilityData, stochData, stoch4hData, cci4hData] = await Promise.all([
+        const [volumeData, volatilityData, stochData, stoch4hData] = await Promise.all([
             checkVolume(symbol),
             checkVolatility(symbol),
             checkStochastic(symbol, isBullish),
-            checkStochastic4h(symbol, isBullish),
-            checkCCI4h(symbol, isBullish)
+            checkStochastic4h(symbol, isBullish)
         ]);
 
         const marketData = {
@@ -5555,7 +5486,6 @@ async function monitorSymbol(symbol) {
             rsi: rsiData,
             stoch: stochData,
             stoch4h: stoch4hData,
-            cci4h: cci4hData,
             ema: {
                 isAboveEMA55: emaData.isAboveEMA55,
                 isEMA13CrossingUp: emaData.isEMA13CrossingUp,
@@ -5664,8 +5594,6 @@ async function processSymbolGroup(symbols) {
 function cleanupCaches() {
     const now = Date.now();
     
-    // O cacheManager já faz a limpeza automática via intervalo
-    // Esta função é mantida para compatibilidade
     console.log('🧹 Cache cleanup chamado (gerenciado automaticamente)');
 }
 
@@ -5702,6 +5630,7 @@ async function mainBotLoop() {
     console.log(`  Performance vs BTC: Destacando altcoins liderando o mercado`);
     console.log(`  Tipos de Análise: Momentum Rápido | Outperformance BTC | Reversão | Exaustão/Correção | Neutra`);
     console.log(` 🔥 NOVO: Correlação Dinâmica com BTC - Beta, Alpha e Timing`);
+    console.log(` ❌ CCI completamente removido do sistema`);
 
     await sendInitializationMessage(allSymbols);
 
@@ -5757,9 +5686,6 @@ async function mainBotLoop() {
                     await new Promise(r => setTimeout(r, 800));
                 }
             }
-
-            // Limpeza automática via cacheManager - não precisa chamar manualmente
-            // O cacheManager tem seu próprio intervalo de limpeza
 
             if (Date.now() - lastReportTime >= 3600000) {
                 await learningSystem.sendPerformanceReport();
@@ -5906,13 +5832,13 @@ function resetLearningData() {
             lastUpdated: Date.now(),
             trailingConfig: learningSystem.trailingConfig,
             resetTimestamp: Date.now(),
-            resetNote: 'Sistema resetado para análise de pares BTC spot (RSI EXTREME REMOVIDO)'
+            resetNote: 'Sistema resetado para análise de pares BTC spot (CCI REMOVIDO)'
         };
         
         fs.writeFileSync(learningFile, JSON.stringify(cleanData, null, 2));
         
         console.log('✅ Dados de aprendizado resetados com sucesso!');
-        console.log('📊 Novo relatório será gerado com dados de pares BTC spot.');
+        console.log('📊 Novo relatório será gerado com dados de pares BTC spot (CCI REMOVIDO).');
         
         return true;
         
@@ -5961,6 +5887,7 @@ async function startBot() {
         console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
         console.log(` ⚡ Momentum: Detecção rápida em 1m-3m`);
         console.log(` 📈 Performance vs BTC: Destacando oportunidades relativas`);
+        console.log(` ❌ CCI completamente removido do sistema`);
         console.log('='.repeat(80) + '\n');
 
         try {
@@ -5992,7 +5919,7 @@ async function startBot() {
         }
 
         global.riskLayer = new SophisticatedRiskLayer();
-        console.log('🛡️  Risk Layer Sofisticado ativado (RSI EXTREME REMOVIDO)');
+        console.log('🛡️  Risk Layer Sofisticado ativado');
 
         console.log('✅ Tudo pronto! Iniciando monitoramento de pares BTC spot...');
 
@@ -6019,6 +5946,7 @@ function re() {
     console.log('  • Volume Threshold: ' + VOLUME_SETTINGS.baseThreshold.toFixed(2));
     console.log('  • Quality Threshold: ' + QUALITY_THRESHOLD);
     console.log('  • Performance vs BTC: ' + BTC_CORRELATION_SETTINGS.thresholds.highOutperformance + '%+ para alta performance');
+    console.log('  • ❌ CCI: Completamente removido do sistema');
     console.log('');
     console.log('⚙️  Configurações de sensibilidade:');
     console.log('  • Scan Interval: ' + (SENSITIVITY_SETTINGS.scanInterval / 1000) + 's');
@@ -6029,7 +5957,7 @@ function re() {
     console.log('  • Alertas mais rápidos (timeframes menores)');
     console.log('  • Maior sensibilidade a performance vs BTC');
     console.log('  • Detecção de momentum rápido');
-    console.log('  • RSI EXTREME completamente removido');
+    console.log('  • ❌ CCI completamente removido');
     console.log('  • 🔥 NOVO: Correlação Dinâmica com BTC (Beta, Alpha, Timing)');
     console.log('='.repeat(60) + '\n');
     
@@ -6042,7 +5970,7 @@ function re() {
         scan_interval: SENSITIVITY_SETTINGS.scanInterval,
         group_size: SENSITIVITY_SETTINGS.symbolGroupSize,
         momentum_enabled: true,
-        rsi_extreme_removed: true,
+        cci_removed: true,
         btc_correlation_dynamic: true,
         btc_timing_enabled: true
     };
