@@ -6,12 +6,21 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnsc'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
-
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
+
+// === CONFIGURAÇÕES DE SLIPPAGE ===
+const SLIPPAGE_SETTINGS = {
+    maxAllowedSlippage: 0.8, // 0.8% máximo de slippage
+    minLiquidityBTC: 0.01, // Mínimo de 0.01 BTC de liquidez
+    orderBookDepth: 50, // Profundidade do order book para análise
+    simulateOrderSize: 0.01, // Simular ordem de 0.01 BTC
+    timeoutMs: 3000, // Timeout para consulta do order book
+    blockIfInsufficient: true // Bloquear se liquidez insuficiente
+};
 
 // === CONFIGURAÇÕES DE VOLUME MÍNIMO ===
 const VOLUME_MINIMUM_THRESHOLDS = {
@@ -84,6 +93,7 @@ const COOLDOWN_SETTINGS = {
 
 // === QUALITY SCORE - MAIS PERMISSIVO, MAS INTELIGENTE ===
 const QUALITY_THRESHOLD = 62; // ← aceita mais sinais, mas com contexto
+const HIGH_PRIORITY_OVERRIDE_THRESHOLD = 55; // ↓ Limite reduzido para override de alta prioridade
 
 // === PESOS REAJUSTADOS PARA MAXIMIZAR EDGE EM MOMENTUM + BTC ===
 const QUALITY_WEIGHTS = {
@@ -108,7 +118,8 @@ const BINANCE_RATE_LIMIT = {
         exchangeInfo: 10,
         klines: 1,
         ticker24hr: 1,
-        ping: 1
+        ping: 1,
+        orderBook: 1            // 🆕 Peso para consulta de order book
     },
     maxWeightPerMinute: 2400,    // Aumentado de 2200 para 2400
     maxWeightPerSecond: 45,      // Aumentado de 40 para 45
@@ -220,6 +231,7 @@ const PRIORITY_SETTINGS = {
         volumeSpike: 3.0,           // > 3x volume
         momentum1m: 1.0,            // > 1% em 1 minuto
         rsiSignal: true,            // RSI dentro da zona
+        minQualityScore: 55         // 🆕 Score mínimo para override
     },
     mediumPriority: {
         btcOutperformance: 0.8,
@@ -242,17 +254,20 @@ class AdvancedCacheManager {
         this.candleCache = new Map();
         this.momentumCache = new Map();
         this.generalCache = new Map();
+        this.orderBookCache = new Map(); // 🆕 Cache para order books
         
         this.maxSize = {
             candleCache: 500,        // Máximo de 500 entradas de candles
             momentumCache: 200,      // Máximo de 200 entradas de momentum
-            generalCache: 100        // Máximo de 100 entradas gerais
+            generalCache: 100,       // Máximo de 100 entradas gerais
+            orderBookCache: 100      // 🆕 Máximo de 100 order books
         };
         
         this.ttl = {
             candleCache: 30000,      // 30 segundos
             momentumCache: 10000,    // 10 segundos
-            generalCache: 60000      // 60 segundos
+            generalCache: 60000,     // 60 segundos
+            orderBookCache: 5000     // 🆕 5 segundos (order book muda rápido)
         };
         
         this.stats = {
@@ -264,6 +279,42 @@ class AdvancedCacheManager {
         
         this.cleanupInterval = setInterval(() => this.cleanup(), 60000); // Limpeza a cada 1 minuto
         console.log('🧠 Advanced Cache Manager inicializado');
+    }
+
+    getOrderBookCacheKey(symbol) {
+        return `orderbook_${symbol}`;
+    }
+
+    getOrderBookCached(symbol) {
+        const cacheKey = this.getOrderBookCacheKey(symbol);
+        const now = Date.now();
+        
+        const cached = this.orderBookCache.get(cacheKey);
+        if (cached && now - cached.timestamp < this.ttl.orderBookCache) {
+            this.stats.hits++;
+            return Promise.resolve(cached.data);
+        }
+        
+        this.stats.misses++;
+        return null;
+    }
+
+    setOrderBookCached(symbol, data) {
+        const cacheKey = this.getOrderBookCacheKey(symbol);
+        
+        // Verificar se precisamos liberar espaço
+        if (this.orderBookCache.size >= this.maxSize.orderBookCache) {
+            this.evictOldestEntries('orderBookCache');
+        }
+        
+        this.orderBookCache.set(cacheKey, {
+            data: data,
+            timestamp: Date.now(),
+            accessCount: 1,
+            size: JSON.stringify(data).length
+        });
+        
+        this.updateStats();
     }
 
     getCandleCacheKey(symbol, timeframe, limit) {
@@ -393,8 +444,8 @@ class AdvancedCacheManager {
         let cleaned = 0;
         
         // Limpar caches expirados
-        [this.candleCache, this.momentumCache, this.generalCache].forEach((cache, index) => {
-            const cacheName = ['candleCache', 'momentumCache', 'generalCache'][index];
+        [this.candleCache, this.momentumCache, this.generalCache, this.orderBookCache].forEach((cache, index) => {
+            const cacheName = ['candleCache', 'momentumCache', 'generalCache', 'orderBookCache'][index];
             const ttl = this.ttl[cacheName];
             
             for (const [key, entry] of cache.entries()) {
@@ -414,7 +465,7 @@ class AdvancedCacheManager {
     }
 
     updateStats() {
-        this.stats.size = this.candleCache.size + this.momentumCache.size + this.generalCache.size;
+        this.stats.size = this.candleCache.size + this.momentumCache.size + this.generalCache.size + this.orderBookCache.size;
         
         // Log de stats a cada 5 minutos
         if (Date.now() - (this.lastStatsLog || 0) > 300000) {
@@ -430,6 +481,7 @@ class AdvancedCacheManager {
             candleCacheSize: this.candleCache.size,
             momentumCacheSize: this.momentumCache.size,
             generalCacheSize: this.generalCache.size,
+            orderBookCacheSize: this.orderBookCache.size,
             memoryUsage: process.memoryUsage()
         };
     }
@@ -438,6 +490,7 @@ class AdvancedCacheManager {
         this.candleCache.clear();
         this.momentumCache.clear();
         this.generalCache.clear();
+        this.orderBookCache.clear();
         this.stats.hits = 0;
         this.stats.misses = 0;
         this.stats.evictions = 0;
@@ -454,6 +507,224 @@ class AdvancedCacheManager {
 
 // Instância global do cache manager
 const cacheManager = new AdvancedCacheManager();
+
+// =====================================================================
+// 🎯 FUNÇÕES DE VALIDAÇÃO DE SLIPPAGE E LIQUIDEZ
+// =====================================================================
+
+/**
+ * Consulta o order book da Binance para um símbolo específico
+ * @param {string} symbol - Símbolo do par (ex: BTCUSDT)
+ * @returns {Promise<object|null>} Order book ou null em caso de erro
+ */
+async function getOrderBook(symbol) {
+    try {
+        // Verificar cache primeiro
+        const cached = await cacheManager.getOrderBookCached(symbol);
+        if (cached) {
+            return cached;
+        }
+        
+        const url = `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=${SLIPPAGE_SETTINGS.orderBookDepth}`;
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SLIPPAGE_SETTINGS.timeoutMs);
+        
+        const response = await fetch(url, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const orderBook = await response.json();
+        
+        // Armazenar em cache
+        cacheManager.setOrderBookCached(symbol, orderBook);
+        
+        return orderBook;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar order book ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Calcula o slippage estimado para uma ordem de mercado
+ * @param {object} orderBook - Order book da Binance
+ * @param {number} orderSizeBTC - Tamanho da ordem em BTC
+ * @param {boolean} isBuy - Se é ordem de compra
+ * @returns {object} Resultado da simulação
+ */
+function estimateSlippage(orderBook, orderSizeBTC, isBuy) {
+    try {
+        const bids = orderBook.bids.map(bid => ({ price: parseFloat(bid[0]), quantity: parseFloat(bid[1]) }));
+        const asks = orderBook.asks.map(ask => ({ price: parseFloat(ask[0]), quantity: parseFloat(ask[1]) }));
+        
+        const levels = isBuy ? asks : bids; // Para compra, olhamos as asks (vendas)
+        let remainingOrder = orderSizeBTC;
+        let totalCost = 0;
+        let totalQuantity = 0;
+        let weightedPrice = 0;
+        
+        // Preço ideal (melhor oferta)
+        const idealPrice = isBuy ? asks[0].price : bids[0].price;
+        
+        // Percorrer os níveis do order book
+        for (const level of levels) {
+            if (remainingOrder <= 0) break;
+            
+            const availableAtLevel = level.quantity * level.price; // Quantidade em BTC disponível neste nível
+            
+            if (availableAtLevel >= remainingOrder) {
+                // Ordem pode ser completamente preenchida neste nível
+                totalCost += remainingOrder;
+                totalQuantity += remainingOrder / level.price;
+                weightedPrice = totalCost / (totalQuantity * idealPrice); // Normalizado pelo preço ideal
+                remainingOrder = 0;
+            } else {
+                // Consumir todo este nível e continuar
+                totalCost += availableAtLevel;
+                totalQuantity += level.quantity;
+                remainingOrder -= availableAtLevel;
+            }
+        }
+        
+        // Se ainda há ordem não preenchida, estimar com o último preço disponível
+        if (remainingOrder > 0) {
+            const lastPrice = levels[levels.length - 1].price;
+            totalCost += remainingOrder;
+            totalQuantity += remainingOrder / lastPrice;
+            weightedPrice = totalCost / (totalQuantity * idealPrice);
+            
+            return {
+                idealPrice: idealPrice,
+                avgExecutionPrice: totalCost / totalQuantity,
+                slippagePercentage: ((totalCost / totalQuantity - idealPrice) / idealPrice) * 100,
+                slippageAbsolute: totalCost / totalQuantity - idealPrice,
+                filledPercentage: 100 * (orderSizeBTC - remainingOrder) / orderSizeBTC,
+                isCompleteFill: remainingOrder <= 0,
+                isLiquidEnough: remainingOrder <= orderSizeBTC * 0.1, // Considera líquido se preencheu pelo menos 90%
+                estimatedLiquidityBTC: orderSizeBTC - remainingOrder,
+                warning: remainingOrder > 0 ? `Insuficiente liquidez: ${(remainingOrder/orderSizeBTC*100).toFixed(1)}% não preenchido` : null
+            };
+        }
+        
+        return {
+            idealPrice: idealPrice,
+            avgExecutionPrice: totalCost / totalQuantity,
+            slippagePercentage: ((totalCost / totalQuantity - idealPrice) / idealPrice) * 100,
+            slippageAbsolute: totalCost / totalQuantity - idealPrice,
+            filledPercentage: 100,
+            isCompleteFill: true,
+            isLiquidEnough: true,
+            estimatedLiquidityBTC: orderSizeBTC,
+            warning: null
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular slippage: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Valida se um par tem liquidez suficiente e slippage aceitável
+ * @param {string} symbol - Símbolo do par
+ * @param {number} currentPrice - Preço atual do candle
+ * @returns {Promise<object>} Resultado da validação
+ */
+async function validateSlippageAndLiquidity(symbol, currentPrice) {
+    try {
+        console.log(`🔍 Validando slippage/liquidez para ${symbol}...`);
+        
+        const orderBook = await getOrderBook(symbol);
+        if (!orderBook) {
+            return {
+                isValid: false,
+                reason: 'Não foi possível obter order book',
+                shouldBlock: true
+            };
+        }
+        
+        // Verificar se há bids e asks suficientes
+        if (orderBook.bids.length === 0 || orderBook.asks.length === 0) {
+            return {
+                isValid: false,
+                reason: 'Order book vazio ou incompleto',
+                shouldBlock: true
+            };
+        }
+        
+        // Simular ordem de compra (consideramos apenas compra para validação)
+        const slippageResult = estimateSlippage(
+            orderBook, 
+            SLIPPAGE_SETTINGS.simulateOrderSize, 
+            true
+        );
+        
+        if (!slippageResult) {
+            return {
+                isValid: false,
+                reason: 'Erro ao calcular slippage',
+                shouldBlock: true
+            };
+        }
+        
+        // Analisar resultados
+        const isSlippageAcceptable = Math.abs(slippageResult.slippagePercentage) <= SLIPPAGE_SETTINGS.maxAllowedSlippage;
+        const isLiquiditySufficient = slippageResult.isLiquidEnough && 
+                                    slippageResult.estimatedLiquidityBTC >= SLIPPAGE_SETTINGS.minLiquidityBTC;
+        
+        const isValid = isSlippageAcceptable && isLiquiditySufficient;
+        
+        const result = {
+            isValid: isValid,
+            slippagePercentage: slippageResult.slippagePercentage,
+            idealPrice: slippageResult.idealPrice,
+            avgExecutionPrice: slippageResult.avgExecutionPrice,
+            filledPercentage: slippageResult.filledPercentage,
+            estimatedLiquidityBTC: slippageResult.estimatedLiquidityBTC,
+            isCompleteFill: slippageResult.isCompleteFill,
+            isLiquidEnough: isLiquiditySufficient,
+            isSlippageAcceptable: isSlippageAcceptable,
+            shouldBlock: SLIPPAGE_SETTINGS.blockIfInsufficient && !isValid,
+            details: {
+                maxAllowedSlippage: SLIPPAGE_SETTINGS.maxAllowedSlippage,
+                minLiquidityBTC: SLIPPAGE_SETTINGS.minLiquidityBTC,
+                simulatedOrderSize: SLIPPAGE_SETTINGS.simulateOrderSize,
+                currentCandlePrice: currentPrice,
+                priceDifferenceVsIdeal: ((currentPrice - slippageResult.idealPrice) / slippageResult.idealPrice * 100).toFixed(3) + '%'
+            }
+        };
+        
+        if (!isValid) {
+            result.reason = `Slippage: ${slippageResult.slippagePercentage.toFixed(2)}% > ${SLIPPAGE_SETTINGS.maxAllowedSlippage}% ou ` +
+                          `Liquidez: ${slippageResult.estimatedLiquidityBTC.toFixed(4)} BTC < ${SLIPPAGE_SETTINGS.minLiquidityBTC} BTC`;
+        }
+        
+        console.log(`📊 Validação ${symbol}:`);
+        console.log(`   Slippage: ${slippageResult.slippagePercentage.toFixed(2)}% ${isSlippageAcceptable ? '✅' : '❌'} (máx: ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%)`);
+        console.log(`   Liquidez: ${slippageResult.estimatedLiquidityBTC.toFixed(4)} BTC ${isLiquiditySufficient ? '✅' : '❌'} (mín: ${SLIPPAGE_SETTINGS.minLiquidityBTC} BTC)`);
+        console.log(`   Preenchido: ${slippageResult.filledPercentage.toFixed(1)}%`);
+        console.log(`   Preço Ideal: ${slippageResult.idealPrice.toFixed(8)} | Execução: ${slippageResult.avgExecutionPrice.toFixed(8)}`);
+        console.log(`   Válido: ${isValid ? '✅' : '❌'} | Bloquear: ${result.shouldBlock ? 'SIM' : 'NÃO'}`);
+        
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro na validação de slippage ${symbol}: ${error.message}`);
+        return {
+            isValid: false,
+            reason: `Erro: ${error.message}`,
+            shouldBlock: true
+        };
+    }
+}
 
 // =====================================================================
 // 🔥 CORRELAÇÃO DINÂMICA COM BTC (CRUCIAL) - NOVO
@@ -565,6 +836,82 @@ const BTC_CORRELATION_ENHANCED = {
         }
     }
 };
+
+// =====================================================================
+// 🎯 FUNÇÃO DE OVERRIDE DE ALTA PRIORIDADE
+// =====================================================================
+
+/**
+ * Verifica se um sinal atende aos critérios de alta prioridade para override
+ * @param {object} signal - Sinal detectado
+ * @returns {object} Resultado da verificação
+ */
+function checkHighPriorityOverride(signal) {
+    try {
+        const marketData = signal.marketData;
+        const btcCorrelation = marketData.btcCorrelation;
+        const volumeData = marketData.volume;
+        const momentumData = marketData.momentum;
+        const rsiData = marketData.rsi;
+        
+        // Critérios de alta prioridade
+        const criteria = {
+            btcOutperformance: btcCorrelation?.relativePerformance >= PRIORITY_SETTINGS.highPriority.btcOutperformance,
+            volumeSpike: volumeData?.rawRatio >= PRIORITY_SETTINGS.highPriority.volumeSpike,
+            momentum1m: momentumData?.isSpiking && Math.abs(momentumData.priceChange) >= PRIORITY_SETTINGS.highPriority.momentum1m,
+            rsiSignal: rsiData && (
+                (signal.isBullish && rsiData.value >= 25 && rsiData.value <= RSI_BUY_MAX) ||
+                (!signal.isBullish && rsiData.value >= RSI_SELL_MIN && rsiData.value <= 75)
+            ),
+            minQualityScore: signal.qualityScore.score >= PRIORITY_SETTINGS.highPriority.minQualityScore
+        };
+        
+        // Verificar se atende todos os critérios principais
+        const meetsAllCriteria = criteria.btcOutperformance && 
+                                criteria.momentum1m && 
+                                criteria.rsiSignal &&
+                                criteria.minQualityScore;
+        
+        // Verificar combinações alternativas fortes
+        const strongCombination1 = criteria.btcOutperformance && criteria.volumeSpike && criteria.minQualityScore;
+        const strongCombination2 = criteria.momentum1m && criteria.volumeSpike && criteria.minQualityScore;
+        
+        const qualifiesForOverride = meetsAllCriteria || strongCombination1 || strongCombination2;
+        
+        const result = {
+            qualifies: qualifiesForOverride,
+            meetsAllCriteria: meetsAllCriteria,
+            strongCombination1: strongCombination1,
+            strongCombination2: strongCombination2,
+            criteria: criteria,
+            shouldOverride: qualifiesForOverride && signal.qualityScore.score < QUALITY_THRESHOLD,
+            newEffectiveThreshold: qualifiesForOverride ? HIGH_PRIORITY_OVERRIDE_THRESHOLD : QUALITY_THRESHOLD,
+            isAcceptableWithOverride: qualifiesForOverride ? signal.qualityScore.score >= HIGH_PRIORITY_OVERRIDE_THRESHOLD : false
+        };
+        
+        if (qualifiesForOverride) {
+            console.log(`🚨 ALTA PRIORIDADE detectada para ${signal.symbol}:`);
+            console.log(`   BTC Outperformance: ${criteria.btcOutperformance ? '✅' : '❌'} (${btcCorrelation?.relativePerformance?.toFixed(2) || 0}% ≥ ${PRIORITY_SETTINGS.highPriority.btcOutperformance}%)`);
+            console.log(`   Volume Spike: ${criteria.volumeSpike ? '✅' : '❌'} (${volumeData?.rawRatio?.toFixed(2) || 0}x ≥ ${PRIORITY_SETTINGS.highPriority.volumeSpike}x)`);
+            console.log(`   Momentum 1m: ${criteria.momentum1m ? '✅' : '❌'} (${Math.abs(momentumData?.priceChange || 0).toFixed(2)}% ≥ ${PRIORITY_SETTINGS.highPriority.momentum1m}%)`);
+            console.log(`   RSI Signal: ${criteria.rsiSignal ? '✅' : '❌'} (${rsiData?.value?.toFixed(1) || 0})`);
+            console.log(`   Min Score: ${criteria.minQualityScore ? '✅' : '❌'} (${signal.qualityScore.score} ≥ ${PRIORITY_SETTINGS.highPriority.minQualityScore})`);
+            console.log(`   Override Ativado: ${result.shouldOverride ? '✅' : '❌'}`);
+            console.log(`   Score Original: ${signal.qualityScore.score} | Threshold Efetivo: ${result.newEffectiveThreshold}`);
+        }
+        
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao verificar alta prioridade: ${error.message}`);
+        return {
+            qualifies: false,
+            shouldOverride: false,
+            newEffectiveThreshold: QUALITY_THRESHOLD,
+            isAcceptableWithOverride: false
+        };
+    }
+}
 
 // =====================================================================
 // 🎯 ESTRATÉGIA DE ENTRADA BASEADA EM CORRELAÇÃO - NOVO
@@ -758,7 +1105,8 @@ class SophisticatedRiskLayer {
             SUPPORT_RESISTANCE_RISK: { weight: 1.4 },
             MARKET_CONDITION_RISK: { weight: 1.6 },
             PIVOT_RISK: { weight: 1.2 },
-            BTC_CORRELATION_RISK: { weight: 1.8 } // Aumentado foco em BTC
+            BTC_CORRELATION_RISK: { weight: 1.8 }, // Aumentado foco em BTC
+            SLIPPAGE_RISK: { weight: 2.0, threshold: SLIPPAGE_SETTINGS.maxAllowedSlippage } // 🆕 Risco de slippage
         };
 
         this.riskHistory = new Map();
@@ -777,8 +1125,22 @@ class SophisticatedRiskLayer {
                 recommendations: [],
                 confidence: 100,
                 shouldAlert: true,
-                shouldBlock: false
+                shouldBlock: false,
+                slippageValidation: null // 🆕 Validação de slippage
             };
+
+            // 🆕 Primeiro: validar slippage e liquidez
+            const slippageRisk = await this.analyzeSlippageRisk(signal);
+            riskAssessment.factors.push(slippageRisk);
+            riskAssessment.overallScore += slippageRisk.score * this.riskFactors.SLIPPAGE_RISK.weight;
+            riskAssessment.slippageValidation = slippageRisk.data;
+            
+            // Se slippage for crítico, bloquear imediatamente
+            if (slippageRisk.score >= 3) {
+                riskAssessment.shouldBlock = true;
+                riskAssessment.shouldAlert = false;
+                console.log(`🚫 ${signal.symbol}: Bloqueado por slippage/liquidez crítica`);
+            }
 
             const volatilityRisk = await this.analyzeVolatilityRisk(signal);
             riskAssessment.factors.push(volatilityRisk);
@@ -838,6 +1200,67 @@ class SophisticatedRiskLayer {
         } catch (error) {
             console.error('Erro na avaliação de risco:', error);
             return this.getDefaultRiskAssessment();
+        }
+    }
+
+    // 🆕 Nova função para análise de risco de slippage
+    async analyzeSlippageRisk(signal) {
+        try {
+            console.log(`🔍 Analisando risco de slippage para ${signal.symbol}...`);
+            
+            const slippageValidation = await validateSlippageAndLiquidity(signal.symbol, signal.price);
+            
+            if (!slippageValidation) {
+                return {
+                    type: 'SLIPPAGE',
+                    score: 3,
+                    message: '❌ FALHA NA VALIDAÇÃO DE SLIPPAGE',
+                    data: null
+                };
+            }
+            
+            let score = 0;
+            let message = '';
+            
+            if (!slippageValidation.isValid) {
+                score = 3;
+                message = `🚫 ${slippageValidation.reason || 'Slippage/liquidez inaceitável'}`;
+            } else if (Math.abs(slippageValidation.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.7) {
+                score = 2;
+                message = `⚠️ Slippage elevado: ${slippageValidation.slippagePercentage.toFixed(2)}% (próximo do limite)`;
+            } else if (Math.abs(slippageValidation.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.5) {
+                score = 1;
+                message = `↗️ Slippage moderado: ${slippageValidation.slippagePercentage.toFixed(2)}%`;
+            } else {
+                score = -0.5;
+                message = `✅ Slippage OK: ${slippageValidation.slippagePercentage.toFixed(2)}% (limite: ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%)`;
+            }
+            
+            // Adicionar informações de liquidez
+            if (slippageValidation.estimatedLiquidityBTC < SLIPPAGE_SETTINGS.minLiquidityBTC * 2) {
+                score = Math.max(score, 1);
+                message += ` | Liquidez limitada: ${slippageValidation.estimatedLiquidityBTC.toFixed(4)} BTC`;
+            } else if (slippageValidation.estimatedLiquidityBTC < SLIPPAGE_SETTINGS.minLiquidityBTC * 5) {
+                message += ` | Liquidez moderada: ${slippageValidation.estimatedLiquidityBTC.toFixed(4)} BTC`;
+            } else {
+                message += ` | Liquidez boa: ${slippageValidation.estimatedLiquidityBTC.toFixed(4)} BTC`;
+            }
+            
+            return {
+                type: 'SLIPPAGE',
+                score: Math.min(3, Math.max(-2, score)),
+                message: message,
+                data: slippageValidation
+            };
+            
+        } catch (error) {
+            console.error(`Erro análise slippage ${signal.symbol}:`, error.message);
+            return {
+                type: 'SLIPPAGE',
+                score: 2,
+                message: 'Erro na análise de slippage',
+                data: null
+            };
         }
     }
 
@@ -1446,6 +1869,22 @@ class SophisticatedRiskLayer {
     generateRecommendations(assessment) {
         const recommendations = [];
 
+        // 🆕 Recomendações de slippage
+        if (assessment.slippageValidation) {
+            const slippage = assessment.slippageValidation;
+            if (slippage.slippagePercentage > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.7) {
+                recommendations.push('⚠️ SLIPPAGE ELEVADO: Considere ordem limitada');
+                recommendations.push('• Use limite de preço próximo ao ideal');
+                recommendations.push('• Considere dividir a ordem');
+            }
+            
+            if (slippage.estimatedLiquidityBTC < SLIPPAGE_SETTINGS.minLiquidityBTC * 2) {
+                recommendations.push('⚠️ LIQUIDEZ LIMITADA: Reduza tamanho da posição');
+                recommendations.push('• Use tamanho menor que a liquidez disponível');
+                recommendations.push('• Evite ordens market grandes');
+            }
+        }
+
         assessment.factors.forEach(factor => {
             if (factor.type === 'BTC_CORRELATION' && factor.score >= 1) {
                 if (factor.data.performanceLevel === 'STRONG_UNDERPERFORMANCE') {
@@ -1499,6 +1938,20 @@ class SophisticatedRiskLayer {
     generateWarnings(assessment) {
         const warnings = [];
 
+        // 🆕 Warnings de slippage
+        if (assessment.slippageValidation) {
+            const slippage = assessment.slippageValidation;
+            if (!slippage.isValid) {
+                warnings.push(`🚫 ${slippage.reason || 'Slippage/liquidez inaceitável'}`);
+            } else if (Math.abs(slippage.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.8) {
+                warnings.push(`⚠️ SLIPPAGE ELEVADO: ${slippage.slippagePercentage.toFixed(2)}% (limite: ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%)`);
+            }
+            
+            if (slippage.estimatedLiquidityBTC < SLIPPAGE_SETTINGS.minLiquidityBTC * 1.5) {
+                warnings.push(`⚠️ LIQUIDEZ BAIXA: ${slippage.estimatedLiquidityBTC.toFixed(4)} BTC`);
+            }
+        }
+
         assessment.factors.forEach(factor => {
             if (factor.type === 'BTC_CORRELATION' && factor.score >= 2) {
                 warnings.push(`📉 ${factor.message}`);
@@ -1540,6 +1993,13 @@ class SophisticatedRiskLayer {
         console.log(`   Score: ${assessment.overallScore.toFixed(2)}`);
         console.log(`   Confiança: ${assessment.confidence}%`);
 
+        // 🆕 Log de slippage
+        if (assessment.slippageValidation) {
+            const slippage = assessment.slippageValidation;
+            console.log(`   Slippage: ${slippage.slippagePercentage?.toFixed(2) || 'N/A'}% | Liquidez: ${slippage.estimatedLiquidityBTC?.toFixed(4) || 'N/A'} BTC`);
+            console.log(`   Slippage Válido: ${slippage.isValid ? '✅' : '❌'} | Bloquear: ${slippage.shouldBlock ? 'SIM' : 'NÃO'}`);
+        }
+
         assessment.factors.forEach(factor => {
             if (factor.type === 'BTC_CORRELATION') {
                 console.log(`   BTC Correlation: ${factor.message}`);
@@ -1561,7 +2021,8 @@ class SophisticatedRiskLayer {
             recommendations: ['Use cautela padrão'],
             confidence: 70,
             shouldAlert: true,
-            shouldBlock: false
+            shouldBlock: false,
+            slippageValidation: null
         };
     }
 
@@ -2035,7 +2496,8 @@ class AdvancedLearningSystem {
                     supportResistance: marketData.supportResistance || {},
                     pivotPoints: marketData.pivotPoints || {},
                     btcCorrelation: marketData.btcCorrelation || {},
-                    momentum: marketData.momentum || {}
+                    momentum: marketData.momentum || {},
+                    slippageValidation: signal.slippageValidation || null // 🆕 Adicionado slippage
                 },
                 status: 'OPEN',
                 outcome: null,
@@ -2109,6 +2571,10 @@ class AdvancedLearningSystem {
             const momentumAnalysis = this.analyzeMomentumPatterns(closedTrades);
             console.log(`📊 Análise Momentum: ${momentumAnalysis.strongMomentumWinners.length} vencedores com momentum forte`);
 
+            // 🆕 Análise de slippage
+            const slippageAnalysis = this.analyzeSlippagePatterns(closedTrades);
+            console.log(`📊 Análise Slippage: ${slippageAnalysis.goodSlippageWinners.length} vencedores com slippage bom`);
+
             this.patterns.winning = {};
             this.patterns.losing = {};
 
@@ -2135,6 +2601,41 @@ class AdvancedLearningSystem {
         } catch (error) {
             console.error('Erro na análise de padrões:', error);
         }
+    }
+
+    // 🆕 Nova função para análise de padrões de slippage
+    analyzeSlippagePatterns(trades) {
+        const goodSlippageWinners = [];
+        const badSlippageLosers = [];
+        const unknownSlippageWinners = [];
+        const unknownSlippageLosers = [];
+
+        trades.forEach(trade => {
+            const slippageData = trade.marketData.slippageValidation;
+            const isWinner = trade.outcome === 'SUCCESS' || 
+                           trade.outcome === 'ALL_TARGETS_HIT' || 
+                           trade.outcome === 'PARTIAL_TARGETS_HIT';
+
+            if (slippageData) {
+                if (slippageData.isValid && Math.abs(slippageData.slippagePercentage) <= SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.5) {
+                    if (isWinner) goodSlippageWinners.push(trade);
+                    else badSlippageLosers.push(trade);
+                } else if (!slippageData.isValid || Math.abs(slippageData.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage) {
+                    if (!isWinner) badSlippageLosers.push(trade);
+                }
+            } else {
+                if (isWinner) unknownSlippageWinners.push(trade);
+                else unknownSlippageLosers.push(trade);
+            }
+        });
+
+        return {
+            goodSlippageWinners,
+            badSlippageLosers,
+            unknownSlippageWinners,
+            unknownSlippageLosers,
+            goodSlippageWinRate: goodSlippageWinners.length / (goodSlippageWinners.length + badSlippageLosers.length) || 0
+        };
     }
 
     analyzeMomentumPatterns(trades) {
@@ -2254,6 +2755,15 @@ class AdvancedLearningSystem {
             patterns.push('STRONG_MOMENTUM');
         }
 
+        // 🆕 Padrões de slippage
+        if (data.slippageValidation) {
+            if (data.slippageValidation.isValid && Math.abs(data.slippageValidation.slippagePercentage) <= SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.5) {
+                patterns.push('GOOD_SLIPPAGE');
+            } else if (!data.slippageValidation.isValid || Math.abs(data.slippageValidation.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage) {
+                patterns.push('BAD_SLIPPAGE');
+            }
+        }
+
         return patterns;
     }
 
@@ -2280,6 +2790,19 @@ class AdvancedLearningSystem {
                     strongMomentumCount: momentumAnalysis.strongMomentumWinners.length
                 });
                 console.log('✅ Momentum: Trades com momentum forte têm win rate de ' + (momentumAnalysis.strongMomentumWinRate * 100).toFixed(1) + '%');
+            }
+
+            // 🆕 Análise de slippage
+            const slippageAnalysis = this.analyzeSlippagePatterns(closedTrades);
+            if (slippageAnalysis.goodSlippageWinRate > 0.6) {
+                this.parameterEvolution.slippage = this.parameterEvolution.slippage || [];
+                this.parameterEvolution.slippage.push({
+                    timestamp: Date.now(),
+                    message: 'Trades com slippage bom têm melhor win rate',
+                    winRate: slippageAnalysis.goodSlippageWinRate,
+                    goodSlippageCount: slippageAnalysis.goodSlippageWinners.length
+                });
+                console.log('✅ Slippage: Trades com slippage bom têm win rate de ' + (slippageAnalysis.goodSlippageWinRate * 100).toFixed(1) + '%');
             }
 
             const volumeAnalysis = this.analyzeParameter(
@@ -2636,6 +3159,7 @@ class AdvancedLearningSystem {
 
         const btcCorrelationAnalysis = this.analyzeBTCCorrelationPatterns(validClosedTrades);
         const momentumAnalysis = this.analyzeMomentumPatterns(validClosedTrades);
+        const slippageAnalysis = this.analyzeSlippagePatterns(validClosedTrades);
 
         return {
             totalTrades: validClosedTrades.length,
@@ -2657,6 +3181,10 @@ class AdvancedLearningSystem {
             momentumAnalysis: {
                 strongMomentumWinRate: (momentumAnalysis.strongMomentumWinRate * 100).toFixed(1),
                 strongMomentumTrades: momentumAnalysis.strongMomentumWinners.length
+            },
+            slippageAnalysis: {
+                goodSlippageWinRate: (slippageAnalysis.goodSlippageWinRate * 100).toFixed(1),
+                goodSlippageTrades: slippageAnalysis.goodSlippageWinners.length
             }
         };
     }
@@ -3064,6 +3592,16 @@ async function sendSignalAlertWithRisk(signal) {
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
         
+        // 🆕 Verificar se deve bloquear devido ao slippage
+        if (riskAssessment.shouldBlock) {
+            console.log(`🚫 ${signal.symbol}: Bloqueado pelo Risk Layer (slippage/liquidez crítica)`);
+            return {
+                type: 'BLOCKED',
+                reason: 'Slippage/liquidez crítica',
+                shouldAlert: false
+            };
+        }
+        
         const volumeRatio = signal.marketData.volume?.rawRatio || 0;
         
         const baseProbability = calculateProbability(signal);
@@ -3115,6 +3653,17 @@ async function sendSignalAlertWithRisk(signal) {
             priorityEmoji = '⚠️ ';
         }
 
+        // 🆕 Adicionar informações de slippage ao alerta
+        let slippageText = '';
+        if (riskAssessment.slippageValidation) {
+            const slippage = riskAssessment.slippageValidation;
+            if (slippage.isValid) {
+                slippageText = ` | 📊 Slippage: ${slippage.slippagePercentage?.toFixed(2) || 'N/A'}%`;
+            } else {
+                slippageText = ` | ⚠️ Slippage crítico`;
+            }
+        }
+
         let alertTitle = '';
         let alertType = '';
         
@@ -3135,7 +3684,7 @@ ${now.date} ${now.time}
 ⚠️ Score: ${signal.qualityScore.score}/100 (${signal.qualityScore.grade})
 ⚠️ Probabilidade: ${riskAdjustedProbability.toFixed(1)}%
 • Preço: ${signal.price.toFixed(8)} BTC
-${btcPerformanceEmoji} ${btcPerformanceText}${momentumText}
+${btcPerformanceEmoji} ${btcPerformanceText}${momentumText}${slippageText}
 ⚠️ Vol: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification}) - Z-Score: ${volumeData?.zScore?.toFixed(2) || 'N/A'}
 • Dist. Suport/Resist.: ${distancePercent}%
 • Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})
@@ -3154,13 +3703,21 @@ ${btcPerformanceEmoji} ${btcPerformanceText}${momentumText}
         console.log(`   Probabilidade: ${riskAdjustedProbability.toFixed(1)}%`);
         console.log(`   Volume: ${volumeRatio.toFixed(2)}x (Score: ${volumeScore.toFixed(2)} - ${volumeClassification})`);
         console.log(`   Volume Confirmado: ${isVolumeConfirmed ? '✅ SIM' : '❌ NÃO'}`);
+        
+        // 🆕 Log de slippage
+        if (riskAssessment.slippageValidation) {
+            const slippage = riskAssessment.slippageValidation;
+            console.log(`   Slippage: ${slippage.slippagePercentage?.toFixed(2) || 'N/A'}% | Liquidez: ${slippage.estimatedLiquidityBTC?.toFixed(4) || 'N/A'} BTC`);
+            console.log(`   Slippage Válido: ${slippage.isValid ? '✅' : '❌'}`);
+        }
 
         return {
             type: alertType,
             analysisType: analysisType.type,
             volumeConfirmed: isVolumeConfirmed,
             volumeScore: volumeScore,
-            priority: priority
+            priority: priority,
+            slippageValid: riskAssessment.slippageValidation?.isValid || false
         };
 
     } catch (error) {
@@ -3173,6 +3730,12 @@ function determineAlertPriority(signal) {
     const btcPerf = signal.marketData.btcCorrelation?.relativePerformance || 0;
     const volumeRatio = signal.marketData.volume?.rawRatio || 0;
     const momentum = signal.marketData.momentum;
+    
+    // 🆕 Verificar override de alta prioridade
+    const highPriorityOverride = checkHighPriorityOverride(signal);
+    if (highPriorityOverride.qualifies) {
+        return 'HIGH_OVERRIDE';
+    }
     
     if (btcPerf >= PRIORITY_SETTINGS.highPriority.btcOutperformance && 
         volumeRatio >= PRIORITY_SETTINGS.highPriority.volumeSpike) {
@@ -3209,7 +3772,7 @@ async function sendSignalAlert(signal) {
         
         const priority = determineAlertPriority(signal);
         let priorityEmoji = '';
-        if (priority === 'HIGH') {
+        if (priority === 'HIGH' || priority === 'HIGH_OVERRIDE') {
             priorityEmoji = '🚨 ';
         } else if (priority === 'MEDIUM') {
             priorityEmoji = '⚠️ ';
@@ -3383,6 +3946,17 @@ function calculateProbability(signal) {
             baseProbability += 8;
         } else if (Math.abs(momentumData.priceChange) > 0.5) {
             baseProbability += 4;
+        }
+    }
+
+    // 🆕 Considerar validação de slippage
+    if (signal.slippageValidation) {
+        if (!signal.slippageValidation.isValid) {
+            baseProbability -= 20;
+        } else if (Math.abs(signal.slippageValidation.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.7) {
+            baseProbability -= 10;
+        } else if (Math.abs(signal.slippageValidation.slippagePercentage) <= SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.3) {
+            baseProbability += 5;
         }
     }
 
@@ -5318,6 +5892,37 @@ async function calculateSignalQuality(symbol, isBullish, marketData) {
         failedChecks.push(`Momentum: Não analisado`);
     }
 
+    // 🆕 Adicionar validação de slippage à pontuação
+    if (marketData.slippageValidation) {
+        const slippageData = marketData.slippageValidation;
+        let slippageScore = 0;
+        let slippageDetail = '';
+
+        if (!slippageData.isValid) {
+            slippageScore = -20; // Penalidade severa para slippage inválido
+            slippageDetail = `❌ SLIPPAGE CRÍTICO: ${slippageData.reason || 'Não validado'}`;
+            failedChecks.push(`Slippage: ${slippageData.reason || 'Crítico'}`);
+        } else if (Math.abs(slippageData.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage) {
+            slippageScore = -15;
+            slippageDetail = `⚠️ SLIPPAGE ALTO: ${slippageData.slippagePercentage.toFixed(2)}% > ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%`;
+            failedChecks.push(`Slippage: ${slippageData.slippagePercentage.toFixed(2)}% > limite`);
+        } else if (Math.abs(slippageData.slippagePercentage) > SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.7) {
+            slippageScore = -5;
+            slippageDetail = `↗️ Slippage moderado: ${slippageData.slippagePercentage.toFixed(2)}%`;
+        } else if (Math.abs(slippageData.slippagePercentage) <= SLIPPAGE_SETTINGS.maxAllowedSlippage * 0.3) {
+            slippageScore = 5;
+            slippageDetail = `✅ Slippage excelente: ${slippageData.slippagePercentage.toFixed(2)}%`;
+        } else {
+            slippageScore = 0;
+            slippageDetail = `➡️ Slippage aceitável: ${slippageData.slippagePercentage.toFixed(2)}%`;
+        }
+
+        score += slippageScore;
+        details.push(` Validação Slippage: ${slippageDetail}`);
+    } else {
+        failedChecks.push(`Slippage: Não validado`);
+    }
+
     let grade, emoji;
     if (score >= 85) {
         grade = "A✨";
@@ -5469,6 +6074,15 @@ async function monitorSymbol(symbol) {
             return null;
         }
 
+        // 🆕 Validação de slippage e liquidez
+        const slippageValidation = await validateSlippageAndLiquidity(symbol, emaData.currentPrice);
+        
+        // Se slippage for crítico, bloquear imediatamente
+        if (slippageValidation.shouldBlock) {
+            console.log(`🚫 ${symbol}: Bloqueado por slippage/liquidez crítica`);
+            return null;
+        }
+
         const btcCorrelationData = await analyzeBTCCorrelation(symbol, emaData.currentPrice, isBullish);
         
         const supportResistanceData = await analyzeSupportResistance(symbol, emaData.currentPrice, isBullish);
@@ -5498,12 +6112,31 @@ async function monitorSymbol(symbol) {
             pivotPoints: pivotPointsData,
             btcCorrelation: btcCorrelationData,
             momentum: momentumData,
-            btcTiming: btcTiming // 🔥 NOVO: Adicionado timing BTC
+            btcTiming: btcTiming, // 🔥 NOVO: Adicionado timing BTC
+            slippageValidation: slippageValidation // 🆕 Adicionado validação de slippage
         };
 
         const qualityScore = await calculateSignalQuality(symbol, isBullish, marketData);
 
-        if (!qualityScore.isAcceptable) return null;
+        // 🆕 Verificar override de alta prioridade
+        const highPriorityOverride = checkHighPriorityOverride({
+            symbol: symbol,
+            isBullish: isBullish,
+            price: emaData.currentPrice,
+            qualityScore: qualityScore,
+            marketData: marketData
+        });
+
+        // Aplicar override se qualificar
+        const effectiveThreshold = highPriorityOverride.newEffectiveThreshold;
+        const isAcceptable = highPriorityOverride.shouldOverride ? 
+            qualityScore.score >= HIGH_PRIORITY_OVERRIDE_THRESHOLD : 
+            qualityScore.score >= QUALITY_THRESHOLD;
+
+        if (!isAcceptable) {
+            console.log(`❌ ${symbol}: Score ${qualityScore.score} < ${effectiveThreshold} ${highPriorityOverride.shouldOverride ? '(override não aplicado)' : ''}`);
+            return null;
+        }
 
         const targetsData = await calculateAdvancedTargetsAndStop(emaData.currentPrice, isBullish, symbol);
 
@@ -5514,6 +6147,8 @@ async function monitorSymbol(symbol) {
             qualityScore: qualityScore,
             targetsData: targetsData,
             marketData: marketData,
+            slippageValidation: slippageValidation, // 🆕 Adicionar validação ao sinal
+            highPriorityOverride: highPriorityOverride, // 🆕 Adicionar info de override
             timestamp: Date.now()
         };
 
@@ -5560,14 +6195,30 @@ async function monitorSymbol(symbol) {
             correlationText = ` | Corr: ${(correlationInfo.correlation * 100).toFixed(1)}% | Beta: ${correlationInfo.beta.toFixed(2)}x | Alpha: ${(correlationInfo.alpha * 100).toFixed(2)}%`;
         }
 
+        // 🆕 Adicionar informações de slippage
+        let slippageText = '';
+        if (slippageValidation.isValid) {
+            slippageText = ` | 📊 Slippage: ${slippageValidation.slippagePercentage?.toFixed(2) || 'N/A'}%`;
+        } else {
+            slippageText = ` | 🚫 Slippage crítico`;
+        }
+
+        // 🆕 Adicionar informações de override
+        let overrideText = '';
+        if (highPriorityOverride.shouldOverride) {
+            overrideText = ` | 🚨 OVERRIDE ATIVADO!`;
+        }
+
         console.log(`✅ ${symbol}: ${isBullish ? 'COMPRA' : 'VENDA'} (Score: ${qualityScore.score} ${qualityScore.grade})`);
-        console.log(`   ${performanceText}${momentumText}${correlationText}`);
+        console.log(`   ${performanceText}${momentumText}${correlationText}${slippageText}${overrideText}`);
         console.log(`   📊 RSI: ${rsiData.value.toFixed(1)} (${rsiData.status})`);
         console.log(`   📈 Volume: ${volumeData.rawRatio.toFixed(2)}x (Score: ${volumeScore} - ${volumeClassification})`);
         console.log(`   📊 EMA: ${emaRatio}x | Z-Score: ${zScore}`);
         console.log(`   📊 S/R: ${srDistance}% | Risco: ${breakoutRisk}`);
         console.log(`   📊 Pivot: ${pivotType} ${pivotDistance}% (${pivotStrength} - ${pivotTimeframe})`);
         console.log(`   🕒 BTC Timing: ${btcTiming.btcTrend} (${btcTiming.btcTrendStrength}) | Mom: ${btcTiming.btcMomentum.toFixed(2)}%`);
+        console.log(`   📊 Slippage: ${slippageValidation.slippagePercentage?.toFixed(2) || 'N/A'}% | Liquidez: ${slippageValidation.estimatedLiquidityBTC?.toFixed(4) || 'N/A'} BTC`);
+        console.log(`   🚨 Override: ${highPriorityOverride.qualifies ? '✅' : '❌'} | Threshold Efetivo: ${effectiveThreshold}`);
 
         return signal;
 
@@ -5632,6 +6283,8 @@ async function mainBotLoop() {
     console.log(`  Performance vs BTC: Destacando altcoins liderando o mercado`);
     console.log(`  Tipos de Análise: Momentum Rápido | Outperformance BTC | Reversão | Exaustão/Correção | Neutra`);
     console.log(` 🔥 NOVO: Correlação Dinâmica com BTC - Beta, Alpha e Timing`);
+    console.log(` 🎯 NOVO: Validação de Slippage/Liquidez (máx ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%)`);
+    console.log(` 🚨 NOVO: Override de Alta Prioridade (score ≥ ${HIGH_PRIORITY_OVERRIDE_THRESHOLD} com critérios especiais)`);
     console.log(` ❌ CCI completamente removido do sistema`);
 
     await sendInitializationMessage(allSymbols);
@@ -5641,6 +6294,7 @@ async function mainBotLoop() {
     let totalAnalysis = 0;
     let lastReportTime = Date.now();
     let lastRiskReportTime = Date.now();
+    let blockedBySlippage = 0;
 
     while (true) {
         try {
@@ -5680,10 +6334,17 @@ async function mainBotLoop() {
             console.log(`✅ ${((endTime - startTime) / 1000).toFixed(1)}s | Sinais: ${signals.length} (Total: ${totalSignals})`);
 
             for (const signal of signals) {
-                if (signal.qualityScore.score >= QUALITY_THRESHOLD) {
+                // 🆕 Usar threshold efetivo considerando override
+                const effectiveThreshold = signal.highPriorityOverride?.newEffectiveThreshold || QUALITY_THRESHOLD;
+                
+                if (signal.qualityScore.score >= effectiveThreshold) {
                     const alertResult = await sendSignalAlertWithRisk(signal);
-                    if (alertResult && alertResult.type === 'analysis') {
-                        totalAnalysis++;
+                    if (alertResult) {
+                        if (alertResult.type === 'BLOCKED') {
+                            blockedBySlippage++;
+                        } else if (alertResult.type === 'analysis') {
+                            totalAnalysis++;
+                        }
                     }
                     await new Promise(r => setTimeout(r, 800));
                 }
@@ -5700,7 +6361,7 @@ async function mainBotLoop() {
             }
 
             const status = symbolManager.getCurrentStatus();
-            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
+            console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis} | Bloqueados por slippage: ${blockedBySlippage}`);
 
             // Log do status do cache a cada 5 ciclos
             if (symbolManager.totalCycles % 5 === 0) {
@@ -5786,6 +6447,10 @@ ${now.full}
 ⚡ Análise Momentum:
 • Win Rate com momentum forte: ${report.momentumAnalysis.strongMomentumWinRate}%
 • Trades com momentum forte: ${report.momentumAnalysis.strongMomentumTrades}
+
+🎯 Análise Slippage:
+• Win Rate com slippage bom: ${report.slippageAnalysis.goodSlippageWinRate}%
+• Trades com slippage bom: ${report.slippageAnalysis.goodSlippageTrades}
 
 📈 Padrões Vencedores (Top 5):
 ${bestPatterns || 'Nenhum padrão identificado ainda'}
@@ -5889,6 +6554,8 @@ async function startBot() {
         console.log(` RSI: Compra ≤ ${RSI_BUY_MAX}, Venda ≥ ${RSI_SELL_MIN}`);
         console.log(` ⚡ Momentum: Detecção rápida em 1m-3m`);
         console.log(` 📈 Performance vs BTC: Destacando oportunidades relativas`);
+        console.log(` 🎯 Slippage Validation: Máx ${SLIPPAGE_SETTINGS.maxAllowedSlippage}%`);
+        console.log(` 🚨 High Priority Override: Score ≥ ${HIGH_PRIORITY_OVERRIDE_THRESHOLD}`);
         console.log(` ❌ CCI completamente removido do sistema`);
         console.log('='.repeat(80) + '\n');
 
@@ -5947,7 +6614,10 @@ function re() {
     console.log('  • RSI: Compra ≤ ' + RSI_BUY_MAX + ', Venda ≥ ' + RSI_SELL_MIN);
     console.log('  • Volume Threshold: ' + VOLUME_SETTINGS.baseThreshold.toFixed(2));
     console.log('  • Quality Threshold: ' + QUALITY_THRESHOLD);
+    console.log('  • High Priority Override Threshold: ' + HIGH_PRIORITY_OVERRIDE_THRESHOLD);
     console.log('  • Performance vs BTC: ' + BTC_CORRELATION_SETTINGS.thresholds.highOutperformance + '%+ para alta performance');
+    console.log('  • Slippage Máximo: ' + SLIPPAGE_SETTINGS.maxAllowedSlippage + '%');
+    console.log('  • Liquidez Mínima: ' + SLIPPAGE_SETTINGS.minLiquidityBTC + ' BTC');
     console.log('  • ❌ CCI: Completamente removido do sistema');
     console.log('');
     console.log('⚙️  Configurações de sensibilidade:');
@@ -5961,6 +6631,8 @@ function re() {
     console.log('  • Detecção de momentum rápido');
     console.log('  • ❌ CCI completamente removido');
     console.log('  • 🔥 NOVO: Correlação Dinâmica com BTC (Beta, Alpha, Timing)');
+    console.log('  • 🎯 NOVO: Validação de Slippage/Liquidez em tempo real');
+    console.log('  • 🚨 NOVO: Override de Alta Prioridade para setups excepcionais');
     console.log('='.repeat(60) + '\n');
     
     return {
@@ -5968,13 +6640,18 @@ function re() {
         rsi_sell_min: RSI_SELL_MIN,
         volume_threshold: VOLUME_SETTINGS.baseThreshold,
         quality_threshold: QUALITY_THRESHOLD,
+        high_priority_override_threshold: HIGH_PRIORITY_OVERRIDE_THRESHOLD,
         btc_high_outperformance: BTC_CORRELATION_SETTINGS.thresholds.highOutperformance,
+        max_slippage: SLIPPAGE_SETTINGS.maxAllowedSlippage,
+        min_liquidity_btc: SLIPPAGE_SETTINGS.minLiquidityBTC,
         scan_interval: SENSITIVITY_SETTINGS.scanInterval,
         group_size: SENSITIVITY_SETTINGS.symbolGroupSize,
         momentum_enabled: true,
         cci_removed: true,
         btc_correlation_dynamic: true,
-        btc_timing_enabled: true
+        btc_timing_enabled: true,
+        slippage_validation_enabled: true,
+        high_priority_override_enabled: true
     };
 }
 
