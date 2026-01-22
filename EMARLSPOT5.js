@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-1003606050587';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-I'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-10036';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
