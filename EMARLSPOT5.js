@@ -6,8 +6,9 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-Ic'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-1003606';
+const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-IOnUiLdWJ8phTxs-6_1jk2nzWsc'; //Titanium 2
+const TELEGRAM_CHAT_ID = '-1003606050587';
+
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -57,8 +58,8 @@ const VOLATILITY_TIMEFRAME = '10m';  // Reduzido de 15m para 10m
 const VOLATILITY_THRESHOLD = 0.4;    // Reduzido de 0.5 para 0.4
 
 // === CONFIGURAÇÕES RSI - MAIS SENSÍVEIS ===
-const RSI_BUY_MAX = 63;              // Aumentado de 64 para 68
-const RSI_SELL_MIN = 32;             // Reduzido de 62 para 32
+const RSI_BUY_MAX = 62;              // Aumentado de 64 para 68
+const RSI_SELL_MIN = 33;             // Reduzido de 62 para 32
 
 // === CONFIGURAÇÕES DE SENSIBILIDADE ===
 const SENSITIVITY_SETTINGS = {
@@ -82,7 +83,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MUITO MAIS PERMISSIVO ===
-const QUALITY_THRESHOLD = 70; // Reduzido de 65 para 58 (ACEITA MAIS SINAIS)
+const QUALITY_THRESHOLD = 65; // Reduzido de 65 para 58 (ACEITA MAIS SINAIS)
 
 // === PESOS REAJUSTADOS PARA MÁXIMA LUCRA E CORRELAÇÃO BTC ===
 const QUALITY_WEIGHTS = {
@@ -233,37 +234,227 @@ const LOG_DIR = './logs';
 const LEARNING_DIR = './learning_data';
 const MAX_LOG_FILES = 15;
 
-// === CACHE SETTINGS MAIS RÁPIDOS ===
-const candleCache = {};
-const momentumCache = {};
-const CANDLE_CACHE_TTL = 30000;      // Reduzido de 60000 para 30000ms
-const MOMENTUM_CACHE_TTL = 10000;    // Cache de momentum rápido
-const MAX_CACHE_AGE = 5 * 60 * 1000; // Reduzido de 10 para 5 minutos
+// =====================================================================
+// 🧠 SISTEMA DE CACHE AVANÇADO COM GESTÃO DE MEMÓRIA
+// =====================================================================
 
-// === CONFIGURAÇÕES TÉCNICAS ===
-const STOCH_SETTINGS = {
-    period: 14,
-    smooth: 3,
-    signalPeriod: 3,
-    timeframe1h: '1h'
-};
+class AdvancedCacheManager {
+    constructor() {
+        this.candleCache = new Map();
+        this.momentumCache = new Map();
+        this.generalCache = new Map();
+        
+        this.maxSize = {
+            candleCache: 500,        // Máximo de 500 entradas de candles
+            momentumCache: 200,      // Máximo de 200 entradas de momentum
+            generalCache: 100        // Máximo de 100 entradas gerais
+        };
+        
+        this.ttl = {
+            candleCache: 30000,      // 30 segundos
+            momentumCache: 10000,    // 10 segundos
+            generalCache: 60000      // 60 segundos
+        };
+        
+        this.stats = {
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            size: 0
+        };
+        
+        this.cleanupInterval = setInterval(() => this.cleanup(), 60000); // Limpeza a cada 1 minuto
+        console.log('🧠 Advanced Cache Manager inicializado');
+    }
 
-const STOCH_4H_SETTINGS = {
-    period: 14,
-    signalPeriod: 3,
-    smooth: 3,
-    timeframe: '4h'
-};
+    getCandleCacheKey(symbol, timeframe, limit) {
+        return `candle_${symbol}_${timeframe}_${limit}`;
+    }
 
-const CCI_4H_SETTINGS = {
-    period: 20,
-    maPeriod: 14,
-    timeframe: '4h'
-};
+    getMomentumCacheKey(symbol, timeframe) {
+        return `momentum_${symbol}_${timeframe}`;
+    }
 
-const TARGET_PERCENTAGES = [1.0, 2.0, 3.5, 5.0, 8.0]; // Reduzido o primeiro alvo
-const ATR_PERIOD = 12;              // Reduzido de 14 para 12
-const ATR_TIMEFRAME = '10m';        // Reduzido de 15m para 10m
+    getCandlesCached(symbol, timeframe, limit = 80) {
+        const cacheKey = this.getCandleCacheKey(symbol, timeframe, limit);
+        const now = Date.now();
+        
+        const cached = this.candleCache.get(cacheKey);
+        if (cached && now - cached.timestamp < this.ttl.candleCache) {
+            this.stats.hits++;
+            return Promise.resolve(cached.data);
+        }
+        
+        this.stats.misses++;
+        return null;
+    }
+
+    setCandlesCached(symbol, timeframe, limit, data) {
+        const cacheKey = this.getCandleCacheKey(symbol, timeframe, limit);
+        
+        // Verificar se precisamos liberar espaço
+        if (this.candleCache.size >= this.maxSize.candleCache) {
+            this.evictOldestEntries('candleCache');
+        }
+        
+        this.candleCache.set(cacheKey, {
+            data: data,
+            timestamp: Date.now(),
+            accessCount: 1,
+            size: JSON.stringify(data).length
+        });
+        
+        this.updateStats();
+    }
+
+    getMomentumCached(symbol, timeframe = '1m') {
+        const cacheKey = this.getMomentumCacheKey(symbol, timeframe);
+        const now = Date.now();
+        
+        const cached = this.momentumCache.get(cacheKey);
+        if (cached && now - cached.timestamp < this.ttl.momentumCache) {
+            this.stats.hits++;
+            return cached.data;
+        }
+        
+        this.stats.misses++;
+        return null;
+    }
+
+    setMomentumCached(symbol, timeframe, data) {
+        const cacheKey = this.getMomentumCacheKey(symbol, timeframe);
+        
+        if (this.momentumCache.size >= this.maxSize.momentumCache) {
+            this.evictOldestEntries('momentumCache');
+        }
+        
+        this.momentumCache.set(cacheKey, {
+            data: data,
+            timestamp: Date.now(),
+            accessCount: 1
+        });
+    }
+
+    getGeneralCached(key) {
+        const cached = this.generalCache.get(key);
+        const now = Date.now();
+        
+        if (cached && now - cached.timestamp < this.ttl.generalCache) {
+            this.stats.hits++;
+            cached.accessCount++;
+            return cached.data;
+        }
+        
+        this.stats.misses++;
+        return null;
+    }
+
+    setGeneralCached(key, data, customTTL = null) {
+        if (this.generalCache.size >= this.maxSize.generalCache) {
+            this.evictOldestEntries('generalCache');
+        }
+        
+        this.generalCache.set(key, {
+            data: data,
+            timestamp: Date.now(),
+            accessCount: 1,
+            ttl: customTTL || this.ttl.generalCache
+        });
+    }
+
+    evictOldestEntries(cacheType) {
+        const cache = this[cacheType];
+        if (cache.size === 0) return;
+        
+        // Encontrar a entrada mais antiga (menos acessada + mais antiga)
+        let oldestKey = null;
+        let oldestScore = Infinity;
+        const now = Date.now();
+        
+        for (const [key, entry] of cache.entries()) {
+            // Score baseado em: idade * (1/accessCount)
+            const age = now - entry.timestamp;
+            const score = age / (entry.accessCount || 1);
+            
+            if (score < oldestScore) {
+                oldestScore = score;
+                oldestKey = key;
+            }
+        }
+        
+        if (oldestKey) {
+            cache.delete(oldestKey);
+            this.stats.evictions++;
+            console.log(`🧹 Cache ${cacheType}: Evicting ${oldestKey} (score: ${oldestScore.toFixed(2)})`);
+        }
+    }
+
+    cleanup() {
+        const now = Date.now();
+        let cleaned = 0;
+        
+        // Limpar caches expirados
+        [this.candleCache, this.momentumCache, this.generalCache].forEach((cache, index) => {
+            const cacheName = ['candleCache', 'momentumCache', 'generalCache'][index];
+            const ttl = this.ttl[cacheName];
+            
+            for (const [key, entry] of cache.entries()) {
+                const entryTTL = entry.ttl || ttl;
+                if (now - entry.timestamp > entryTTL) {
+                    cache.delete(key);
+                    cleaned++;
+                }
+            }
+        });
+        
+        if (cleaned > 0) {
+            console.log(`🧹 Cache cleanup: Removed ${cleaned} expired entries`);
+        }
+        
+        this.updateStats();
+    }
+
+    updateStats() {
+        this.stats.size = this.candleCache.size + this.momentumCache.size + this.generalCache.size;
+        
+        // Log de stats a cada 5 minutos
+        if (Date.now() - (this.lastStatsLog || 0) > 300000) {
+            console.log(`📊 Cache Stats: Hits=${this.stats.hits}, Misses=${this.stats.misses}, ` +
+                       `Evictions=${this.stats.evictions}, Size=${this.stats.size}`);
+            this.lastStatsLog = Date.now();
+        }
+    }
+
+    getStats() {
+        return {
+            ...this.stats,
+            candleCacheSize: this.candleCache.size,
+            momentumCacheSize: this.momentumCache.size,
+            generalCacheSize: this.generalCache.size,
+            memoryUsage: process.memoryUsage()
+        };
+    }
+
+    clear() {
+        this.candleCache.clear();
+        this.momentumCache.clear();
+        this.generalCache.clear();
+        this.stats.hits = 0;
+        this.stats.misses = 0;
+        this.stats.evictions = 0;
+        this.stats.size = 0;
+        console.log('🧹 Todos os caches foram limpos');
+    }
+
+    destroy() {
+        clearInterval(this.cleanupInterval);
+        this.clear();
+        console.log('🧹 Cache Manager destruído');
+    }
+}
+
+// Instância global do cache manager
+const cacheManager = new AdvancedCacheManager();
 
 // =====================================================================
 // 🔥 CORRELAÇÃO DINÂMICA COM BTC (CRUCIAL) - NOVO
@@ -3354,11 +3545,9 @@ function getBTCCorrelationAnalysis(relativePerformance, performanceLevel) {
 
 async function detectMomentumSpike(symbol, timeframe = '1m') {
     try {
-        const cacheKey = `${symbol}_${timeframe}_momentum`;
-        const now = Date.now();
-        
-        if (momentumCache[cacheKey] && now - momentumCache[cacheKey].timestamp < MOMENTUM_CACHE_TTL) {
-            return momentumCache[cacheKey].data;
+        const cachedData = cacheManager.getMomentumCached(symbol, timeframe);
+        if (cachedData) {
+            return cachedData;
         }
         
         const candles = await getCandlesCached(symbol, timeframe, 10);
@@ -3387,10 +3576,10 @@ async function detectMomentumSpike(symbol, timeframe = '1m') {
             priceChange: avgPriceChange,
             volumeChange: avgVolumeChange,
             timeframe,
-            timestamp: now
+            timestamp: Date.now()
         };
         
-        momentumCache[cacheKey] = { data: result, timestamp: now };
+        cacheManager.setMomentumCached(symbol, timeframe, result);
         return result;
         
     } catch (error) {
@@ -4672,11 +4861,9 @@ async function fetchAllSpotSymbols() {
 
 async function getCandlesCached(symbol, timeframe, limit = 80) {
     try {
-        const cacheKey = `${symbol}_${timeframe}_${limit}`;
-        const now = Date.now();
-
-        if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < CANDLE_CACHE_TTL) {
-            return candleCache[cacheKey].data;
+        const cachedData = cacheManager.getCandlesCached(symbol, timeframe, limit);
+        if (cachedData !== null) {
+            return cachedData;
         }
 
         const intervalMap = {
@@ -4698,7 +4885,7 @@ async function getCandlesCached(symbol, timeframe, limit = 80) {
             time: candle[0]
         }));
 
-        candleCache[cacheKey] = { data: candles, timestamp: now };
+        cacheManager.setCandlesCached(symbol, timeframe, limit, candles);
         return candles;
     } catch (error) {
         return [];
@@ -5476,18 +5663,10 @@ async function processSymbolGroup(symbols) {
 
 function cleanupCaches() {
     const now = Date.now();
-
-    Object.keys(candleCache).forEach(key => {
-        if (now - candleCache[key].timestamp > MAX_CACHE_AGE) {
-            delete candleCache[key];
-        }
-    });
-
-    Object.keys(momentumCache).forEach(key => {
-        if (now - momentumCache[key].timestamp > MOMENTUM_CACHE_TTL * 3) {
-            delete momentumCache[key];
-        }
-    });
+    
+    // O cacheManager já faz a limpeza automática via intervalo
+    // Esta função é mantida para compatibilidade
+    console.log('🧹 Cache cleanup chamado (gerenciado automaticamente)');
 }
 
 // =====================================================================
@@ -5579,7 +5758,8 @@ async function mainBotLoop() {
                 }
             }
 
-            cleanupCaches();
+            // Limpeza automática via cacheManager - não precisa chamar manualmente
+            // O cacheManager tem seu próprio intervalo de limpeza
 
             if (Date.now() - lastReportTime >= 3600000) {
                 await learningSystem.sendPerformanceReport();
@@ -5593,6 +5773,12 @@ async function mainBotLoop() {
 
             const status = symbolManager.getCurrentStatus();
             console.log(`📊 Progresso: ${status.consecutiveNoSignals} grupos sem sinais | Análises: ${totalAnalysis}`);
+
+            // Log do status do cache a cada 5 ciclos
+            if (symbolManager.totalCycles % 5 === 0) {
+                const cacheStats = cacheManager.getStats();
+                console.log(`📊 Cache Status: Size=${cacheStats.size}, Hits=${cacheStats.hits}, Misses=${cacheStats.misses}`);
+            }
 
             consecutiveErrors = 0;
 
