@@ -164,23 +164,23 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 83;       // ↑ de 70 (filtro mais rigoroso)
+const QUALITY_THRESHOLD = 80;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
-    volume: 30,                    // ↑ de 42 (volume ainda mais crítico)
+    volume: 25,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 1,
-    volatility: 5,                 // ↑ de 7
-    lsr: 8,                        // ↑ de 8
-    rsi: 13,                       // ↑ de 18
-    emaAlignment: 8,              // ↑ de 10
-    stoch1h: 12,                   // ↑ de 10
-    stoch4h: 12,                   // ↑ de 10
-    breakoutRisk: 8,              // ↑ de 10
-    supportResistance: 10,          // ↑ de 12
-    pivotPoints: 12,               // ↑ de 15
-    funding: 8,
-    stochastic12h: 10,             // ↑ de 8
-    stochasticDaily: 10,            // ↑ de 8
-    candlePatterns: 13             // NOVO: Peso para padrões de candles
+    volatility: 3,                 // ↑ de 7
+    lsr: 5,                        // ↑ de 8
+    rsi: 10,                       // ↑ de 18
+    emaAlignment: 5,              // ↑ de 10
+    stoch1h: 10,                   // ↑ de 10
+    stoch4h: 8,                   // ↑ de 10
+    breakoutRisk: 5,              // ↑ de 10
+    supportResistance: 8,          // ↑ de 12
+    pivotPoints: 8,               // ↑ de 15
+    funding: 6,
+    stochastic12h: 6,             // ↑ de 8
+    stochasticDaily: 6,            // ↑ de 8
+    candlePatterns: 10             // NOVO: Peso para padrões de candles
 };
 
 // === NOVA CONFIGURAÇÃO: FORÇA RELATIVA BTC ===
