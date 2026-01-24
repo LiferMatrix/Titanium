@@ -6,8 +6,8 @@ const { Stochastic, EMA, RSI, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6A';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -19,11 +19,13 @@ const marketDataCache = {};
 const orderBookCache = {};
 const lsrCache = {};
 const fundingCache = {};
+const atrCache = {};
 const CANDLE_CACHE_TTL = 45000;
 const MARKET_DATA_CACHE_TTL = 30000;
 const ORDERBOOK_CACHE_TTL = 20000;
 const LSR_CACHE_TTL = 30000;
 const FUNDING_CACHE_TTL = 30000;
+const ATR_CACHE_TTL = 60000;
 const MAX_CACHE_AGE = 10 * 60 * 1000;
 
 // === CONFIGURAÇÕES PARA DETECÇÃO DE ZONAS ===
@@ -98,7 +100,13 @@ const EMA_ZONE_SETTINGS = {
     // Configurações para 200 pares
     maxPairs: 200, // Monitorar 200 pares
     minVolumeUSD: 100000, // Mínimo $100k volume 24h
-    minPrice: 0.0001 // Preço mínimo para evitar shitcoins
+    minPrice: 0.0001, // Preço mínimo para evitar shitcoins
+    // Configurações para alvos ATR
+    atrTimeframe: '1h',
+    atrPeriod: 14,
+    targetMultipliers: [1, 2, 3], // Multiplicadores para 3 alvos
+    stopLossMultiplier: 2, // Multiplicador para stop loss baseado no ATR
+    minStopDistancePercent: 0.5 // Distância mínima do stop em %
 };
 
 // =====================================================================
@@ -874,6 +882,174 @@ async function checkFundingRate(symbol) {
 }
 
 // =====================================================================
+// 📊 FUNÇÃO PARA CALCULAR ATR (AVERAGE TRUE RANGE)
+// =====================================================================
+
+async function calculateATR(symbol, timeframe = '1h', period = 14) {
+    try {
+        const cacheKey = `atr_${symbol}_${timeframe}_${period}`;
+        const now = Date.now();
+
+        if (atrCache[cacheKey] && now - atrCache[cacheKey].timestamp < ATR_CACHE_TTL) {
+            return atrCache[cacheKey].data;
+        }
+
+        const candles = await getCandlesCached(symbol, timeframe, period + 20);
+        if (candles.length < period + 1) return null;
+
+        const trueRanges = [];
+        
+        for (let i = 1; i < candles.length; i++) {
+            const current = candles[i];
+            const previous = candles[i - 1];
+            
+            const highLow = current.high - current.low;
+            const highClose = Math.abs(current.high - previous.close);
+            const lowClose = Math.abs(current.low - previous.close);
+            
+            const trueRange = Math.max(highLow, highClose, lowClose);
+            trueRanges.push(trueRange);
+        }
+        
+        // Calcular ATR (média móvel simples dos true ranges)
+        let atrSum = 0;
+        for (let i = 0; i < period; i++) {
+            atrSum += trueRanges[i];
+        }
+        
+        const atr = atrSum / period;
+        
+        // Classificar volatilidade
+        let volatilityLevel = 'BAIXA';
+        let volatilityEmoji = '🟢';
+        
+        const currentPrice = candles[candles.length - 1].close;
+        const atrPercent = (atr / currentPrice) * 100;
+        
+        if (atrPercent > 3) {
+            volatilityLevel = 'ALTA';
+            volatilityEmoji = '🔴🔴';
+        } else if (atrPercent > 1.5) {
+            volatilityLevel = 'MÉDIA';
+            volatilityEmoji = '🟡';
+        }
+        
+        const result = {
+            atrValue: atr,
+            atrPercent: atrPercent,
+            volatilityLevel: volatilityLevel,
+            volatilityEmoji: volatilityEmoji,
+            currentPrice: currentPrice,
+            period: period,
+            timeframe: timeframe
+        };
+        
+        atrCache[cacheKey] = { data: result, timestamp: now };
+        
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular ATR para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🎯 FUNÇÃO PARA CALCULAR ALVOS BASEADOS NO ATR
+// =====================================================================
+
+async function calculateATRTargets(symbol, entryPrice, signalType) {
+    try {
+        const atrData = await calculateATR(symbol, EMA_ZONE_SETTINGS.atrTimeframe, EMA_ZONE_SETTINGS.atrPeriod);
+        
+        if (!atrData) {
+            // Fallback: usar valores padrão baseados no preço
+            const fallbackATR = entryPrice * 0.02; // 2% como fallback
+            
+            const targets = EMA_ZONE_SETTINGS.targetMultipliers.map(multiplier => {
+                const targetPrice = signalType === 'COMPRA' 
+                    ? entryPrice + (fallbackATR * multiplier)
+                    : entryPrice - (fallbackATR * multiplier);
+                
+                return {
+                    target: targetPrice,
+                    distancePercent: Math.abs((targetPrice - entryPrice) / entryPrice * 100).toFixed(2),
+                    multiplier: multiplier
+                };
+            });
+            
+            const stopLoss = signalType === 'COMPRA' 
+                ? entryPrice - (fallbackATR * EMA_ZONE_SETTINGS.stopLossMultiplier)
+                : entryPrice + (fallbackATR * EMA_ZONE_SETTINGS.stopLossMultiplier);
+            
+            const stopDistancePercent = Math.abs((stopLoss - entryPrice) / entryPrice * 100).toFixed(2);
+            
+            // Verificar se o stop está muito próximo
+            const adjustedStopLoss = stopDistancePercent < EMA_ZONE_SETTINGS.minStopDistancePercent
+                ? signalType === 'COMPRA'
+                    ? entryPrice - (entryPrice * (EMA_ZONE_SETTINGS.minStopDistancePercent / 100))
+                    : entryPrice + (entryPrice * (EMA_ZONE_SETTINGS.minStopDistancePercent / 100))
+                : stopLoss;
+            
+            return {
+                targets: targets,
+                stopLoss: adjustedStopLoss,
+                atrValue: fallbackATR,
+                atrPercent: 2.0,
+                volatilityLevel: 'MÉDIA',
+                volatilityEmoji: '🟡',
+                riskReward: (targets[0].distancePercent / parseFloat(stopDistancePercent)).toFixed(2)
+            };
+        }
+        
+        // Calcular alvos baseados no ATR
+        const targets = EMA_ZONE_SETTINGS.targetMultipliers.map(multiplier => {
+            const targetPrice = signalType === 'COMPRA' 
+                ? entryPrice + (atrData.atrValue * multiplier)
+                : entryPrice - (atrData.atrValue * multiplier);
+            
+            return {
+                target: targetPrice,
+                distancePercent: Math.abs((targetPrice - entryPrice) / entryPrice * 100).toFixed(2),
+                multiplier: multiplier
+            };
+        });
+        
+        // Calcular stop loss baseado no ATR
+        const stopLoss = signalType === 'COMPRA' 
+            ? entryPrice - (atrData.atrValue * EMA_ZONE_SETTINGS.stopLossMultiplier)
+            : entryPrice + (atrData.atrValue * EMA_ZONE_SETTINGS.stopLossMultiplier);
+        
+        const stopDistancePercent = Math.abs((stopLoss - entryPrice) / entryPrice * 100).toFixed(2);
+        
+        // Verificar se o stop está muito próximo
+        const adjustedStopLoss = stopDistancePercent < EMA_ZONE_SETTINGS.minStopDistancePercent
+            ? signalType === 'COMPRA'
+                ? entryPrice - (entryPrice * (EMA_ZONE_SETTINGS.minStopDistancePercent / 100))
+                : entryPrice + (entryPrice * (EMA_ZONE_SETTINGS.minStopDistancePercent / 100))
+            : stopLoss;
+        
+        // Calcular relação risco/recompensa
+        const finalStopDistancePercent = Math.abs((adjustedStopLoss - entryPrice) / entryPrice * 100).toFixed(2);
+        const riskReward = (parseFloat(targets[0].distancePercent) / parseFloat(finalStopDistancePercent)).toFixed(2);
+        
+        return {
+            targets: targets,
+            stopLoss: adjustedStopLoss,
+            atrValue: atrData.atrValue,
+            atrPercent: atrData.atrPercent,
+            volatilityLevel: atrData.volatilityLevel,
+            volatilityEmoji: atrData.volatilityEmoji,
+            riskReward: riskReward
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular alvos ATR para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
 // 📊 FUNÇÕES PARA ANÁLISE TÉCNICA
 // =====================================================================
 
@@ -1248,7 +1424,7 @@ async function checkZoneThenEMA(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO PARA ENVIAR ALERTA DE ZONA + EMA
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA DE ZONA + EMA COM ALVOS ATR
 // =====================================================================
 
 async function sendZoneEMAAlert(setupData) {
@@ -1259,11 +1435,12 @@ async function sendZoneEMAAlert(setupData) {
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}&interval=3`;
         
         // Obter outros indicadores para contexto
-        const [rsiData, lsrData, fundingData, btcStrength] = await Promise.all([
+        const [rsiData, lsrData, fundingData, btcStrength, atrTargets] = await Promise.all([
             getRSI(symbol, '1h'),
             getBinanceLSRValue(symbol, '15m'),
             checkFundingRate(symbol),
-            calculateBTCRelativeStrength(symbol)
+            calculateBTCRelativeStrength(symbol),
+            calculateATRTargets(symbol, ema.price, signalType)
         ]);
         
         const isBuySignal = signalType === 'COMPRA';
@@ -1279,28 +1456,41 @@ async function sendZoneEMAAlert(setupData) {
             }
         }
         
+        // Formatar alvos ATR
+        let targetsText = '';
+        if (atrTargets && atrTargets.targets) {
+            targetsText = `\n<i> Alvos:</i>\n`;
+            atrTargets.targets.forEach((target, index) => {
+                targetsText += `• ${index + 1}º: $${target.target.toFixed(6)} (+${target.distancePercent}%)\n`;
+            });
+            
+            targetsText += `\n<i> Stop:</i>\n`;
+            targetsText += `• Stop: $${atrTargets.stopLoss.toFixed(6)}\n`;
+            targetsText += `• Volatilidade: ${atrTargets.volatilityEmoji} ${atrTargets.volatilityLevel}\n`;
+            targetsText += `• R:R: 1:${atrTargets.riskReward}`;
+        } else {
+            targetsText = `\n<i>⚠️ Alvos não disponíveis</i>`;
+        }
+        
         const message = `
-${actionEmoji} <i>${symbol} - Operação </i>
- <i>de ${signalType} confirmado por ${zoneType}</i>
+${actionEmoji} <i>${symbol} - Operação de ${signalType} confirmado por ${zoneType}</i>
 ${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
-• ${zoneType}: $${zone.price.toFixed(6)}
-<i>Distâncias:</i>
-• Preço → ${zoneType}: ${zone.distancePercent.toFixed(2)}%
 
- <i>Indicadores:</i>
+<i>📊 Nível de ${zoneType}:</i>
+• ${zoneType}: $${zone.price.toFixed(6)}
+• Distância: ${zone.distancePercent.toFixed(2)}%
+<i> Indicadores:</i>
 • RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
 • LSR: ${lsrInfo}
 • Funding Rate: ${fundingData.text}
 • Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
 • Confiança: ${confidence.toFixed(0)}%
-
- <i>Análise 24h:</i>
+<i>📊 Análise 24h:</i>
 • Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
-• Vol: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
+• Volume: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
 • Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
 
-
- <i>Titanium by @J4Rviz</i>
+<i>Titanium by @J4Rviz</i>
         `;
         
         const sent = await sendTelegramAlert(message);
@@ -1310,6 +1500,17 @@ ${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
             console.log(`   ${zoneType}: $${zone.price.toFixed(6)} (${zone.distancePercent.toFixed(2)}%)`);
             console.log(`   EMA 13: $${ema.ema13.toFixed(6)} | EMA 34: $${ema.ema34.toFixed(6)}`);
             console.log(`   Preço: $${ema.price.toFixed(6)} | EMA 55: $${ema.ema55.toFixed(6)}`);
+            
+            if (atrTargets) {
+                console.log(`     Alvos:`);
+                atrTargets.targets.forEach((target, index) => {
+                    console.log(`     ${index + 1}º: $${target.target.toFixed(6)} (+${target.distancePercent}%)`);
+                });
+                console.log(`    Stop: $${atrTargets.stopLoss.toFixed(6)}`);
+                console.log(`    Volatilidade: ${atrTargets.volatilityLevel} (ATR: ${atrTargets.atrPercent.toFixed(2)}%)`);
+                console.log(`     R:R: 1:${atrTargets.riskReward}`);
+            }
+            
             console.log(`   Confiança: ${confidence.toFixed(0)}%`);
         }
         
@@ -1604,6 +1805,8 @@ async function mainZoneEMAMonitorLoop() {
     console.log(`\n🚨 SISTEMA DE ALERTA ZONA + EMA - 200 PARES`);
     console.log(`📊 Monitorando os 200 pares com mais liquidez`);
     console.log(`📊 Sequência: Suporte/Resistência (15m) → EMA 13/34/55 (3m)`);
+    console.log(`🎯 Alvos: 3 alvos baseados no ATR (1x, 2x, 3x)`);
+    console.log(`🛡️  Stop: Adaptativo por volatilidade (ATR * 2)`);
     console.log(`⏱️  Intervalo: ${EMA_ZONE_SETTINGS.checkInterval / 1000}s entre grupos`);
     console.log(`💰 Volume mínimo: $${(EMA_ZONE_SETTINGS.minVolumeUSD/1000).toFixed(0)}k 24h`);
     console.log(`🤖 Iniciando monitoramento...\n`);
@@ -1703,6 +1906,12 @@ function cleanupCaches() {
             delete fundingCache[key];
         }
     });
+
+    Object.keys(atrCache).forEach(key => {
+        if (now - atrCache[key].timestamp > 300000) {
+            delete atrCache[key];
+        }
+    });
 }
 
 // =====================================================================
@@ -1717,6 +1926,8 @@ async function startZoneEMABot() {
         console.log('🚨 TITANIUM ALERT SYSTEM - 200 PARES');
         console.log('📊 Monitorando os 200 pares com MAIS LIQUIDEZ da Binance');
         console.log(`⏱️  Timeframe: ${EMA_ZONE_SETTINGS.timeframe} para EMA | ${EMA_ZONE_SETTINGS.zoneTimeframe} para zonas`);
+        console.log(`🎯 Alvos: 3 alvos dinâmicos baseados no ATR`);
+        console.log(`🛡️  Stop Loss: Adaptativo por volatilidade do ativo`);
         console.log(`💰 Volume mínimo: $${(EMA_ZONE_SETTINGS.minVolumeUSD/1000).toFixed(0)}k 24h`);
         console.log(`📍 Proximidade: ${EMA_ZONE_SETTINGS.zoneProximity}% da zona`);
         console.log('⚠️  Alerta só após setup completo (Zona → EMA → Preço/EMA55)');
