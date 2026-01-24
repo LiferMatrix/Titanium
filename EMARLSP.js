@@ -6,8 +6,8 @@ const { Stochastic, EMA, RSI, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8g';
-const TELEGRAM_CHAT_ID = '-1002559';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -78,18 +78,23 @@ const BTC_STRENGTH_SETTINGS = {
 };
 
 // =====================================================================
-// 🆕 CONFIGURAÇÕES PARA EMA 3 MINUTOS ===
+// 🆕 CONFIGURAÇÕES PARA EMA 3 MINUTOS COM SUPORTE/RESISTÊNCIA ===
 // =====================================================================
 
-const EMA_SETTINGS = {
+const EMA_ZONE_SETTINGS = {
     ema13Period: 13,
     ema34Period: 34,
     ema55Period: 55,
     timeframe: '3m',
     requiredCandles: 100,
-    checkInterval: 30000, // Verificar a cada 30 segundos
-    alertCooldown: 5 * 60 * 1000, // 5 minutos de cooldown entre alertas do mesmo tipo
-    alertGroups: 6 // Número de grupos para distribuir os símbolos
+    checkInterval: 30000,
+    alertCooldown: 5 * 60 * 1000,
+    alertGroups: 6,
+    // Configurações para zona de suporte/resistência
+    zoneProximity: 0.5, // 0.5% de proximidade da zona
+    zoneTimeframe: '15m', // Timeframe para detectar zonas
+    minZoneStrength: 1, // Força mínima da zona
+    requireZoneConfirmation: true // Requer confirmação de zona
 };
 
 // =====================================================================
@@ -988,10 +993,10 @@ async function getStochastic(symbol, timeframe = '12h') {
 
 async function checkEMA3133455(symbol) {
     try {
-        const candles = await getCandlesCached(symbol, EMA_SETTINGS.timeframe, EMA_SETTINGS.requiredCandles);
+        const candles = await getCandlesCached(symbol, EMA_ZONE_SETTINGS.timeframe, EMA_ZONE_SETTINGS.requiredCandles);
         
-        if (candles.length < EMA_SETTINGS.requiredCandles) {
-            console.log(`⚠️ Dados insuficientes para EMA ${symbol} no timeframe ${EMA_SETTINGS.timeframe}`);
+        if (candles.length < EMA_ZONE_SETTINGS.requiredCandles) {
+            console.log(`⚠️ Dados insuficientes para EMA ${symbol} no timeframe ${EMA_ZONE_SETTINGS.timeframe}`);
             return null;
         }
 
@@ -1000,17 +1005,17 @@ async function checkEMA3133455(symbol) {
         
         // Calcular EMA 13, 34, 55
         const ema13Values = EMA.calculate({
-            period: EMA_SETTINGS.ema13Period,
+            period: EMA_ZONE_SETTINGS.ema13Period,
             values: closes
         });
         
         const ema34Values = EMA.calculate({
-            period: EMA_SETTINGS.ema34Period,
+            period: EMA_ZONE_SETTINGS.ema34Period,
             values: closes
         });
         
         const ema55Values = EMA.calculate({
-            period: EMA_SETTINGS.ema55Period,
+            period: EMA_ZONE_SETTINGS.ema55Period,
             values: closes
         });
         
@@ -1035,14 +1040,10 @@ async function checkEMA3133455(symbol) {
         
         // Preço atual (último fechamento)
         const currentPrice = closes[closes.length - 1];
-        const previousPrice = closes[closes.length - 2];
         
         // Verificar posição do preço em relação à EMA 55
         const priceAboveEma55 = currentPrice > currentEma55;
-        const previousPriceAboveEma55 = previousPrice > currentEma55;
-        
         const priceBelowEma55 = currentPrice < currentEma55;
-        const previousPriceBelowEma55 = previousPrice < currentEma55;
         
         // Detectar cruzamentos
         let crossoverSignal = null;
@@ -1092,11 +1093,98 @@ async function checkEMA3133455(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO PARA ENVIAR ALERTA DE EMA
+// 🆕 FUNÇÃO PARA VERIFICAR SUPORTE/RESISTÊNCIA E DEPOIS EMA
 // =====================================================================
 
-async function sendEMAAlert(symbol, emaData, marketData) {
+async function checkZoneThenEMA(symbol) {
     try {
+        console.log(`🔍 Analisando ${symbol}: Verificando zonas primeiro...`);
+        
+        // 1. PRIMEIRO: Verificar se está perto de suporte/resistência
+        const zones = await getSupportResistanceLevels(symbol, EMA_ZONE_SETTINGS.zoneTimeframe);
+        const marketData = await getMarketData(symbol);
+        
+        if (!marketData || !zones || zones.length === 0) {
+            console.log(`   ⚠️ Sem zonas S/R encontradas para ${symbol}`);
+            return null;
+        }
+        
+        const currentPrice = marketData.lastPrice;
+        let nearZone = null;
+        
+        // Verificar se está perto de alguma zona
+        for (const zone of zones) {
+            const distancePercent = Math.abs((currentPrice - zone.price) / currentPrice) * 100;
+            
+            if (distancePercent <= EMA_ZONE_SETTINGS.zoneProximity) {
+                nearZone = {
+                    type: zone.type,
+                    price: zone.price,
+                    strength: zone.strength,
+                    distancePercent: distancePercent,
+                    isSupport: zone.type === 'SUPPORT',
+                    isResistance: zone.type === 'RESISTANCE'
+                };
+                break;
+            }
+        }
+        
+        if (!nearZone) {
+            console.log(`   ⚠️ ${symbol} não está perto de zona S/R (mínimo ${EMA_ZONE_SETTINGS.zoneProximity}%)`);
+            return null;
+        }
+        
+        console.log(`   ✅ ${symbol} perto de ${nearZone.type} $${nearZone.price.toFixed(6)} (${nearZone.distancePercent.toFixed(2)}%)`);
+        
+        // 2. SEGUNDO: Verificar cruzamento das EMAs
+        const emaData = await checkEMA3133455(symbol);
+        
+        if (!emaData || !emaData.crossover) {
+            console.log(`   ⚠️ Sem cruzamento de EMA para ${symbol}`);
+            return null;
+        }
+        
+        // 3. VERIFICAR SE O SINAL DE EMA CORRESPONDE À ZONA
+        const isBuySignal = emaData.crossover.type === 'COMPRA';
+        const isSellSignal = emaData.crossover.type === 'VENDA';
+        
+        // Compra: deve estar perto de SUPORTE
+        if (isBuySignal && !nearZone.isSupport) {
+            console.log(`   ⚠️ Sinal de COMPRA mas está perto de RESISTÊNCIA - ignorando`);
+            return null;
+        }
+        
+        // Venda: deve estar perto de RESISTÊNCIA
+        if (isSellSignal && !nearZone.isResistance) {
+            console.log(`   ⚠️ Sinal de VENDA mas está perto de SUPORTE - ignorando`);
+            return null;
+        }
+        
+        console.log(`   🎯 Setup completo detectado: ${emaData.crossover.type} com confirmação de ${nearZone.type}`);
+        
+        return {
+            symbol: symbol,
+            zone: nearZone,
+            ema: emaData,
+            marketData: marketData,
+            signalType: emaData.crossover.type,
+            confidence: Math.min(100, 70 + (nearZone.strength * 10))
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro checkZoneThenEMA ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA DE ZONA + EMA
+// =====================================================================
+
+async function sendZoneEMAAlert(setupData) {
+    try {
+        const { symbol, zone, ema, marketData, signalType, confidence } = setupData;
+        
         const now = getBrazilianDateTime();
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}&interval=3`;
         
@@ -1108,9 +1196,9 @@ async function sendEMAAlert(symbol, emaData, marketData) {
             calculateBTCRelativeStrength(symbol)
         ]);
         
-        const isBuySignal = emaData.crossover.type === 'COMPRA';
+        const isBuySignal = signalType === 'COMPRA';
         const actionEmoji = isBuySignal ? '🟢' : '🔴';
-        const actionType = isBuySignal ? 'COMPRA' : 'VENDA';
+        const zoneType = zone.isSupport ? 'SUPORTE' : 'RESISTÊNCIA';
         
         // Formatar LSR
         let lsrInfo = 'N/A';
@@ -1122,53 +1210,61 @@ async function sendEMAAlert(symbol, emaData, marketData) {
         }
         
         const message = `
-${actionEmoji} <b>${symbol} - ALERTA EMA ${EMA_SETTINGS.timeframe}</b>
-📈 <b>Sinal de ${actionType}</b>
+${actionEmoji} <b>${symbol} - ALERTA ZONA + EMA ${EMA_ZONE_SETTINGS.timeframe}</b>
+🎯 <b>Sinal de ${signalType} confirmado por ${zoneType}</b>
 ${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
 
-🎯 <b>Sinal Detectado:</b>
-${emaData.crossover.message}
+📍 <b>CONDIÇÕES ATENDIDAS:</b>
+1️⃣ <b>${zoneType} PRÓXIMO:</b> $${zone.price.toFixed(6)} (${zone.distancePercent.toFixed(2)}% do preço)
+2️⃣ <b>EMA 13 CRUZOU ${isBuySignal ? 'PARA CIMA' : 'PARA BAIXO'} DA EMA 34</b>
+3️⃣ <b>PREÇO ${isBuySignal ? 'ACIMA' : 'ABAIXO'} DA EMA 55</b>
 
 💲 <b>Preços Atuais:</b>
-• Preço: $${emaData.price.toFixed(6)}
-• EMA 13: $${emaData.ema13.toFixed(6)}
-• EMA 34: $${emaData.ema34.toFixed(6)}
-• EMA 55: $${emaData.ema55.toFixed(6)}
+• Preço: $${ema.price.toFixed(6)}
+• ${zoneType}: $${zone.price.toFixed(6)}
+• EMA 13: $${ema.ema13.toFixed(6)}
+• EMA 34: $${ema.ema34.toFixed(6)}
+• EMA 55: $${ema.ema55.toFixed(6)}
 
-📊 <b>Distâncias:</b>
-• Preço vs EMA 55: ${isBuySignal ? 'ACIMA' : 'ABAIXO'}
-• EMA 13 vs EMA 34: ${emaData.ema13AboveEma34 ? 'ACIMA' : 'ABAIXO'}
+📏 <b>Distâncias:</b>
+• Preço → ${zoneType}: ${zone.distancePercent.toFixed(2)}%
+• Preço → EMA 55: ${isBuySignal ? 'ACIMA' : 'ABAIXO'}
+• EMA 13 → EMA 34: ${ema.ema13AboveEma34 ? 'ACIMA' : 'ABAIXO'}
 
-📈 <i>Indicadores de Confirmação:</i>
+📊 <i>Indicadores de Confirmação:</i>
 • RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
 • LSR: ${lsrInfo}
 • Funding Rate: ${fundingData.text}
 • Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
+• Confiança do Setup: ${confidence.toFixed(0)}%
 
-📊 <i>Análise 24h:</i>
+📈 <i>Análise 24h:</i>
 • Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
 • Vol: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
 • Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
 
-⚠️ <b>ATENÇÃO:</b> Este é um alerta de EMA cruzando no timeframe 3 minutos. 
-Use como confirmação junto com outras análises.
+⚠️ <b>ESTRATÉGIA SUGERIDA:</b>
+${isBuySignal ? 
+'• Entrada: Acima da EMA 55 após confirmação\n• Stop Loss: Abaixo do suporte identificado\n• Alvo 1: Próxima resistência\n• Alvo 2: Distância 2:1 risk/reward' : 
+'• Entrada: Abaixo da EMA 55 após confirmação\n• Stop Loss: Acima da resistência identificada\n• Alvo 1: Próximo suporte\n• Alvo 2: Distância 2:1 risk/reward'}
 
-🔔 <i>Alerta EMA 3m by @J4Rviz</i>
+🔔 <i>Alerta Zona + EMA by @J4Rviz</i>
         `;
         
         const sent = await sendTelegramAlert(message);
         
         if (sent) {
-            console.log(`\n${actionEmoji} Alerta EMA enviado: ${symbol} - ${actionType}`);
-            console.log(`   EMA 13: $${emaData.ema13.toFixed(6)} | EMA 34: $${emaData.ema34.toFixed(6)}`);
-            console.log(`   Preço: $${emaData.price.toFixed(6)} | EMA 55: $${emaData.ema55.toFixed(6)}`);
-            console.log(`   RSI: ${rsiData ? rsiData.value.toFixed(1) : 'N/A'} | LSR: ${lsrData ? lsrData.lsrValue.toFixed(3) : 'N/A'}`);
+            console.log(`\n${actionEmoji} Alerta Zona+EMA enviado: ${symbol} - ${signalType}`);
+            console.log(`   ${zoneType}: $${zone.price.toFixed(6)} (${zone.distancePercent.toFixed(2)}%)`);
+            console.log(`   EMA 13: $${ema.ema13.toFixed(6)} | EMA 34: $${ema.ema34.toFixed(6)}`);
+            console.log(`   Preço: $${ema.price.toFixed(6)} | EMA 55: $${ema.ema55.toFixed(6)}`);
+            console.log(`   Confiança: ${confidence.toFixed(0)}%`);
         }
         
         return sent;
         
     } catch (error) {
-        console.error(`Erro enviando alerta EMA ${symbol}:`, error.message);
+        console.error(`Erro enviando alerta Zona+EMA ${symbol}:`, error.message);
         return false;
     }
 }
@@ -1377,469 +1473,34 @@ async function getBreakoutStructure15m(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO PARA DETECTAR ZONAS DE BID/ASK E S/R COM CRITÉRIO DE RSI
+// 🆕 MONITOR PARA ALERTAS DE ZONA + EMA
 // =====================================================================
 
-async function detectTradingZonesWithRSICriteria(symbol) {
-    try {
-        const now = Date.now();
-        const cacheKey = `zones_rsi_${symbol}`;
-        
-        if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < 20000) {
-            return candleCache[cacheKey].data;
-        }
-
-        // Obter RSI 1h primeiro para aplicar o critério
-        const rsiData = await getRSI(symbol, '1h');
-        
-        // Se não conseguir RSI, não prosseguir
-        if (!rsiData) {
-            return [];
-        }
-
-        const [marketData, orderBook, supportResistance] = await Promise.all([
-            getMarketData(symbol),
-            getOrderBook(symbol, 100),
-            getSupportResistanceLevels(symbol, '15m')
-        ]);
-
-        if (!marketData) {
-            return [];
-        }
-
-        const currentPrice = marketData.lastPrice;
-        const zones = [];
-
-        // APLICAR CRITÉRIO DE RSI PARA FILTRAR ZONAS
-        const isRSIFavorableForBuy = rsiData.value <= 62;
-        const isRSIFavorableForSell = rsiData.value > 60;
-
-        // 1. Analisar Order Book para zonas de Bid/Ask
-        if (orderBook) {
-            const significantBids = orderBook.bids
-                .filter(bid => bid.quantity >= ZONE_SETTINGS.minBidAskVolume)
-                .slice(0, 10);
-            
-            if (significantBids.length >= 3) {
-                const avgBidPrice = significantBids.reduce((sum, bid) => sum + bid.price, 0) / significantBids.length;
-                const totalBidVolume = significantBids.reduce((sum, bid) => sum + bid.quantity, 0);
-                const distancePercent = Math.abs((currentPrice - avgBidPrice) / currentPrice) * 100;
-                
-                if (distancePercent <= ZONE_SETTINGS.bidAskZoneSize) {
-                    // APLICAR FILTRO: Só adiciona zona de COMPRA se RSI <= 62
-                    if (isRSIFavorableForBuy) {
-                        zones.push({
-                            type: 'BID_ZONE',
-                            price: avgBidPrice,
-                            zoneType: 'COMPRA (Bids Fortes)',
-                            strength: Math.min(1, totalBidVolume / 10),
-                            volume: totalBidVolume,
-                            distancePercent: distancePercent,
-                            isAbove: currentPrice > avgBidPrice,
-                            confidence: Math.min(100, 60 + (totalBidVolume * 5)),
-                            count: significantBids.length,
-                            rsiStatus: `RSI ${rsiData.value.toFixed(1)} (${rsiData.status})`,
-                            rsiFavorable: true
-                        });
-                    }
-                }
-            }
-
-            const significantAsks = orderBook.asks
-                .filter(ask => ask.quantity >= ZONE_SETTINGS.minBidAskVolume)
-                .slice(0, 10);
-            
-            if (significantAsks.length >= 3) {
-                const avgAskPrice = significantAsks.reduce((sum, ask) => sum + ask.price, 0) / significantAsks.length;
-                const totalAskVolume = significantAsks.reduce((sum, ask) => sum + ask.quantity, 0);
-                const distancePercent = Math.abs((currentPrice - avgAskPrice) / currentPrice) * 100;
-                
-                if (distancePercent <= ZONE_SETTINGS.bidAskZoneSize) {
-                    // APLICAR FILTRO: Só adiciona zona de VENDA se RSI > 60
-                    if (isRSIFavorableForSell) {
-                        zones.push({
-                            type: 'ASK_ZONE',
-                            price: avgAskPrice,
-                            zoneType: 'VENDA (Asks Fortes)',
-                            strength: Math.min(1, totalAskVolume / 10),
-                            volume: totalAskVolume,
-                            distancePercent: distancePercent,
-                            isAbove: currentPrice > avgAskPrice,
-                            confidence: Math.min(100, 60 + (totalAskVolume * 5)),
-                            count: significantAsks.length,
-                            rsiStatus: `RSI ${rsiData.value.toFixed(1)} (${rsiData.status})`,
-                            rsiFavorable: true
-                        });
-                    }
-                }
-            }
-        }
-
-        // 2. Analisar Suportes e Resistências
-        supportResistance.forEach(level => {
-            const distancePercent = Math.abs((currentPrice - level.price) / currentPrice) * 100;
-            
-            if (distancePercent <= ZONE_SETTINGS.proximityThreshold) {
-                const zoneType = level.type === 'SUPPORT' ? 
-                    'COMPRA (Suporte)' : 'VENDA (Resistência)';
-                
-                // APLICAR FILTRO RSI:
-                // - Suporte/Compra: RSI <= 62
-                // - Resistência/Venda: RSI > 60
-                const isFavorable = (level.type === 'SUPPORT' && isRSIFavorableForBuy) ||
-                                   (level.type === 'RESISTANCE' && isRSIFavorableForSell);
-                
-                if (isFavorable) {
-                    zones.push({
-                        type: 'SR_ZONE',
-                        price: level.price,
-                        zoneType: zoneType,
-                        strength: level.strength,
-                        volume: level.volume,
-                        distancePercent: distancePercent,
-                        isAbove: currentPrice > level.price,
-                        confidence: Math.min(100, 50 + (level.count * 10) + (level.strength * 5)),
-                        count: level.count,
-                        touches: level.count,
-                        rsiStatus: `RSI ${rsiData.value.toFixed(1)} (${rsiData.status})`,
-                        rsiFavorable: true
-                    });
-                }
-            }
-        });
-
-        // 3. Analisar Preço Round Numbers
-        const roundNumbers = analyzeRoundNumbers(currentPrice);
-        roundNumbers.forEach(roundNum => {
-            const distancePercent = Math.abs((currentPrice - roundNum.price) / currentPrice) * 100;
-            
-            if (distancePercent <= ZONE_SETTINGS.proximityThreshold) {
-                const zoneType = currentPrice > roundNum.price ? 
-                    'COMPRA (Round Number)' : 'VENDA (Round Number)';
-                
-                // APLICAR FILTRO RSI:
-                // - Compra: RSI <= 62
-                // - Venda: RSI > 60
-                const isFavorable = (currentPrice > roundNum.price && isRSIFavorableForBuy) ||
-                                   (currentPrice <= roundNum.price && isRSIFavorableForSell);
-                
-                if (isFavorable) {
-                    zones.push({
-                        type: 'ROUND_NUMBER',
-                        price: roundNum.price,
-                        zoneType: zoneType,
-                        strength: roundNum.strength,
-                        distancePercent: distancePercent,
-                        isAbove: currentPrice > roundNum.price,
-                        confidence: 65,
-                        description: roundNum.description,
-                        rsiStatus: `RSI ${rsiData.value.toFixed(1)} (${rsiData.status})`,
-                        rsiFavorable: true
-                    });
-                }
-            }
-        });
-
-        // Filtrar e ordenar zonas
-        const filteredZones = zones.filter(zone => 
-            zone.confidence >= 50 && 
-            zone.distancePercent <= ZONE_SETTINGS.proximityThreshold &&
-            zone.rsiFavorable === true
-        );
-
-        const uniqueZones = [];
-        filteredZones.forEach(zone => {
-            const isSimilar = uniqueZones.some(existingZone => 
-                Math.abs(existingZone.price - zone.price) / existingZone.price < 0.001
-            );
-            
-            if (!isSimilar) {
-                uniqueZones.push(zone);
-            }
-        });
-
-        uniqueZones.sort((a, b) => b.confidence - a.confidence);
-
-        candleCache[cacheKey] = {
-            data: uniqueZones,
-            timestamp: now
-        };
-
-        return uniqueZones;
-
-    } catch (error) {
-        console.log(`⚠️ Erro detectando zonas com critério RSI ${symbol}: ${error.message}`);
-        return [];
-    }
-}
-
-function analyzeRoundNumbers(currentPrice) {
-    const roundNumbers = [];
-    
-    const priceStr = currentPrice.toFixed(2);
-    const integerPart = Math.floor(currentPrice);
-    
-    for (let i = -5; i <= 5; i++) {
-        const roundNum = integerPart + i;
-        if (roundNum > 0) {
-            const distance = Math.abs(currentPrice - roundNum) / currentPrice * 100;
-            if (distance < 2) {
-                roundNumbers.push({
-                    price: roundNum,
-                    strength: 1,
-                    description: `Nível redondo ${roundNum}`
-                });
-            }
-        }
-    }
-    
-    [0.25, 0.50, 0.75].forEach(decimal => {
-        const level = integerPart + decimal;
-        const distance = Math.abs(currentPrice - level) / currentPrice * 100;
-        if (distance < 2) {
-            roundNumbers.push({
-                price: level,
-                strength: 0.8,
-                description: `Nível ${decimal * 100}%`
-            });
-        }
-    });
-    
-    return roundNumbers;
-}
-
-// =====================================================================
-// 📤 FUNÇÃO PARA ENVIAR ALERTAS DE ZONAS COM CRITÉRIO RSI E ESTRUTURA 15M
-// =====================================================================
-
-async function sendZoneAlertWithRSICriteria(symbol, zone, marketData) {
-    try {
-        // Obter todos os indicadores simultaneamente
-        const [
-            btcStrength,
-            rsiData,
-            stoch12h,
-            stoch1d,
-            lsrData,
-            fundingData,
-            breakoutStructure
-        ] = await Promise.all([
-            calculateBTCRelativeStrength(symbol),
-            getRSI(symbol, '1h'),
-            getStochastic(symbol, '12h'),
-            getStochastic(symbol, '1d'),
-            getBinanceLSRValue(symbol, '15m'),
-            checkFundingRate(symbol),
-            getBreakoutStructure15m(symbol)
-        ]);
-
-        const now = getBrazilianDateTime();
-        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}&interval=15`;
-        
-        // Determinar ação com base no RSI
-        let actionEmoji = '🎯';
-        let actionText = '';
-        let intensity = '';
-        
-        if (zone.zoneType.includes('COMPRA')) {
-            actionEmoji = '🟢';
-            if (zone.isAbove) {
-                actionText = 'PRÓXIMO SUPORTE DE COMPRA';
-                intensity = zone.distancePercent < 0.15 ? '⭐ MUITO PRÓXIMO ⭐' : '📌 PRÓXIMO';
-            } else {
-                actionText = 'ACIMA DA ZONA DE COMPRA';
-                intensity = '⚠️ CUIDADO';
-            }
-        } else if (zone.zoneType.includes('VENDA')) {
-            actionEmoji = '🔴';
-            if (zone.isAbove) {
-                actionText = 'ACIMA DA ZONA DE VENDA';
-                intensity = '⚠️ CUIDADO';
-            } else {
-                actionText = 'PRÓXIMO RESISTÊNCIA DE VENDA';
-                intensity = zone.distancePercent < 0.15 ? '⭐ MUITO PRÓXIMO ⭐' : '📌 PRÓXIMO';
-            }
-        }
-
-        // Formatar informações do Stochastic
-        let stoch12hInfo = 'N/A';
-        if (stoch12h) {
-            const kValue = stoch12h.k.toFixed(1);
-            const dValue = stoch12h.d.toFixed(1);
-            const trend = stoch12h.isBullish ? 'ALTA' : 'BAIXA';
-            stoch12hInfo = `K:${kValue} D:${dValue} | Tendência: ${trend}`;
-        }
-
-        let stochDailyInfo = 'N/A';
-        if (stoch1d) {
-            const kValue = stoch1d.k.toFixed(1);
-            const dValue = stoch1d.d.toFixed(1);
-            const zoneText = stoch1d.zone !== 'NEUTRAL' ? ` (${stoch1d.zone})` : '';
-            stochDailyInfo = `K:${kValue} D:${dValue}${zoneText}`;
-        }
-
-        // Formatar LSR
-        let lsrInfo = 'N/A';
-        if (lsrData) {
-            lsrInfo = `${lsrData.lsrValue.toFixed(3)} ${lsrData.isRising ? '⬆️' : '⬇️'}`;
-            if (lsrData.percentChange !== '0.00') {
-                lsrInfo += ` (${lsrData.percentChange}%)`;
-            }
-        }
-
-        // Formatar informações de rompimento da estrutura 15m
-        let breakoutInfo = '';
-        if (breakoutStructure.breakoutHigh || breakoutStructure.breakoutLow) {
-            breakoutInfo = '📈 <b>Estrutura 15m - ROMPIMENTO:</b>\n';
-            
-            if (breakoutStructure.breakoutHigh) {
-                const breakoutPercent = ((marketData.lastPrice - breakoutStructure.breakoutHigh) / breakoutStructure.breakoutHigh * 100).toFixed(2);
-                breakoutInfo += `• 🟢 ROMPEU ALTA: $${breakoutStructure.breakoutHigh.toFixed(6)} (+${breakoutPercent}%)\n`;
-            }
-            
-            if (breakoutStructure.breakoutLow) {
-                const breakoutPercent = ((breakoutStructure.breakoutLow - marketData.lastPrice) / marketData.lastPrice * 100).toFixed(2);
-                breakoutInfo += `• 🔴 ROMPEU BAIXA: $${breakoutStructure.breakoutLow.toFixed(6)} (-${breakoutPercent}%)\n`;
-            }
-            
-            // Mostrar as principais highs e lows da estrutura
-            if (breakoutStructure.structureHighs.length > 0) {
-                breakoutInfo += `• 📊 Máximas estrutura: `;
-                breakoutStructure.structureHighs.slice(0, 3).forEach((high, index) => {
-                    breakoutInfo += `$${high.price.toFixed(6)}${index < 2 ? ' | ' : ''}`;
-                });
-                breakoutInfo += '\n';
-            }
-            
-            if (breakoutStructure.structureLows.length > 0) {
-                breakoutInfo += `• 📊 Mínimas estrutura: `;
-                breakoutStructure.structureLows.slice(0, 3).forEach((low, index) => {
-                    breakoutInfo += `$${low.price.toFixed(6)}${index < 2 ? ' | ' : ''}`;
-                });
-            }
-        } else {
-            // Se não houve rompimento, mostrar as highs e lows da estrutura
-            breakoutInfo = '📈 <b>Estrutura 15m:</b>\n';
-            
-            if (breakoutStructure.structureHighs.length > 0) {
-                breakoutInfo += `• 🎯 Próxima alta: $${breakoutStructure.structureHighs[0].price.toFixed(6)}\n`;
-            }
-            
-            if (breakoutStructure.structureLows.length > 0) {
-                breakoutInfo += `• 🎯 Próxima baixa: $${breakoutStructure.structureLows[0].price.toFixed(6)}\n`;
-            }
-            
-            if (breakoutStructure.currentPrice) {
-                const distanceToHigh = breakoutStructure.structureHighs.length > 0 
-                    ? ((breakoutStructure.structureHighs[0].price - breakoutStructure.currentPrice) / breakoutStructure.currentPrice * 100).toFixed(2)
-                    : 'N/A';
-                    
-                const distanceToLow = breakoutStructure.structureLows.length > 0
-                    ? ((breakoutStructure.currentPrice - breakoutStructure.structureLows[0].price) / breakoutStructure.currentPrice * 100).toFixed(2)
-                    : 'N/A';
-                
-                if (distanceToHigh !== 'N/A') {
-                    breakoutInfo += `• 📏 Distância até alta: +${distanceToHigh}%\n`;
-                }
-                
-                if (distanceToLow !== 'N/A') {
-                    breakoutInfo += `• 📏 Distância até baixa: -${distanceToLow}%`;
-                }
-            }
-        }
-
-        // Adicionar informação de critério RSI no título
-        const rsiCriteria = zone.zoneType.includes('COMPRA') 
-            ? `(RSI : ${rsiData.value.toFixed(1)})` 
-            : `(RSI : ${rsiData.value.toFixed(1)})`;
-
-        // Formatar mensagem completa
-        const message = `
-${actionEmoji} <b>${symbol} - ${actionText} ${rsiCriteria}</b>
-${now.full} <a href="${tradingViewLink}">Gráfico</a>
-
-${intensity}
-
-🎯 <b>Zona:</b> ${zone.zoneType}
-💲 <b>Preço Atual:</b> $${marketData.lastPrice.toFixed(6)}
-📍 <b>Zona Alvo:</b> $${zone.price.toFixed(6)}
- <b>Distância:</b> ${zone.distancePercent.toFixed(2)}%
- <b>Confiança:</b> ${zone.confidence.toFixed(0)}%
-
-${breakoutInfo}
-
- <i>Indicadores Técnicos:</i>
-• RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
-• LSR: ${lsrInfo}
-• Funding Rate: ${fundingData.text}
-• Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
-• Estocástico 12h: ${stoch12hInfo}
-• Estocástico 1D: ${stochDailyInfo}
-
-📈 <i>Análise 24h:</i>
-• Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
-• Vol: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
-• Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
-
-${zone.type === 'BID_ZONE' ? '💰 <i>Zona de compra identificada por bids fortes</i>' : 
-  zone.type === 'ASK_ZONE' ? '💰 <i>Zona de venda identificada por asks fortes</i>' : 
-  zone.type === 'SR_ZONE' && zone.zoneType.includes('COMPRA') ? ' <i>Suporte histórico</i>' : 
-  zone.type === 'SR_ZONE' && zone.zoneType.includes('VENDA') ? ' <i>Resistência histórica </i>' : 
- '✨ <i>Titanium Zone Alert by @J4Rviz</i>'}
-        `;
-
-        const sent = await sendTelegramAlert(message);
-        
-        if (sent) {
-            console.log(`\n${actionEmoji} Alerta com critério RSI enviado: ${symbol}`);
-            console.log(`   ${zone.zoneType} | RSI: ${rsiData.value.toFixed(1)} | ${zone.distancePercent.toFloat(2)}% de distância`);
-            console.log(`   LSR: ${lsrData ? lsrData.lsrValue.toFixed(3) : 'N/A'} | Funding: ${fundingData.text}`);
-            
-            // Log das informações de estrutura
-            if (breakoutStructure.breakoutHigh) {
-                console.log(`   🟢 ROMPEU ALTA 15m: $${breakoutStructure.breakoutHigh.toFixed(6)}`);
-            }
-            if (breakoutStructure.breakoutLow) {
-                console.log(`   🔴 ROMPEU BAIXA 15m: $${breakoutStructure.breakoutLow.toFixed(6)}`);
-            }
-        }
-        
-        return sent;
-
-    } catch (error) {
-        console.error(`Erro enviando alerta ${symbol}:`, error.message);
-        return false;
-    }
-}
-
-// =====================================================================
-// 🆕 MONITOR PARA ALERTAS DE EMA
-// =====================================================================
-
-class EMAMonitor {
+class ZoneEMAMonitor {
     constructor() {
         this.symbolGroups = [];
         this.currentGroupIndex = 0;
         this.alertCooldowns = new Map();
         this.totalAlertsSent = 0;
         this.lastAlertTime = new Map();
+        this.confirmationTracker = new Map();
     }
 
     async initializeSymbols() {
         try {
             const allSymbols = await fetchAllFuturesSymbols();
             
-            // Criar grupos para EMA
-            const groupSize = Math.ceil(allSymbols.length / EMA_SETTINGS.alertGroups);
+            // Criar grupos
+            const groupSize = Math.ceil(allSymbols.length / EMA_ZONE_SETTINGS.alertGroups);
             this.symbolGroups = this.createGroups(allSymbols, groupSize);
             
-            console.log(`📊 ${allSymbols.length} ativos para monitoramento EMA`);
-            console.log(`📊 ${this.symbolGroups.length} grupos de EMA criados`);
+            console.log(`📊 ${allSymbols.length} ativos para monitoramento Zona+EMA`);
+            console.log(`📊 ${this.symbolGroups.length} grupos criados`);
             
             return allSymbols;
             
         } catch (error) {
-            console.error('Erro inicializando símbolos para EMA:', error.message);
+            console.error('Erro inicializando símbolos:', error.message);
             return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
         }
     }
@@ -1864,7 +1525,7 @@ class EMAMonitor {
         
         if (!lastAlert) return true;
         
-        return Date.now() - lastAlert > EMA_SETTINGS.alertCooldown;
+        return Date.now() - lastAlert > EMA_ZONE_SETTINGS.alertCooldown;
     }
 
     recordAlert(symbol, signalType) {
@@ -1881,141 +1542,8 @@ class EMAMonitor {
         }
     }
 
-    async monitorEMASignals() {
-        try {
-            const symbols = this.getNextGroup();
-            if (!symbols || symbols.length === 0) return;
-            
-            console.log(`\n📊 Monitorando EMA ${EMA_SETTINGS.timeframe}: ${symbols.join(', ')}`);
-            
-            for (const symbol of symbols) {
-                try {
-                    await new Promise(r => setTimeout(r, 800)); // Delay para evitar rate limit
-                    
-                    const emaData = await checkEMA3133455(symbol);
-                    
-                    if (!emaData || !emaData.crossover) {
-                        continue;
-                    }
-                    
-                    const signalType = emaData.crossover.type;
-                    
-                    if (this.canSendAlert(symbol, signalType)) {
-                        const marketData = await getMarketData(symbol);
-                        if (!marketData) continue;
-                        
-                        await sendEMAAlert(symbol, emaData, marketData);
-                        this.recordAlert(symbol, signalType);
-                        
-                        // Aguardar entre alerts
-                        await new Promise(r => setTimeout(r, 2000));
-                    }
-                    
-                } catch (error) {
-                    console.log(`⚠️ Erro monitorando EMA ${symbol}: ${error.message}`);
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-            }
-            
-        } catch (error) {
-            console.error(`Erro no monitor EMA: ${error.message}`);
-        }
-    }
-}
-
-// =====================================================================
-// 🔄 MONITORAMENTO PRINCIPAL COM CRITÉRIO RSI
-// =====================================================================
-
-class ZoneMonitorWithRSI {
-    constructor() {
-        this.symbolGroups = [];
-        this.currentGroupIndex = 0;
-        this.totalCycles = 0;
-        this.groupSize = 8;
-        this.alertsSent = new Map();
-        this.alertCooldown = 60 * 60 * 1000;
-        this.confirmationTracker = new Map();
-    }
-
-    async initializeSymbols() {
-        try {
-            const allSymbols = await fetchAllFuturesSymbols();
-
-            const symbolsWithVolume = await Promise.all(
-                allSymbols.map(async symbol => {
-                    try {
-                        const data = await getMarketData(symbol);
-                        return {
-                            symbol,
-                            volume: data ? data.quoteVolume : 0
-                        };
-                    } catch {
-                        return { symbol, volume: 0 };
-                    }
-                })
-            );
-
-            symbolsWithVolume.sort((a, b) => b.volume - a.volume);
-            
-            const topSymbols = symbolsWithVolume
-                .slice(0, 40)
-                .map(item => item.symbol);
-
-            this.symbolGroups = this.createGroups(topSymbols, this.groupSize);
-
-            console.log(`📊 ${topSymbols.length} ativos priorizados por volume`);
-            console.log(`📊 Top 5: ${topSymbols.slice(0, 5).join(', ')}`);
-
-            return topSymbols;
-
-        } catch (error) {
-            console.error('Erro inicializando símbolos:', error.message);
-            return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
-        }
-    }
-
-    createGroups(symbols, groupSize) {
-        const groups = [];
-        for (let i = 0; i < symbols.length; i += groupSize) {
-            groups.push(symbols.slice(i, i + groupSize));
-        }
-        return groups;
-    }
-
-    getNextGroup() {
-        const group = this.symbolGroups[this.currentGroupIndex];
-        this.currentGroupIndex = (this.currentGroupIndex + 1) % this.symbolGroups.length;
-
-        if (this.currentGroupIndex === 0) {
-            this.totalCycles++;
-        }
-
-        return group;
-    }
-
-    canSendAlert(symbol, zoneKey) {
-        const key = `${symbol}_${zoneKey}`;
-        const lastAlert = this.alertsSent.get(key);
-        
-        if (!lastAlert) return true;
-        
-        return Date.now() - lastAlert > this.alertCooldown;
-    }
-
-    recordAlert(symbol, zoneKey) {
-        const key = `${symbol}_${zoneKey}`;
-        this.alertsSent.set(key, Date.now());
-        
-        for (const [k, timestamp] of this.alertsSent.entries()) {
-            if (Date.now() - timestamp > 86400000) {
-                this.alertsSent.delete(k);
-            }
-        }
-    }
-
-    trackConfirmation(symbol, zonePrice, zoneType) {
-        const key = `${symbol}_${zonePrice.toFixed(6)}_${zoneType}`;
+    trackConfirmation(symbol, zonePrice, signalType) {
+        const key = `${symbol}_${zonePrice.toFixed(6)}_${signalType}`;
         
         if (!this.confirmationTracker.has(key)) {
             this.confirmationTracker.set(key, {
@@ -2039,48 +1567,132 @@ class ZoneMonitorWithRSI {
         const data = this.confirmationTracker.get(key);
         return data ? data.count : 0;
     }
-}
 
-async function processSymbolForZonesWithRSI(symbol, monitor) {
-    try {
-        await new Promise(r => setTimeout(r, 400));
-        
-        // Usar a nova função com critério RSI
-        const zones = await detectTradingZonesWithRSICriteria(symbol);
-        
-        if (!zones || zones.length === 0) {
-            return [];
-        }
-
-        const marketData = await getMarketData(symbol);
-        if (!marketData) return [];
-
-        const alertsToSend = [];
-
-        for (const zone of zones) {
-            const confirmations = monitor.trackConfirmation(symbol, zone.price, zone.type);
+    async monitorZoneEMASignals() {
+        try {
+            const symbols = this.getNextGroup();
+            if (!symbols || symbols.length === 0) return;
             
-            if (confirmations >= ZONE_SETTINGS.requiredConfirmations) {
-                const zoneKey = `${zone.type}_${zone.price.toFixed(3)}`;
-                
-                if (monitor.canSendAlert(symbol, zoneKey)) {
-                    alertsToSend.push({
-                        symbol: symbol,
-                        zone: zone,
-                        marketData: marketData,
-                        confirmations: confirmations
-                    });
+            console.log(`\n📊 Monitorando Zona+EMA ${EMA_ZONE_SETTINGS.timeframe}: ${symbols.join(', ')}`);
+            
+            for (const symbol of symbols) {
+                try {
+                    await new Promise(r => setTimeout(r, 1000)); // Delay para evitar rate limit
+                    
+                    // Verificar setup completo: zona primeiro, depois EMA
+                    const setupData = await checkZoneThenEMA(symbol);
+                    
+                    if (!setupData) {
+                        continue;
+                    }
+                    
+                    const { zone, signalType } = setupData;
+                    
+                    // Verificar confirmações
+                    const confirmations = this.trackConfirmation(symbol, zone.price, signalType);
+                    
+                    if (confirmations >= 1 && this.canSendAlert(symbol, signalType)) {
+                        await sendZoneEMAAlert(setupData);
+                        this.recordAlert(symbol, signalType);
+                        
+                        // Aguardar entre alerts
+                        await new Promise(r => setTimeout(r, 3000));
+                    } else if (confirmations >= 1) {
+                        console.log(`   ⏱️  ${symbol}: Setup detectado mas em cooldown (${signalType})`);
+                    }
+                    
+                } catch (error) {
+                    console.log(`⚠️ Erro monitorando ${symbol}: ${error.message}`);
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             }
+            
+        } catch (error) {
+            console.error(`Erro no monitor Zona+EMA: ${error.message}`);
         }
-
-        return alertsToSend;
-
-    } catch (error) {
-        console.log(`⚠️ Erro processando ${symbol}: ${error.message}`);
-        return [];
     }
 }
+
+// =====================================================================
+// 🔄 MONITORAMENTO PRINCIPAL COM ZONA + EMA
+// =====================================================================
+
+async function checkInternetConnection() {
+    try {
+        const response = await fetch('https://api.binance.com/api/v3/ping', {
+            signal: AbortSignal.timeout(10000)
+        });
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function mainZoneEMAMonitorLoop() {
+    const zoneEMAMonitor = new ZoneEMAMonitor();
+
+    await zoneEMAMonitor.initializeSymbols();
+
+    console.log(`\n🚨 SISTEMA DE ALERTA ZONA + EMA`);
+    console.log(`📊 Sequência de análise:`);
+    console.log(`  1. Verificar proximidade com suporte/resistência (${EMA_ZONE_SETTINGS.zoneTimeframe})`);
+    console.log(`  2. Verificar cruzamento EMA 13/34/55 (${EMA_ZONE_SETTINGS.timeframe})`);
+    console.log(`  3. Confirmar posição do preço em relação à EMA 55`);
+    console.log(`⏱️  Intervalo: ${EMA_ZONE_SETTINGS.checkInterval / 1000}s`);
+    console.log(`💰 Monitorando: ${EMA_ZONE_SETTINGS.zoneProximity}% de proximidade da zona`);
+    console.log(`🤖 Iniciando...\n`);
+
+    let consecutiveErrors = 0;
+    let totalAlerts = 0;
+    let lastReportTime = Date.now();
+
+    while (true) {
+        try {
+            if (!await checkInternetConnection()) {
+                console.log('🌐 Sem conexão. Aguardando 60s...');
+                await new Promise(r => setTimeout(r, 60000));
+                consecutiveErrors++;
+                continue;
+            }
+
+            const startTime = Date.now();
+            
+            // Monitorar sinais de zona + EMA
+            await zoneEMAMonitor.monitorZoneEMASignals();
+            
+            const endTime = Date.now();
+            console.log(`✅ Ciclo completo: ${((endTime - startTime) / 1000).toFixed(1)}s`);
+
+            cleanupCaches();
+            consecutiveErrors = 0;
+
+            if (Date.now() - lastReportTime >= 600000) {
+                console.log(`\n📊 STATUS: ${zoneEMAMonitor.totalAlertsSent} alertas Zona+EMA enviados`);
+                lastReportTime = Date.now();
+            }
+
+            const waitTime = EMA_ZONE_SETTINGS.checkInterval;
+            console.log(`⏱️  Próximo ciclo em ${waitTime/1000}s...`);
+            await new Promise(r => setTimeout(r, waitTime));
+
+        } catch (error) {
+            consecutiveErrors++;
+            console.error(`\n❌ ERRO LOOP (${consecutiveErrors}):`, error.message);
+
+            if (consecutiveErrors >= 2) {
+                console.log('🔄 Muitos erros. Pausa de 120s...');
+                await new Promise(r => setTimeout(r, 120000));
+                consecutiveErrors = 0;
+            }
+
+            await new Promise(r => setTimeout(r, Math.min(30000 * consecutiveErrors, 120000)));
+        }
+    }
+}
+
+// =====================================================================
+// 🔄 FUNÇÃO DE LIMPEZA DE CACHE
+// =====================================================================
 
 function cleanupCaches() {
     const now = Date.now();
@@ -2117,153 +1729,19 @@ function cleanupCaches() {
 }
 
 // =====================================================================
-// 🔄 LOOP PRINCIPAL COM EMA E ZONAS
-// =====================================================================
-
-async function checkInternetConnection() {
-    try {
-        const response = await fetch('https://api.binance.com/api/v3/ping', {
-            signal: AbortSignal.timeout(10000)
-        });
-        return response.ok;
-    } catch (error) {
-        return false;
-    }
-}
-
-async function mainMonitorLoop() {
-    const zoneMonitor = new ZoneMonitorWithRSI();
-    const emaMonitor = new EMAMonitor();
-
-    // Inicializar ambos os monitores
-    await Promise.all([
-        zoneMonitor.initializeSymbols(),
-        emaMonitor.initializeSymbols()
-    ]);
-
-    console.log(`\n🚨 TITANIUM ALERT SYSTEM`);
-    console.log(`📊 Sistema de alertas duplo:`);
-    console.log(`  1. Zonas de Trading com critério RSI`);
-    console.log(`  2. EMA 13/34/55 no timeframe 3m`);
-    console.log(`⏱️  Intervalo: ${ZONE_SETTINGS.checkInterval / 1000}s (Zonas) | ${EMA_SETTINGS.checkInterval / 1000}s (EMA)`);
-    console.log(`🤖 Iniciando...\n`);
-
-    let consecutiveErrors = 0;
-    let totalAlerts = 0;
-    let lastReportTime = Date.now();
-    let lastEMACheck = Date.now();
-
-    while (true) {
-        try {
-            // ============================================
-            // PARTE 1: MONITORAMENTO DE ZONAS COM RSI
-            // ============================================
-            const currentSymbols = zoneMonitor.getNextGroup();
-            if (currentSymbols.length > 0) {
-                console.log(`\n🔄 Ciclo Zonas ${zoneMonitor.totalCycles}, Grupo ${zoneMonitor.currentGroupIndex}/${zoneMonitor.symbolGroups.length}`);
-
-                if (!await checkInternetConnection()) {
-                    console.log('🌐 Sem conexão. Aguardando 60s...');
-                    await new Promise(r => setTimeout(r, 60000));
-                    consecutiveErrors++;
-                    continue;
-                }
-
-                const startTime = Date.now();
-                const allAlerts = [];
-
-                for (const symbol of currentSymbols) {
-                    try {
-                        console.log(`🔍 Analisando ${symbol} (Zonas + RSI)...`);
-                        const alerts = await processSymbolForZonesWithRSI(symbol, zoneMonitor);
-                        
-                        if (alerts.length > 0) {
-                            console.log(`   ✅ ${alerts.length} zonas com critério RSI`);
-                        }
-                        
-                        allAlerts.push(...alerts);
-                        
-                        await new Promise(r => setTimeout(r, 600));
-                        
-                    } catch (error) {
-                        console.log(`⚠️ Erro em ${symbol}: ${error.message}`);
-                        await new Promise(r => setTimeout(r, 2000));
-                    }
-                }
-
-                const endTime = Date.now();
-                console.log(`✅ Zonas: ${((endTime - startTime) / 1000).toFixed(1)}s | Alertas: ${allAlerts.length}`);
-
-                for (const alertData of allAlerts) {
-                    const { symbol, zone, marketData, confirmations } = alertData;
-                    const zoneKey = `${zone.type}_${zone.price.toFixed(3)}`;
-                    
-                    console.log(`📤 ${symbol}: ${zone.zoneType} | RSI: ${zone.rsiStatus} | ${confirmations} confs, ${zone.distancePercent.toFixed(2)}%`);
-                    
-                    await sendZoneAlertWithRSICriteria(symbol, zone, marketData);
-                    zoneMonitor.recordAlert(symbol, zoneKey);
-                    totalAlerts++;
-                    
-                    await new Promise(r => setTimeout(r, 1500));
-                }
-            }
-
-            // ============================================
-            // PARTE 2: MONITORAMENTO DE EMA 3 MINUTOS
-            // ============================================
-            const now = Date.now();
-            if (now - lastEMACheck >= EMA_SETTINGS.checkInterval) {
-                console.log(`\n📈 Verificando EMA ${EMA_SETTINGS.timeframe}...`);
-                await emaMonitor.monitorEMASignals();
-                lastEMACheck = now;
-            }
-
-            // ============================================
-            // LIMPEZA E RELATÓRIO
-            // ============================================
-            cleanupCaches();
-            consecutiveErrors = 0;
-
-            if (Date.now() - lastReportTime >= 600000) {
-                console.log(`\n📊 STATUS: ${totalAlerts} alertas totais | ${zoneMonitor.totalCycles} ciclos zonas`);
-                console.log(`📊 EMA: ${emaMonitor.totalAlertsSent} alertas enviados`);
-                lastReportTime = Date.now();
-            }
-
-            const waitTime = ZONE_SETTINGS.checkInterval;
-            console.log(`⏱️  Próximo ciclo em ${waitTime/1000}s...`);
-            await new Promise(r => setTimeout(r, waitTime));
-
-        } catch (error) {
-            consecutiveErrors++;
-            console.error(`\n❌ ERRO LOOP (${consecutiveErrors}):`, error.message);
-
-            if (consecutiveErrors >= 2) {
-                console.log('🔄 Muitos erros. Pausa de 120s...');
-                await new Promise(r => setTimeout(r, 120000));
-                consecutiveErrors = 0;
-            }
-
-            await new Promise(r => setTimeout(r, Math.min(30000 * consecutiveErrors, 120000)));
-        }
-    }
-}
-
-// =====================================================================
 // ▶️ INICIALIZAÇÃO
 // =====================================================================
 
-async function startBot() {
+async function startZoneEMABot() {
     try {
         if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚨 TITANIUM ALERT SYSTEM');
-        console.log('🎯 Sistema de alertas duplo:');
-        console.log('  1. Zonas de Trading com critério RSI (15m)');
-        console.log('  2. EMA 13/34/55 no timeframe 3 minutos');
-        console.log('💰 Priorização por volume de trading');
-        console.log('⚠️  Alertas com confirmação múltipla');
+        console.log('🚨 SISTEMA DE ALERTA ZONA + EMA');
+        console.log('📊 Sequência: Suporte/Resistência → EMA 13/34/55 → Preço/EMA 55');
+        console.log(`⏱️  Timeframe: ${EMA_ZONE_SETTINGS.timeframe} para EMA | ${EMA_ZONE_SETTINGS.zoneTimeframe} para zonas`);
+        console.log(`📍 Proximidade: ${EMA_ZONE_SETTINGS.zoneProximity}% da zona`);
+        console.log('⚠️  Alerta só após setup completo');
         console.log('='.repeat(80) + '\n');
 
         try {
@@ -2289,15 +1767,15 @@ async function startBot() {
             process.exit(1);
         }
 
-        console.log('✅ Conexão OK! Iniciando sistema de alertas...');
+        console.log('✅ Conexão OK! Iniciando monitoramento Zona+EMA...');
 
-        await mainMonitorLoop();
+        await mainZoneEMAMonitorLoop();
 
     } catch (error) {
         console.error(`\n🚨 ERRO CRÍTICO: ${error.message}`);
         console.log('🔄 Reiniciando em 180 segundos...');
         await new Promise(r => setTimeout(r, 180000));
-        await startBot();
+        await startZoneEMABot();
     }
 }
 
@@ -2305,12 +1783,12 @@ process.on('unhandledRejection', (error) => {
     console.error('❌ Unhandled Rejection:', error.message);
 });
 
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', (error) {
     console.error('❌ Uncaught Exception:', error.message);
     setTimeout(() => {
-        startBot();
+        startZoneEMABot();
     }, 60000);
 });
 
-// Iniciar o bot
-startBot();
+// Iniciar o bot Zona+EMA
+startZoneEMABot();
