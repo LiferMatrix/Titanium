@@ -6,8 +6,8 @@ const { Stochastic, EMA, RSI, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6Adg';
-const TELEGRAM_CHAT_ID = '-100279';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -1456,41 +1456,55 @@ async function sendZoneEMAAlert(setupData) {
             }
         }
         
-        // Formatar alvos ATR
+        // Formatar alvos ATR - CORREÇÃO AQUI
         let targetsText = '';
+        let stopText = '';
+        let rrText = '';
+        let volatilityText = '';
+        
         if (atrTargets && atrTargets.targets) {
-            targetsText = `\n<i> Alvos:</i>\n`;
+            targetsText = `<i>🎯 Alvos:</i>\n`;
             atrTargets.targets.forEach((target, index) => {
                 targetsText += `• ${index + 1}º: $${target.target.toFixed(6)} (+${target.distancePercent}%)\n`;
             });
             
-            targetsText += `\n<i> Stop:</i>\n`;
-            targetsText += `• Stop: $${atrTargets.stopLoss.toFixed(6)}\n`;
-            targetsText += `• Volatilidade: ${atrTargets.volatilityEmoji} ${atrTargets.volatilityLevel}\n`;
-            targetsText += `• R:R: 1:${atrTargets.riskReward}`;
+            stopText = `<i>🛡️ Stop Loss:</i>\n`;
+            stopText += `• $${atrTargets.stopLoss.toFixed(6)}\n`;
+            
+            volatilityText = `<i>📊 Volatilidade:</i>\n`;
+            volatilityText += `• ${atrTargets.volatilityEmoji} ${atrTargets.volatilityLevel} (ATR: ${atrTargets.atrPercent.toFixed(2)}%)\n`;
+            
+            rrText = `<i>⚖️  Risco/Recompensa:</i>\n`;
+            rrText += `• 1:${atrTargets.riskReward}`;
         } else {
-            targetsText = `\n<i>⚠️ Alvos não disponíveis</i>`;
+            targetsText = `<i>⚠️ Alvos não disponíveis</i>`;
         }
         
         const message = `
-${actionEmoji} <i>${symbol} - Operação de ${signalType} confirmado por ${zoneType}</i>
-${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
+${actionEmoji} <b>${symbol} - ${signalType} confirmado por ${zoneType}</b>
+<i>${now.full}</i> <a href="${tradingViewLink}">Gráfico 3m</a>
 
-<i>📊 Nível de ${zoneType}:</i>
+<b>📊 Nível de ${zoneType}:</b>
 • ${zoneType}: $${zone.price.toFixed(6)}
 • Distância: ${zone.distancePercent.toFixed(2)}%
-<i> Indicadores:</i>
+
+<b>📈 Indicadores:</b>
 • RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
 • LSR: ${lsrInfo}
 • Funding Rate: ${fundingData.text}
 • Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
 • Confiança: ${confidence.toFixed(0)}%
-<i>📊 Análise 24h:</i>
+
+<b>📊 Análise 24h:</b>
 • Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
 • Volume: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
 • Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
 
-<i>Titanium by @J4Rviz</i>
+${targetsText}
+${stopText}
+${rrText}
+
+<b>Titanium by @J4Rviz</b>
         `;
         
         const sent = await sendTelegramAlert(message);
@@ -1502,13 +1516,13 @@ ${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
             console.log(`   Preço: $${ema.price.toFixed(6)} | EMA 55: $${ema.ema55.toFixed(6)}`);
             
             if (atrTargets) {
-                console.log(`     Alvos:`);
+                console.log(`   Alvos:`);
                 atrTargets.targets.forEach((target, index) => {
                     console.log(`     ${index + 1}º: $${target.target.toFixed(6)} (+${target.distancePercent}%)`);
                 });
-                console.log(`    Stop: $${atrTargets.stopLoss.toFixed(6)}`);
-                console.log(`    Volatilidade: ${atrTargets.volatilityLevel} (ATR: ${atrTargets.atrPercent.toFixed(2)}%)`);
-                console.log(`     R:R: 1:${atrTargets.riskReward}`);
+                console.log(`   Stop: $${atrTargets.stopLoss.toFixed(6)}`);
+                console.log(`   Volatilidade: ${atrTargets.volatilityLevel} (ATR: ${atrTargets.atrPercent.toFixed(2)}%)`);
+                console.log(`   R:R: 1:${atrTargets.riskReward}`);
             }
             
             console.log(`   Confiança: ${confidence.toFixed(0)}%`);
