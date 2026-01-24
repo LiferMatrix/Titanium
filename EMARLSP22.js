@@ -6,8 +6,8 @@ const { Stochastic, EMA, RSI, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8g';
-const TELEGRAM_CHAT_ID = '-1002';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -670,9 +670,9 @@ async function fetchAllFuturesSymbols() {
             'AAVEUSDT', 'ALGOUSDT', 'GRTUSDT', 'QNTUSDT', 'EOSUSDT', 'XMRUSDT',
             'SNXUSDT', 'RNDRUSDT', 'IMXUSDT', 'FTMUSDT', 'APEUSDT', 'SANDUSDT',
             'AXSUSDT', 'EGLDUSDT', 'MANAUSDT', 'THETAUSDT', 'XTZUSDT', 'CHZUSDT',
-            'FLOWUSDT', 'CRVUSDT', 'FILUSDT', 'GALAUSDT', 'ONEUSDT', 'LDOUSDT',
+            'FLOWUSDT', 'CRVUSDT', 'KLAYUSDT', 'GALAUSDT', 'ONEUSDT', 'LDOUSDT',
             'ENSUSDT', 'MKRUSDT', 'STXUSDT', 'DASHUSDT', 'ENJUSDT', 'COMPUSDT',
-            'ZECUSDT', 'VANRYSUSDT', 'APEUSDT', 'ICXUSDT', 'ANKRUSDT', 'RVNUSDT'
+            'ZECUSDT', 'WAVESUSDT', 'OMGUSDT', 'ICXUSDT', 'ANKRUSDT', 'RVNUSDT'
         ].slice(0, 60);
     }
 }
@@ -1702,15 +1702,15 @@ async function sendZoneEMAAlert(setupData) {
         let volatilityText = '';
         
         if (atrTargets && atrTargets.targets) {
-            targetsText = `<i> Alvos:</i>\n`;
+            targetsText = `<i>🎯 Alvos:</i>\n`;
             atrTargets.targets.forEach((target, index) => {
                 targetsText += `• ${index + 1}º: $${target.target.toFixed(6)} (+${target.distancePercent}%)\n`;
             });
             
-            stopText = `<i> Stop:</i>\n`;
+            stopText = `<i>🛡️ Stop Loss:</i>\n`;
             stopText += `• $${atrTargets.stopLoss.toFixed(6)}\n`;
             
-            volatilityText = `<i> Volatilidade:</i>\n`;
+            volatilityText = `<i>📊 Volatilidade:</i>\n`;
             volatilityText += `• ${atrTargets.volatilityEmoji} ${atrTargets.volatilityLevel} (ATR: ${atrTargets.atrPercent.toFixed(2)}%)\n`;
             
             rrText = `<i>⚖️ Risco/Recompensa:</i>\n`;
@@ -1720,27 +1720,28 @@ async function sendZoneEMAAlert(setupData) {
         }
         
         const message = `
-${actionEmoji} <i>${symbol} - ${signalType} confirmado por ${zoneType}</i>
+${actionEmoji} <b>${symbol} - ${signalType} confirmado por ${zoneType}</b>
 <i>${now.full}</i> <a href="${tradingViewLink}">Gráfico 3m</a>
 
-<i>📊 Nível de ${zoneType}:</i>
+<b>📊 Nível de ${zoneType}:</b>
 • ${zoneType}: $${zone.price.toFixed(6)}
 • Distância: ${zone.distancePercent.toFixed(2)}%
 
-<i>📈 Indicadores:</i>
+<b>📈 Indicadores Técnicos:</b>
+• EMA 13/34/55: ${ema.crossover.message.split(' ').slice(0, 10).join(' ')}...
 • RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
 • LSR: ${lsrInfo}
-• Fund. Rate: ${fundingData.text}
+• Funding Rate: ${fundingData.text}
 • Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
 
-<i> Vol ${signalType}):</i>
+<b>💰 Volume 3m (CRITÉRIO ${signalType}):</b>
 • Comprador: ${volumeAnalysis.volumeBuyer} | Vendedor: ${volumeAnalysis.volumeSeller}
 • Razão: ${volumeAnalysis.volumeRatio}:1 | Pressão: ${volumeAnalysis.buyerPressure}%/${volumeAnalysis.sellerPressure}%
 • Dominante: ${volumeEmoji} ${volumeAnalysis.dominantSide}
 • Spike: ${volumeAnalysis.volumeSpike ? '✅' : '❌'} | ${volumeAnalysis.analysis}
+• <b>Critério Volume: ${volumeCriteriaEmoji} ${volumeCriteriaText}</b>
 
-
-<i>📊 Análise 24h:</i>
+<b>📊 Análise 24h:</b>
 • Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
 • Volume: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
 • Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
@@ -1750,7 +1751,7 @@ ${stopText}
 ${volatilityText}
 ${rrText}
 
-<b> Titanium by @J4Rviz</b>
+<b>📈 Confiança: ${confidence.toFixed(0)}% | Titanium by @J4Rviz</b>
         `;
         
         const sent = await sendTelegramAlert(message);
