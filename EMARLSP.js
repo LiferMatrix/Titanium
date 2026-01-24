@@ -6,8 +6,8 @@ const { Stochastic, EMA, RSI, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6dg';
-const TELEGRAM_CHAT_ID = '-100259';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -75,6 +75,21 @@ const BTC_STRENGTH_SETTINGS = {
         moderateSell: 30,
         strongSell: 20
     }
+};
+
+// =====================================================================
+// 🆕 CONFIGURAÇÕES PARA EMA 3 MINUTOS ===
+// =====================================================================
+
+const EMA_SETTINGS = {
+    ema13Period: 13,
+    ema34Period: 34,
+    ema55Period: 55,
+    timeframe: '3m',
+    requiredCandles: 100,
+    checkInterval: 30000, // Verificar a cada 30 segundos
+    alertCooldown: 5 * 60 * 1000, // 5 minutos de cooldown entre alertas do mesmo tipo
+    alertGroups: 6 // Número de grupos para distribuir os símbolos
 };
 
 // =====================================================================
@@ -968,6 +983,197 @@ async function getStochastic(symbol, timeframe = '12h') {
 }
 
 // =====================================================================
+// 🆕 FUNÇÃO PARA CALCULAR EMA 13, 34, 55 NO TIMEFRAME 3 MINUTOS
+// =====================================================================
+
+async function checkEMA3133455(symbol) {
+    try {
+        const candles = await getCandlesCached(symbol, EMA_SETTINGS.timeframe, EMA_SETTINGS.requiredCandles);
+        
+        if (candles.length < EMA_SETTINGS.requiredCandles) {
+            console.log(`⚠️ Dados insuficientes para EMA ${symbol} no timeframe ${EMA_SETTINGS.timeframe}`);
+            return null;
+        }
+
+        // Extrair preços de fechamento
+        const closes = candles.map(c => c.close);
+        
+        // Calcular EMA 13, 34, 55
+        const ema13Values = EMA.calculate({
+            period: EMA_SETTINGS.ema13Period,
+            values: closes
+        });
+        
+        const ema34Values = EMA.calculate({
+            period: EMA_SETTINGS.ema34Period,
+            values: closes
+        });
+        
+        const ema55Values = EMA.calculate({
+            period: EMA_SETTINGS.ema55Period,
+            values: closes
+        });
+        
+        if (ema13Values.length < 3 || ema34Values.length < 3 || ema55Values.length < 3) {
+            return null;
+        }
+        
+        // Obter os últimos valores
+        const currentEma13 = ema13Values[ema13Values.length - 1];
+        const currentEma34 = ema34Values[ema34Values.length - 1];
+        const currentEma55 = ema55Values[ema55Values.length - 1];
+        
+        const previousEma13 = ema13Values[ema13Values.length - 2];
+        const previousEma34 = ema34Values[ema34Values.length - 2];
+        
+        // Verificar cruzamento de EMA 13 com EMA 34
+        const ema13AboveEma34 = currentEma13 > currentEma34;
+        const previousEma13AboveEma34 = previousEma13 > previousEma34;
+        
+        const ema13BelowEma34 = currentEma13 < currentEma34;
+        const previousEma13BelowEma34 = previousEma13 < previousEma34;
+        
+        // Preço atual (último fechamento)
+        const currentPrice = closes[closes.length - 1];
+        const previousPrice = closes[closes.length - 2];
+        
+        // Verificar posição do preço em relação à EMA 55
+        const priceAboveEma55 = currentPrice > currentEma55;
+        const previousPriceAboveEma55 = previousPrice > currentEma55;
+        
+        const priceBelowEma55 = currentPrice < currentEma55;
+        const previousPriceBelowEma55 = previousPrice < currentEma55;
+        
+        // Detectar cruzamentos
+        let crossoverSignal = null;
+        
+        // COMPRA: EMA 13 cruza para CIMA da EMA 34 E preço fecha ACIMA da EMA 55
+        if (ema13AboveEma34 && !previousEma13AboveEma34 && priceAboveEma55) {
+            crossoverSignal = {
+                type: 'COMPRA',
+                message: `EMA 13 (${currentEma13.toFixed(6)}) cruzou para CIMA da EMA 34 (${currentEma34.toFixed(6)}) e preço (${currentPrice.toFixed(6)}) está ACIMA da EMA 55 (${currentEma55.toFixed(6)})`,
+                ema13: currentEma13,
+                ema34: currentEma34,
+                ema55: currentEma55,
+                price: currentPrice,
+                time: candles[candles.length - 1].time
+            };
+        }
+        // VENDA: EMA 13 cruza para BAIXO da EMA 34 E preço fecha ABAIXO da EMA 55
+        else if (ema13BelowEma34 && !previousEma13BelowEma34 && priceBelowEma55) {
+            crossoverSignal = {
+                type: 'VENDA',
+                message: `EMA 13 (${currentEma13.toFixed(6)}) cruzou para BAIXO da EMA 34 (${currentEma34.toFixed(6)}) e preço (${currentPrice.toFixed(6)}) está ABAIXO da EMA 55 (${currentEma55.toFixed(6)})`,
+                ema13: currentEma13,
+                ema34: currentEma34,
+                ema55: currentEma55,
+                price: currentPrice,
+                time: candles[candles.length - 1].time
+            };
+        }
+        
+        return {
+            ema13: currentEma13,
+            ema34: currentEma34,
+            ema55: currentEma55,
+            price: currentPrice,
+            priceAboveEma55: priceAboveEma55,
+            priceBelowEma55: priceBelowEma55,
+            ema13AboveEma34: ema13AboveEma34,
+            ema13BelowEma34: ema13BelowEma34,
+            crossover: crossoverSignal,
+            timestamp: Date.now()
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular EMA para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA DE EMA
+// =====================================================================
+
+async function sendEMAAlert(symbol, emaData, marketData) {
+    try {
+        const now = getBrazilianDateTime();
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}&interval=3`;
+        
+        // Obter outros indicadores para contexto
+        const [rsiData, lsrData, fundingData, btcStrength] = await Promise.all([
+            getRSI(symbol, '1h'),
+            getBinanceLSRValue(symbol, '15m'),
+            checkFundingRate(symbol),
+            calculateBTCRelativeStrength(symbol)
+        ]);
+        
+        const isBuySignal = emaData.crossover.type === 'COMPRA';
+        const actionEmoji = isBuySignal ? '🟢' : '🔴';
+        const actionType = isBuySignal ? 'COMPRA' : 'VENDA';
+        
+        // Formatar LSR
+        let lsrInfo = 'N/A';
+        if (lsrData) {
+            lsrInfo = `${lsrData.lsrValue.toFixed(3)} ${lsrData.isRising ? '⬆️' : '⬇️'}`;
+            if (lsrData.percentChange !== '0.00') {
+                lsrInfo += ` (${lsrData.percentChange}%)`;
+            }
+        }
+        
+        const message = `
+${actionEmoji} <b>${symbol} - ALERTA EMA ${EMA_SETTINGS.timeframe}</b>
+📈 <b>Sinal de ${actionType}</b>
+${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
+
+🎯 <b>Sinal Detectado:</b>
+${emaData.crossover.message}
+
+💲 <b>Preços Atuais:</b>
+• Preço: $${emaData.price.toFixed(6)}
+• EMA 13: $${emaData.ema13.toFixed(6)}
+• EMA 34: $${emaData.ema34.toFixed(6)}
+• EMA 55: $${emaData.ema55.toFixed(6)}
+
+📊 <b>Distâncias:</b>
+• Preço vs EMA 55: ${isBuySignal ? 'ACIMA' : 'ABAIXO'}
+• EMA 13 vs EMA 34: ${emaData.ema13AboveEma34 ? 'ACIMA' : 'ABAIXO'}
+
+📈 <i>Indicadores de Confirmação:</i>
+• RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
+• LSR: ${lsrInfo}
+• Funding Rate: ${fundingData.text}
+• Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
+
+📊 <i>Análise 24h:</i>
+• Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
+• Vol: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
+• Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
+
+⚠️ <b>ATENÇÃO:</b> Este é um alerta de EMA cruzando no timeframe 3 minutos. 
+Use como confirmação junto com outras análises.
+
+🔔 <i>Alerta EMA 3m by @J4Rviz</i>
+        `;
+        
+        const sent = await sendTelegramAlert(message);
+        
+        if (sent) {
+            console.log(`\n${actionEmoji} Alerta EMA enviado: ${symbol} - ${actionType}`);
+            console.log(`   EMA 13: $${emaData.ema13.toFixed(6)} | EMA 34: $${emaData.ema34.toFixed(6)}`);
+            console.log(`   Preço: $${emaData.price.toFixed(6)} | EMA 55: $${emaData.ema55.toFixed(6)}`);
+            console.log(`   RSI: ${rsiData ? rsiData.value.toFixed(1) : 'N/A'} | LSR: ${lsrData ? lsrData.lsrValue.toFixed(3) : 'N/A'}`);
+        }
+        
+        return sent;
+        
+    } catch (error) {
+        console.error(`Erro enviando alerta EMA ${symbol}:`, error.message);
+        return false;
+    }
+}
+
+// =====================================================================
 // 🆕 FUNÇÃO PARA CALCULAR FORÇA RELATIVA EM RELAÇÃO AO BTC (DO ORIGINAL)
 // =====================================================================
 
@@ -1586,7 +1792,7 @@ ${zone.type === 'BID_ZONE' ? '💰 <i>Zona de compra identificada por bids forte
         
         if (sent) {
             console.log(`\n${actionEmoji} Alerta com critério RSI enviado: ${symbol}`);
-            console.log(`   ${zone.zoneType} | RSI: ${rsiData.value.toFixed(1)} | ${zone.distancePercent.toFixed(2)}% de distância`);
+            console.log(`   ${zone.zoneType} | RSI: ${rsiData.value.toFixed(1)} | ${zone.distancePercent.toFloat(2)}% de distância`);
             console.log(`   LSR: ${lsrData ? lsrData.lsrValue.toFixed(3) : 'N/A'} | Funding: ${fundingData.text}`);
             
             // Log das informações de estrutura
@@ -1603,6 +1809,117 @@ ${zone.type === 'BID_ZONE' ? '💰 <i>Zona de compra identificada por bids forte
     } catch (error) {
         console.error(`Erro enviando alerta ${symbol}:`, error.message);
         return false;
+    }
+}
+
+// =====================================================================
+// 🆕 MONITOR PARA ALERTAS DE EMA
+// =====================================================================
+
+class EMAMonitor {
+    constructor() {
+        this.symbolGroups = [];
+        this.currentGroupIndex = 0;
+        this.alertCooldowns = new Map();
+        this.totalAlertsSent = 0;
+        this.lastAlertTime = new Map();
+    }
+
+    async initializeSymbols() {
+        try {
+            const allSymbols = await fetchAllFuturesSymbols();
+            
+            // Criar grupos para EMA
+            const groupSize = Math.ceil(allSymbols.length / EMA_SETTINGS.alertGroups);
+            this.symbolGroups = this.createGroups(allSymbols, groupSize);
+            
+            console.log(`📊 ${allSymbols.length} ativos para monitoramento EMA`);
+            console.log(`📊 ${this.symbolGroups.length} grupos de EMA criados`);
+            
+            return allSymbols;
+            
+        } catch (error) {
+            console.error('Erro inicializando símbolos para EMA:', error.message);
+            return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
+        }
+    }
+
+    createGroups(symbols, groupSize) {
+        const groups = [];
+        for (let i = 0; i < symbols.length; i += groupSize) {
+            groups.push(symbols.slice(i, i + groupSize));
+        }
+        return groups;
+    }
+
+    getNextGroup() {
+        const group = this.symbolGroups[this.currentGroupIndex];
+        this.currentGroupIndex = (this.currentGroupIndex + 1) % this.symbolGroups.length;
+        return group;
+    }
+
+    canSendAlert(symbol, signalType) {
+        const key = `${symbol}_${signalType}`;
+        const lastAlert = this.lastAlertTime.get(key);
+        
+        if (!lastAlert) return true;
+        
+        return Date.now() - lastAlert > EMA_SETTINGS.alertCooldown;
+    }
+
+    recordAlert(symbol, signalType) {
+        const key = `${symbol}_${signalType}`;
+        this.lastAlertTime.set(key, Date.now());
+        this.totalAlertsSent++;
+        
+        // Limpar alerts antigos
+        const now = Date.now();
+        for (const [k, timestamp] of this.lastAlertTime.entries()) {
+            if (now - timestamp > 86400000) {
+                this.lastAlertTime.delete(k);
+            }
+        }
+    }
+
+    async monitorEMASignals() {
+        try {
+            const symbols = this.getNextGroup();
+            if (!symbols || symbols.length === 0) return;
+            
+            console.log(`\n📊 Monitorando EMA ${EMA_SETTINGS.timeframe}: ${symbols.join(', ')}`);
+            
+            for (const symbol of symbols) {
+                try {
+                    await new Promise(r => setTimeout(r, 800)); // Delay para evitar rate limit
+                    
+                    const emaData = await checkEMA3133455(symbol);
+                    
+                    if (!emaData || !emaData.crossover) {
+                        continue;
+                    }
+                    
+                    const signalType = emaData.crossover.type;
+                    
+                    if (this.canSendAlert(symbol, signalType)) {
+                        const marketData = await getMarketData(symbol);
+                        if (!marketData) continue;
+                        
+                        await sendEMAAlert(symbol, emaData, marketData);
+                        this.recordAlert(symbol, signalType);
+                        
+                        // Aguardar entre alerts
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                    
+                } catch (error) {
+                    console.log(`⚠️ Erro monitorando EMA ${symbol}: ${error.message}`);
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+            
+        } catch (error) {
+            console.error(`Erro no monitor EMA: ${error.message}`);
+        }
     }
 }
 
@@ -1800,7 +2117,7 @@ function cleanupCaches() {
 }
 
 // =====================================================================
-// 🔄 LOOP PRINCIPAL COM CRITÉRIO RSI
+// 🔄 LOOP PRINCIPAL COM EMA E ZONAS
 // =====================================================================
 
 async function checkInternetConnection() {
@@ -1814,96 +2131,107 @@ async function checkInternetConnection() {
     }
 }
 
-async function mainZoneMonitorLoopWithRSI() {
-    const monitor = new ZoneMonitorWithRSI();
+async function mainMonitorLoop() {
+    const zoneMonitor = new ZoneMonitorWithRSI();
+    const emaMonitor = new EMAMonitor();
 
-    const allSymbols = await monitor.initializeSymbols();
+    // Inicializar ambos os monitores
+    await Promise.all([
+        zoneMonitor.initializeSymbols(),
+        emaMonitor.initializeSymbols()
+    ]);
 
-    if (allSymbols.length === 0) {
-        console.log('❌ Não foi possível carregar símbolos.');
-        return;
-    }
-
-    console.log(`\n🚨 TITANIUM ZONE MONITOR COM CRITÉRIO RSI!`);
-    console.log(`📊 ${allSymbols.length} ativos (priorizados por volume)`);
-    console.log(`🎯 Critério: COMPRA (RSI ≤ 62) | VENDA (RSI > 60)`);
-    console.log(`💰 Monitorando: Bids/Asks + Suportes/Resistências`);
-    console.log(`📈 Indicadores: RSI 1h, LSR, Funding Rate, Stochastic, Estrutura 15m`);
-    console.log(`⚠️  Alerta a ${ZONE_SETTINGS.proximityThreshold}% da zona`);
-    console.log(`⏱️  Verificando a cada ${ZONE_SETTINGS.checkInterval / 1000}s`);
-    console.log(`👥 Grupos de ${monitor.groupSize} símbolos`);
+    console.log(`\n🚨 TITANIUM ALERT SYSTEM`);
+    console.log(`📊 Sistema de alertas duplo:`);
+    console.log(`  1. Zonas de Trading com critério RSI`);
+    console.log(`  2. EMA 13/34/55 no timeframe 3m`);
+    console.log(`⏱️  Intervalo: ${ZONE_SETTINGS.checkInterval / 1000}s (Zonas) | ${EMA_SETTINGS.checkInterval / 1000}s (EMA)`);
     console.log(`🤖 Iniciando...\n`);
 
     let consecutiveErrors = 0;
     let totalAlerts = 0;
     let lastReportTime = Date.now();
+    let lastEMACheck = Date.now();
 
     while (true) {
         try {
-            const currentSymbols = monitor.getNextGroup();
-            if (currentSymbols.length === 0) {
-                await new Promise(r => setTimeout(r, ZONE_SETTINGS.checkInterval));
-                continue;
-            }
+            // ============================================
+            // PARTE 1: MONITORAMENTO DE ZONAS COM RSI
+            // ============================================
+            const currentSymbols = zoneMonitor.getNextGroup();
+            if (currentSymbols.length > 0) {
+                console.log(`\n🔄 Ciclo Zonas ${zoneMonitor.totalCycles}, Grupo ${zoneMonitor.currentGroupIndex}/${zoneMonitor.symbolGroups.length}`);
 
-            console.log(`\n🔄 Ciclo ${monitor.totalCycles}, Grupo ${monitor.currentGroupIndex}/${monitor.symbolGroups.length}`);
-            console.log(`📊 Símbolos: ${currentSymbols.join(', ')}`);
+                if (!await checkInternetConnection()) {
+                    console.log('🌐 Sem conexão. Aguardando 60s...');
+                    await new Promise(r => setTimeout(r, 60000));
+                    consecutiveErrors++;
+                    continue;
+                }
 
-            if (!await checkInternetConnection()) {
-                console.log('🌐 Sem conexão. Aguardando 60s...');
-                await new Promise(r => setTimeout(r, 60000));
-                consecutiveErrors++;
-                continue;
-            }
+                const startTime = Date.now();
+                const allAlerts = [];
 
-            const startTime = Date.now();
-            const allAlerts = [];
-
-            for (const symbol of currentSymbols) {
-                try {
-                    console.log(`🔍 Analisando ${symbol} (com critério RSI e estrutura 15m)...`);
-                    const alerts = await processSymbolForZonesWithRSI(symbol, monitor);
-                    
-                    if (alerts.length > 0) {
-                        console.log(`   ✅ ${alerts.length} zonas com critério RSI`);
+                for (const symbol of currentSymbols) {
+                    try {
+                        console.log(`🔍 Analisando ${symbol} (Zonas + RSI)...`);
+                        const alerts = await processSymbolForZonesWithRSI(symbol, zoneMonitor);
+                        
+                        if (alerts.length > 0) {
+                            console.log(`   ✅ ${alerts.length} zonas com critério RSI`);
+                        }
+                        
+                        allAlerts.push(...alerts);
+                        
+                        await new Promise(r => setTimeout(r, 600));
+                        
+                    } catch (error) {
+                        console.log(`⚠️ Erro em ${symbol}: ${error.message}`);
+                        await new Promise(r => setTimeout(r, 2000));
                     }
+                }
+
+                const endTime = Date.now();
+                console.log(`✅ Zonas: ${((endTime - startTime) / 1000).toFixed(1)}s | Alertas: ${allAlerts.length}`);
+
+                for (const alertData of allAlerts) {
+                    const { symbol, zone, marketData, confirmations } = alertData;
+                    const zoneKey = `${zone.type}_${zone.price.toFixed(3)}`;
                     
-                    allAlerts.push(...alerts);
+                    console.log(`📤 ${symbol}: ${zone.zoneType} | RSI: ${zone.rsiStatus} | ${confirmations} confs, ${zone.distancePercent.toFixed(2)}%`);
                     
-                    await new Promise(r => setTimeout(r, 600));
+                    await sendZoneAlertWithRSICriteria(symbol, zone, marketData);
+                    zoneMonitor.recordAlert(symbol, zoneKey);
+                    totalAlerts++;
                     
-                } catch (error) {
-                    console.log(`⚠️ Erro em ${symbol}: ${error.message}`);
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => setTimeout(r, 1500));
                 }
             }
 
-            const endTime = Date.now();
-            console.log(`✅ ${((endTime - startTime) / 1000).toFixed(1)}s | Alertas com RSI: ${allAlerts.length}`);
-
-            for (const alertData of allAlerts) {
-                const { symbol, zone, marketData, confirmations } = alertData;
-                const zoneKey = `${zone.type}_${zone.price.toFixed(3)}`;
-                
-                console.log(`📤 ${symbol}: ${zone.zoneType} | RSI: ${zone.rsiStatus} | ${confirmations} confs, ${zone.distancePercent.toFixed(2)}%`);
-                
-                await sendZoneAlertWithRSICriteria(symbol, zone, marketData);
-                monitor.recordAlert(symbol, zoneKey);
-                totalAlerts++;
-                
-                await new Promise(r => setTimeout(r, 1500));
+            // ============================================
+            // PARTE 2: MONITORAMENTO DE EMA 3 MINUTOS
+            // ============================================
+            const now = Date.now();
+            if (now - lastEMACheck >= EMA_SETTINGS.checkInterval) {
+                console.log(`\n📈 Verificando EMA ${EMA_SETTINGS.timeframe}...`);
+                await emaMonitor.monitorEMASignals();
+                lastEMACheck = now;
             }
 
+            // ============================================
+            // LIMPEZA E RELATÓRIO
+            // ============================================
             cleanupCaches();
             consecutiveErrors = 0;
 
             if (Date.now() - lastReportTime >= 600000) {
-                console.log(`\n📊 STATUS: ${totalAlerts} alertas com critério RSI | ${monitor.totalCycles} ciclos`);
+                console.log(`\n📊 STATUS: ${totalAlerts} alertas totais | ${zoneMonitor.totalCycles} ciclos zonas`);
+                console.log(`📊 EMA: ${emaMonitor.totalAlertsSent} alertas enviados`);
                 lastReportTime = Date.now();
             }
 
             const waitTime = ZONE_SETTINGS.checkInterval;
-            console.log(`⏱️  Próximo grupo em ${waitTime/1000}s...`);
+            console.log(`⏱️  Próximo ciclo em ${waitTime/1000}s...`);
             await new Promise(r => setTimeout(r, waitTime));
 
         } catch (error) {
@@ -1925,16 +2253,17 @@ async function mainZoneMonitorLoopWithRSI() {
 // ▶️ INICIALIZAÇÃO
 // =====================================================================
 
-async function startBotWithRSICriteria() {
+async function startBot() {
     try {
         if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚨 TITANIUM ZONE MONITOR COM CRITÉRIO RSI');
-        console.log(`🎯 Sistema com filtro: COMPRA (RSI ≤ 62) | VENDA (RSI > 60)`);
-        console.log(`📊 Estrutura 15m com rompimentos de alta/baixa`);
-        console.log(`💰 Priorização por volume de trading`);
-        console.log(`⚠️  Alertas apenas com ${ZONE_SETTINGS.requiredConfirmations}+ confirmações`);
+        console.log('🚨 TITANIUM ALERT SYSTEM');
+        console.log('🎯 Sistema de alertas duplo:');
+        console.log('  1. Zonas de Trading com critério RSI (15m)');
+        console.log('  2. EMA 13/34/55 no timeframe 3 minutos');
+        console.log('💰 Priorização por volume de trading');
+        console.log('⚠️  Alertas com confirmação múltipla');
         console.log('='.repeat(80) + '\n');
 
         try {
@@ -1960,15 +2289,15 @@ async function startBotWithRSICriteria() {
             process.exit(1);
         }
 
-        console.log('✅ Conexão OK! Iniciando monitoramento com critério RSI...');
+        console.log('✅ Conexão OK! Iniciando sistema de alertas...');
 
-        await mainZoneMonitorLoopWithRSI();
+        await mainMonitorLoop();
 
     } catch (error) {
         console.error(`\n🚨 ERRO CRÍTICO: ${error.message}`);
         console.log('🔄 Reiniciando em 180 segundos...');
         await new Promise(r => setTimeout(r, 180000));
-        await startBotWithRSICriteria();
+        await startBot();
     }
 }
 
@@ -1979,9 +2308,9 @@ process.on('unhandledRejection', (error) => {
 process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught Exception:', error.message);
     setTimeout(() => {
-        startBotWithRSICriteria();
+        startBot();
     }, 60000);
 });
 
-// Iniciar com critério RSI
-startBotWithRSICriteria();
+// Iniciar o bot
+startBot();
