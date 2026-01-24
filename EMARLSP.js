@@ -1210,45 +1210,27 @@ async function sendZoneEMAAlert(setupData) {
         }
         
         const message = `
-${actionEmoji} <b>${symbol} - ALERTA ZONA + EMA ${EMA_ZONE_SETTINGS.timeframe}</b>
-🎯 <b>Sinal de ${signalType} confirmado por ${zoneType}</b>
+${actionEmoji} <i>${symbol} - Operação ${EMA_ZONE_SETTINGS.timeframe}</i>
+ <i>Sinal de ${signalType} confirmado por ${zoneType}</i>
 ${now.full} <a href="${tradingViewLink}">Gráfico 3m</a>
-
-📍 <b>CONDIÇÕES ATENDIDAS:</b>
-1️⃣ <b>${zoneType} PRÓXIMO:</b> $${zone.price.toFixed(6)} (${zone.distancePercent.toFixed(2)}% do preço)
-2️⃣ <b>EMA 13 CRUZOU ${isBuySignal ? 'PARA CIMA' : 'PARA BAIXO'} DA EMA 34</b>
-3️⃣ <b>PREÇO ${isBuySignal ? 'ACIMA' : 'ABAIXO'} DA EMA 55</b>
-
-💲 <b>Preços Atuais:</b>
-• Preço: $${ema.price.toFixed(6)}
 • ${zoneType}: $${zone.price.toFixed(6)}
-• EMA 13: $${ema.ema13.toFixed(6)}
-• EMA 34: $${ema.ema34.toFixed(6)}
-• EMA 55: $${ema.ema55.toFixed(6)}
-
-📏 <b>Distâncias:</b>
+<i>Distâncias:</i>
 • Preço → ${zoneType}: ${zone.distancePercent.toFixed(2)}%
-• Preço → EMA 55: ${isBuySignal ? 'ACIMA' : 'ABAIXO'}
-• EMA 13 → EMA 34: ${ema.ema13AboveEma34 ? 'ACIMA' : 'ABAIXO'}
 
-📊 <i>Indicadores de Confirmação:</i>
+ <i>Indicadores:</i>
 • RSI 1h: ${rsiData ? `${rsiData.emoji} ${rsiData.value.toFixed(1)} (${rsiData.status})` : 'N/A'}
 • LSR: ${lsrInfo}
 • Funding Rate: ${fundingData.text}
 • Força vs BTC: ${btcStrength.emoji} ${btcStrength.status}
-• Confiança do Setup: ${confidence.toFixed(0)}%
+• Confiança: ${confidence.toFixed(0)}%
 
-📈 <i>Análise 24h:</i>
+ <i>Análise 24h:</i>
 • Variação: ${marketData.priceChangePercent >= 0 ? '🟢' : '🔴'} ${marketData.priceChangePercent.toFixed(2)}%
 • Vol: $${(marketData.quoteVolume / 1000000).toFixed(1)}M
 • Range: $${marketData.lowPrice.toFixed(6)} - $${marketData.highPrice.toFixed(6)}
 
-⚠️ <b>ESTRATÉGIA SUGERIDA:</b>
-${isBuySignal ? 
-'• Entrada: Acima da EMA 55 após confirmação\n• Stop Loss: Abaixo do suporte identificado\n• Alvo 1: Próxima resistência\n• Alvo 2: Distância 2:1 risk/reward' : 
-'• Entrada: Abaixo da EMA 55 após confirmação\n• Stop Loss: Acima da resistência identificada\n• Alvo 1: Próximo suporte\n• Alvo 2: Distância 2:1 risk/reward'}
 
-🔔 <i>Alerta Zona + EMA by @J4Rviz</i>
+ <i>Titanium by @J4Rviz</i>
         `;
         
         const sent = await sendTelegramAlert(message);
@@ -1783,7 +1765,7 @@ process.on('unhandledRejection', (error) => {
     console.error('❌ Unhandled Rejection:', error.message);
 });
 
-process.on('uncaughtException', (error) {
+process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught Exception:', error.message);
     setTimeout(() => {
         startZoneEMABot();
