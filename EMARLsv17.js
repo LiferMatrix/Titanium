@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7715750289:AAEDoOv-Ic'; //Titanium 2
-const TELEGRAM_CHAT_ID = '-100360';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -87,14 +87,14 @@ const QUALITY_WEIGHTS = {
     lsr: 12,                        // ↑ de 8
     rsi: 15,                       // ↑ de 18
     emaAlignment: 8,              // ↑ de 10
-    stoch1h: 14,                   // ↑ de 10
-    stoch4h: 14,                   // ↑ de 10
+    stoch1h: 11,                   // ↑ de 10
+    stoch4h: 11,                   // ↑ de 10
     breakoutRisk: 8,              // ↑ de 10
     supportResistance: 10,          // ↑ de 12
     pivotPoints: 12,               // ↑ de 15
     funding: 8,
-    stochastic12h: 4,             // ↑ de 8
-    stochasticDaily: 4            // ↑ de 8
+    stochastic12h: 8,             // ↑ de 8
+    stochasticDaily: 8            // ↑ de 8
 };
 
 // === NOVA CONFIGURAÇÃO: FORÇA RELATIVA BTC ===
