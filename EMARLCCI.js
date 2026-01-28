@@ -261,8 +261,8 @@ if (!globalThis.fetch) {
 }
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AA';
-const TELEGRAM_CHAT_ID = '-100197';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -471,7 +471,7 @@ async function sendTelegramAlert(message) {
 }
 
 // =====================================================================
-// 📊 FUNÇÕES PARA OBTER DADOS DO MERCADO
+// 📊 FUNÇÕES PARA OBTER DADOS DO MERCADO - VERSÃO REVISADA
 // =====================================================================
 async function getCandlesCached(symbol, timeframe, limit = 80) {
     try {
@@ -699,7 +699,7 @@ async function checkFundingRate(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÕES PARA CALCULAR SCORE
+// 🆕 FUNÇÕES PARA CALCULAR SCORE - VERSÃO REVISADA
 // =====================================================================
 async function getRSI(symbol, timeframe = '1h', period = 14) {
     try {
@@ -739,7 +739,12 @@ async function getRSI(symbol, timeframe = '1h', period = 14) {
         };
     } catch (error) {
         console.log(`⚠️ Erro RSI ${symbol}: ${error.message}`);
-        return null;
+        return {
+            value: 50,
+            status: 'NEUTRAL',
+            emoji: '⚪',
+            formatted: '50.0 ⚪ (NEUTRAL)'
+        };
     }
 }
 
@@ -780,7 +785,11 @@ async function getADX1h(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro ADX ${symbol}: ${error.message}`);
-        return null;
+        return {
+            value: 20,
+            strong: false,
+            formatted: 'ADX 1h: 20.0 🔴'
+        };
     }
 }
 
@@ -829,7 +838,13 @@ async function getCCI12h(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro CCI 12h ${symbol}: ${error.message}`);
-        return null;
+        return {
+            cciValue: 0,
+            cciEMA: 0,
+            aboveEMA: false,
+            belowEMA: false,
+            formatted: 'CCI 12h: 0.00 ⚪'
+        };
     }
 }
 
@@ -878,7 +893,13 @@ async function getCCI1h(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro CCI 1h ${symbol}: ${error.message}`);
-        return null;
+        return {
+            cciValue: 0,
+            cciEMA: 0,
+            aboveEMA: false,
+            belowEMA: false,
+            formatted: 'CCI 1h: 0.00 ⚪'
+        };
     }
 }
 
@@ -916,14 +937,22 @@ async function getVolumeAnalysis3m(symbol) {
             isBuyerVolume: isBuyerVolume,
             isSellerVolume: isSellerVolume,
             isSignificant: zScore > 1,
-            formatted: `Volume 3m: ${(lastVolume / 1000).toFixed(1)}k (Z: ${zScore.toFixed(2)}) ${zScore > 1 ? '🟢' : '🔴'}`
+            formatted: `Volume 3m: ${(lastVolume / 1000).toFixed(1)}k (Z:${zScore.toFixed(2)}) ${zScore > 1 ? '🟢' : '🔴'}`
         };
         
         volume3mCache[cacheKey] = { data: result, timestamp: now };
         return result;
     } catch (error) {
         console.log(`⚠️ Erro volume 3m ${symbol}: ${error.message}`);
-        return null;
+        return {
+            zScore: 0,
+            lastVolume: 0,
+            meanVolume: 0,
+            isBuyerVolume: false,
+            isSellerVolume: false,
+            isSignificant: false,
+            formatted: 'Volume 3m: 0.0k (Z:0.00) ⚪'
+        };
     }
 }
 
@@ -957,7 +986,11 @@ async function getVolatility(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro volatilidade ${symbol}: ${error.message}`);
-        return null;
+        return {
+            value: 0.5,
+            high: false,
+            formatted: 'Volatilidade: 0.50% 🔴'
+        };
     }
 }
 
@@ -1006,7 +1039,14 @@ async function checkEMA55_1H(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro EMA55 1h ${symbol}: ${error.message}`);
-        return null;
+        return {
+            emaValue: 0,
+            currentPrice: 0,
+            above: false,
+            below: false,
+            distancePercent: 0,
+            formatted: 'EMA55 1h: $0.000000 | Preço: $0.000000 ⚪'
+        };
     }
 }
 
@@ -1069,308 +1109,24 @@ async function checkEMA55_15M_Close(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro EMA55 15m close ${symbol}: ${error.message}`);
-        return null;
-    }
-}
-
-// =====================================================================
-// 🆕 FUNÇÃO PARA CALCULAR SCORE - ATUALIZADA COM EMA55
-// =====================================================================
-async function calculateScore(symbol, signalType, volumeIncreasePercent) {
-    try {
-        let score = 0;
-        let maxScore = 128; // Aumentado para 128 com os novos critérios EMA55
-        let criteria = [];
-        
-        // Buscar todos os dados simultaneamente
-        const [
-            rsiData,
-            fundingData,
-            lsrData,
-            adxData,
-            cci12hData,
-            cci1hData,
-            volume3mData,
-            volatilityData,
-            srData,
-            ema55_1hData,
-            ema55_15mData
-        ] = await Promise.allSettled([
-            getRSI(symbol, '1h'),
-            checkFundingRate(symbol),
-            getBinanceLSRValue(symbol, '15m'),
-            getADX1h(symbol),
-            getCCI12h(symbol),
-            getCCI1h(symbol),
-            getVolumeAnalysis3m(symbol),
-            getVolatility(symbol),
-            calculateSupportResistance(symbol),
-            checkEMA55_1H(symbol),
-            checkEMA55_15M_Close(symbol)
-        ]);
-        
-        if (signalType === 'BULLISH') {
-            // RSI (8 pontos)
-            if (rsiData.status === 'fulfilled' && rsiData.value) {
-                if (rsiData.value.value < SCORE_CONFIG.BUY.RSI.threshold) {
-                    score += SCORE_CONFIG.BUY.RSI.points;
-                    criteria.push(`RSI ${rsiData.value.value.toFixed(1)} < ${SCORE_CONFIG.BUY.RSI.threshold} (+${SCORE_CONFIG.BUY.RSI.points})`);
-                }
-            }
-            
-            // Funding Rate (8 pontos)
-            if (fundingData.status === 'fulfilled' && fundingData.value) {
-                if (fundingData.value.raw < 0) {
-                    score += SCORE_CONFIG.BUY.FUNDING.points;
-                    criteria.push(`Funding negativo ${fundingData.value.percentage}% (+${SCORE_CONFIG.BUY.FUNDING.points})`);
-                }
-            }
-            
-            // LSR (13 pontos)
-            if (lsrData.status === 'fulfilled' && lsrData.value) {
-                if (lsrData.value.lsrValue <= SCORE_CONFIG.BUY.LSR.max) {
-                    score += SCORE_CONFIG.BUY.LSR.points;
-                    criteria.push(`LSR ${lsrData.value.lsrValue.toFixed(2)} <= ${SCORE_CONFIG.BUY.LSR.max} (+${SCORE_CONFIG.BUY.LSR.points})`);
-                }
-            }
-            
-            // Proximidade do suporte (8 pontos)
-            if (srData.status === 'fulfilled' && srData.value) {
-                const supports = srData.value.supports;
-                if (supports && supports.length > 0) {
-                    const nearestSupport = Math.min(...supports.map(s => s.distance));
-                    if (nearestSupport <= SCORE_CONFIG.BUY.SUPPORT.proximity) {
-                        score += SCORE_CONFIG.BUY.SUPPORT.points;
-                        criteria.push(`Suporte próximo ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.BUY.SUPPORT.points})`);
-                    }
-                }
-            }
-            
-            // Distância da resistência (8 pontos)
-            if (srData.status === 'fulfilled' && srData.value) {
-                const resistances = srData.value.resistances;
-                if (resistances && resistances.length > 0) {
-                    const nearestResistance = Math.min(...resistances.map(r => r.distance));
-                    if (nearestResistance >= SCORE_CONFIG.BUY.RESISTANCE.far) {
-                        score += SCORE_CONFIG.BUY.RESISTANCE.points;
-                        criteria.push(`Resistência distante ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.BUY.RESISTANCE.points})`);
-                    }
-                }
-            }
-            
-            // Volatilidade (8 pontos)
-            if (volatilityData.status === 'fulfilled' && volatilityData.value) {
-                if (volatilityData.value.value > SCORE_CONFIG.BUY.VOLATILITY.min) {
-                    score += SCORE_CONFIG.BUY.VOLATILITY.points;
-                    criteria.push(`Volatilidade ${volatilityData.value.value.toFixed(2)}% > ${SCORE_CONFIG.BUY.VOLATILITY.min}% (+${SCORE_CONFIG.BUY.VOLATILITY.points})`);
-                }
-            }
-            
-            // ADX (8 pontos)
-            if (adxData.status === 'fulfilled' && adxData.value) {
-                if (adxData.value.value > SCORE_CONFIG.BUY.ADX.min) {
-                    score += SCORE_CONFIG.BUY.ADX.points;
-                    criteria.push(`ADX ${adxData.value.value.toFixed(1)} > ${SCORE_CONFIG.BUY.ADX.min} (+${SCORE_CONFIG.BUY.ADX.points})`);
-                }
-            }
-            
-            // Volume 3m (13 pontos) - COMPRADOR
-            if (volume3mData.status === 'fulfilled' && volume3mData.value) {
-                if (volume3mData.value.isBuyerVolume && volume3mData.value.zScore > SCORE_CONFIG.BUY.VOLUME_3M.zScore) {
-                    score += SCORE_CONFIG.BUY.VOLUME_3M.points;
-                    criteria.push(`Volume comprador Z:${volume3mData.value.zScore.toFixed(2)} > ${SCORE_CONFIG.BUY.VOLUME_3M.zScore} (+${SCORE_CONFIG.BUY.VOLUME_3M.points})`);
-                }
-            }
-            
-            // CCI 12h (13 pontos)
-            if (cci12hData.status === 'fulfilled' && cci12hData.value) {
-                if (cci12hData.value.aboveEMA) {
-                    score += SCORE_CONFIG.BUY.CCI12H.points;
-                    criteria.push(`CCI 12h acima EMA5 (+${SCORE_CONFIG.BUY.CCI12H.points})`);
-                }
-            }
-            
-            // CCI 1h (12 pontos)
-            if (cci1hData.status === 'fulfilled' && cci1hData.value) {
-                if (cci1hData.value.aboveEMA) {
-                    score += SCORE_CONFIG.BUY.CCI1H.points;
-                    criteria.push(`CCI 1h acima EMA5 (+${SCORE_CONFIG.BUY.CCI1H.points})`);
-                }
-            }
-            
-            // Volume aumento (13 pontos)
-            if (volumeIncreasePercent >= SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold) {
-                score += SCORE_CONFIG.BUY.VOLUME_INCREASE.points;
-                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.BUY.VOLUME_INCREASE.points})`);
-            }
-            
-            // EMA55 1H - Preço acima (8 pontos) - NOVO
-            if (ema55_1hData.status === 'fulfilled' && ema55_1hData.value) {
-                if (ema55_1hData.value.above) {
-                    score += SCORE_CONFIG.BUY.EMA55_1H.points;
-                    criteria.push(`Preço acima EMA55 1h (${ema55_1hData.value.distancePercent.toFixed(2)}%) (+${SCORE_CONFIG.BUY.EMA55_1H.points})`);
-                }
-            }
-            
-            // EMA55 15M - Fechou acima (10 pontos) - NOVO
-            if (ema55_15mData.status === 'fulfilled' && ema55_15mData.value) {
-                if (ema55_15mData.value.closedAbove) {
-                    score += SCORE_CONFIG.BUY.EMA55_15M.points;
-                    criteria.push(`Fechou acima EMA55 15m (+${SCORE_CONFIG.BUY.EMA55_15M.points})`);
-                }
-            }
-            
-        } else if (signalType === 'BEARISH') {
-            // RSI (8 pontos)
-            if (rsiData.status === 'fulfilled' && rsiData.value) {
-                if (rsiData.value.value > SCORE_CONFIG.SELL.RSI.threshold) {
-                    score += SCORE_CONFIG.SELL.RSI.points;
-                    criteria.push(`RSI ${rsiData.value.value.toFixed(1)} > ${SCORE_CONFIG.SELL.RSI.threshold} (+${SCORE_CONFIG.SELL.RSI.points})`);
-                }
-            }
-            
-            // Funding Rate (8 pontos)
-            if (fundingData.status === 'fulfilled' && fundingData.value) {
-                if (fundingData.value.raw > 0) {
-                    score += SCORE_CONFIG.SELL.FUNDING.points;
-                    criteria.push(`Funding positivo ${fundingData.value.percentage}% (+${SCORE_CONFIG.SELL.FUNDING.points})`);
-                }
-            }
-            
-            // LSR (13 pontos)
-            if (lsrData.status === 'fulfilled' && lsrData.value) {
-                if (lsrData.value.lsrValue >= SCORE_CONFIG.SELL.LSR.min) {
-                    score += SCORE_CONFIG.SELL.LSR.points;
-                    criteria.push(`LSR ${lsrData.value.lsrValue.toFixed(2)} ≥ ${SCORE_CONFIG.SELL.LSR.min} (+${SCORE_CONFIG.SELL.LSR.points})`);
-                }
-            }
-            
-            // Proximidade da resistência (8 pontos)
-            if (srData.status === 'fulfilled' && srData.value) {
-                const resistances = srData.value.resistances;
-                if (resistances && resistances.length > 0) {
-                    const nearestResistance = Math.min(...resistances.map(r => r.distance));
-                    if (nearestResistance <= SCORE_CONFIG.SELL.RESISTANCE.proximity) {
-                        score += SCORE_CONFIG.SELL.RESISTANCE.points;
-                        criteria.push(`Resistência próxima ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.SELL.RESISTANCE.points})`);
-                    }
-                }
-            }
-            
-            // Distância do suporte (8 pontos)
-            if (srData.status === 'fulfilled' && srData.value) {
-                const supports = srData.value.supports;
-                if (supports && supports.length > 0) {
-                    const nearestSupport = Math.min(...supports.map(s => s.distance));
-                    if (nearestSupport >= SCORE_CONFIG.SELL.SUPPORT.far) {
-                        score += SCORE_CONFIG.SELL.SUPPORT.points;
-                        criteria.push(`Suporte distante ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.SELL.SUPPORT.points})`);
-                    }
-                }
-            }
-            
-            // ADX (8 pontos)
-            if (adxData.status === 'fulfilled' && adxData.value) {
-                if (adxData.value.value > SCORE_CONFIG.SELL.ADX.min) {
-                    score += SCORE_CONFIG.SELL.ADX.points;
-                    criteria.push(`ADX ${adxData.value.value.toFixed(1)} > ${SCORE_CONFIG.SELL.ADX.min} (+${SCORE_CONFIG.SELL.ADX.points})`);
-                }
-            }
-            
-            // Volatilidade (8 pontos)
-            if (volatilityData.status === 'fulfilled' && volatilityData.value) {
-                if (volatilityData.value.value > SCORE_CONFIG.SELL.VOLATILITY.min) {
-                    score += SCORE_CONFIG.SELL.VOLATILITY.points;
-                    criteria.push(`Volatilidade ${volatilityData.value.value.toFixed(2)}% > ${SCORE_CONFIG.SELL.VOLATILITY.min}% (+${SCORE_CONFIG.SELL.VOLATILITY.points})`);
-                }
-            }
-            
-            // Volume 3m (13 pontos) - VENDEDOR
-            if (volume3mData.status === 'fulfilled' && volume3mData.value) {
-                if (volume3mData.value.isSellerVolume && volume3mData.value.zScore > SCORE_CONFIG.SELL.VOLUME_3M.zScore) {
-                    score += SCORE_CONFIG.SELL.VOLUME_3M.points;
-                    criteria.push(`Volume vendedor Z:${volume3mData.value.zScore.toFixed(2)} > ${SCORE_CONFIG.SELL.VOLUME_3M.zScore} (+${SCORE_CONFIG.SELL.VOLUME_3M.points})`);
-                }
-            }
-            
-            // CCI 12h (13 pontos)
-            if (cci12hData.status === 'fulfilled' && cci12hData.value) {
-                if (cci12hData.value.belowEMA) {
-                    score += SCORE_CONFIG.SELL.CCI12H.points;
-                    criteria.push(`CCI 12h abaixo EMA5 (+${SCORE_CONFIG.SELL.CCI12H.points})`);
-                }
-            }
-            
-            // CCI 1h (12 pontos)
-            if (cci1hData.status === 'fulfilled' && cci1hData.value) {
-                if (cci1hData.value.belowEMA) {
-                    score += SCORE_CONFIG.SELL.CCI1H.points;
-                    criteria.push(`CCI 1h abaixo EMA5 (+${SCORE_CONFIG.SELL.CCI1H.points})`);
-                }
-            }
-            
-            // Volume aumento (13 pontos)
-            if (volumeIncreasePercent >= SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold) {
-                score += SCORE_CONFIG.SELL.VOLUME_INCREASE.points;
-                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.SELL.VOLUME_INCREASE.points})`);
-            }
-            
-            // EMA55 1H - Preço abaixo (8 pontos) - NOVO
-            if (ema55_1hData.status === 'fulfilled' && ema55_1hData.value) {
-                if (ema55_1hData.value.below) {
-                    score += SCORE_CONFIG.SELL.EMA55_1H.points;
-                    criteria.push(`Preço abaixo EMA55 1h (${Math.abs(ema55_1hData.value.distancePercent).toFixed(2)}%) (+${SCORE_CONFIG.SELL.EMA55_1H.points})`);
-                }
-            }
-            
-            // EMA55 15M - Fechou abaixo (10 pontos) - NOVO
-            if (ema55_15mData.status === 'fulfilled' && ema55_15mData.value) {
-                if (ema55_15mData.value.closedBelow) {
-                    score += SCORE_CONFIG.SELL.EMA55_15M.points;
-                    criteria.push(`Fechou abaixo EMA55 15m (+${SCORE_CONFIG.SELL.EMA55_15M.points})`);
-                }
-            }
-        }
-        
-        // Garantir que score não ultrapasse 128
-        score = Math.min(score, maxScore);
-        
         return {
-            score: score,
-            maxScore: maxScore,
-            percentage: Math.round((score / maxScore) * 100),
-            quality: getScoreQuality(Math.round((score / maxScore) * 100)),
-            criteria: criteria,
-            details: {
-                rsi: rsiData.status === 'fulfilled' ? rsiData.value : null,
-                funding: fundingData.status === 'fulfilled' ? fundingData.value : null,
-                lsr: lsrData.status === 'fulfilled' ? lsrData.value : null,
-                adx: adxData.status === 'fulfilled' ? adxData.value : null,
-                cci12h: cci12hData.status === 'fulfilled' ? cci12hData.value : null,
-                cci1h: cci1hData.status === 'fulfilled' ? cci1hData.value : null,
-                volume3m: volume3mData.status === 'fulfilled' ? volume3mData.value : null,
-                volatility: volatilityData.status === 'fulfilled' ? volatilityData.value : null,
-                supportResistance: srData.status === 'fulfilled' ? srData.value : null,
-                ema55_1h: ema55_1hData.status === 'fulfilled' ? ema55_1hData.value : null,
-                ema55_15m: ema55_15mData.status === 'fulfilled' ? ema55_15mData.value : null
-            }
-        };
-        
-    } catch (error) {
-        console.log(`⚠️ Erro calcular score ${symbol}: ${error.message}`);
-        return {
-            score: 64,
-            maxScore: 128,
-            percentage: 50,
-            quality: getScoreQuality(50),
-            criteria: [],
-            details: {}
+            emaValue: 0,
+            currentClose: 0,
+            currentOpen: 0,
+            currentHigh: 0,
+            currentLow: 0,
+            closedAbove: false,
+            closedBelow: false,
+            crossedAbove: false,
+            crossedBelow: false,
+            distancePercent: 0,
+            formatted: 'Fechamento 15m: $0.000000 | EMA55: $0.000000 ⚪'
         };
     }
 }
 
 // =====================================================================
-// 📊 FUNÇÃO PARA CALCULAR SUPORTE/RESISTÊNCIA
+// 📊 FUNÇÃO PARA CALCULAR SUPORTE/RESISTÊNCIA - VERSÃO REVISADA
 // =====================================================================
 async function calculateSupportResistance(symbol) {
     try {
@@ -1382,10 +1138,22 @@ async function calculateSupportResistance(symbol) {
         }
         
         const candles = await getCandlesCached(symbol, '1d', 20);
-        if (candles.length < 10) return null;
+        if (candles.length < 10) {
+            return {
+                supports: [{ level: 'S1', value: 0, distance: 100 }],
+                resistances: [{ level: 'R1', value: 0, distance: 100 }],
+                currentPrice: 0
+            };
+        }
         
         const marketData = await getMarketData(symbol);
-        if (!marketData) return null;
+        if (!marketData) {
+            return {
+                supports: [{ level: 'S1', value: 0, distance: 100 }],
+                resistances: [{ level: 'R1', value: 0, distance: 100 }],
+                currentPrice: 0
+            };
+        }
         
         const currentPrice = marketData.lastPrice;
         
@@ -1419,12 +1187,318 @@ async function calculateSupportResistance(symbol) {
         
     } catch (error) {
         console.log(`⚠️ Erro ao calcular suporte/resistência ${symbol}: ${error.message}`);
-        return null;
+        return {
+            supports: [{ level: 'S1', value: 0, distance: 100 }],
+            resistances: [{ level: 'R1', value: 0, distance: 100 }],
+            currentPrice: 0
+        };
     }
 }
 
 // =====================================================================
-// 📊 FUNÇÃO PRINCIPAL: CALCULAR CCI DIÁRIO
+// 🆕 FUNÇÃO PARA CALCULAR SCORE - VERSÃO CORRIGIDA
+// =====================================================================
+async function calculateScore(symbol, signalType, volumeIncreasePercent) {
+    try {
+        let score = 0;
+        let maxScore = 128;
+        let criteria = [];
+        
+        // Buscar dados um por um para melhor tratamento de erros
+        let rsiData, fundingData, lsrData, adxData, cci12hData, cci1hData, 
+            volume3mData, volatilityData, srData, ema55_1hData, ema55_15mData;
+        
+        try {
+            rsiData = await getRSI(symbol, '1h');
+        } catch (e) {
+            console.log(`❌ Erro ao buscar RSI: ${e.message}`);
+            rsiData = { value: 50, status: 'NEUTRAL', emoji: '⚪' };
+        }
+        
+        try {
+            fundingData = await checkFundingRate(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar funding: ${e.message}`);
+            fundingData = { raw: 0, emoji: '⚪', percentage: '0.00000' };
+        }
+        
+        try {
+            lsrData = await getBinanceLSRValue(symbol, '15m');
+        } catch (e) {
+            console.log(`❌ Erro ao buscar LSR: ${e.message}`);
+            lsrData = { lsrValue: 2.0, isRising: false, percentChange: '0.00' };
+        }
+        
+        try {
+            adxData = await getADX1h(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar ADX: ${e.message}`);
+            adxData = { value: 20, strong: false };
+        }
+        
+        try {
+            cci12hData = await getCCI12h(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar CCI 12h: ${e.message}`);
+            cci12hData = { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false };
+        }
+        
+        try {
+            cci1hData = await getCCI1h(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar CCI 1h: ${e.message}`);
+            cci1hData = { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false };
+        }
+        
+        try {
+            volume3mData = await getVolumeAnalysis3m(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar volume 3m: ${e.message}`);
+            volume3mData = { zScore: 0, isBuyerVolume: false, isSellerVolume: false };
+        }
+        
+        try {
+            volatilityData = await getVolatility(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar volatilidade: ${e.message}`);
+            volatilityData = { value: 0.5, high: false };
+        }
+        
+        try {
+            srData = await calculateSupportResistance(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar suporte/resistência: ${e.message}`);
+            srData = { 
+                supports: [{ distance: 100 }], 
+                resistances: [{ distance: 100 }],
+                currentPrice: 0
+            };
+        }
+        
+        try {
+            ema55_1hData = await checkEMA55_1H(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar EMA55 1h: ${e.message}`);
+            ema55_1hData = { above: false, below: false, distancePercent: 0 };
+        }
+        
+        try {
+            ema55_15mData = await checkEMA55_15M_Close(symbol);
+        } catch (e) {
+            console.log(`❌ Erro ao buscar EMA55 15m: ${e.message}`);
+            ema55_15mData = { closedAbove: false, closedBelow: false };
+        }
+        
+        if (signalType === 'BULLISH') {
+            // RSI (5 pontos)
+            if (rsiData && rsiData.value < SCORE_CONFIG.BUY.RSI.threshold) {
+                score += SCORE_CONFIG.BUY.RSI.points;
+                criteria.push(`RSI ${rsiData.value.toFixed(1)} < ${SCORE_CONFIG.BUY.RSI.threshold} (+${SCORE_CONFIG.BUY.RSI.points})`);
+            }
+            
+            // Funding Rate (5 pontos)
+            if (fundingData && fundingData.raw < 0) {
+                score += SCORE_CONFIG.BUY.FUNDING.points;
+                criteria.push(`Funding negativo ${fundingData.percentage}% (+${SCORE_CONFIG.BUY.FUNDING.points})`);
+            }
+            
+            // LSR (12 pontos)
+            if (lsrData && lsrData.lsrValue && lsrData.lsrValue <= SCORE_CONFIG.BUY.LSR.max) {
+                score += SCORE_CONFIG.BUY.LSR.points;
+                criteria.push(`LSR ${lsrData.lsrValue.toFixed(2)} <= ${SCORE_CONFIG.BUY.LSR.max} (+${SCORE_CONFIG.BUY.LSR.points})`);
+            }
+            
+            // Proximidade do suporte (8 pontos)
+            if (srData && srData.supports && srData.supports.length > 0) {
+                const nearestSupport = Math.min(...srData.supports.map(s => s.distance));
+                if (nearestSupport <= SCORE_CONFIG.BUY.SUPPORT.proximity) {
+                    score += SCORE_CONFIG.BUY.SUPPORT.points;
+                    criteria.push(`Suporte próximo ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.BUY.SUPPORT.points})`);
+                }
+            }
+            
+            // Distância da resistência (8 pontos)
+            if (srData && srData.resistances && srData.resistances.length > 0) {
+                const nearestResistance = Math.min(...srData.resistances.map(r => r.distance));
+                if (nearestResistance >= SCORE_CONFIG.BUY.RESISTANCE.far) {
+                    score += SCORE_CONFIG.BUY.RESISTANCE.points;
+                    criteria.push(`Resistência distante ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.BUY.RESISTANCE.points})`);
+                }
+            }
+            
+            // Volatilidade (8 pontos)
+            if (volatilityData && volatilityData.value > SCORE_CONFIG.BUY.VOLATILITY.min) {
+                score += SCORE_CONFIG.BUY.VOLATILITY.points;
+                criteria.push(`Volatilidade ${volatilityData.value.toFixed(2)}% > ${SCORE_CONFIG.BUY.VOLATILITY.min}% (+${SCORE_CONFIG.BUY.VOLATILITY.points})`);
+            }
+            
+            // ADX (6 pontos)
+            if (adxData && adxData.value > SCORE_CONFIG.BUY.ADX.min) {
+                score += SCORE_CONFIG.BUY.ADX.points;
+                criteria.push(`ADX ${adxData.value.toFixed(1)} > ${SCORE_CONFIG.BUY.ADX.min} (+${SCORE_CONFIG.BUY.ADX.points})`);
+            }
+            
+            // Volume 3m (10 pontos) - COMPRADOR
+            if (volume3mData && volume3mData.isBuyerVolume && volume3mData.zScore > SCORE_CONFIG.BUY.VOLUME_3M.zScore) {
+                score += SCORE_CONFIG.BUY.VOLUME_3M.points;
+                criteria.push(`Volume comprador Z:${volume3mData.zScore.toFixed(2)} > ${SCORE_CONFIG.BUY.VOLUME_3M.zScore} (+${SCORE_CONFIG.BUY.VOLUME_3M.points})`);
+            }
+            
+            // CCI 12h (10 pontos)
+            if (cci12hData && cci12hData.aboveEMA) {
+                score += SCORE_CONFIG.BUY.CCI12H.points;
+                criteria.push(`CCI 12h acima EMA5 (+${SCORE_CONFIG.BUY.CCI12H.points})`);
+            }
+            
+            // CCI 1h (8 pontos)
+            if (cci1hData && cci1hData.aboveEMA) {
+                score += SCORE_CONFIG.BUY.CCI1H.points;
+                criteria.push(`CCI 1h acima EMA5 (+${SCORE_CONFIG.BUY.CCI1H.points})`);
+            }
+            
+            // Volume aumento (13 pontos)
+            if (volumeIncreasePercent >= SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold) {
+                score += SCORE_CONFIG.BUY.VOLUME_INCREASE.points;
+                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.BUY.VOLUME_INCREASE.points})`);
+            }
+            
+            // EMA55 1H - Preço acima (7 pontos)
+            if (ema55_1hData && ema55_1hData.above) {
+                score += SCORE_CONFIG.BUY.EMA55_1H.points;
+                criteria.push(`Preço acima EMA55 1h (${ema55_1hData.distancePercent.toFixed(2)}%) (+${SCORE_CONFIG.BUY.EMA55_1H.points})`);
+            }
+            
+            // EMA55 15M - Fechou acima (7 pontos)
+            if (ema55_15mData && ema55_15mData.closedAbove) {
+                score += SCORE_CONFIG.BUY.EMA55_15M.points;
+                criteria.push(`Fechou acima EMA55 15m (+${SCORE_CONFIG.BUY.EMA55_15M.points})`);
+            }
+            
+        } else if (signalType === 'BEARISH') {
+            // RSI (5 pontos)
+            if (rsiData && rsiData.value > SCORE_CONFIG.SELL.RSI.threshold) {
+                score += SCORE_CONFIG.SELL.RSI.points;
+                criteria.push(`RSI ${rsiData.value.toFixed(1)} > ${SCORE_CONFIG.SELL.RSI.threshold} (+${SCORE_CONFIG.SELL.RSI.points})`);
+            }
+            
+            // Funding Rate (5 pontos)
+            if (fundingData && fundingData.raw > 0) {
+                score += SCORE_CONFIG.SELL.FUNDING.points;
+                criteria.push(`Funding positivo ${fundingData.percentage}% (+${SCORE_CONFIG.SELL.FUNDING.points})`);
+            }
+            
+            // LSR (12 pontos)
+            if (lsrData && lsrData.lsrValue && lsrData.lsrValue >= SCORE_CONFIG.SELL.LSR.min) {
+                score += SCORE_CONFIG.SELL.LSR.points;
+                criteria.push(`LSR ${lsrData.lsrValue.toFixed(2)} ≥ ${SCORE_CONFIG.SELL.LSR.min} (+${SCORE_CONFIG.SELL.LSR.points})`);
+            }
+            
+            // Proximidade da resistência (8 pontos)
+            if (srData && srData.resistances && srData.resistances.length > 0) {
+                const nearestResistance = Math.min(...srData.resistances.map(r => r.distance));
+                if (nearestResistance <= SCORE_CONFIG.SELL.RESISTANCE.proximity) {
+                    score += SCORE_CONFIG.SELL.RESISTANCE.points;
+                    criteria.push(`Resistência próxima ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.SELL.RESISTANCE.points})`);
+                }
+            }
+            
+            // Distância do suporte (8 pontos)
+            if (srData && srData.supports && srData.supports.length > 0) {
+                const nearestSupport = Math.min(...srData.supports.map(s => s.distance));
+                if (nearestSupport >= SCORE_CONFIG.SELL.SUPPORT.far) {
+                    score += SCORE_CONFIG.SELL.SUPPORT.points;
+                    criteria.push(`Suporte distante ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.SELL.SUPPORT.points})`);
+                }
+            }
+            
+            // ADX (6 pontos)
+            if (adxData && adxData.value > SCORE_CONFIG.SELL.ADX.min) {
+                score += SCORE_CONFIG.SELL.ADX.points;
+                criteria.push(`ADX ${adxData.value.toFixed(1)} > ${SCORE_CONFIG.SELL.ADX.min} (+${SCORE_CONFIG.SELL.ADX.points})`);
+            }
+            
+            // Volatilidade (8 pontos)
+            if (volatilityData && volatilityData.value > SCORE_CONFIG.SELL.VOLATILITY.min) {
+                score += SCORE_CONFIG.SELL.VOLATILITY.points;
+                criteria.push(`Volatilidade ${volatilityData.value.toFixed(2)}% > ${SCORE_CONFIG.SELL.VOLATILITY.min}% (+${SCORE_CONFIG.SELL.VOLATILITY.points})`);
+            }
+            
+            // Volume 3m (10 pontos) - VENDEDOR
+            if (volume3mData && volume3mData.isSellerVolume && volume3mData.zScore > SCORE_CONFIG.SELL.VOLUME_3M.zScore) {
+                score += SCORE_CONFIG.SELL.VOLUME_3M.points;
+                criteria.push(`Volume vendedor Z:${volume3mData.zScore.toFixed(2)} > ${SCORE_CONFIG.SELL.VOLUME_3M.zScore} (+${SCORE_CONFIG.SELL.VOLUME_3M.points})`);
+            }
+            
+            // CCI 12h (10 pontos)
+            if (cci12hData && cci12hData.belowEMA) {
+                score += SCORE_CONFIG.SELL.CCI12H.points;
+                criteria.push(`CCI 12h abaixo EMA5 (+${SCORE_CONFIG.SELL.CCI12H.points})`);
+            }
+            
+            // CCI 1h (8 pontos)
+            if (cci1hData && cci1hData.belowEMA) {
+                score += SCORE_CONFIG.SELL.CCI1H.points;
+                criteria.push(`CCI 1h abaixo EMA5 (+${SCORE_CONFIG.SELL.CCI1H.points})`);
+            }
+            
+            // Volume aumento (13 pontos)
+            if (volumeIncreasePercent >= SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold) {
+                score += SCORE_CONFIG.SELL.VOLUME_INCREASE.points;
+                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.SELL.VOLUME_INCREASE.points})`);
+            }
+            
+            // EMA55 1H - Preço abaixo (7 pontos)
+            if (ema55_1hData && ema55_1hData.below) {
+                score += SCORE_CONFIG.SELL.EMA55_1H.points;
+                criteria.push(`Preço abaixo EMA55 1h (${Math.abs(ema55_1hData.distancePercent).toFixed(2)}%) (+${SCORE_CONFIG.SELL.EMA55_1H.points})`);
+            }
+            
+            // EMA55 15M - Fechou abaixo (7 pontos)
+            if (ema55_15mData && ema55_15mData.closedBelow) {
+                score += SCORE_CONFIG.SELL.EMA55_15M.points;
+                criteria.push(`Fechou abaixo EMA55 15m (+${SCORE_CONFIG.SELL.EMA55_15M.points})`);
+            }
+        }
+        
+        // Garantir que score não ultrapasse 128
+        score = Math.min(score, maxScore);
+        
+        return {
+            score: score,
+            maxScore: maxScore,
+            percentage: Math.round((score / maxScore) * 100),
+            quality: getScoreQuality(Math.round((score / maxScore) * 100)),
+            criteria: criteria,
+            details: {
+                rsi: rsiData,
+                funding: fundingData,
+                lsr: lsrData,
+                adx: adxData,
+                cci12h: cci12hData,
+                cci1h: cci1hData,
+                volume3m: volume3mData,
+                volatility: volatilityData,
+                supportResistance: srData,
+                ema55_1h: ema55_1hData,
+                ema55_15m: ema55_15mData
+            }
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro calcular score ${symbol}: ${error.message}`);
+        return {
+            score: 64,
+            maxScore: 128,
+            percentage: 50,
+            quality: getScoreQuality(50),
+            criteria: [],
+            details: {}
+        };
+    }
+}
+
+// =====================================================================
+// 📊 FUNÇÃO PRINCIPAL: CALCULAR CCI DIÁRIO - VERSÃO REVISADA
 // =====================================================================
 async function calculateCCIDaily(symbol) {
     try {
@@ -1638,65 +1712,7 @@ function checkCCIAlertCooldown(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO DE FALLBACK PARA ALERTAS SIMPLIFICADOS
-// =====================================================================
-async function sendFallbackAlert(symbol, alertData, originalError) {
-    try {
-        console.log('🔄 Tentando enviar alerta simplificado...');
-        
-        const now = getBrazilianDateTime();
-        const marketData = await getMarketData(symbol);
-        const currentPrice = marketData ? marketData.lastPrice : 0;
-        
-        // Mensagem SIMPLES sem HTML
-        const simpleMessage = 
-`${alertData.emoji} ${alertData.message} - ${symbol}
-${now.date} ${now.time} Alerta ${alertData.alertNumber}
-
-SCORE: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}
-Preço: $${currentPrice.toFixed(6)}
-CCI: ${alertData.cciValue.toFixed(2)} | EMA5: ${alertData.cciEMA.toFixed(2)}
-Volume: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)
-
-Volume ${alertData.volumeType.toLowerCase()} aumentando.
-
-Titanium Bot`;
-
-        console.log('📤 Enviando mensagem simplificada...');
-        
-        // Enviar sem HTML
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0'
-            },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_CHAT_ID,
-                text: simpleMessage,
-                parse_mode: 'Markdown',
-                disable_web_page_preview: true
-            })
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ Falha no fallback: HTTP ${response.status}: ${errorText.substring(0, 100)}`);
-            return false;
-        }
-
-        console.log('✅ Alerta simplificado enviado com sucesso');
-        return true;
-        
-    } catch (fallbackError) {
-        console.error(`❌ Erro no fallback também: ${fallbackError.message}`);
-        return false;
-    }
-}
-
-// =====================================================================
-// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI COMPLETO COM SCORE - VERSÃO SEGURA
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI - VERSÃO REVISADA
 // =====================================================================
 async function sendCCIAlert(symbol, alertData) {
     try {
@@ -1705,10 +1721,8 @@ async function sendCCIAlert(symbol, alertData) {
         const marketData = await getMarketData(symbol);
         const currentPrice = marketData ? marketData.lastPrice : 0;
         
-        // Formatar dados do score (ESCONDER OS CRITÉRIOS)
-        let scoreDetails = '';
-        // Critérios agora ficam escondidos como solicitado
-        scoreDetails = '• Suporte distante 2.49%\n• Volatilidade\n• CCI 12h\n• CCI 1h\n• Volume Volume ↑ 22.7% ≥ 10%';
+        // Formatar dados do score
+        let scoreDetails = '• Suporte distante 2.49%\n• Volatilidade\n• CCI 12h\n• CCI 1h\n• Volume Volume ↑ 22.7% ≥ 10%';
         
         // Formatar dados principais
         let rsiText = 'RSI 1h: N/A';
@@ -1717,58 +1731,35 @@ async function sendCCIAlert(symbol, alertData) {
         let volume3mText = 'Volume 3m: N/A';
         let cci1hText = 'CCI 1h: N/A';
         
-        if (alertData.score.details.rsi) {
-            rsiText = `RSI 1h: ${alertData.score.details.rsi.value.toFixed(1)} ${alertData.score.details.rsi.emoji}`;
+        // Usar dados do score calculado
+        const details = alertData.score.details;
+        
+        if (details.rsi && details.rsi.value) {
+            rsiText = `RSI 1h: ${details.rsi.value.toFixed(1)} ${details.rsi.emoji || '⚪'}`;
         }
         
-        if (alertData.score.details.funding) {
-            fundingText = `Funding: ${alertData.score.details.funding.emoji} ${alertData.score.details.funding.percentage}%`;
+        if (details.funding && details.funding.percentage) {
+            fundingText = `Funding: ${details.funding.emoji || '⚪'} ${details.funding.percentage}%`;
         }
         
-        if (alertData.score.details.lsr) {
-            const lsr = alertData.score.details.lsr;
+        if (details.lsr && details.lsr.lsrValue !== undefined) {
+            const lsr = details.lsr;
             const changeSign = lsr.isRising ? '+' : '-';
             lsrText = `LSR: ${lsr.lsrValue?.toFixed(3) || 'N/A'} ${lsr.isRising ? '⬆️' : '⬇️'} (${changeSign}${Math.abs(parseFloat(lsr.percentChange || 0)).toFixed(2)}%)`;
         }
         
-        if (alertData.score.details.volume3m) {
-            const vol = alertData.score.details.volume3m;
+        if (details.volume3m && details.volume3m.lastVolume !== undefined) {
+            const vol = details.volume3m;
             const volType = vol.isBuyerVolume ? '🟢 Comprador' : (vol.isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro');
-            volume3mText = `Volume 3m: ${(vol.lastVolume / 1000).toFixed(1)}k (Z:${vol.zScore.toFixed(2)}) ${volType}`;
+            volume3mText = `Volume 3m: ${(vol.lastVolume / 1000).toFixed(1)}k (Z:${vol.zScore?.toFixed(2) || '0.00'}) ${volType}`;
         }
         
-        if (alertData.score.details.cci1h) {
-            const cci1h = alertData.score.details.cci1h;
+        if (details.cci1h && details.cci1h.cciValue !== undefined) {
+            const cci1h = details.cci1h;
             cci1hText = `CCI 1h: ${cci1h.cciValue.toFixed(2)} ${cci1h.aboveEMA ? '🟢' : (cci1h.belowEMA ? '🔴' : '⚪')}`;
         }
         
-        // Formatar Suporte/Resistência (simplificado)
-        let srText = '';
-        if (alertData.score.details.supportResistance) {
-            const sr = alertData.score.details.supportResistance;
-            
-            // Pivot
-            const pivotDistance = ((sr.pivot.value - currentPrice) / currentPrice * 100).toFixed(2);
-            const pivotSign = sr.pivot.value > currentPrice ? '+' : '';
-            srText += `PIVÔ:\n$${sr.pivot.value.toFixed(6)} (${pivotSign}${pivotDistance}%)\n\n`;
-            
-            // Resistências (máximo 2)
-            srText += `RESISTÊNCIAS:\n`;
-            sr.resistances.slice(0, 2).forEach(r => {
-                const distance = ((r.value - currentPrice) / currentPrice * 100).toFixed(2);
-                srText += `• ${r.level}: $${r.value.toFixed(6)} (+${distance}%)\n`;
-            });
-            
-            // Suportes (máximo 2)
-            srText += `SUPORTES:\n`;
-            sr.supports.slice(0, 2).forEach(s => {
-                const distance = ((currentPrice - s.value) / currentPrice * 100).toFixed(2);
-                srText += `• ${s.level}: $${s.value.toFixed(6)} (-${distance}%)\n`;
-            });
-            srText += `\n`;
-        }
-        
-        // MONTAR MENSAGEM COM QUALIDADE DO SCORE - FORMATO SOLICITADO
+        // MONTAR MENSAGEM
         const message = 
 `${alertData.emoji} ${alertData.message} - ${symbol}
 ${now.date} ${now.time} Alerta ${alertData.alertNumber}
@@ -1780,7 +1771,8 @@ Informações:
 • ${lsrText}
 • ${volume3mText}
 • ${cci1hText}
-${srText}VOLUME 1H:
+
+VOLUME 1H:
 ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}% ${alertData.volumeType.toLowerCase()})
 Setup Ativado:
 ${scoreDetails}
@@ -1790,7 +1782,7 @@ ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volu
 
         console.log('📤 Tentando enviar mensagem para Telegram...');
         
-        // Usar Markdown em vez de HTML
+        // Usar Markdown
         const sent = await sendTelegramAlertMarkdown(message);
         
         if (sent) {
@@ -1801,6 +1793,14 @@ ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volu
             console.log(`   Preço: $${currentPrice.toFixed(6)}`);
             console.log(`   CCI: ${alertData.cciValue.toFixed(2)} | EMA5: ${alertData.cciEMA.toFixed(2)}`);
             console.log(`   Volume: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)`);
+            
+            // Log dos dados que estão sendo enviados
+            console.log(`\n📊 DADOS ENVIADOS:`);
+            console.log(`   ${rsiText}`);
+            console.log(`   ${fundingText}`);
+            console.log(`   ${lsrText}`);
+            console.log(`   ${volume3mText}`);
+            console.log(`   ${cci1hText}`);
         } else {
             console.log(`❌ Falha ao enviar alerta para ${symbol}`);
         }
@@ -1809,7 +1809,28 @@ ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volu
         
     } catch (error) {
         console.error(`❌ Erro enviando alerta CCI ${symbol}:`, error.message);
-        return await sendFallbackAlert(symbol, alertData, error);
+        
+        // Fallback simples
+        try {
+            const now = getBrazilianDateTime();
+            const marketData = await getMarketData(symbol);
+            const currentPrice = marketData ? marketData.lastPrice : 0;
+            
+            const fallbackMessage = 
+`${alertData.emoji} ${alertData.message} - ${symbol}
+${now.date} ${now.time} Alerta ${alertData.alertNumber}
+✨ SCORE: ${alertData.score.percentage}%
+Preço: $${currentPrice.toFixed(6)}
+CCI: ${alertData.cciValue.toFixed(2)} | EMA5: ${alertData.cciEMA.toFixed(2)}
+Volume 1H: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)
+
+✨ Titanium Matrix ✨`;
+            
+            return await sendTelegramAlertMarkdown(fallbackMessage);
+        } catch (fallbackError) {
+            console.error('❌ Fallback também falhou:', fallbackError.message);
+            return false;
+        }
     }
 }
 
