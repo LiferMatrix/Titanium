@@ -1196,6 +1196,51 @@ async function calculateSupportResistance(symbol) {
 }
 
 // =====================================================================
+// 🆕 FUNÇÃO PARA BUSCAR TODOS OS DADOS NECESSÁRIOS PARA A MENSAGEM
+// =====================================================================
+async function getAllMarketData(symbol) {
+    try {
+        console.log(`📊 Buscando todos os dados para ${symbol}...`);
+        
+        // Buscar dados em paralelo
+        const [
+            marketData,
+            rsiData,
+            fundingData,
+            lsrData,
+            volume3mData,
+            cci1hData
+        ] = await Promise.allSettled([
+            getMarketData(symbol),
+            getRSI(symbol, '1h'),
+            checkFundingRate(symbol),
+            getBinanceLSRValue(symbol, '15m'),
+            getVolumeAnalysis3m(symbol),
+            getCCI1h(symbol)
+        ]);
+        
+        return {
+            marketData: marketData.status === 'fulfilled' ? marketData.value : null,
+            rsi: rsiData.status === 'fulfilled' ? rsiData.value : { value: 50, emoji: '⚪' },
+            funding: fundingData.status === 'fulfilled' ? fundingData.value : { raw: 0, emoji: '⚪', percentage: '0.00000' },
+            lsr: lsrData.status === 'fulfilled' ? lsrData.value : { lsrValue: 0, isRising: false, percentChange: '0.00' },
+            volume3m: volume3mData.status === 'fulfilled' ? volume3mData.value : { lastVolume: 0, zScore: 0, isBuyerVolume: false, isSellerVolume: false },
+            cci1h: cci1hData.status === 'fulfilled' ? cci1hData.value : { cciValue: 0, aboveEMA: false, belowEMA: false }
+        };
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar dados para ${symbol}: ${error.message}`);
+        return {
+            marketData: null,
+            rsi: { value: 50, emoji: '⚪' },
+            funding: { raw: 0, emoji: '⚪', percentage: '0.00000' },
+            lsr: { lsrValue: 0, isRising: false, percentChange: '0.00' },
+            volume3m: { lastVolume: 0, zScore: 0, isBuyerVolume: false, isSellerVolume: false },
+            cci1h: { cciValue: 0, aboveEMA: false, belowEMA: false }
+        };
+    }
+}
+
+// =====================================================================
 // 🆕 FUNÇÃO PARA CALCULAR SCORE - VERSÃO CORRIGIDA
 // =====================================================================
 async function calculateScore(symbol, signalType, volumeIncreasePercent) {
@@ -1204,90 +1249,52 @@ async function calculateScore(symbol, signalType, volumeIncreasePercent) {
         let maxScore = 128;
         let criteria = [];
         
-        // Buscar dados um por um para melhor tratamento de erros
-        let rsiData, fundingData, lsrData, adxData, cci12hData, cci1hData, 
-            volume3mData, volatilityData, srData, ema55_1hData, ema55_15mData;
+        // Buscar todos os dados necessários para o score
+        const allData = await getAllMarketData(symbol);
         
-        try {
-            rsiData = await getRSI(symbol, '1h');
-        } catch (e) {
-            console.log(`❌ Erro ao buscar RSI: ${e.message}`);
-            rsiData = { value: 50, status: 'NEUTRAL', emoji: '⚪' };
-        }
-        
-        try {
-            fundingData = await checkFundingRate(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar funding: ${e.message}`);
-            fundingData = { raw: 0, emoji: '⚪', percentage: '0.00000' };
-        }
-        
-        try {
-            lsrData = await getBinanceLSRValue(symbol, '15m');
-        } catch (e) {
-            console.log(`❌ Erro ao buscar LSR: ${e.message}`);
-            lsrData = { lsrValue: 2.0, isRising: false, percentChange: '0.00' };
-        }
-        
-        try {
-            adxData = await getADX1h(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar ADX: ${e.message}`);
-            adxData = { value: 20, strong: false };
-        }
-        
-        try {
-            cci12hData = await getCCI12h(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar CCI 12h: ${e.message}`);
-            cci12hData = { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false };
-        }
-        
-        try {
-            cci1hData = await getCCI1h(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar CCI 1h: ${e.message}`);
-            cci1hData = { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false };
-        }
-        
-        try {
-            volume3mData = await getVolumeAnalysis3m(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar volume 3m: ${e.message}`);
-            volume3mData = { zScore: 0, isBuyerVolume: false, isSellerVolume: false };
-        }
-        
-        try {
-            volatilityData = await getVolatility(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar volatilidade: ${e.message}`);
-            volatilityData = { value: 0.5, high: false };
-        }
-        
-        try {
-            srData = await calculateSupportResistance(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar suporte/resistência: ${e.message}`);
-            srData = { 
-                supports: [{ distance: 100 }], 
-                resistances: [{ distance: 100 }],
-                currentPrice: 0
+        // Extrair dados
+        const { rsiData, fundingData, lsrData, volume3mData, cci1hData } = await (async () => {
+            // Buscar dados adicionais necessários para o score
+            const [
+                rsi,
+                funding,
+                lsr,
+                adxData,
+                cci12hData,
+                cci1h,
+                volume3m,
+                volatilityData,
+                srData,
+                ema55_1hData,
+                ema55_15mData
+            ] = await Promise.allSettled([
+                getRSI(symbol, '1h'),
+                checkFundingRate(symbol),
+                getBinanceLSRValue(symbol, '15m'),
+                getADX1h(symbol),
+                getCCI12h(symbol),
+                getCCI1h(symbol),
+                getVolumeAnalysis3m(symbol),
+                getVolatility(symbol),
+                calculateSupportResistance(symbol),
+                checkEMA55_1H(symbol),
+                checkEMA55_15M_Close(symbol)
+            ]);
+            
+            return {
+                rsiData: rsi.status === 'fulfilled' ? rsi.value : { value: 50, status: 'NEUTRAL', emoji: '⚪' },
+                fundingData: funding.status === 'fulfilled' ? funding.value : { raw: 0, emoji: '⚪', percentage: '0.00000' },
+                lsrData: lsr.status === 'fulfilled' ? lsr.value : { lsrValue: 2.0, isRising: false, percentChange: '0.00' },
+                adxData: adxData.status === 'fulfilled' ? adxData.value : { value: 20, strong: false },
+                cci12hData: cci12hData.status === 'fulfilled' ? cci12hData.value : { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false },
+                cci1hData: cci1h.status === 'fulfilled' ? cci1h.value : { cciValue: 0, cciEMA: 0, aboveEMA: false, belowEMA: false },
+                volume3mData: volume3m.status === 'fulfilled' ? volume3m.value : { zScore: 0, isBuyerVolume: false, isSellerVolume: false },
+                volatilityData: volatilityData.status === 'fulfilled' ? volatilityData.value : { value: 0.5, high: false },
+                srData: srData.status === 'fulfilled' ? srData.value : { supports: [{ distance: 100 }], resistances: [{ distance: 100 }], currentPrice: 0 },
+                ema55_1hData: ema55_1hData.status === 'fulfilled' ? ema55_1hData.value : { above: false, below: false, distancePercent: 0 },
+                ema55_15mData: ema55_15mData.status === 'fulfilled' ? ema55_15mData.value : { closedAbove: false, closedBelow: false }
             };
-        }
-        
-        try {
-            ema55_1hData = await checkEMA55_1H(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar EMA55 1h: ${e.message}`);
-            ema55_1hData = { above: false, below: false, distancePercent: 0 };
-        }
-        
-        try {
-            ema55_15mData = await checkEMA55_15M_Close(symbol);
-        } catch (e) {
-            console.log(`❌ Erro ao buscar EMA55 15m: ${e.message}`);
-            ema55_15mData = { closedAbove: false, closedBelow: false };
-        }
+        })();
         
         if (signalType === 'BULLISH') {
             // RSI (5 pontos)
@@ -1712,50 +1719,50 @@ function checkCCIAlertCooldown(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI - VERSÃO REVISADA
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI - VERSÃO REVISADA E CORRIGIDA
 // =====================================================================
 async function sendCCIAlert(symbol, alertData) {
     try {
         const now = getBrazilianDateTime();
         
-        const marketData = await getMarketData(symbol);
-        const currentPrice = marketData ? marketData.lastPrice : 0;
+        // Buscar TODOS os dados necessários para a mensagem
+        const marketData = await getAllMarketData(symbol);
+        
+        const currentPrice = marketData.marketData ? marketData.marketData.lastPrice : 0;
         
         // Formatar dados do score
         let scoreDetails = '• Suporte distante 2.49%\n• Volatilidade\n• CCI 12h\n• CCI 1h\n• Volume Volume ↑ 22.7% ≥ 10%';
         
-        // Formatar dados principais
+        // Formatar dados principais com os dados reais
         let rsiText = 'RSI 1h: N/A';
         let fundingText = 'Funding: N/A';
         let lsrText = 'LSR: N/A';
         let volume3mText = 'Volume 3m: N/A';
         let cci1hText = 'CCI 1h: N/A';
         
-        // Usar dados do score calculado
-        const details = alertData.score.details;
-        
-        if (details.rsi && details.rsi.value) {
-            rsiText = `RSI 1h: ${details.rsi.value.toFixed(1)} ${details.rsi.emoji || '⚪'}`;
+        // Usar os dados buscados
+        if (marketData.rsi && marketData.rsi.value) {
+            rsiText = `RSI 1h: ${marketData.rsi.value.toFixed(1)} ${marketData.rsi.emoji || '⚪'}`;
         }
         
-        if (details.funding && details.funding.percentage) {
-            fundingText = `Funding: ${details.funding.emoji || '⚪'} ${details.funding.percentage}%`;
+        if (marketData.funding && marketData.funding.percentage) {
+            fundingText = `Funding: ${marketData.funding.emoji || '⚪'} ${marketData.funding.percentage}%`;
         }
         
-        if (details.lsr && details.lsr.lsrValue !== undefined) {
-            const lsr = details.lsr;
+        if (marketData.lsr && marketData.lsr.lsrValue !== undefined) {
+            const lsr = marketData.lsr;
             const changeSign = lsr.isRising ? '+' : '-';
             lsrText = `LSR: ${lsr.lsrValue?.toFixed(3) || 'N/A'} ${lsr.isRising ? '⬆️' : '⬇️'} (${changeSign}${Math.abs(parseFloat(lsr.percentChange || 0)).toFixed(2)}%)`;
         }
         
-        if (details.volume3m && details.volume3m.lastVolume !== undefined) {
-            const vol = details.volume3m;
+        if (marketData.volume3m && marketData.volume3m.lastVolume !== undefined) {
+            const vol = marketData.volume3m;
             const volType = vol.isBuyerVolume ? '🟢 Comprador' : (vol.isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro');
             volume3mText = `Volume 3m: ${(vol.lastVolume / 1000).toFixed(1)}k (Z:${vol.zScore?.toFixed(2) || '0.00'}) ${volType}`;
         }
         
-        if (details.cci1h && details.cci1h.cciValue !== undefined) {
-            const cci1h = details.cci1h;
+        if (marketData.cci1h && marketData.cci1h.cciValue !== undefined) {
+            const cci1h = marketData.cci1h;
             cci1hText = `CCI 1h: ${cci1h.cciValue.toFixed(2)} ${cci1h.aboveEMA ? '🟢' : (cci1h.belowEMA ? '🔴' : '⚪')}`;
         }
         
