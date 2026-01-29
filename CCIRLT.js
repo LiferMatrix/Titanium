@@ -301,6 +301,7 @@ if (!globalThis.fetch) {
 const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
 const TELEGRAM_CHAT_ID = '-1002554953979';
 
+
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
 
@@ -2056,28 +2057,21 @@ ${resistancesText}
 • ${volume3mText}
 • ${cci1hText}
 • ${atrText}
-
-📈 **VOLUME 1H:**
-${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}% ${alertData.volumeType.toLowerCase()})
-
-🎯 **SETUP DE OPERAÇÃO:**
-
-${alertData.type === 'BULLISH' ? '🟢 COMPRA' : '🔴 VENDA'} RECOMENDADA
-
-**ENTRADA SUGERIDA:** $${entryData.entry.toFixed(6)}
-${alertData.type === 'BULLISH' ? 
-  `• Entrada mais próxima do suporte (${entryData.distance.toFixed(2)}% do preço atual)` :
-  `• Entrada mais próxima da resistência (${entryData.distance.toFixed(2)}% do preço atual)`}
-
-**STOP LOSS ATR:** $${entryData.stopLoss.toFixed(6)}
-• Stop adaptativo de volatilidade: ${entryData.stopLossDistance.toFixed(2)}%
-
-**TAKE PROFIT:** $${entryData.takeProfit.toFixed(6)}
-• Alvo: ${entryData.takeProfitDistance.toFixed(2)}%
-
 ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} **Volume ${alertData.volumeType.toLowerCase()}** aumentando +${alertData.volumePercent.toFixed(1)}%.
 
-✨ **Titanium Matrix** ✨`;
+ **SETUP Titanium IA:**
+
+${alertData.type === 'BULLISH' ? '🟢 Operação de COMPRA' : '🔴Operação de VENDA'} 
+**ENTRADA SUGERIDA:** $${entryData.entry.toFixed(6)}
+${alertData.type === 'BULLISH' ? 
+  `• Entrada próxima do suporte (${entryData.distance.toFixed(2)}% do preço atual)` :
+  `• Entrada próxima da resistência (${entryData.distance.toFixed(2)}% do preço atual)`}
+**STOP :** $${entryData.stopLoss.toFixed(6)}
+• Stop%: ${entryData.stopLossDistance.toFixed(2)}%
+**TAKE:** $${entryData.takeProfit.toFixed(6)}
+• Alvo: ${entryData.takeProfitDistance.toFixed(2)}%
+
+✨ **Titanium Matrix by @J4Rviz ** ✨`;
 
         console.log('📤 Tentando enviar mensagem para Telegram...');
         
