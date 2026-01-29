@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFA';
-const TELEGRAM_CHAT_ID = '-100197';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -188,7 +188,7 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 82;       // ↑ de 70 (filtro mais rigoroso)
+const QUALITY_THRESHOLD = 77;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
     volume: 25,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 4,
