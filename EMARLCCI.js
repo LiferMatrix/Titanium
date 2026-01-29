@@ -298,8 +298,8 @@ if (!globalThis.fetch) {
 }
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVA';
+const TELEGRAM_CHAT_ID = '-1001997';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
