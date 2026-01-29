@@ -238,12 +238,49 @@ try {
                     return Array(20).fill(20); // Valor padrão
                 }
             }
+        },
+        ATR: {
+            calculate: ({ high, low, close, period }) => {
+                try {
+                    if (!high || !low || !close || high.length < period) return [];
+                    
+                    const result = [];
+                    const trValues = [];
+                    
+                    for (let i = 0; i < high.length; i++) {
+                        let tr = 0;
+                        if (i === 0) {
+                            tr = high[i] - low[i];
+                        } else {
+                            const hl = high[i] - low[i];
+                            const hc = Math.abs(high[i] - close[i - 1]);
+                            const lc = Math.abs(low[i] - close[i - 1]);
+                            tr = Math.max(hl, hc, lc);
+                        }
+                        trValues.push(tr);
+                    }
+                    
+                    // Calcular ATR
+                    for (let i = period - 1; i < trValues.length; i++) {
+                        let sum = 0;
+                        for (let j = i - period + 1; j <= i; j++) {
+                            sum += trValues[j];
+                        }
+                        result.push(sum / period);
+                    }
+                    
+                    return result;
+                } catch (error) {
+                    console.log('⚠️ Erro no fallback ATR:', error.message);
+                    return [];
+                }
+            }
         }
     };
     console.log('✅ Fallback para indicadores técnicos configurado');
 }
 
-const { CCI, EMA, RSI, ADX } = technicalIndicators;
+const { CCI, EMA, RSI, ADX, ATR } = technicalIndicators;
 
 // =====================================================================
 // 🛡️ FALLBACK PARA FETCH GLOBAL
@@ -261,8 +298,8 @@ if (!globalThis.fetch) {
 }
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVxdg';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -281,6 +318,7 @@ const volume3mCache = {};
 const volatilityCache = {};
 const ema55Cache = {};
 const ema55_15mCache = {};
+const atrCache = {};
 const CANDLE_CACHE_TTL = 45000;
 const MARKET_DATA_CACHE_TTL = 30000;
 const LSR_CACHE_TTL = 30000;
@@ -294,6 +332,7 @@ const VOLUME3M_CACHE_TTL = 60000;
 const VOLATILITY_CACHE_TTL = 60000;
 const EMA55_CACHE_TTL = 30000;
 const EMA55_15M_CACHE_TTL = 30000;
+const ATR_CACHE_TTL = 60000;
 const MAX_CACHE_AGE = 10 * 60 * 1000;
 
 // =====================================================================
@@ -694,6 +733,58 @@ async function checkFundingRate(symbol) {
             emoji: '⚪',
             text: 'Indisponível',
             percentage: '0.00000'
+        };
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA CALCULAR ATR (Average True Range)
+// =====================================================================
+async function calculateATR(symbol, period = 14) {
+    try {
+        const cacheKey = `atr_${symbol}_${period}`;
+        const now = Date.now();
+        
+        if (atrCache[cacheKey] && now - atrCache[cacheKey].timestamp < ATR_CACHE_TTL) {
+            return atrCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '1d', period + 20);
+        if (candles.length < period + 5) return null;
+        
+        const high = candles.map(c => c.high);
+        const low = candles.map(c => c.low);
+        const close = candles.map(c => c.close);
+        
+        const atrValues = ATR.calculate({
+            high: high,
+            low: low,
+            close: close,
+            period: period
+        });
+        
+        if (!atrValues || atrValues.length === 0) return null;
+        
+        const currentATR = atrValues[atrValues.length - 1];
+        const currentPrice = close[close.length - 1];
+        const atrPercent = (currentATR / currentPrice) * 100;
+        
+        const result = {
+            value: currentATR,
+            percent: atrPercent,
+            stopDistance: currentATR * 1.5, // Stop adaptativo baseado no ATR
+            formatted: `ATR: ${currentATR.toFixed(6)} (${atrPercent.toFixed(2)}%)`
+        };
+        
+        atrCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro ATR ${symbol}: ${error.message}`);
+        return {
+            value: 0,
+            percent: 0,
+            stopDistance: 0,
+            formatted: 'ATR: N/A'
         };
     }
 }
@@ -1137,11 +1228,11 @@ async function calculateSupportResistance(symbol) {
             return supportResistanceCache[cacheKey].data;
         }
         
-        const candles = await getCandlesCached(symbol, '1d', 20);
-        if (candles.length < 10) {
+        const candles = await getCandlesCached(symbol, '1d', 30);
+        if (candles.length < 15) {
             return {
-                supports: [{ level: 'S1', value: 0, distance: 100 }],
-                resistances: [{ level: 'R1', value: 0, distance: 100 }],
+                supports: [],
+                resistances: [],
                 currentPrice: 0
             };
         }
@@ -1149,35 +1240,55 @@ async function calculateSupportResistance(symbol) {
         const marketData = await getMarketData(symbol);
         if (!marketData) {
             return {
-                supports: [{ level: 'S1', value: 0, distance: 100 }],
-                resistances: [{ level: 'R1', value: 0, distance: 100 }],
+                supports: [],
+                resistances: [],
                 currentPrice: 0
             };
         }
         
         const currentPrice = marketData.lastPrice;
         
-        const recentCandle = candles[candles.length - 1];
-        const pivot = (recentCandle.high + recentCandle.low + recentCandle.close) / 3;
+        // Identificar topos e fundos
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
         
-        const r1 = (2 * pivot) - recentCandle.low;
-        const r2 = pivot + (recentCandle.high - recentCandle.low);
-        const s1 = (2 * pivot) - recentCandle.high;
-        const s2 = pivot - (recentCandle.high - recentCandle.low);
+        // Encontrar resistências (topos)
+        const resistances = [];
+        for (let i = 2; i < highs.length - 2; i++) {
+            if (highs[i] > highs[i-1] && highs[i] > highs[i-2] && 
+                highs[i] > highs[i+1] && highs[i] > highs[i+2]) {
+                resistances.push({
+                    level: `R${resistances.length + 1}`,
+                    value: highs[i],
+                    distance: Math.abs((highs[i] - currentPrice) / currentPrice * 100)
+                });
+            }
+        }
+        
+        // Encontrar suportes (fundos)
+        const supports = [];
+        for (let i = 2; i < lows.length - 2; i++) {
+            if (lows[i] < lows[i-1] && lows[i] < lows[i-2] && 
+                lows[i] < lows[i+1] && lows[i] < lows[i+2]) {
+                supports.push({
+                    level: `S${supports.length + 1}`,
+                    value: lows[i],
+                    distance: Math.abs((lows[i] - currentPrice) / currentPrice * 100)
+                });
+            }
+        }
+        
+        // Ordenar por proximidade
+        supports.sort((a, b) => a.distance - b.distance);
+        resistances.sort((a, b) => a.distance - b.distance);
+        
+        // Pegar os 2 mais próximos de cada
+        const nearestSupports = supports.slice(0, 3);
+        const nearestResistances = resistances.slice(0, 3);
         
         const result = {
-            pivot: {
-                value: pivot,
-                distance: Math.abs((pivot - currentPrice) / currentPrice * 100)
-            },
-            resistances: [
-                { level: 'R1', value: r1, distance: Math.abs((r1 - currentPrice) / currentPrice * 100) },
-                { level: 'R2', value: r2, distance: Math.abs((r2 - currentPrice) / currentPrice * 100) }
-            ].filter(r => r.value > 0),
-            supports: [
-                { level: 'S1', value: s1, distance: Math.abs((s1 - currentPrice) / currentPrice * 100) },
-                { level: 'S2', value: s2, distance: Math.abs((s2 - currentPrice) / currentPrice * 100) }
-            ].filter(s => s.value > 0),
+            supports: nearestSupports,
+            resistances: nearestResistances,
             currentPrice: currentPrice
         };
         
@@ -1188,8 +1299,8 @@ async function calculateSupportResistance(symbol) {
     } catch (error) {
         console.log(`⚠️ Erro ao calcular suporte/resistência ${symbol}: ${error.message}`);
         return {
-            supports: [{ level: 'S1', value: 0, distance: 100 }],
-            resistances: [{ level: 'R1', value: 0, distance: 100 }],
+            supports: [],
+            resistances: [],
             currentPrice: 0
         };
     }
@@ -1209,14 +1320,18 @@ async function getAllMarketData(symbol) {
             fundingData,
             lsrData,
             volume3mData,
-            cci1hData
+            cci1hData,
+            atrData,
+            srData
         ] = await Promise.allSettled([
             getMarketData(symbol),
             getRSI(symbol, '1h'),
             checkFundingRate(symbol),
             getBinanceLSRValue(symbol, '15m'),
             getVolumeAnalysis3m(symbol),
-            getCCI1h(symbol)
+            getCCI1h(symbol),
+            calculateATR(symbol),
+            calculateSupportResistance(symbol)
         ]);
         
         return {
@@ -1225,7 +1340,9 @@ async function getAllMarketData(symbol) {
             funding: fundingData.status === 'fulfilled' ? fundingData.value : { raw: 0, emoji: '⚪', percentage: '0.00000' },
             lsr: lsrData.status === 'fulfilled' ? lsrData.value : { lsrValue: 0, isRising: false, percentChange: '0.00' },
             volume3m: volume3mData.status === 'fulfilled' ? volume3mData.value : { lastVolume: 0, zScore: 0, isBuyerVolume: false, isSellerVolume: false },
-            cci1h: cci1hData.status === 'fulfilled' ? cci1hData.value : { cciValue: 0, aboveEMA: false, belowEMA: false }
+            cci1h: cci1hData.status === 'fulfilled' ? cci1hData.value : { cciValue: 0, aboveEMA: false, belowEMA: false },
+            atr: atrData.status === 'fulfilled' ? atrData.value : { stopDistance: 0, percent: 0 },
+            sr: srData.status === 'fulfilled' ? srData.value : { supports: [], resistances: [], currentPrice: 0 }
         };
     } catch (error) {
         console.log(`⚠️ Erro ao buscar dados para ${symbol}: ${error.message}`);
@@ -1235,7 +1352,9 @@ async function getAllMarketData(symbol) {
             funding: { raw: 0, emoji: '⚪', percentage: '0.00000' },
             lsr: { lsrValue: 0, isRising: false, percentChange: '0.00' },
             volume3m: { lastVolume: 0, zScore: 0, isBuyerVolume: false, isSellerVolume: false },
-            cci1h: { cciValue: 0, aboveEMA: false, belowEMA: false }
+            cci1h: { cciValue: 0, aboveEMA: false, belowEMA: false },
+            atr: { stopDistance: 0, percent: 0 },
+            sr: { supports: [], resistances: [], currentPrice: 0 }
         };
     }
 }
@@ -1694,6 +1813,125 @@ async function calculateCCIDaily(symbol) {
 }
 
 // =====================================================================
+// 🆕 FUNÇÃO PARA CALCULAR ENTRADA IDEAL BASEADA NA VOLATILIDADE
+// =====================================================================
+function calculateEntryPrice(signalType, srData, atrData, currentPrice) {
+    try {
+        if (!srData || !atrData) {
+            return {
+                entry: currentPrice,
+                stopLoss: currentPrice * 0.98,
+                takeProfit: currentPrice * 1.02,
+                distance: 0
+            };
+        }
+
+        let entryPrice = currentPrice;
+        let stopLoss = currentPrice;
+        let takeProfit = currentPrice;
+        
+        // Calcular baseado no tipo de sinal
+        if (signalType === 'BULLISH') {
+            // Para compra: entrada mais perto do suporte
+            if (srData.supports && srData.supports.length > 0) {
+                const nearestSupport = srData.supports[0];
+                const distanceToSupport = Math.abs(nearestSupport.value - currentPrice);
+                
+                // Ajustar entrada baseado na volatilidade (ATR)
+                const atrOffset = atrData.value * 0.3; // 30% do ATR
+                
+                // Se muito distante do suporte, usar uma entrada mais conservadora
+                if (distanceToSupport > atrData.value * 2) {
+                    entryPrice = currentPrice - atrOffset;
+                } else {
+                    // Mais próximo do suporte, mas com um pequeno buffer
+                    entryPrice = Math.max(
+                        nearestSupport.value + (atrData.value * 0.1), // 10% do ATR acima do suporte
+                        currentPrice - (atrData.value * 0.5) // Ou 50% do ATR abaixo do preço atual
+                    );
+                }
+                
+                // Stop loss abaixo do suporte mais próximo
+                if (srData.supports.length > 1) {
+                    const secondSupport = srData.supports[1];
+                    stopLoss = secondSupport.value - (atrData.value * 0.5);
+                } else {
+                    stopLoss = nearestSupport.value - (atrData.value * 1.5);
+                }
+                
+                // Take profit baseado na resistência mais próxima
+                if (srData.resistances && srData.resistances.length > 0) {
+                    const nearestResistance = srData.resistances[0];
+                    takeProfit = nearestResistance.value - (atrData.value * 0.3);
+                } else {
+                    takeProfit = entryPrice + (atrData.value * 2); // 2x ATR
+                }
+            }
+        } else if (signalType === 'BEARISH') {
+            // Para venda: entrada mais perto da resistência
+            if (srData.resistances && srData.resistances.length > 0) {
+                const nearestResistance = srData.resistances[0];
+                const distanceToResistance = Math.abs(nearestResistance.value - currentPrice);
+                
+                // Ajustar entrada baseado na volatilidade (ATR)
+                const atrOffset = atrData.value * 0.3; // 30% do ATR
+                
+                // Se muito distante da resistência, usar uma entrada mais conservadora
+                if (distanceToResistance > atrData.value * 2) {
+                    entryPrice = currentPrice + atrOffset;
+                } else {
+                    // Mais próximo da resistência, mas com um pequeno buffer
+                    entryPrice = Math.min(
+                        nearestResistance.value - (atrData.value * 0.1), // 10% do ATR abaixo da resistência
+                        currentPrice + (atrData.value * 0.5) // Ou 50% do ATR acima do preço atual
+                    );
+                }
+                
+                // Stop loss acima da resistência mais próxima
+                if (srData.resistances.length > 1) {
+                    const secondResistance = srData.resistances[1];
+                    stopLoss = secondResistance.value + (atrData.value * 0.5);
+                } else {
+                    stopLoss = nearestResistance.value + (atrData.value * 1.5);
+                }
+                
+                // Take profit baseado no suporte mais próximo
+                if (srData.supports && srData.supports.length > 0) {
+                    const nearestSupport = srData.supports[0];
+                    takeProfit = nearestSupport.value + (atrData.value * 0.3);
+                } else {
+                    takeProfit = entryPrice - (atrData.value * 2); // 2x ATR
+                }
+            }
+        }
+        
+        // Garantir que os valores são válidos
+        entryPrice = Math.max(entryPrice, 0.000001);
+        stopLoss = Math.max(stopLoss, 0.000001);
+        takeProfit = Math.max(takeProfit, 0.000001);
+        
+        const distancePercent = Math.abs((entryPrice - currentPrice) / currentPrice * 100);
+        
+        return {
+            entry: entryPrice,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            distance: distancePercent,
+            stopLossDistance: Math.abs((stopLoss - entryPrice) / entryPrice * 100),
+            takeProfitDistance: Math.abs((takeProfit - entryPrice) / entryPrice * 100)
+        };
+    } catch (error) {
+        console.log(`⚠️ Erro calcular entrada: ${error.message}`);
+        return {
+            entry: currentPrice,
+            stopLoss: currentPrice * 0.98,
+            takeProfit: currentPrice * 1.02,
+            distance: 0
+        };
+    }
+}
+
+// =====================================================================
 // 🆕 FUNÇÃO PARA VERIFICAR COOLDOWN DE ALERTA CCI
 // =====================================================================
 function checkCCIAlertCooldown(symbol) {
@@ -1719,19 +1957,46 @@ function checkCCIAlertCooldown(symbol) {
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI - VERSÃO REVISADA E CORRIGIDA
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI - VERSÃO COMPLETA COM NOVAS INFORMAÇÕES
 // =====================================================================
 async function sendCCIAlert(symbol, alertData) {
     try {
         const now = getBrazilianDateTime();
         
         // Buscar TODOS os dados necessários para a mensagem
-        const marketData = await getAllMarketData(symbol);
+        const allData = await getAllMarketData(symbol);
         
-        const currentPrice = marketData.marketData ? marketData.marketData.lastPrice : 0;
+        const currentPrice = allData.marketData ? allData.marketData.lastPrice : 0;
         
-        // Formatar dados do score
-        let scoreDetails = '• Suporte distante 2.49%\n• Volatilidade\n• CCI 12h\n• CCI 1h\n• Volume Volume ↑ 22.7% ≥ 10%';
+        // Calcular entrada ideal
+        const entryData = calculateEntryPrice(
+            alertData.type,
+            allData.sr,
+            allData.atr,
+            currentPrice
+        );
+        
+        // Formatar suportes e resistências
+        let supportsText = 'Suportes: N/A';
+        let resistancesText = 'Resistências: N/A';
+        
+        if (allData.sr && allData.sr.supports && allData.sr.supports.length > 0) {
+            supportsText = 'Suportes:\n';
+            allData.sr.supports.forEach((s, i) => {
+                if (i < 3) { // Mostrar até 3 suportes
+                    supportsText += `S${i+1}: $${s.value.toFixed(6)} (${s.distance.toFixed(2)}%)\n`;
+                }
+            });
+        }
+        
+        if (allData.sr && allData.sr.resistances && allData.sr.resistances.length > 0) {
+            resistancesText = 'Resistências:\n';
+            allData.sr.resistances.forEach((r, i) => {
+                if (i < 3) { // Mostrar até 3 resistências
+                    resistancesText += `R${i+1}: $${r.value.toFixed(6)} (${r.distance.toFixed(2)}%)\n`;
+                }
+            });
+        }
         
         // Formatar dados principais com os dados reais
         let rsiText = 'RSI 1h: N/A';
@@ -1739,53 +2004,80 @@ async function sendCCIAlert(symbol, alertData) {
         let lsrText = 'LSR: N/A';
         let volume3mText = 'Volume 3m: N/A';
         let cci1hText = 'CCI 1h: N/A';
+        let atrText = 'ATR: N/A';
         
         // Usar os dados buscados
-        if (marketData.rsi && marketData.rsi.value) {
-            rsiText = `RSI 1h: ${marketData.rsi.value.toFixed(1)} ${marketData.rsi.emoji || '⚪'}`;
+        if (allData.rsi && allData.rsi.value) {
+            rsiText = `RSI 1h: ${allData.rsi.value.toFixed(1)} ${allData.rsi.emoji || '⚪'}`;
         }
         
-        if (marketData.funding && marketData.funding.percentage) {
-            fundingText = `Funding: ${marketData.funding.emoji || '⚪'} ${marketData.funding.percentage}%`;
+        if (allData.funding && allData.funding.percentage) {
+            fundingText = `Funding: ${allData.funding.emoji || '⚪'} ${allData.funding.percentage}%`;
         }
         
-        if (marketData.lsr && marketData.lsr.lsrValue !== undefined) {
-            const lsr = marketData.lsr;
+        if (allData.lsr && allData.lsr.lsrValue !== undefined) {
+            const lsr = allData.lsr;
             const changeSign = lsr.isRising ? '+' : '-';
             lsrText = `LSR: ${lsr.lsrValue?.toFixed(3) || 'N/A'} ${lsr.isRising ? '⬆️' : '⬇️'} (${changeSign}${Math.abs(parseFloat(lsr.percentChange || 0)).toFixed(2)}%)`;
         }
         
-        if (marketData.volume3m && marketData.volume3m.lastVolume !== undefined) {
-            const vol = marketData.volume3m;
+        if (allData.volume3m && allData.volume3m.lastVolume !== undefined) {
+            const vol = allData.volume3m;
             const volType = vol.isBuyerVolume ? '🟢 Comprador' : (vol.isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro');
             volume3mText = `Volume 3m: ${(vol.lastVolume / 1000).toFixed(1)}k (Z:${vol.zScore?.toFixed(2) || '0.00'}) ${volType}`;
         }
         
-        if (marketData.cci1h && marketData.cci1h.cciValue !== undefined) {
-            const cci1h = marketData.cci1h;
+        if (allData.cci1h && allData.cci1h.cciValue !== undefined) {
+            const cci1h = allData.cci1h;
             cci1hText = `CCI 1h: ${cci1h.cciValue.toFixed(2)} ${cci1h.aboveEMA ? '🟢' : (cci1h.belowEMA ? '🔴' : '⚪')}`;
         }
         
-        // MONTAR MENSAGEM
+        if (allData.atr && allData.atr.value) {
+            atrText = `ATR: ${allData.atr.value.toFixed(6)} (${allData.atr.percent.toFixed(2)}%)`;
+        }
+        
+        // Criar mensagem com formatação
         const message = 
 `${alertData.emoji} ${alertData.message} - ${symbol}
 ${now.date} ${now.time} Alerta ${alertData.alertNumber}
-✨ SCORE: ${alertData.score.percentage}%
-Informações:
-• Preço: $${currentPrice.toFixed(6)}
+
+📊 **SCORE: ${alertData.score.percentage}%** ${alertData.score.quality.emoji}
+
+💰 **PREÇO ATUAL:** $${currentPrice.toFixed(6)}
+
+🎯 **NÍVEIS DE SUPORTE E RESISTÊNCIA:**
+${supportsText}
+${resistancesText}
+
+⚙️ **PARÂMETROS TÉCNICOS:**
 • ${rsiText}
 • ${fundingText}
 • ${lsrText}
 • ${volume3mText}
 • ${cci1hText}
+• ${atrText}
 
-VOLUME 1H:
+📈 **VOLUME 1H:**
 ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}% ${alertData.volumeType.toLowerCase()})
-Setup Ativado:
-${scoreDetails}
-${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volumeType.toLowerCase()} aumentando +${alertData.volumePercent.toFixed(1)}%.
 
-✨ Titanium Matrix ✨`;
+🎯 **SETUP DE OPERAÇÃO:**
+
+${alertData.type === 'BULLISH' ? '🟢 COMPRA' : '🔴 VENDA'} RECOMENDADA
+
+**ENTRADA SUGERIDA:** $${entryData.entry.toFixed(6)}
+${alertData.type === 'BULLISH' ? 
+  `• Entrada mais próxima do suporte (${entryData.distance.toFixed(2)}% do preço atual)` :
+  `• Entrada mais próxima da resistência (${entryData.distance.toFixed(2)}% do preço atual)`}
+
+**STOP LOSS ATR:** $${entryData.stopLoss.toFixed(6)}
+• Stop adaptativo de volatilidade: ${entryData.stopLossDistance.toFixed(2)}%
+
+**TAKE PROFIT:** $${entryData.takeProfit.toFixed(6)}
+• Alvo: ${entryData.takeProfitDistance.toFixed(2)}%
+
+${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} **Volume ${alertData.volumeType.toLowerCase()}** aumentando +${alertData.volumePercent.toFixed(1)}%.
+
+✨ **Titanium Matrix** ✨`;
 
         console.log('📤 Tentando enviar mensagem para Telegram...');
         
@@ -1798,8 +2090,9 @@ ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volu
             console.log(`   Alerta: ${alertData.alertNumber}`);
             console.log(`   Score: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}`);
             console.log(`   Preço: $${currentPrice.toFixed(6)}`);
-            console.log(`   CCI: ${alertData.cciValue.toFixed(2)} | EMA5: ${alertData.cciEMA.toFixed(2)}`);
-            console.log(`   Volume: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)`);
+            console.log(`   Entrada sugerida: $${entryData.entry.toFixed(6)}`);
+            console.log(`   Stop Loss ATR: $${entryData.stopLoss.toFixed(6)} (${entryData.stopLossDistance.toFixed(2)}%)`);
+            console.log(`   Take Profit: $${entryData.takeProfit.toFixed(6)} (${entryData.takeProfitDistance.toFixed(2)}%)`);
             
             // Log dos dados que estão sendo enviados
             console.log(`\n📊 DADOS ENVIADOS:`);
@@ -1808,6 +2101,7 @@ ${alertData.volumeType === 'VENDEDOR' ? '🔴' : '🟢'} Volume ${alertData.volu
             console.log(`   ${lsrText}`);
             console.log(`   ${volume3mText}`);
             console.log(`   ${cci1hText}`);
+            console.log(`   ${atrText}`);
         } else {
             console.log(`❌ Falha ao enviar alerta para ${symbol}`);
         }
@@ -2167,6 +2461,12 @@ function cleanupCaches() {
             }
         });
         
+        Object.keys(atrCache).forEach(key => {
+            if (now - atrCache[key].timestamp > 300000) {
+                delete atrCache[key];
+            }
+        });
+        
         const hourAgo = Date.now() - (60 * 60 * 1000);
         for (const [symbol, timestamp] of cciAlertCooldownMap.entries()) {
             if (timestamp < hourAgo) {
@@ -2186,21 +2486,18 @@ async function mainCCIMonitorLoop() {
 
     await cciAlertMonitor.initializeSymbols();
 
-    console.log(`\n🚨 SISTEMA DE ALERTA CCI DIÁRIO COM CONTADOR DE ALERTAS`);
+    console.log(`\n🚨 SISTEMA DE ALERTA CCI DIÁRIO COMPLETO`);
     console.log('='.repeat(80));
-    console.log(`⚙️  SISTEMA DE CONTAGEM DE ALERTAS:`);
-    console.log(`   • Contador por moeda`);
-    console.log(`   • Zera automaticamente às 21h (horário de Brasília)`);
-    console.log(`   • Se mesma moeda alertar: Alerta 1, Alerta 2, etc.`);
-    console.log(`   • Se outra moeda alertar: Começa em Alerta 1`);
+    console.log(`⚙️  FUNCIONALIDADES ADICIONADAS:`);
+    console.log(`   • Stop Loss ATR adaptativo de volatilidade`);
+    console.log(`   • Dica de entrada próxima ao suporte/resistência`);
+    console.log(`   • 2 suportes abaixo e 2 resistências acima`);
+    console.log(`   • Cálculo baseado na estrutura e volatilidade`);
     console.log('='.repeat(80));
     console.log(`📊 FORMATO DO ALERTA:`);
-    console.log(`   🔴 🤖IA análise de Venda - FFUSDT`);
-    console.log(`   28/01/2026 17:54 Alerta 1`);
-    console.log('='.repeat(80));
-    console.log(`🎯 CRITÉRIOS BASE (OBRIGATÓRIOS):`);
-    console.log(`   🟢 BULLISH: CCI cruza EMA5 PARA CIMA + vela 1h bullish + volume ↑ ≥10%`);
-    console.log(`   🔴 BEARISH: CCI cruza EMA5 PARA BAIXO + vela 1h bearish + volume ↑ ≥10%`);
+    console.log(`   🟢 🤖IA análise de Compra - BTCUSDT`);
+    console.log(`   🔴 🤖IA análise de Venda - ETHUSDT`);
+    console.log(`   Com todos os parâmetros técnicos e setup de operação`);
     console.log('='.repeat(80));
     console.log(`🤖 Iniciando monitoramento...\n`);
 
@@ -2275,13 +2572,13 @@ async function startCCIBot() {
         }
 
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 CCI ALERT SYSTEM COM CONTADOR DE ALERTAS');
+        console.log('🚀 CCI ALERT SYSTEM COMPLETO COM SUPORTE/RESISTÊNCIA');
         console.log('='.repeat(80));
         
         console.log('🔍 Iniciando sistema...');
         console.log('📊 Monitorando TODOS os pares Futures USDT da Binance');
-        console.log('🔢 Sistema de contagem de alertas ativo (reset às 21h)');
-        console.log('✨ Critérios de score escondidos na mensagem');
+        console.log('🎯 Sistema completo com suporte/resistência e ATR');
+        console.log('⚡ Entradas calculadas baseadas em volatilidade');
         console.log('='.repeat(80) + '\n');
 
         await mainCCIMonitorLoop();
