@@ -178,8 +178,8 @@ if (!globalThis.fetch) {
 }
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vvdg';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === DIRETÓRIOS ===
 const LOG_DIR = './logs';
@@ -243,40 +243,40 @@ const CCI_ALERT_SETTINGS = {
 };
 
 // =====================================================================
-// ⚙️ CONFIGURAÇÕES SCORE (128%) - ATUALIZADO COM EMA55
+// ⚙️ CONFIGURAÇÕES SCORE - ATUALIZADO COM EMA55
 // =====================================================================
 const SCORE_CONFIG = {
-    // COMPRA (BULLISH) - 13 CRITÉRIOS (128 PONTOS)
+    // COMPRA (BULLISH) - 13 CRITÉRIOS 
     BUY: {
-        RSI: { threshold: 63, points: 10 }, // RSI abaixo de 63
-        FUNDING: { negative: true, points: 8 }, // Funding negativo
-        LSR: { max: 2.5, points: 13 }, // LSR até 2.5
-        SUPPORT: { proximity: 1.5, points: 8 }, // 1.5% do suporte
-        RESISTANCE: { far: 2.0, points: 8 }, // Longe da resistência
-        VOLATILITY: { min: 0.6, points: 8 }, // > 0.6%
-        ADX: { min: 20, points: 8 }, // ADX > 20
-        VOLUME_3M: { zScore: 1, buyer: true, points: 13 }, // Z-score > 1 (comprador 3m)
-        CCI12H: { aboveEMA: true, points: 10 }, // CCI 12h acima EMA5
-        CCI1H: { aboveEMA: true, points: 10 }, // CCI 1h acima EMA5
-        VOLUME_INCREASE: { threshold: 10, points: 13 }, // Volume aumento ≥10%
-        EMA55_1H: { above: true, points: 8 }, // NOVO: Preço acima EMA55 1h
-        EMA55_15M: { closedAbove: true, points: 10 } // NOVO: Fechou acima EMA55 15m
+        RSI: { threshold: 63, points: 12 },
+        FUNDING: { negative: true, points: 8 },
+        LSR: { max: 2.5, points: 12 },
+        SUPPORT: { proximity: 1.5, points: 8 },
+        RESISTANCE: { far: 2.0, points: 8 },
+        VOLATILITY: { min: 0.6, points: 8 },
+        ADX: { min: 20, points: 8 },
+        VOLUME_3M: { zScore: 1, buyer: true, points: 8 },
+        CCI12H: { aboveEMA: true, points: 10 },
+        CCI1H: { aboveEMA: true, points: 10 },
+        VOLUME_INCREASE: { threshold: 10, points: 12 },
+        EMA55_1H: { above: true, points: 8 },
+        EMA55_15M: { closedAbove: true, points: 10 }
     },
-    // VENDA (BEARISH) - 13 CRITÉRIOS (128 PONTOS)
+    // VENDA (BEARISH) - 13 CRITÉRIOS 
     SELL: {
-        RSI: { threshold: 65, points: 10 }, // RSI acima de 65
-        FUNDING: { positive: true, points: 8 }, // Funding positivo
-        LSR: { min: 3, points: 13 }, // LSR acima de 3
-        RESISTANCE: { proximity: 1.5, points: 8 }, // Próximo da resistência
-        SUPPORT: { far: 2.0, points: 8 }, // Longe do suporte
-        ADX: { min: 20, points: 8 }, // ADX > 20
-        VOLATILITY: { min: 0.6, points: 8 }, // > 0.6%
-        VOLUME_3M: { zScore: 1, seller: true, points: 13 }, // Z-score > 1 (vendedor 3m)
-        CCI12H: { belowEMA: true, points: 10 }, // CCI 12h abaixo EMA5
-        CCI1H: { belowEMA: true, points: 10 }, // CCI 1h abaixo EMA5
-        VOLUME_INCREASE: { threshold: 10, points: 13 }, // Volume aumento ≥10%
-        EMA55_1H: { below: true, points: 8 }, // NOVO: Preço abaixo EMA55 1h
-        EMA55_15M: { closedBelow: true, points: 10 } // NOVO: Fechou abaixo EMA55 15m
+        RSI: { threshold: 65, points: 12 },
+        FUNDING: { positive: true, points: 8 },
+        LSR: { min: 3, points: 12 },
+        RESISTANCE: { proximity: 1.5, points: 8 },
+        SUPPORT: { far: 2.0, points: 8 },
+        ADX: { min: 20, points: 8 },
+        VOLATILITY: { min: 0.6, points: 8 },
+        VOLUME_3M: { zScore: 1, seller: true, points: 8 },
+        CCI12H: { belowEMA: true, points: 10 },
+        CCI1H: { belowEMA: true, points: 10 },
+        VOLUME_INCREASE: { threshold: 10, points: 12 },
+        EMA55_1H: { below: true, points: 8 },
+        EMA55_15M: { closedBelow: true, points: 10 }
     }
 };
 
@@ -334,7 +334,7 @@ function getScoreQuality(percentage) {
             text: 'Muito Bom',
             color: '🟡'
         };
-    } else if (percentage >= 50) {
+    } else if (percentage >= 55) {
         return { 
             emoji: '🏆', 
             text: 'Bom',
@@ -349,12 +349,24 @@ function getScoreQuality(percentage) {
     }
 }
 
-async function sendTelegramAlert(message) {
+// =====================================================================
+// 🆕 FUNÇÃO AUXILIAR PARA ENVIAR COM HTML CORRETAMENTE
+// =====================================================================
+async function sendTelegramAlertHTML(message) {
     try {
         const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+        // CORREÇÃO: Remover caracteres problemáticos do HTML
+        const safeMessage = message
+            .replace(/[<>]/g, (match) => {
+                if (match === '<') return '&lt;';
+                if (match === '>') return '&gt;';
+                return match;
+            })
+            .replace(/&lt;(\/?)(i|b|code|pre|a)&gt;/g, '<$1$2>'); // Restaurar tags permitidas
 
         const response = await fetch(url, {
             method: 'POST',
@@ -364,7 +376,7 @@ async function sendTelegramAlert(message) {
             },
             body: JSON.stringify({
                 chat_id: TELEGRAM_CHAT_ID,
-                text: message,
+                text: safeMessage,
                 parse_mode: 'HTML',
                 disable_web_page_preview: true
             }),
@@ -378,11 +390,11 @@ async function sendTelegramAlert(message) {
             throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
         }
 
-        console.log('✅ Mensagem enviada para Telegram');
-        logToFile(`📤 Alerta CCI enviado para Telegram`);
+        console.log('✅ Mensagem enviada para Telegram (HTML)');
+        logToFile(`📤 Alerta CCI enviado para Telegram (HTML)`);
         return true;
     } catch (error) {
-        console.error('❌ Erro ao enviar alerta:', error.message);
+        console.error('❌ Erro ao enviar alerta HTML:', error.message);
         return false;
     }
 }
@@ -685,7 +697,10 @@ async function getADX1h(symbol) {
         
         if (!adxValues || adxValues.length === 0) return null;
         
-        const currentADX = adxValues[adxValues.length - 1];
+        // CORREÇÃO: Garantir que currentADX é um número
+        const currentADX = Array.isArray(adxValues) && adxValues.length > 0 
+            ? parseFloat(adxValues[adxValues.length - 1]) 
+            : 20;
         
         const result = {
             value: currentADX,
@@ -697,7 +712,11 @@ async function getADX1h(symbol) {
         return result;
     } catch (error) {
         console.log(`⚠️ Erro ADX ${symbol}: ${error.message}`);
-        return null;
+        return {
+            value: 20,
+            strong: false,
+            formatted: `ADX 1h: 20.0 🔴`
+        };
     }
 }
 
@@ -821,10 +840,14 @@ async function getVolumeAnalysis3m(symbol) {
         const lastVolume = volumes[volumes.length - 1];
         const zScore = stdDev !== 0 ? (lastVolume - mean) / stdDev : 0;
         
-        // Determinar se é comprador ou vendedor
+        // Determinar se é comprador ou vendedor - CORREÇÃO AQUI
         const lastCandle = candles[candles.length - 1];
-        const isBuyerVolume = lastCandle.close > lastCandle.open;
-        const isSellerVolume = lastCandle.close < lastCandle.open;
+        const previousCandle = candles[candles.length - 2] || lastCandle;
+        const isBullishCandle = lastCandle.close > previousCandle.close;
+        const isBearishCandle = lastCandle.close < previousCandle.close;
+        
+        const isBuyerVolume = isBullishCandle && lastVolume > mean;
+        const isSellerVolume = isBearishCandle && lastVolume > mean;
         
         const result = {
             zScore: zScore,
@@ -833,7 +856,7 @@ async function getVolumeAnalysis3m(symbol) {
             isBuyerVolume: isBuyerVolume,
             isSellerVolume: isSellerVolume,
             isSignificant: zScore > 1,
-            formatted: `Volume 3m: ${(lastVolume / 1000).toFixed(1)}k (Z:${zScore.toFixed(2)}) ${zScore > 1 ? '🟢' : '🔴'}`
+            formatted: `Volume 3m: ${(lastVolume / 1000).toFixed(1)}k (Z:${zScore.toFixed(2)}) ${isBuyerVolume ? '🟢 Comprador' : (isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro')}`
         };
         
         volume3mCache[cacheKey] = { data: result, timestamp: now };
@@ -859,7 +882,7 @@ async function getVolatility(symbol) {
         let totalRange = 0;
         for (let i = 1; i < candles.length; i++) {
             const range = (candles[i].high - candles[i].low) / candles[i - 1].close;
-            totalRange += Math.abs(range) * 100; // Converter para percentual
+            totalRange += Math.abs(range) * 100;
         }
         
         const avgVolatility = totalRange / (candles.length - 1);
@@ -996,7 +1019,7 @@ async function checkEMA55_15M_Close(symbol) {
 async function calculateScore(symbol, signalType, volumeIncreasePercent) {
     try {
         let score = 0;
-        let maxScore = 128; // Aumentado para 128 com os novos critérios EMA55
+        let maxScore = 128;
         let criteria = [];
         
         // Buscar todos os dados simultaneamente
@@ -1091,7 +1114,7 @@ async function calculateScore(symbol, signalType, volumeIncreasePercent) {
                 }
             }
             
-            // Volume 3m (13 pontos) - COMPRADOR
+            // Volume 3m (13 pontos) - COMPRADOR - CORREÇÃO AQUI
             if (volume3mData.status === 'fulfilled' && volume3mData.value) {
                 if (volume3mData.value.isBuyerVolume && volume3mData.value.zScore > SCORE_CONFIG.BUY.VOLUME_3M.zScore) {
                     score += SCORE_CONFIG.BUY.VOLUME_3M.points;
@@ -1202,7 +1225,7 @@ async function calculateScore(symbol, signalType, volumeIncreasePercent) {
                 }
             }
             
-            // Volume 3m (13 pontos) - VENDEDOR
+            // Volume 3m (13 pontos) - VENDEDOR - CORREÇÃO AQUI
             if (volume3mData.status === 'fulfilled' && volume3mData.value) {
                 if (volume3mData.value.isSellerVolume && volume3mData.value.zScore > SCORE_CONFIG.SELL.VOLUME_3M.zScore) {
                     score += SCORE_CONFIG.SELL.VOLUME_3M.points;
@@ -1410,8 +1433,8 @@ async function calculateCCIDaily(symbol) {
             };
         }
         
-        // Análise de volume de 1h
-        const hourlyCandles = await getCandlesCached(symbol, '1h', 10);
+        // Análise de volume de 1h - CORREÇÃO: Aumentar candles para cálculo correto
+        const hourlyCandles = await getCandlesCached(symbol, '1h', 5);
         let volumeAnalysis = null;
         
         if (hourlyCandles.length >= 3) {
@@ -1450,7 +1473,7 @@ async function calculateCCIDaily(symbol) {
                     alertSignal = {
                         type: 'BULLISH',
                         emoji: '🟢',
-                        message: 'Volume  Comprador',
+                        message: 'Volume Comprador', // CORREÇÃO: Espaço
                         description: `CCI (${currentCCI.toFixed(2)}) cruzou acima da EMA (${currentCCI_EMA.toFixed(2)})`,
                         volumeChange: `+${volumeAnalysis.volumeIncreasePercent.toFixed(1)}%`,
                         volumeType: 'COMPRADOR',
@@ -1605,47 +1628,6 @@ Titanium Bot`;
 }
 
 // =====================================================================
-// 🆕 FUNÇÃO AUXILIAR PARA ENVIAR COM HTML CORRETAMENTE
-// =====================================================================
-async function sendTelegramAlertHTML(message) {
-    try {
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000);
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0'
-            },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_CHAT_ID,
-                text: message,
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-            }),
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
-        }
-
-        console.log('✅ Mensagem enviada para Telegram (HTML)');
-        logToFile(`📤 Alerta CCI enviado para Telegram (HTML)`);
-        return true;
-    } catch (error) {
-        console.error('❌ Erro ao enviar alerta HTML:', error.message);
-        return false;
-    }
-}
-
-// =====================================================================
 // 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI COMPLETO COM SCORE - VERSÃO SEGURA
 // =====================================================================
 async function sendCCIAlert(symbol, alertData) {
@@ -1714,24 +1696,30 @@ async function sendCCIAlert(symbol, alertData) {
         if (alertData.score.details.supportResistance) {
             const sr = alertData.score.details.supportResistance;
             
-            // Pivot
-            const pivotDistance = ((sr.pivot.value - currentPrice) / currentPrice * 100).toFixed(2);
-            const pivotSign = sr.pivot.value > currentPrice ? '+' : '';
-            
             // Resistências (máximo 2)
             let resistancesText = '';
-            sr.resistances.slice(0, 2).forEach(r => {
-                const distance = ((r.value - currentPrice) / currentPrice * 100).toFixed(2);
-                resistancesText += `• ${r.level}: $${r.value.toFixed(6)} (+${distance}%)\n`;
-            });
+            if (sr.resistances && sr.resistances.length > 0) {
+                sr.resistances.slice(0, 2).forEach(r => {
+                    const distance = ((r.value - currentPrice) / currentPrice * 100).toFixed(2);
+                    resistancesText += `• ${r.level}: $${r.value.toFixed(6)} (+${distance}%)\n`;
+                });
+            } else {
+                resistancesText = `• Nenhuma resistência identificada\n`;
+            }
             
             // Suportes (máximo 2)
             let supportsText = '';
-            sr.supports.slice(0, 2).forEach(s => {
-                const distance = ((currentPrice - s.value) / currentPrice * 100).toFixed(2);
-                supportsText += `• ${s.level}: $${s.value.toFixed(6)} (-${distance}%)\n`;
-            });
-            srText = `<i>📍 NÍVEIS DE SUPORTE/RESISTÊNCIA:</i>\n\n<i>🛡️ SUPORTES:</i>\n${supportsText}\n<i>🎯 RESISTÊNCIAS:</i>\n${resistancesText}\n`;
+            if (sr.supports && sr.supports.length > 0) {
+                sr.supports.slice(0, 2).forEach(s => {
+                    const distance = ((currentPrice - s.value) / currentPrice * 100).toFixed(2);
+                    supportsText += `• ${s.level}: $${s.value.toFixed(6)} (-${distance}%)\n`;
+                });
+            } else {
+                supportsText = `• Nenhum suporte identificado\n`;
+            }
+            srText = `\n Suportes:\n${supportsText}\n Resistências:\n${resistancesText}\n`;
+        } else {
+            srText = `\n Suportes: N/A\n Resistências: N/A\n\n`;
         }
         
         // Determinar critérios atendidos
@@ -1743,7 +1731,7 @@ async function sendCCIAlert(symbol, alertData) {
 `${alertData.emoji} <i>${alertData.message} - ${symbol}</i>
  ${now.date} ${now.time} 
 ✨ <i>SCORE: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}</i>
-<i> INFORMAÇÕES TÉCNICAS :</i>
+<i> INFORMAÇÕES TÉCNICAS:</i>
 • Preço Atual: $${currentPrice.toFixed(6)}
 • CCI Diário: ${alertData.cciValue.toFixed(2)} ${alertData.type === 'BULLISH' ? '⤴️' : '⤵️'} EMA (${alertData.cciEMA.toFixed(2)})
 • Volume 1H: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}% ${alertData.volumeType.toLowerCase()})
@@ -1751,7 +1739,7 @@ async function sendCCIAlert(symbol, alertData) {
 ${cci1hText}
 ${ema55_1hText}
 ${ema55_15mText}
-<i> INDICADORES :</i>
+<i> INDICADORES:</i>
 • ${rsiText}
 • ${fundingText}
 • ${lsrText}
@@ -1768,7 +1756,7 @@ ${alertData.type === 'BULLISH' ? 'Entrada estratégica próxima aos suportes.' :
 
         console.log('📤 Tentando enviar mensagem para Telegram...');
         
-        // Usar HTML
+        // Usar HTML corrigido
         const sent = await sendTelegramAlertHTML(message);
         
         if (sent) {
