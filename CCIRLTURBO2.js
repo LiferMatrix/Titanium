@@ -1,0 +1,2413 @@
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+
+// =====================================================================
+// 🛡️ FALLBACK PARA TECHNICALINDICATORS
+// =====================================================================
+let technicalIndicators;
+try {
+    technicalIndicators = require('technicalindicators');
+    console.log('✅ technicalindicators carregado com sucesso');
+} catch (error) {
+    console.error('❌ Erro ao carregar technicalindicators:', error.message);
+    console.log('⚠️ Usando fallback para indicadores técnicos');
+    
+    technicalIndicators = {
+        CCI: {
+            calculate: ({ high, low, close, period }) => {
+                try {
+                    if (!high || !low || !close || high.length < period) return [];
+                    
+                    const result = [];
+                    
+                    for (let i = period - 1; i < close.length; i++) {
+                        const typicalPrices = [];
+                        for (let j = i - period + 1; j <= i; j++) {
+                            typicalPrices.push((high[j] + low[j] + close[j]) / 3);
+                        }
+                        
+                        const sma = typicalPrices.reduce((sum, price) => sum + price, 0) / period;
+                        
+                        let meanDeviation = 0;
+                        for (let j = 0; j < typicalPrices.length; j++) {
+                            meanDeviation += Math.abs(typicalPrices[j] - sma);
+                        }
+                        meanDeviation /= period;
+                        
+                        const cci = meanDeviation !== 0 ? 
+                            (typicalPrices[typicalPrices.length - 1] - sma) / (0.015 * meanDeviation) : 0;
+                        
+                        result.push(cci);
+                    }
+                    
+                    return result;
+                } catch (error) {
+                    console.log('⚠️ Erro no fallback CCI:', error.message);
+                    return [];
+                }
+            }
+        },
+        EMA: {
+            calculate: ({ period, values }) => {
+                try {
+                    if (!values || values.length === 0) return [50];
+                    if (values.length < period) return values.map(() => values[0]);
+                    
+                    const result = [];
+                    const multiplier = 2 / (period + 1);
+                    let ema = values[0];
+                    
+                    for (let i = 0; i < values.length; i++) {
+                        if (i === 0) {
+                            ema = values[i];
+                        } else {
+                            ema = (values[i] - ema) * multiplier + ema;
+                        }
+                        result.push(ema);
+                    }
+                    return result;
+                } catch (error) {
+                    console.log('⚠️ Erro no fallback EMA:', error.message);
+                    return values || [50];
+                }
+            }
+        },
+        RSI: {
+            calculate: ({ values, period }) => {
+                try {
+                    if (!values || values.length < period + 1) return Array(values.length).fill(50);
+                    
+                    const result = [];
+                    
+                    for (let i = period; i < values.length; i++) {
+                        let gains = 0;
+                        let losses = 0;
+                        
+                        for (let j = i - period + 1; j <= i; j++) {
+                            const diff = values[j] - values[j - 1];
+                            if (diff > 0) gains += diff;
+                            else losses += Math.abs(diff);
+                        }
+                        
+                        const avgGain = gains / period;
+                        const avgLoss = losses / period;
+                        
+                        if (avgLoss === 0) {
+                            result.push(100);
+                        } else {
+                            const rs = avgGain / avgLoss;
+                            result.push(100 - (100 / (1 + rs)));
+                        }
+                    }
+                    
+                    return result.length > 0 ? result : [50];
+                } catch (error) {
+                    console.log('⚠️ Erro no fallback RSI:', error.message);
+                    return [50];
+                }
+            }
+        },
+        ADX: {
+            calculate: ({ high, low, close, period }) => {
+                try {
+                    if (!high || !low || !close || high.length < period) return [];
+                    
+                    const result = [];
+                    const atrPeriod = 14;
+                    
+                    for (let i = period - 1; i < close.length; i++) {
+                        // Implementação simplificada do ADX
+                        let plusDM = 0;
+                        let minusDM = 0;
+                        
+                        for (let j = i - period + 2; j <= i; j++) {
+                            const upMove = high[j] - high[j - 1];
+                            const downMove = low[j - 1] - low[j];
+                            
+                            if (upMove > downMove && upMove > 0) {
+                                plusDM += upMove;
+                            } else if (downMove > upMove && downMove > 0) {
+                                minusDM += downMove;
+                            }
+                        }
+                        
+                        const tr = Math.max(
+                            high[i] - low[i],
+                            Math.abs(high[i] - close[i - 1]),
+                            Math.abs(low[i] - close[i - 1])
+                        );
+                        
+                        const atr = tr; // Simplificado
+                        
+                        const plusDI = atr !== 0 ? (plusDM / atr) * 100 : 0;
+                        const minusDI = atr !== 0 ? (minusDM / atr) * 100 : 0;
+                        
+                        const dx = (plusDI + minusDI) !== 0 ? 
+                            Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100 : 0;
+                        
+                        result.push(dx);
+                    }
+                    
+                    return result;
+                } catch (error) {
+                    console.log('⚠️ Erro no fallback ADX:', error.message);
+                    return Array(20).fill(20); // Valor padrão
+                }
+            }
+        }
+    };
+    console.log('✅ Fallback para indicadores técnicos configurado');
+}
+
+const { CCI, EMA, RSI, ADX } = technicalIndicators;
+
+// =====================================================================
+// 🛡️ FALLBACK PARA FETCH GLOBAL
+// =====================================================================
+if (!globalThis.fetch) {
+    try {
+        globalThis.fetch = fetch;
+        console.log('✅ fetch configurado no globalThis');
+    } catch (error) {
+        console.error('❌ Erro ao configurar fetch:', error.message);
+        globalThis.fetch = function() {
+            return Promise.reject(new Error('Fetch não disponível'));
+        };
+    }
+}
+
+// === CONFIGURE AQUI SEU BOT E CHAT ===
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
+
+
+// === DIRETÓRIOS ===
+const LOG_DIR = './logs';
+
+// === CACHE SETTINGS ===
+const candleCache = {};
+const marketDataCache = {};
+const lsrCache = {};
+const fundingCache = {};
+const cciCache = {};
+const supportResistanceCache = {};
+const cci12hCache = {};
+const cci1hCache = {};
+const adxCache = {};
+const volume3mCache = {};
+const volatilityCache = {};
+const ema55Cache = {};
+const ema55_15mCache = {};
+const CANDLE_CACHE_TTL = 45000;
+const MARKET_DATA_CACHE_TTL = 30000;
+const LSR_CACHE_TTL = 30000;
+const FUNDING_CACHE_TTL = 30000;
+const CCI_CACHE_TTL = 300000;
+const SR_CACHE_TTL = 60000;
+const CCI12H_CACHE_TTL = 180000;
+const CCI1H_CACHE_TTL = 120000;
+const ADX_CACHE_TTL = 180000;
+const VOLUME3M_CACHE_TTL = 60000;
+const VOLATILITY_CACHE_TTL = 60000;
+const EMA55_CACHE_TTL = 30000;
+const EMA55_15M_CACHE_TTL = 30000;
+const MAX_CACHE_AGE = 10 * 60 * 1000;
+
+// =====================================================================
+// ⚙️ CONFIGURAÇÕES CCI DIÁRIO
+// =====================================================================
+const CCI_SETTINGS = {
+    period: 20,
+    emaPeriod: 5,
+    timeframe: '1d',
+    requiredCandles: 50,
+    thresholds: {
+        overbought: 100,
+        oversold: -100,
+        strongTrend: 200
+    }
+};
+
+const CCI_ALERT_SETTINGS = {
+    emaPeriod: 5,
+    timeframe: '1d',
+    volumeTimeframe: '1h',
+    requiredCandles: 50,
+    alertCooldown: 15 * 60 * 1000,
+    volumeSensitivity: 1.1,
+    alertCheckInterval: 60000,
+    minVolumeForAlert: 100000,
+    crossTolerance: 0.01,
+    maxAlertsPerHour: 10,
+    volumePercentThreshold: 10
+};
+
+// =====================================================================
+// ⚙️ CONFIGURAÇÕES SCORE - ATUALIZADO COM EMA55 E PENALIDADES DE FUNDING
+// =====================================================================
+const SCORE_CONFIG = {
+    // COMPRA (BULLISH) - 13 CRITÉRIOS 
+    BUY: {
+        RSI: { threshold: 63, points: 15 },
+        FUNDING: { negative: true, points: 4 },
+        FUNDING_PENALTY: { threshold: 0.01, points: -13 },
+        LSR: { max: 2.5, points: 13 },
+        SUPPORT: { proximity: 1.5, points: 8 },
+        RESISTANCE: { far: 2.0, points: 8 },
+        VOLATILITY: { min: 0.6, points: 8 },
+        ADX: { min: 20, points: 6 },
+        VOLUME_3M: { zScore: 1, buyer: true, points: 10 },
+        CCI12H: { aboveEMA: true, points: 10 },
+        CCI1H: { aboveEMA: true, points: 10 },
+        VOLUME_INCREASE: { threshold: 10, points: 12 },
+        EMA55_1H: { above: true, points: 8 },
+        EMA55_15M: { closedAbove: true, points: 10 }
+    },
+    // VENDA (BEARISH) - 13 CRITÉRIOS 
+    SELL: {
+        RSI: { threshold: 65, points: 15 },
+        FUNDING: { positive: true, points: 4 },
+        FUNDING_PENALTY: { threshold: -0.01, points: -13 }, 
+        LSR: { min: 3, points: 13 },
+        RESISTANCE: { proximity: 1.5, points: 10 },
+        SUPPORT: { far: 2.0, points: 10 },
+        ADX: { min: 20, points: 6 },
+        VOLATILIDADE: { min: 0.6, points: 8 },
+        VOLUME_3M: { zScore: 1, seller: true, points: 10 },
+        CCI12H: { belowEMA: true, points: 10 },
+        CCI1H: { belowEMA: true, points: 10 },
+        VOLUME_INCREASE: { threshold: 10, points: 12 },
+        EMA55_1H: { below: true, points: 8 },
+        EMA55_15M: { closedBelow: true, points: 10 }
+    }
+};
+
+// =====================================================================
+// 🆕 CONTADOR DE ALERTAS DIÁRIO
+// =====================================================================
+class DailyAlertCounter {
+    constructor() {
+        this.counters = new Map(); // Mapa: symbol_direction -> contador
+        this.lastResetDate = this.getCurrentDateBrazil();
+        this.initializeDailyReset();
+    }
+
+    // Obtém a data atual no fuso do Brasil
+    getCurrentDateBrazil() {
+        const now = new Date();
+        const offset = -3;
+        const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
+        return brazilTime.toISOString().split('T')[0]; // YYYY-MM-DD
+    }
+
+    // Verifica se é hora de resetar (21h no Brasil)
+    shouldReset() {
+        const now = new Date();
+        const offset = -3;
+        const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
+        
+        const currentDate = brazilTime.toISOString().split('T')[0];
+        const currentHour = brazilTime.getUTCHours();
+        
+        // Se mudou o dia OU são 21h, reseta
+        if (currentDate !== this.lastResetDate) {
+            return true;
+        }
+        
+        if (currentHour === 21) {
+            // Verifica se já resetou hoje às 21h
+            const lastResetHour = new Date(this.counters.get('last_reset_time') || 0);
+            if (brazilTime.getTime() - lastResetHour.getTime() > 60 * 60 * 1000) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    // Reseta todos os contadores
+    resetCounters() {
+        console.log('🔄 Resetando contadores diários de alertas (21h)...');
+        this.counters.clear();
+        this.lastResetDate = this.getCurrentDateBrazil();
+        this.counters.set('last_reset_time', Date.now());
+        console.log('✅ Contadores resetados com sucesso');
+    }
+
+    // Inicializa o sistema de reset diário
+    initializeDailyReset() {
+        // Verifica a cada minuto se precisa resetar
+        setInterval(() => {
+            if (this.shouldReset()) {
+                this.resetCounters();
+            }
+        }, 60000); // Verifica a cada minuto
+    }
+
+    // Obtém o próximo número de alerta para um símbolo e direção
+    getNextAlertNumber(symbol, direction) {
+        const key = `${symbol}_${direction}`;
+        
+        // Verifica se precisa resetar
+        if (this.shouldReset()) {
+            this.resetCounters();
+        }
+        
+        let count = this.counters.get(key) || 0;
+        count++;
+        this.counters.set(key, count);
+        
+        return count;
+    }
+
+    // Obtém o número atual do alerta sem incrementar
+    getCurrentAlertNumber(symbol, direction) {
+        const key = `${symbol}_${direction}`;
+        return this.counters.get(key) || 0;
+    }
+}
+
+// Inicializa o contador global
+const alertCounter = new DailyAlertCounter();
+
+// =====================================================================
+// 🆕 COOLDOWN PARA ALERTAS CCI
+// =====================================================================
+const cciAlertCooldownMap = new Map();
+
+// =====================================================================
+// 📊 FUNÇÕES AUXILIARES
+// =====================================================================
+function logToFile(message) {
+    try {
+        if (!fs.existsSync(LOG_DIR)) {
+            fs.mkdirSync(LOG_DIR, { recursive: true });
+        }
+
+        const logFile = path.join(LOG_DIR, `cci_alert_${new Date().toISOString().split('T')[0]}.log`);
+        const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        const logMessage = `[${timestamp}] ${message}\n`;
+
+        fs.appendFileSync(logFile, logMessage, 'utf8');
+
+    } catch (error) {
+        console.error('❌ Erro ao escrever no log:', error.message);
+    }
+}
+
+function getBrazilianDateTime() {
+    try {
+        const now = new Date();
+        const offset = -3;
+        const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
+
+        const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
+        const time = brazilTime.toISOString().split('T')[1].split('.')[0].substring(0, 5);
+
+        return { date, time, full: `${date} ${time}` };
+    } catch (error) {
+        console.error('❌ Erro em getBrazilianDateTime:', error.message);
+        return { date: '01/01/2024', time: '00:00', full: '01/01/2024 00:00' };
+    }
+}
+
+function getScoreQuality(percentage) {
+    if (percentage >= 90) {
+        return { 
+            emoji: '✨🟢✨', 
+            text: 'Excelente',
+            color: '🟢'
+        };
+    } else if (percentage >= 70) {
+        return { 
+            emoji: '🏆✨', 
+            text: 'Muito Bom',
+            color: '🟡'
+        };
+    } else if (percentage >= 55) {
+        return { 
+            emoji: '🏆', 
+            text: 'Bom',
+            color: '🟡'
+        };
+    } else {
+        return { 
+            emoji: '🔴', 
+            text: 'Fraco',
+            color: '🔴'
+        };
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO AUXILIAR PARA ENVIAR COM HTML CORRETAMENTE
+// =====================================================================
+async function sendTelegramAlertHTML(message) {
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+        // CORREÇÃO: Remover caracteres problemáticos do HTML
+        const safeMessage = message
+            .replace(/[<>]/g, (match) => {
+                if (match === '<') return '&lt;';
+                if (match === '>') return '&gt;';
+                return match;
+            })
+            .replace(/&lt;(\/?)(i|b|code|pre|a)&gt;/g, '<$1$2>'); // Restaurar tags permitidas
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
+            },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: safeMessage,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+            }),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        }
+
+        console.log('✅ Mensagem enviada para Telegram (HTML)');
+        logToFile(`📤 Alerta CCI enviado para Telegram (HTML)`);
+        return true;
+    } catch (error) {
+        console.error('❌ Erro ao enviar alerta HTML:', error.message);
+        return false;
+    }
+}
+
+// =====================================================================
+// 📊 FUNÇÕES PARA OBTER DADOS DO MERCADO
+// =====================================================================
+async function getCandlesCached(symbol, timeframe, limit = 80) {
+    try {
+        const cacheKey = `${symbol}_${timeframe}_${limit}`;
+        const now = Date.now();
+
+        if (candleCache[cacheKey] && now - candleCache[cacheKey].timestamp < CANDLE_CACHE_TTL) {
+            return candleCache[cacheKey].data;
+        }
+
+        const intervalMap = {
+            '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m',
+            '30m': '30m', '1h': '1h', '2h': '2h', '4h': '4h',
+            '12h': '12h', '1d': '1d'
+        };
+
+        const interval = intervalMap[timeframe] || '1d';
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${Math.min(limit, 100)}`;
+
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data || !Array.isArray(data)) {
+            console.log(`⚠️ Dados de candles inválidos para ${symbol}`);
+            return [];
+        }
+
+        const candles = data.map(candle => ({
+            open: parseFloat(candle[1]) || 0,
+            high: parseFloat(candle[2]) || 0,
+            low: parseFloat(candle[3]) || 0,
+            close: parseFloat(candle[4]) || 0,
+            volume: parseFloat(candle[5]) || 0,
+            quoteVolume: parseFloat(candle[7]) || 0,
+            trades: parseFloat(candle[8]) || 0,
+            time: candle[0] || Date.now()
+        }));
+
+        candleCache[cacheKey] = { data: candles, timestamp: now };
+        return candles;
+    } catch (error) {
+        console.log(`⚠️ Erro candles ${symbol}: ${error.message}`);
+        return [];
+    }
+}
+
+async function getMarketData(symbol) {
+    try {
+        const cacheKey = `market_${symbol}`;
+        const now = Date.now();
+
+        if (marketDataCache[cacheKey] && now - marketDataCache[cacheKey].timestamp < MARKET_DATA_CACHE_TTL) {
+            return marketDataCache[cacheKey].data;
+        }
+
+        const url = `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`;
+
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data) {
+            console.log(`⚠️ Dados de mercado inválidos para ${symbol}`);
+            return null;
+        }
+
+        const marketData = {
+            priceChange: parseFloat(data.priceChange) || 0,
+            priceChangePercent: parseFloat(data.priceChangePercent) || 0,
+            weightedAvgPrice: parseFloat(data.weightedAvgPrice) || 0,
+            lastPrice: parseFloat(data.lastPrice) || 0,
+            volume: parseFloat(data.volume) || 0,
+            quoteVolume: parseFloat(data.quoteVolume) || 0,
+            highPrice: parseFloat(data.highPrice) || 0,
+            lowPrice: parseFloat(data.lowPrice) || 0,
+            openPrice: parseFloat(data.openPrice) || 0,
+            prevClosePrice: parseFloat(data.prevClosePrice) || 0
+        };
+
+        marketDataCache[cacheKey] = { data: marketData, timestamp: now };
+        return marketData;
+    } catch (error) {
+        console.log(`⚠️ Erro market data ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getBinanceLSRValue(symbol, period = '15m') {
+    try {
+        const cacheKey = `binance_lsr_${symbol}_${period}`;
+        const now = Date.now();
+        
+        if (lsrCache[cacheKey] && now - lsrCache[cacheKey].timestamp < LSR_CACHE_TTL) {
+            return lsrCache[cacheKey].data;
+        }
+        
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`;
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            console.log(`⚠️ Resposta da API LSR vazia para ${symbol}.`);
+            return null;
+        }
+        
+        const latestData = data[0];
+        
+        if (!latestData.longShortRatio || !latestData.longAccount || !latestData.shortAccount) {
+            console.log(`⚠️ Estrutura de dados LSR inesperada para ${symbol}:`, latestData);
+            return null;
+        }
+        
+        const currentLSR = parseFloat(latestData.longShortRatio);
+        
+        let percentChange = '0.00';
+        let isRising = false;
+        
+        if (data.length >= 2) {
+            const previousData = data[1];
+            const previousLSR = parseFloat(previousData.longShortRatio);
+            
+            if (previousLSR !== 0) {
+                percentChange = ((currentLSR - previousLSR) / previousLSR * 100).toFixed(2);
+                isRising = currentLSR > previousLSR;
+            }
+        }
+        
+        const result = {
+            lsrValue: currentLSR,
+            longAccount: parseFloat(latestData.longAccount),
+            shortAccount: parseFloat(latestData.shortAccount),
+            percentChange: percentChange,
+            isRising: isRising,
+            timestamp: latestData.timestamp,
+            raw: latestData
+        };
+        
+        lsrCache[cacheKey] = { data: result, timestamp: now };
+        
+        console.log(`📊 Binance LSR ${symbol} (${period}): ${result.lsrValue.toFixed(3)} (${percentChange}%) ${isRising ? '⬆️' : '⬇️'}`);
+        
+        return result;
+        
+    } catch (error) {
+        console.error(`❌ Erro ao buscar LSR da Binance para ${symbol}:`, error.message);
+        return null;
+    }
+}
+
+async function checkFundingRate(symbol) {
+    try {
+        const cacheKey = `funding_${symbol}`;
+        const now = Date.now();
+        
+        if (fundingCache[cacheKey] && now - fundingCache[cacheKey].timestamp < FUNDING_CACHE_TTL) {
+            return fundingCache[cacheKey].data;
+        }
+
+        const response = await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data || data.length === 0) {
+            return { 
+                raw: 0,
+                emoji: '⚪',
+                text: 'Indisponível',
+                percentage: '0.00000'
+            };
+        }
+
+        const fundingRate = parseFloat(data[0].fundingRate) || 0;
+        
+        let fundingRateEmoji = '';
+        if (fundingRate <= -0.002) fundingRateEmoji = '🟢🟢🟢';
+        else if (fundingRate <= -0.001) fundingRateEmoji = '🟢🟢';
+        else if (fundingRate <= -0.0005) fundingRateEmoji = '🟢';
+        else if (fundingRate >= 0.001) fundingRateEmoji = '🔴🔴🔴';
+        else if (fundingRate >= 0.0003) fundingRateEmoji = '🔴🔴';
+        else if (fundingRate >= 0.0002) fundingRateEmoji = '🔴';
+        else fundingRateEmoji = '🟢';
+        
+        const fundingRateText = fundingRate !== 0
+            ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
+            : 'Indisponível';
+        
+        const result = {
+            raw: fundingRate,
+            emoji: fundingRateEmoji,
+            text: fundingRateText,
+            percentage: (fundingRate * 100).toFixed(5)
+        };
+        
+        fundingCache[cacheKey] = { data: result, timestamp: now };
+        
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro funding rate ${symbol}: ${error.message}`);
+        return { 
+            raw: 0,
+            emoji: '⚪',
+            text: 'Indisponível',
+            percentage: '0.00000'
+        };
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÕES PARA CALCULAR SCORE
+// =====================================================================
+async function getRSI(symbol, timeframe = '1h', period = 14) {
+    try {
+        const candles = await getCandlesCached(symbol, timeframe, period + 25);
+        if (candles.length < period + 10) return null;
+
+        const closes = candles.map(c => c.close);
+        
+        const rsiValues = RSI.calculate({
+            values: closes,
+            period: period
+        });
+        
+        if (!rsiValues || rsiValues.length === 0) {
+            return null;
+        }
+        
+        const currentRSI = rsiValues[rsiValues.length - 1];
+        
+        let status = 'NEUTRAL';
+        let emoji = '⚪';
+        
+        if (currentRSI >= 30 && currentRSI <= 60) {
+            status = 'ZONA DE COMPRA';
+            emoji = '🟢';
+        } 
+        else if (currentRSI >= 61 && currentRSI <= 85) {
+            status = 'ZONA DE VENDA';
+            emoji = '🔴';
+        }
+        
+        return {
+            value: currentRSI,
+            status: status,
+            emoji: emoji,
+            formatted: `${currentRSI.toFixed(1)} ${emoji} (${status})`
+        };
+    } catch (error) {
+        console.log(`⚠️ Erro RSI ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getADX1h(symbol) {
+    try {
+        const cacheKey = `adx_1h_${symbol}`;
+        const now = Date.now();
+        
+        if (adxCache[cacheKey] && now - adxCache[cacheKey].timestamp < ADX_CACHE_TTL) {
+            return adxCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '1h', 50);
+        if (candles.length < 30) return null;
+        
+        const high = candles.map(c => c.high);
+        const low = candles.map(c => c.low);
+        const close = candles.map(c => c.close);
+        
+        const adxValues = ADX.calculate({
+            high: high,
+            low: low,
+            close: close,
+            period: 14
+        });
+        
+        if (!adxValues || adxValues.length === 0) return null;
+        
+        // CORREÇÃO: Garantir que currentADX é um número
+        const currentADX = Array.isArray(adxValues) && adxValues.length > 0 
+            ? parseFloat(adxValues[adxValues.length - 1]) 
+            : 20;
+        
+        const result = {
+            value: currentADX,
+            strong: currentADX > 25,
+            formatted: `ADX 1h: ${currentADX.toFixed(1)} ${currentADX > 20 ? '🟢' : '🔴'}`
+        };
+        
+        adxCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro ADX ${symbol}: ${error.message}`);
+        return {
+            value: 20,
+            strong: false,
+            formatted: `ADX 1h: 20.0 🔴`
+        };
+    }
+}
+
+async function getCCI12h(symbol) {
+    try {
+        const cacheKey = `cci_12h_${symbol}`;
+        const now = Date.now();
+        
+        if (cci12hCache[cacheKey] && now - cci12hCache[cacheKey].timestamp < CCI12H_CACHE_TTL) {
+            return cci12hCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '12h', 50);
+        if (candles.length < 30) return null;
+        
+        const high = candles.map(c => c.high);
+        const low = candles.map(c => c.low);
+        const close = candles.map(c => c.close);
+        
+        const cciValues = CCI.calculate({
+            high: high,
+            low: low,
+            close: close,
+            period: 20
+        });
+        
+        if (!cciValues || cciValues.length < 10) return null;
+        
+        const cciEmaValues = EMA.calculate({
+            period: 5,
+            values: cciValues
+        });
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const currentCCI_EMA = cciEmaValues[cciEmaValues.length - 1];
+        
+        const result = {
+            cciValue: currentCCI,
+            cciEMA: currentCCI_EMA,
+            aboveEMA: currentCCI > currentCCI_EMA,
+            belowEMA: currentCCI < currentCCI_EMA,
+            formatted: `CCI 12h: ${currentCCI.toFixed(2)} ${currentCCI > currentCCI_EMA ? '🟢' : '🔴'}`
+        };
+        
+        cci12hCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro CCI 12h ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getCCI1h(symbol) {
+    try {
+        const cacheKey = `cci_1h_${symbol}`;
+        const now = Date.now();
+        
+        if (cci1hCache[cacheKey] && now - cci1hCache[cacheKey].timestamp < CCI1H_CACHE_TTL) {
+            return cci1hCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '1h', 50);
+        if (candles.length < 30) return null;
+        
+        const high = candles.map(c => c.high);
+        const low = candles.map(c => c.low);
+        const close = candles.map(c => c.close);
+        
+        const cciValues = CCI.calculate({
+            high: high,
+            low: low,
+            close: close,
+            period: 20
+        });
+        
+        if (!cciValues || cciValues.length < 10) return null;
+        
+        const cciEmaValues = EMA.calculate({
+            period: 5,
+            values: cciValues
+        });
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const currentCCI_EMA = cciEmaValues[cciEmaValues.length - 1];
+        
+        const result = {
+            cciValue: currentCCI,
+            cciEMA: currentCCI_EMA,
+            aboveEMA: currentCCI > currentCCI_EMA,
+            belowEMA: currentCCI < currentCCI_EMA,
+            formatted: `CCI 1h: ${currentCCI.toFixed(2)} ${currentCCI > currentCCI_EMA ? '🟢' : '🔴'}`
+        };
+        
+        cci1hCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro CCI 1h ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getVolumeAnalysis3m(symbol) {
+    try {
+        const cacheKey = `volume_3m_${symbol}`;
+        const now = Date.now();
+        
+        if (volume3mCache[cacheKey] && now - volume3mCache[cacheKey].timestamp < VOLUME3M_CACHE_TTL) {
+            return volume3mCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '3m', 20);
+        if (candles.length < 10) return null;
+        
+        // Calcular Z-score do volume
+        const volumes = candles.map(c => c.quoteVolume);
+        const mean = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+        const stdDev = Math.sqrt(
+            volumes.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / volumes.length
+        );
+        
+        const lastVolume = volumes[volumes.length - 1];
+        const zScore = stdDev !== 0 ? (lastVolume - mean) / stdDev : 0;
+        
+        // Determinar se é comprador ou vendedor - CORREÇÃO AQUI
+        const lastCandle = candles[candles.length - 1];
+        const previousCandle = candles[candles.length - 2] || lastCandle;
+        const isBullishCandle = lastCandle.close > previousCandle.close;
+        const isBearishCandle = lastCandle.close < previousCandle.close;
+        
+        const isBuyerVolume = isBullishCandle && lastVolume > mean;
+        const isSellerVolume = isBearishCandle && lastVolume > mean;
+        
+        const result = {
+            zScore: zScore,
+            lastVolume: lastVolume,
+            meanVolume: mean,
+            isBuyerVolume: isBuyerVolume,
+            isSellerVolume: isSellerVolume,
+            isSignificant: zScore > 1,
+            formatted: `Volume 3m: ${(lastVolume / 1000).toFixed(1)}k (Z:${zScore.toFixed(2)}) ${isBuyerVolume ? '🟢 Comprador' : (isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro')}`
+        };
+        
+        volume3mCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro volume 3m ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getVolatility(symbol) {
+    try {
+        const cacheKey = `volatility_${symbol}`;
+        const now = Date.now();
+        
+        if (volatilityCache[cacheKey] && now - volatilityCache[cacheKey].timestamp < VOLATILITY_CACHE_TTL) {
+            return volatilityCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '15m', 20);
+        if (candles.length < 10) return null;
+        
+        let totalRange = 0;
+        for (let i = 1; i < candles.length; i++) {
+            const range = (candles[i].high - candles[i].low) / candles[i - 1].close;
+            totalRange += Math.abs(range) * 100;
+        }
+        
+        const avgVolatility = totalRange / (candles.length - 1);
+        
+        const result = {
+            value: avgVolatility,
+            high: avgVolatility > 0.6,
+            formatted: `Volatilidade: ${avgVolatility.toFixed(2)}% ${avgVolatility > 0.6 ? '🟢' : '🔴'}`
+        };
+        
+        volatilityCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro volatilidade ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA VERIFICAR EMA55 1H
+// =====================================================================
+async function checkEMA55_1H(symbol) {
+    try {
+        const cacheKey = `ema55_1h_${symbol}`;
+        const now = Date.now();
+        
+        if (ema55Cache[cacheKey] && now - ema55Cache[cacheKey].timestamp < EMA55_CACHE_TTL) {
+            return ema55Cache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '1h', 60);
+        if (candles.length < 55) return null;
+        
+        const closes = candles.map(c => c.close);
+        
+        const ema55Values = EMA.calculate({
+            period: 55,
+            values: closes
+        });
+        
+        if (!ema55Values || ema55Values.length === 0) return null;
+        
+        const currentEMA55 = ema55Values[ema55Values.length - 1];
+        const lastClose = closes[closes.length - 1];
+        
+        const priceAboveEMA = lastClose > currentEMA55;
+        const priceBelowEMA = lastClose < currentEMA55;
+        
+        const distancePercent = ((lastClose - currentEMA55) / currentEMA55) * 100;
+        
+        const result = {
+            emaValue: currentEMA55,
+            currentPrice: lastClose,
+            above: priceAboveEMA,
+            below: priceBelowEMA,
+            distancePercent: distancePercent,
+            formatted: `EMA55 1h: $${currentEMA55.toFixed(6)} | Preço: $${lastClose.toFixed(6)} ${priceAboveEMA ? '🟢 Acima' : '🔴 Abaixo'} (${distancePercent.toFixed(2)}%)`
+        };
+        
+        ema55Cache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro EMA55 1h ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA VERIFICAR FECHAMENTO EM RELAÇÃO À EMA55 15M
+// =====================================================================
+async function checkEMA55_15M_Close(symbol) {
+    try {
+        const cacheKey = `ema55_15m_close_${symbol}`;
+        const now = Date.now();
+        
+        if (ema55_15mCache[cacheKey] && now - ema55_15mCache[cacheKey].timestamp < EMA55_15M_CACHE_TTL) {
+            return ema55_15mCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '15m', 60);
+        if (candles.length < 55) return null;
+        
+        const closes = candles.map(c => c.close);
+        
+        const ema55Values = EMA.calculate({
+            period: 55,
+            values: closes
+        });
+        
+        if (!ema55Values || ema55Values.length === 0) return null;
+        
+        const currentEMA55 = ema55Values[ema55Values.length - 1];
+        const lastCandle = candles[candles.length - 1];
+        const previousCandle = candles[candles.length - 2];
+        
+        // Verificar se a vela atual fechou acima/abaixo da EMA55
+        const currentCloseAboveEMA = lastCandle.close > currentEMA55;
+        const currentCloseBelowEMA = lastCandle.close < currentEMA55;
+        
+        // Verificar se a vela anterior fechou abaixo/acima (para verificar cruzamento)
+        const previousClose = previousCandle ? previousCandle.close : lastCandle.close;
+        const previousCloseAboveEMA = previousClose > currentEMA55;
+        const previousCloseBelowEMA = previousClose < currentEMA55;
+        
+        // Verificar cruzamento
+        const crossedAbove = previousCloseBelowEMA && currentCloseAboveEMA;
+        const crossedBelow = previousCloseAboveEMA && currentCloseBelowEMA;
+        
+        const result = {
+            emaValue: currentEMA55,
+            currentClose: lastCandle.close,
+            currentOpen: lastCandle.open,
+            currentHigh: lastCandle.high,
+            currentLow: lastCandle.low,
+            closedAbove: currentCloseAboveEMA,
+            closedBelow: currentCloseBelowEMA,
+            crossedAbove: crossedAbove,
+            crossedBelow: crossedBelow,
+            distancePercent: ((lastCandle.close - currentEMA55) / currentEMA55) * 100,
+            formatted: `Fechamento 15m: $${lastCandle.close.toFixed(6)} | EMA55: $${currentEMA55.toFixed(6)} ${currentCloseAboveEMA ? '🟢 Acima' : '🔴 Abaixo'}`
+        };
+        
+        ema55_15mCache[cacheKey] = { data: result, timestamp: now };
+        return result;
+    } catch (error) {
+        console.log(`⚠️ Erro EMA55 15m close ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA CALCULAR SCORE - ATUALIZADA COM EMA55 E PENALIDADES DE FUNDING
+// =====================================================================
+async function calculateScore(symbol, signalType, volumeIncreasePercent) {
+    try {
+        let score = 0;
+        let maxScore = 128;
+        let criteria = [];
+        
+        // Buscar todos os dados simultaneamente
+        const [
+            rsiData,
+            fundingData,
+            lsrData,
+            adxData,
+            cci12hData,
+            cci1hData,
+            volume3mData,
+            volatilityData,
+            srData,
+            ema55_1hData,
+            ema55_15mData
+        ] = await Promise.allSettled([
+            getRSI(symbol, '1h'),
+            checkFundingRate(symbol),
+            getBinanceLSRValue(symbol, '15m'),
+            getADX1h(symbol),
+            getCCI12h(symbol),
+            getCCI1h(symbol),
+            getVolumeAnalysis3m(symbol),
+            getVolatility(symbol),
+            calculateSupportResistance(symbol),
+            checkEMA55_1H(symbol),
+            checkEMA55_15M_Close(symbol)
+        ]);
+        
+        if (signalType === 'BULLISH') {
+            // RSI (8 pontos)
+            if (rsiData.status === 'fulfilled' && rsiData.value) {
+                if (rsiData.value.value < SCORE_CONFIG.BUY.RSI.threshold) {
+                    score += SCORE_CONFIG.BUY.RSI.points;
+                    criteria.push(`RSI ${rsiData.value.value.toFixed(1)} < ${SCORE_CONFIG.BUY.RSI.threshold} (+${SCORE_CONFIG.BUY.RSI.points})`);
+                }
+            }
+            
+            // Funding Rate (8 pontos)
+            if (fundingData.status === 'fulfilled' && fundingData.value) {
+                if (fundingData.value.raw < 0) {
+                    score += SCORE_CONFIG.BUY.FUNDING.points;
+                    criteria.push(`Funding negativo ${fundingData.value.percentage}% (+${SCORE_CONFIG.BUY.FUNDING.points})`);
+                }
+            }
+            
+            // PENALIDADE: Funding muito positivo (> 0.01) em alerta de volume comprador
+            if (fundingData.status === 'fulfilled' && fundingData.value) {
+                if (fundingData.value.raw > SCORE_CONFIG.BUY.FUNDING_PENALTY.threshold) {
+                    score += SCORE_CONFIG.BUY.FUNDING_PENALTY.points;
+                    criteria.push(`PENALIDADE: Funding muito positivo > ${(SCORE_CONFIG.BUY.FUNDING_PENALTY.threshold * 100).toFixed(3)}% (${SCORE_CONFIG.BUY.FUNDING_PENALTY.points} pts)`);
+                }
+            }
+            
+            // LSR (13 pontos)
+            if (lsrData.status === 'fulfilled' && lsrData.value) {
+                if (lsrData.value.lsrValue <= SCORE_CONFIG.BUY.LSR.max) {
+                    score += SCORE_CONFIG.BUY.LSR.points;
+                    criteria.push(`LSR ${lsrData.value.lsrValue.toFixed(2)} <= ${SCORE_CONFIG.BUY.LSR.max} (+${SCORE_CONFIG.BUY.LSR.points})`);
+                }
+            }
+            
+            // Proximidade do suporte (8 pontos)
+            if (srData.status === 'fulfilled' && srData.value) {
+                const supports = srData.value.supports;
+                if (supports && supports.length > 0) {
+                    const nearestSupport = Math.min(...supports.map(s => s.distance));
+                    if (nearestSupport <= SCORE_CONFIG.BUY.SUPPORT.proximity) {
+                        score += SCORE_CONFIG.BUY.SUPPORT.points;
+                        criteria.push(`Suporte próximo ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.BUY.SUPPORT.points})`);
+                    }
+                }
+            }
+            
+            // Distância da resistência (8 pontos)
+            if (srData.status === 'fulfilled' && srData.value) {
+                const resistances = srData.value.resistances;
+                if (resistances && resistances.length > 0) {
+                    const nearestResistance = Math.min(...resistances.map(r => r.distance));
+                    if (nearestResistance >= SCORE_CONFIG.BUY.RESISTANCE.far) {
+                        score += SCORE_CONFIG.BUY.RESISTANCE.points;
+                        criteria.push(`Resistência distante ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.BUY.RESISTANCE.points})`);
+                    }
+                }
+            }
+            
+            // Volatilidade (8 pontos)
+            if (volatilityData.status === 'fulfilled' && volatilityData.value) {
+                if (volatilityData.value.value > SCORE_CONFIG.BUY.VOLATILITY.min) {
+                    score += SCORE_CONFIG.BUY.VOLATILITY.points;
+                    criteria.push(`Volatilidade ${volatilityData.value.value.toFixed(2)}% > ${SCORE_CONFIG.BUY.VOLATILITY.min}% (+${SCORE_CONFIG.BUY.VOLATILITY.points})`);
+                }
+            }
+            
+            // ADX (8 pontos)
+            if (adxData.status === 'fulfilled' && adxData.value) {
+                if (adxData.value.value > SCORE_CONFIG.BUY.ADX.min) {
+                    score += SCORE_CONFIG.BUY.ADX.points;
+                    criteria.push(`ADX ${adxData.value.value.toFixed(1)} > ${SCORE_CONFIG.BUY.ADX.min} (+${SCORE_CONFIG.BUY.ADX.points})`);
+                }
+            }
+            
+            // Volume 3m (13 pontos) - COMPRADOR - CORREÇÃO AQUI
+            if (volume3mData.status === 'fulfilled' && volume3mData.value) {
+                if (volume3mData.value.isBuyerVolume && volume3mData.value.zScore > SCORE_CONFIG.BUY.VOLUME_3M.zScore) {
+                    score += SCORE_CONFIG.BUY.VOLUME_3M.points;
+                    criteria.push(`Volume comprador Z:${volume3mData.value.zScore.toFixed(2)} > ${SCORE_CONFIG.BUY.VOLUME_3M.zScore} (+${SCORE_CONFIG.BUY.VOLUME_3M.points})`);
+                }
+            }
+            
+            // CCI 12h (13 pontos)
+            if (cci12hData.status === 'fulfilled' && cci12hData.value) {
+                if (cci12hData.value.aboveEMA) {
+                    score += SCORE_CONFIG.BUY.CCI12H.points;
+                    criteria.push(`CCI 12h acima EMA (+${SCORE_CONFIG.BUY.CCI12H.points})`);
+                }
+            }
+            
+            // CCI 1h (12 pontos)
+            if (cci1hData.status === 'fulfilled' && cci1hData.value) {
+                if (cci1hData.value.aboveEMA) {
+                    score += SCORE_CONFIG.BUY.CCI1H.points;
+                    criteria.push(`CCI 1h acima EMA (+${SCORE_CONFIG.BUY.CCI1H.points})`);
+                }
+            }
+            
+            // Volume aumento (13 pontos)
+            if (volumeIncreasePercent >= SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold) {
+                score += SCORE_CONFIG.BUY.VOLUME_INCREASE.points;
+                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.BUY.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.BUY.VOLUME_INCREASE.points})`);
+            }
+            
+            // EMA55 1H - Preço acima (8 pontos) - NOVO
+            if (ema55_1hData.status === 'fulfilled' && ema55_1hData.value) {
+                if (ema55_1hData.value.above) {
+                    score += SCORE_CONFIG.BUY.EMA55_1H.points;
+                    criteria.push(`Preço acima EMA55 1h (${ema55_1hData.value.distancePercent.toFixed(2)}%) (+${SCORE_CONFIG.BUY.EMA55_1H.points})`);
+                }
+            }
+            
+            // EMA55 15M - Fechou acima (10 pontos) - NOVO
+            if (ema55_15mData.status === 'fulfilled' && ema55_15mData.value) {
+                if (ema55_15mData.value.closedAbove) {
+                    score += SCORE_CONFIG.BUY.EMA55_15M.points;
+                    criteria.push(`Fechou acima EMA55 15m (+${SCORE_CONFIG.BUY.EMA55_15M.points})`);
+                }
+            }
+            
+        } else if (signalType === 'BEARISH') {
+            // RSI (8 pontos)
+            if (rsiData.status === 'fulfilled' && rsiData.value) {
+                if (rsiData.value.value > SCORE_CONFIG.SELL.RSI.threshold) {
+                    score += SCORE_CONFIG.SELL.RSI.points;
+                    criteria.push(`RSI ${rsiData.value.value.toFixed(1)} > ${SCORE_CONFIG.SELL.RSI.threshold} (+${SCORE_CONFIG.SELL.RSI.points})`);
+                }
+            }
+            
+            // Funding Rate (8 pontos)
+            if (fundingData.status === 'fulfilled' && fundingData.value) {
+                if (fundingData.value.raw > 0) {
+                    score += SCORE_CONFIG.SELL.FUNDING.points;
+                    criteria.push(`Funding positivo ${fundingData.value.percentage}% (+${SCORE_CONFIG.SELL.FUNDING.points})`);
+                }
+            }
+            
+            // PENALIDADE: Funding muito negativo (< -0.01) em alerta de volume vendedor
+            if (fundingData.status === 'fulfilled' && fundingData.value) {
+                if (fundingData.value.raw < SCORE_CONFIG.SELL.FUNDING_PENALTY.threshold) {
+                    score += SCORE_CONFIG.SELL.FUNDING_PENALTY.points;
+                    criteria.push(`PENALIDADE: Funding muito negativo < ${(SCORE_CONFIG.SELL.FUNDING_PENALTY.threshold * 100).toFixed(3)}% (${SCORE_CONFIG.SELL.FUNDING_PENALTY.points} pts)`);
+                }
+            }
+            
+            // LSR (13 pontos)
+            if (lsrData.status === 'fulfilled' && lsrData.value) {
+                if (lsrData.value.lsrValue >= SCORE_CONFIG.SELL.LSR.min) {
+                    score += SCORE_CONFIG.SELL.LSR.points;
+                    criteria.push(`LSR ${lsrData.value.lsrValue.toFixed(2)} ≥ ${SCORE_CONFIG.SELL.LSR.min} (+${SCORE_CONFIG.SELL.LSR.points})`);
+                }
+            }
+            
+            // Proximidade da resistência (8 pontos)
+            if (srData.status === 'fulfilled' && srData.value) {
+                const resistances = srData.value.resistances;
+                if (resistances && resistances.length > 0) {
+                    const nearestResistance = Math.min(...resistances.map(r => r.distance));
+                    if (nearestResistance <= SCORE_CONFIG.SELL.RESISTANCE.proximity) {
+                        score += SCORE_CONFIG.SELL.RESISTANCE.points;
+                        criteria.push(`Resistência próxima ${nearestResistance.toFixed(2)}% (+${SCORE_CONFIG.SELL.RESISTANCE.points})`);
+                    }
+                }
+            }
+            
+            // Distância do suporte (8 pontos)
+            if (srData.status === 'fulfilled' && srData.value) {
+                const supports = srData.value.supports;
+                if (supports && supports.length > 0) {
+                    const nearestSupport = Math.min(...supports.map(s => s.distance));
+                    if (nearestSupport >= SCORE_CONFIG.SELL.SUPPORT.far) {
+                        score += SCORE_CONFIG.SELL.SUPPORT.points;
+                        criteria.push(`Suporte distante ${nearestSupport.toFixed(2)}% (+${SCORE_CONFIG.SELL.SUPPORT.points})`);
+                    }
+                }
+            }
+            
+            // ADX (8 pontos)
+            if (adxData.status === 'fulfilled' && adxData.value) {
+                if (adxData.value.value > SCORE_CONFIG.SELL.ADX.min) {
+                    score += SCORE_CONFIG.SELL.ADX.points;
+                    criteria.push(`ADX ${adxData.value.value.toFixed(1)} > ${SCORE_CONFIG.SELL.ADX.min} (+${SCORE_CONFIG.SELL.ADX.points})`);
+                }
+            }
+            
+            // Volatilidade (8 pontos)
+            if (volatilityData.status === 'fulfilled' && volatilityData.value) {
+                if (volatilityData.value.value > SCORE_CONFIG.SELL.VOLATILIDADE.min) {
+                    score += SCORE_CONFIG.SELL.VOLATILIDADE.points;
+                    criteria.push(`Volatilidade ${volatilityData.value.value.toFixed(2)}% > ${SCORE_CONFIG.SELL.VOLATILIDADE.min}% (+${SCORE_CONFIG.SELL.VOLATILIDADE.points})`);
+                }
+            }
+            
+            // Volume 3m (13 pontos) - VENDEDOR - CORREÇÃO AQUI
+            if (volume3mData.status === 'fulfilled' && volume3mData.value) {
+                if (volume3mData.value.isSellerVolume && volume3mData.value.zScore > SCORE_CONFIG.SELL.VOLUME_3M.zScore) {
+                    score += SCORE_CONFIG.SELL.VOLUME_3M.points;
+                    criteria.push(`Volume vendedor Z:${volume3mData.value.zScore.toFixed(2)} > ${SCORE_CONFIG.SELL.VOLUME_3M.zScore} (+${SCORE_CONFIG.SELL.VOLUME_3M.points})`);
+                }
+            }
+            
+            // CCI 12h (13 pontos)
+            if (cci12hData.status === 'fulfilled' && cci12hData.value) {
+                if (cci12hData.value.belowEMA) {
+                    score += SCORE_CONFIG.SELL.CCI12H.points;
+                    criteria.push(`CCI 12h abaixo EMA (+${SCORE_CONFIG.SELL.CCI12H.points})`);
+                }
+            }
+            
+            // CCI 1h (12 pontos)
+            if (cci1hData.status === 'fulfilled' && cci1hData.value) {
+                if (cci1hData.value.belowEMA) {
+                    score += SCORE_CONFIG.SELL.CCI1H.points;
+                    criteria.push(`CCI 1h abaixo EMA (+${SCORE_CONFIG.SELL.CCI1H.points})`);
+                }
+            }
+            
+            // Volume aumento (13 pontos)
+            if (volumeIncreasePercent >= SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold) {
+                score += SCORE_CONFIG.SELL.VOLUME_INCREASE.points;
+                criteria.push(`Volume ↑ ${volumeIncreasePercent.toFixed(1)}% ≥ ${SCORE_CONFIG.SELL.VOLUME_INCREASE.threshold}% (+${SCORE_CONFIG.SELL.VOLUME_INCREASE.points})`);
+            }
+            
+            // EMA55 1H - Preço abaixo (8 pontos) - NOVO
+            if (ema55_1hData.status === 'fulfilled' && ema55_1hData.value) {
+                if (ema55_1hData.value.below) {
+                    score += SCORE_CONFIG.SELL.EMA55_1H.points;
+                    criteria.push(`Preço abaixo EMA55 1h (${Math.abs(ema55_1hData.value.distancePercent).toFixed(2)}%) (+${SCORE_CONFIG.SELL.EMA55_1H.points})`);
+                }
+            }
+            
+            // EMA55 15M - Fechou abaixo (10 pontos) - NOVO
+            if (ema55_15mData.status === 'fulfilled' && ema55_15mData.value) {
+                if (ema55_15mData.value.closedBelow) {
+                    score += SCORE_CONFIG.SELL.EMA55_15M.points;
+                    criteria.push(`Fechou abaixo EMA55 15m (+${SCORE_CONFIG.SELL.EMA55_15M.points})`);
+                }
+            }
+        }
+        
+        // Garantir que score não ultrapasse 128
+        score = Math.min(score, maxScore);
+        
+        return {
+            score: score,
+            maxScore: maxScore,
+            percentage: Math.round((score / maxScore) * 100),
+            quality: getScoreQuality(Math.round((score / maxScore) * 100)),
+            criteria: criteria,
+            details: {
+                rsi: rsiData.status === 'fulfilled' ? rsiData.value : null,
+                funding: fundingData.status === 'fulfilled' ? fundingData.value : null,
+                lsr: lsrData.status === 'fulfilled' ? lsrData.value : null,
+                adx: adxData.status === 'fulfilled' ? adxData.value : null,
+                cci12h: cci12hData.status === 'fulfilled' ? cci12hData.value : null,
+                cci1h: cci1hData.status === 'fulfilled' ? cci1hData.value : null,
+                volume3m: volume3mData.status === 'fulfilled' ? volume3mData.value : null,
+                volatility: volatilityData.status === 'fulfilled' ? volatilityData.value : null,
+                supportResistance: srData.status === 'fulfilled' ? srData.value : null,
+                ema55_1h: ema55_1hData.status === 'fulfilled' ? ema55_1hData.value : null,
+                ema55_15m: ema55_15mData.status === 'fulfilled' ? ema55_15mData.value : null
+            }
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro calcular score ${symbol}: ${error.message}`);
+        return {
+            score: 64,
+            maxScore: 128,
+            percentage: 50,
+            quality: getScoreQuality(50),
+            criteria: [],
+            details: {}
+        };
+    }
+}
+
+// =====================================================================
+// 📊 FUNÇÃO PARA CALCULAR SUPORTE/RESISTÊNCIA
+// =====================================================================
+async function calculateSupportResistance(symbol) {
+    try {
+        const cacheKey = `sr_${symbol}`;
+        const now = Date.now();
+        
+        if (supportResistanceCache[cacheKey] && now - supportResistanceCache[cacheKey].timestamp < SR_CACHE_TTL) {
+            return supportResistanceCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, '1d', 20);
+        if (candles.length < 10) return null;
+        
+        const marketData = await getMarketData(symbol);
+        if (!marketData) return null;
+        
+        const currentPrice = marketData.lastPrice;
+        
+        const recentCandle = candles[candles.length - 1];
+        const pivot = (recentCandle.high + recentCandle.low + recentCandle.close) / 3;
+        
+        const r1 = (2 * pivot) - recentCandle.low;
+        const r2 = pivot + (recentCandle.high - recentCandle.low);
+        const s1 = (2 * pivot) - recentCandle.high;
+        const s2 = pivot - (recentCandle.high - recentCandle.low);
+        
+        const result = {
+            pivot: {
+                value: pivot,
+                distance: Math.abs((pivot - currentPrice) / currentPrice * 100)
+            },
+            resistances: [
+                { level: 'R1', value: r1, distance: Math.abs((r1 - currentPrice) / currentPrice * 100) },
+                { level: 'R2', value: r2, distance: Math.abs((r2 - currentPrice) / currentPrice * 100) }
+            ].filter(r => r.value > 0),
+            supports: [
+                { level: 'S1', value: s1, distance: Math.abs((s1 - currentPrice) / currentPrice * 100) },
+                { level: 'S2', value: s2, distance: Math.abs((s2 - currentPrice) / currentPrice * 100) }
+            ].filter(s => s.value > 0),
+            currentPrice: currentPrice
+        };
+        
+        supportResistanceCache[cacheKey] = { data: result, timestamp: now };
+        
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular suporte/resistência ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 📊 FUNÇÃO PRINCIPAL: CALCULAR CCI DIÁRIO
+// =====================================================================
+async function calculateCCIDaily(symbol) {
+    try {
+        const cacheKey = `cci_daily_${symbol}`;
+        const now = Date.now();
+        
+        if (cciCache[cacheKey] && now - cciCache[cacheKey].timestamp < CCI_CACHE_TTL) {
+            return cciCache[cacheKey].data;
+        }
+        
+        const candles = await getCandlesCached(symbol, CCI_SETTINGS.timeframe, CCI_SETTINGS.requiredCandles);
+        
+        if (candles.length < CCI_SETTINGS.period + 10) {
+            console.log(`⚠️ ${symbol}: Dados insuficientes para CCI diário`);
+            return null;
+        }
+        
+        const high = candles.map(c => c.high);
+        const low = candles.map(c => c.low);
+        const close = candles.map(c => c.close);
+        
+        const cciValues = CCI.calculate({
+            high: high,
+            low: low,
+            close: close,
+            period: CCI_SETTINGS.period
+        });
+        
+        if (!cciValues || cciValues.length < CCI_SETTINGS.emaPeriod + 5) {
+            return null;
+        }
+        
+        const cciEmaValues = EMA.calculate({
+            period: CCI_SETTINGS.emaPeriod,
+            values: cciValues
+        });
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const previousCCI = cciValues[cciValues.length - 2];
+        const currentCCI_EMA = cciEmaValues[cciEmaValues.length - 1];
+        const previousCCI_EMA = cciEmaValues[cciEmaValues.length - 2];
+        
+        const cciAboveEMA = currentCCI > currentCCI_EMA;
+        const previousCCIAboveEMA = previousCCI > previousCCI_EMA;
+        const cciBelowEMA = currentCCI < currentCCI_EMA;
+        const previousCCIBelowEMA = previousCCI < previousCCI_EMA;
+        
+        let crossoverSignal = null;
+        
+        if (cciAboveEMA && !previousCCIAboveEMA) {
+            crossoverSignal = {
+                type: 'BULLISH',
+                strength: 'CROSSOVER_UP',
+                message: `CCI (${currentCCI.toFixed(2)}) ⤴️ EMA (${currentCCI_EMA.toFixed(2)})`,
+                cciValue: currentCCI,
+                cciEMA: currentCCI_EMA
+            };
+        }
+        else if (cciBelowEMA && !previousCCIBelowEMA) {
+            crossoverSignal = {
+                type: 'BEARISH',
+                strength: 'CROSSOVER_DOWN',
+                message: `CCI (${currentCCI.toFixed(2)}) ⤵️ EMA (${currentCCI_EMA.toFixed(2)})`,
+                cciValue: currentCCI,
+                cciEMA: currentCCI_EMA
+            };
+        }
+        
+        // Análise de volume de 1h - CORREÇÃO: Aumentar candles para cálculo correto
+        const hourlyCandles = await getCandlesCached(symbol, '1h', 5);
+        let volumeAnalysis = null;
+        
+        if (hourlyCandles.length >= 3) {
+            const lastHourVolume = hourlyCandles[hourlyCandles.length - 1]?.quoteVolume || 0;
+            const previousHourVolume = hourlyCandles[hourlyCandles.length - 2]?.quoteVolume || 0;
+            
+            let volumeIncreasePercent = 0;
+            if (previousHourVolume > 0) {
+                volumeIncreasePercent = ((lastHourVolume - previousHourVolume) / previousHourVolume) * 100;
+            }
+            
+            const lastHourCandle = hourlyCandles[hourlyCandles.length - 1];
+            const isBullishCandle = lastHourCandle.close > lastHourCandle.open;
+            const isBearishCandle = lastHourCandle.close < lastHourCandle.open;
+            
+            volumeAnalysis = {
+                lastHourVolume: lastHourVolume,
+                previousHourVolume: previousHourVolume,
+                volumeIncreasePercent: volumeIncreasePercent,
+                isBullishCandle: isBullishCandle,
+                isBearishCandle: isBearishCandle,
+                volumeIncreased: volumeIncreasePercent >= CCI_ALERT_SETTINGS.volumePercentThreshold,
+                volumeSignificant: lastHourVolume > CCI_ALERT_SETTINGS.minVolumeForAlert
+            };
+        }
+        
+        let alertSignal = null;
+        
+        // 🟢 CONDICIONAL BULLISH
+        if (crossoverSignal && crossoverSignal.type === 'BULLISH') {
+            if (volumeAnalysis && volumeAnalysis.volumeSignificant) {
+                if (volumeAnalysis.isBullishCandle && volumeAnalysis.volumeIncreased) {
+                    // Calcular score
+                    const scoreData = await calculateScore(symbol, 'BULLISH', volumeAnalysis.volumeIncreasePercent);
+                    
+                    alertSignal = {
+                        type: 'BULLISH',
+                        emoji: '🟢',
+                        message: 'Volume Comprador',
+                        description: `CCI (${currentCCI.toFixed(2)}) cruzou acima da EMA (${currentCCI_EMA.toFixed(2)})`,
+                        volumeChange: `+${volumeAnalysis.volumeIncreasePercent.toFixed(1)}%`,
+                        volumeType: 'COMPRADOR',
+                        cciValue: currentCCI,
+                        cciEMA: currentCCI_EMA,
+                        currentVolume: volumeAnalysis.lastHourVolume,
+                        previousVolume: volumeAnalysis.previousHourVolume,
+                        volumePercent: volumeAnalysis.volumeIncreasePercent,
+                        score: scoreData,
+                        timestamp: Date.now()
+                    };
+                }
+            }
+        }
+        
+        // 🔴 CONDICIONAL BEARISH
+        if (crossoverSignal && crossoverSignal.type === 'BEARISH') {
+            if (volumeAnalysis && volumeAnalysis.volumeSignificant) {
+                if (volumeAnalysis.isBearishCandle && volumeAnalysis.volumeIncreased) {
+                    // Calcular score
+                    const scoreData = await calculateScore(symbol, 'BEARISH', volumeAnalysis.volumeIncreasePercent);
+                    
+                    alertSignal = {
+                        type: 'BEARISH',
+                        emoji: '🔴',
+                        message: 'Volume Vendedor',
+                        description: `CCI (${currentCCI.toFixed(2)}) cruzou abaixo da EMA (${currentCCI_EMA.toFixed(2)})`,
+                        volumeChange: `+${volumeAnalysis.volumeIncreasePercent.toFixed(1)}%`,
+                        volumeType: 'VENDEDOR',
+                        cciValue: currentCCI,
+                        cciEMA: currentCCI_EMA,
+                        currentVolume: volumeAnalysis.lastHourVolume,
+                        previousVolume: volumeAnalysis.previousHourVolume,
+                        volumePercent: volumeAnalysis.volumeIncreasePercent,
+                        score: scoreData,
+                        timestamp: Date.now()
+                    };
+                }
+            }
+        }
+        
+        const result = {
+            hasAlert: alertSignal !== null,
+            alert: alertSignal,
+            currentCCI: currentCCI,
+            currentCCI_EMA: currentCCI_EMA,
+            previousCCI: previousCCI,
+            previousCCI_EMA: previousCCI_EMA,
+            crossover: crossoverSignal,
+            volumeAnalysis: volumeAnalysis,
+            timestamp: Date.now()
+        };
+        
+        cciCache[cacheKey] = { data: result, timestamp: now };
+        
+        if (crossoverSignal) {
+            console.log(`📊 CCI ${symbol}: ${currentCCI.toFixed(2)} | EMA: ${currentCCI_EMA.toFixed(2)} | ${crossoverSignal.type} ${crossoverSignal.type === 'BULLISH' ? '🟢' : '🔴'}`);
+            if (volumeAnalysis) {
+                console.log(`   Volume: ${(volumeAnalysis.lastHourVolume / 1000).toFixed(1)}k (${volumeAnalysis.volumeIncreased ? '+' : ''}${volumeAnalysis.volumeIncreasePercent.toFixed(1)}%)`);
+            }
+        }
+        
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular CCI diário para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA VERIFICAR COOLDOWN DE ALERTA CCI
+// =====================================================================
+function checkCCIAlertCooldown(symbol) {
+    try {
+        const now = Date.now();
+        
+        if (cciAlertCooldownMap.has(symbol)) {
+            const lastAlertTime = cciAlertCooldownMap.get(symbol);
+            const minutesSinceLastAlert = (now - lastAlertTime) / (1000 * 60);
+            
+            if (minutesSinceLastAlert < 15) {
+                const remainingMinutes = Math.ceil(15 - minutesSinceLastAlert);
+                console.log(`   ${symbol}: ⏳ Cooldown ativo (${remainingMinutes} min restantes)`);
+                return false;
+            }
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Erro em checkCCIAlertCooldown:', error.message);
+        return true;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO DE FALLBACK PARA ALERTAS SIMPLIFICADOS
+// =====================================================================
+async function sendFallbackAlert(symbol, alertData, originalError) {
+    try {
+        console.log('🔄 Tentando enviar alerta simplificado...');
+        
+        const now = getBrazilianDateTime();
+        const marketData = await getMarketData(symbol);
+        const currentPrice = marketData ? marketData.lastPrice : 0;
+        
+        // 🆕 DETERMINAR TIPO DE ALERTA ESPECIAL
+        let alertTypeLabel = alertData.message;
+        if (alertData.score && alertData.score.percentage < 55) {
+            if (alertData.type === 'BEARISH' && alertData.score.details.rsi && 
+                alertData.score.details.rsi.value < 60) {
+                alertTypeLabel = 'Possível Pullback de Alta';
+            } else if (alertData.type === 'BULLISH' && alertData.score.details.rsi && 
+                       alertData.score.details.rsi.value > 65) {
+                alertTypeLabel = 'Possível Correção';
+            }
+        }
+        
+        // Obter número do alerta
+        const alertNumber = alertCounter.getNextAlertNumber(symbol, alertData.type);
+        
+        // Mensagem SIMPLES sem HTML
+        const simpleMessage = 
+`${alertData.emoji} ${alertTypeLabel} - ${symbol}
+${now.date} ${now.time} - Alerta ${alertNumber} Diário
+
+SCORE: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}
+Preço: $${currentPrice.toFixed(6)}
+CCI: ${alertData.cciValue.toFixed(2)} | EMA: ${alertData.cciEMA.toFixed(2)}
+Volume: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)
+
+Volume ${alertData.volumeType.toLowerCase()} aumentando.
+
+Titanium Bot`;
+
+        console.log('📤 Enviando mensagem simplificada...');
+        
+        // Enviar sem HTML
+        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
+            },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: simpleMessage,
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Falha no fallback: HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+            return false;
+        }
+
+        console.log('✅ Alerta simplificado enviado com sucesso');
+        return true;
+        
+    } catch (fallbackError) {
+        console.error(`❌ Erro no fallback também: ${fallbackError.message}`);
+        return false;
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA ENVIAR ALERTA CCI COMPLETO COM SCORE - VERSÃO SEGURA
+// =====================================================================
+async function sendCCIAlert(symbol, alertData) {
+    try {
+        const now = getBrazilianDateTime();
+        
+        // Obter número do alerta para este símbolo e direção
+        const alertNumber = alertCounter.getNextAlertNumber(symbol, alertData.type);
+        
+        const marketData = await getMarketData(symbol);
+        const currentPrice = marketData ? marketData.lastPrice : 0;
+        
+        // 🆕 DETERMINAR TIPO DE ALERTA COM BASE NO SCORE E RSI
+        let alertTypeLabel = alertData.type === 'BULLISH' ? 'Volume Comprador' : 'Volume Vendedor';
+        let additionalWarning = '';
+        
+        if (alertData.score && alertData.score.percentage < 55) {
+            // Score fraco
+            if (alertData.type === 'BEARISH' && alertData.score.details.rsi && 
+                alertData.score.details.rsi.value < 60) {
+                // VENDA com RSI abaixo de 60
+                alertTypeLabel = 'Possível 🟢Pullback de Alta';
+                additionalWarning = '⚠️ ATENÇÃO: Score fraco com RSI abaixo de 60 - pode ser pullback de alta,  e não Correção... Observar Suportes';
+            } else if (alertData.type === 'BULLISH' && alertData.score.details.rsi && 
+                       alertData.score.details.rsi.value > 65) {
+                // COMPRA com RSI acima de 65
+                alertTypeLabel = 'Possível 🔴Correção';
+                additionalWarning = '⚠️ ATENÇÃO: Score fraco com RSI acima de 65 - pode ser Correção ou Exaustão , Observar Resistências';
+            }
+        }
+        
+        // Formatar dados do score
+        let scoreDetails = '';
+        if (alertData.score && alertData.score.criteria.length > 0) {
+            alertData.score.criteria.forEach(criteria => {
+                scoreDetails += `• ${criteria}\n`;
+            });
+        } else {
+            scoreDetails = '• Nenhum critério adicional atendido\n';
+        }
+        
+        // Formatar dados principais
+        let rsiText = 'RSI 1h: N/A';
+        let fundingText = 'Funding: N/A';
+        let lsrText = 'LSR: N/A';
+        let volume3mText = 'Volume 3m: N/A';
+        let cci1hText = 'CCI 1h: N/A';
+        let ema55_1hText = 'EMA55 1h: N/A';
+        let ema55_15mText = 'EMA55 15m: N/A';
+        
+        if (alertData.score.details.rsi) {
+            rsiText = `RSI 1h: ${alertData.score.details.rsi.value.toFixed(1)} ${alertData.score.details.rsi.emoji}`;
+        }
+        
+        if (alertData.score.details.funding) {
+            fundingText = `Funding: ${alertData.score.details.funding.emoji} ${alertData.score.details.funding.percentage}%`;
+        }
+        
+        if (alertData.score.details.lsr) {
+            const lsr = alertData.score.details.lsr;
+            const changeSign = lsr.isRising ? '+' : '-';
+            lsrText = `LSR: ${lsr.lsrValue?.toFixed(3) || 'N/A'} ${lsr.isRising ? '⬆️' : '⬇️'} (${changeSign}${Math.abs(parseFloat(lsr.percentChange || 0)).toFixed(2)}%)`;
+        }
+        
+        if (alertData.score.details.volume3m) {
+            const vol = alertData.score.details.volume3m;
+            const volType = vol.isBuyerVolume ? '🟢 Comprador' : (vol.isSellerVolume ? '🔴 Vendedor' : '⚪ Neutro');
+            volume3mText = `Volume 3m: ${(vol.lastVolume / 1000).toFixed(1)}k (Z:${vol.zScore.toFixed(2)}) ${volType}`;
+        }
+        
+        if (alertData.score.details.cci1h) {
+            const cci1h = alertData.score.details.cci1h;
+            cci1hText = `CCI 1h: ${cci1h.cciValue.toFixed(2)} ${cci1h.aboveEMA ? '🟢' : (cci1h.belowEMA ? '🔴' : '⚪')}`;
+        }
+        
+        if (alertData.score.details.ema55_1h) {
+            const ema55 = alertData.score.details.ema55_1h;
+            ema55_1hText = `EMA55 1h: $${ema55.emaValue.toFixed(6)} | Preço: ${ema55.above ? '🟢 Acima' : '🔴 Abaixo'} (${ema55.distancePercent.toFixed(2)}%)`;
+        }
+        
+        if (alertData.score.details.ema55_15m) {
+            const ema55_15m = alertData.score.details.ema55_15m;
+            ema55_15mText = `EMA55 15m: $${ema55_15m.emaValue.toFixed(6)} | Fechamento: ${ema55_15m.closedAbove ? '🟢 Acima' : (ema55_15m.closedBelow ? '🔴 Abaixo' : '⚪ Neutro')}`;
+        }
+        
+        // Formatar Suporte/Resistência
+        let srText = '';
+        if (alertData.score.details.supportResistance) {
+            const sr = alertData.score.details.supportResistance;
+            
+            // Resistências (máximo 2)
+            let resistancesText = '';
+            if (sr.resistances && sr.resistances.length > 0) {
+                sr.resistances.slice(0, 2).forEach(r => {
+                    const distance = ((r.value - currentPrice) / currentPrice * 100).toFixed(2);
+                    resistancesText += `• ${r.level}: $${r.value.toFixed(6)} (+${distance}%)\n`;
+                });
+            } else {
+                resistancesText = `• Nenhuma resistência identificada\n`;
+            }
+            
+            // Suportes (máximo 2)
+            let supportsText = '';
+            if (sr.supports && sr.supports.length > 0) {
+                sr.supports.slice(0, 2).forEach(s => {
+                    const distance = ((currentPrice - s.value) / currentPrice * 100).toFixed(2);
+                    supportsText += `• ${s.level}: $${s.value.toFixed(6)} (-${distance}%)\n`;
+                });
+            } else {
+                supportsText = `• Nenhum suporte identificado\n`;
+            }
+            srText = `\n Suportes:\n${supportsText}\n Resistências:\n${resistancesText}\n`;
+        } else {
+            srText = `\n Suportes: N/A\n Resistências: N/A\n\n`;
+        }
+        
+        // Determinar critérios atendidos
+        const criteriaCount = alertData.score.criteria.length;
+        const totalCriteria = alertData.type === 'BULLISH' ? 13 : 13;
+        
+        // 🆕 ADICIONAR AVISO ESPECIAL SE APLICÁVEL
+        let specialWarningSection = '';
+        if (additionalWarning) {
+            specialWarningSection = `<i>🚨 ALERTA ESPECIAL:</i>\n${additionalWarning}\n\n`;
+        }
+        
+        // MONTAR MENSAGEM COM QUALIDADE DO SCORE E CONTADOR
+        const message = 
+`${alertData.emoji} <i>${alertTypeLabel} - ${symbol}</i>
+ ${now.date} ${now.time} - <b>Alerta ${alertNumber}</b> Diário
+${specialWarningSection}✨ <i>SCORE: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}</i>
+<i> INFORMAÇÕES TÉCNICAS:</i>
+• Preço Atual: $${currentPrice.toFixed(6)}
+• CCI Diário: ${alertData.cciValue.toFixed(2)} ${alertData.type === 'BULLISH' ? '⤴️' : '⤵️'} EMA (${alertData.cciEMA.toFixed(2)})
+• Volume 1H: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}% ${alertData.volumeType.toLowerCase()})
+<i> CONFIRMAÇÕES:</i>
+${cci1hText}
+${ema55_1hText}
+${ema55_15mText}
+<i> INDICADORES:</i>
+• ${rsiText}
+• ${fundingText}
+• ${lsrText}
+• ${volume3mText}
+<i>🎖️ PONTUAÇÃO /SCORE (${criteriaCount}/${totalCriteria}):</i>
+${scoreDetails}
+${srText}
+<i>⚡ RECOMENDAÇÔES:</i>
+Setup ${alertData.score.quality.text.toLowerCase()} com ${criteriaCount} confirmações.
+${alertData.type === 'BULLISH' ? 'Entrada próxima aos suportes. Com Score baixo na Resistência' : 'Entrada próxima às resistências. Com Score baixo no Suporte'}
+<i>📌 CLASSIFICAÇÃO DO SINAL: ${alertData.score.percentage >= 90 ? '★★★★★ (5/5)' : alertData.score.percentage >= 70 ? '★★★★☆ (4/5)' : alertData.score.percentage >= 50 ? '★★★☆☆ (3/5)' : '★★☆☆☆ (2/5)'}</i>
+
+✨ Titanium Matrix AI System ✨`;
+
+        console.log('📤 Tentando enviar mensagem para Telegram...');
+        
+        // Usar HTML corrigido
+        const sent = await sendTelegramAlertHTML(message);
+        
+        if (sent) {
+            console.log(`\n${alertData.emoji} ALERTA ENVIADO: ${symbol}`);
+            console.log(`   Tipo: ${alertTypeLabel}`);
+            console.log(`   Alerta: ${alertNumber} (diário)`);
+            console.log(`   Score: ${alertData.score.percentage}% ${alertData.score.quality.emoji} ${alertData.score.quality.text}`);
+            console.log(`   Preço: $${currentPrice.toFixed(6)}`);
+            console.log(`   CCI: ${alertData.cciValue.toFixed(2)} | EMA5: ${alertData.cciEMA.toFixed(2)}`);
+            console.log(`   Volume: ${(alertData.currentVolume / 1000).toFixed(1)}k (+${alertData.volumePercent.toFixed(1)}%)`);
+            console.log(`   Critérios: ${criteriaCount}/${totalCriteria}`);
+            if (additionalWarning) {
+                console.log(`   🚨 ALERTA ESPECIAL: ${additionalWarning}`);
+            }
+        } else {
+            console.log(`❌ Falha ao enviar alerta para ${symbol}`);
+        }
+        
+        return sent;
+        
+    } catch (error) {
+        console.error(`❌ Erro enviando alerta CCI ${symbol}:`, error.message);
+        return await sendFallbackAlert(symbol, alertData, error);
+    }
+}
+
+// =====================================================================
+// 🆕 FUNÇÃO PARA BUSCAR TODOS OS PARES FUTURES
+// =====================================================================
+async function fetchAllFuturesSymbols() {
+    try {
+        console.log('🔍 Buscando TODOS os pares Futures da Binance...');
+        
+        const response = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const exchangeInfo = await response.json();
+        
+        if (!exchangeInfo || !exchangeInfo.symbols) {
+            console.log('❌ Não foi possível obter informações da exchange');
+            return getDefaultSymbols();
+        }
+        
+        const usdtSymbols = exchangeInfo.symbols.filter(symbol => {
+            const isUSDT = symbol.quoteAsset === 'USDT';
+            const isTrading = symbol.status === 'TRADING';
+            const isPerpetual = symbol.contractType === 'PERPETUAL';
+            
+            const excludedTerms = ['BULL', 'BEAR', 'UP', 'DOWN'];
+            const hasExcludedTerm = excludedTerms.some(term => 
+                symbol.symbol.includes(term)
+            );
+            
+            return isUSDT && isTrading && isPerpetual && !hasExcludedTerm;
+        });
+        
+        const symbols = usdtSymbols.map(s => s.symbol);
+        
+        console.log(`✅ ${symbols.length} pares USDT Perpetual encontrados`);
+        
+        return symbols;
+        
+    } catch (error) {
+        console.log('❌ Erro ao buscar símbolos:', error.message);
+        return getDefaultSymbols();
+    }
+}
+
+function getDefaultSymbols() {
+    return [
+        'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 
+        'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'TRXUSDT',
+        'SHIBUSDT', 'LTCUSDT', 'UNIUSDT', 'ATOMUSDT', 'XLMUSDT', 'ETCUSDT',
+        'FILUSDT', 'APTUSDT', 'ARBUSDT', 'NEARUSDT', 'VETUSDT', 'OPUSDT'
+    ];
+}
+
+// =====================================================================
+// 🆕 MONITOR PARA ALERTAS CCI DIÁRIO
+// =====================================================================
+class CCIDailyAlertMonitor {
+    constructor() {
+        try {
+            this.symbols = [];
+            this.stats = {
+                totalChecks: 0,
+                crossoversDetected: 0,
+                alertsSent: 0,
+                startTime: Date.now()
+            };
+            console.log('✅ CCIDailyAlertMonitor inicializado');
+        } catch (error) {
+            console.error('❌ Erro ao inicializar CCIDailyAlertMonitor:', error.message);
+            this.symbols = [];
+            this.stats = { totalChecks: 0, startTime: Date.now() };
+        }
+    }
+
+    async initializeSymbols() {
+        try {
+            this.symbols = await fetchAllFuturesSymbols();
+            console.log(`📊 ${this.symbols.length} pares configurados para monitoramento CCI diário`);
+            return this.symbols;
+        } catch (error) {
+            console.error('Erro inicializando símbolos CCI:', error.message);
+            this.symbols = getDefaultSymbols();
+            return this.symbols;
+        }
+    }
+
+    async monitorCCICrossovers() {
+        try {
+            console.log(`\n🔍 Monitorando cruzamentos CCI diário em ${this.symbols.length} pares...`);
+            
+            let alertsFound = 0;
+            const batchSize = 5;
+            
+            for (let i = 0; i < this.symbols.length; i += batchSize) {
+                const batch = this.symbols.slice(i, i + batchSize);
+                
+                const batchPromises = batch.map(symbol => 
+                    this.checkSymbolForCCIAlert(symbol)
+                );
+                
+                const batchResults = await Promise.allSettled(batchPromises);
+                alertsFound += batchResults.filter(r => r.status === 'fulfilled' && r.value).length;
+                
+                if (i + batchSize < this.symbols.length) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+            
+            if (alertsFound > 0) {
+                console.log(`✅ ${alertsFound} alertas CCI encontrados nesta verificação`);
+            } else {
+                console.log(`⏭️  Nenhum cruzamento CCI detectado`);
+            }
+            
+            this.cleanupOldHistory();
+            
+        } catch (error) {
+            console.error(`Erro no monitor CCI: ${error.message}`);
+        }
+    }
+
+    async checkSymbolForCCIAlert(symbol) {
+        try {
+            this.stats.totalChecks++;
+            
+            if (!checkCCIAlertCooldown(symbol)) {
+                return false;
+            }
+            
+            const cciData = await calculateCCIDaily(symbol);
+            
+            if (!cciData || !cciData.hasAlert || !cciData.alert) {
+                return false;
+            }
+            
+            this.stats.crossoversDetected++;
+            
+            // 🆕 DETERMINAR TIPO DE ALERTA ESPECIAL
+            let alertTypeLabel = cciData.alert.type === 'BULLISH' ? 'Volume Comprador' : 'Volume Vendedor';
+            if (cciData.alert.score && cciData.alert.score.percentage < 55) {
+                if (cciData.alert.type === 'BEARISH' && cciData.alert.score.details.rsi && 
+                    cciData.alert.score.details.rsi.value < 60) {
+                    alertTypeLabel = 'Possível Pullback de Alta';
+                } else if (cciData.alert.type === 'BULLISH' && cciData.alert.score.details.rsi && 
+                           cciData.alert.score.details.rsi.value > 65) {
+                    alertTypeLabel = 'Possível Correção';
+                }
+            }
+            
+            // Obter número do alerta atual para mostrar no console
+            const alertNumber = alertCounter.getCurrentAlertNumber(symbol, cciData.alert.type) + 1;
+            
+            console.log(`\n🎯 ${symbol}: ${alertTypeLabel} DETECTADO!`);
+            console.log(`   Alerta: ${alertNumber} (diário)`);
+            console.log(`   Score: ${cciData.alert.score.percentage}% ${cciData.alert.score.quality.emoji} ${cciData.alert.score.quality.text}`);
+            console.log(`   CCI: ${cciData.alert.cciValue.toFixed(2)} | EMA5: ${cciData.alert.cciEMA.toFixed(2)}`);
+            console.log(`   Volume: ${(cciData.alert.currentVolume / 1000).toFixed(1)}k (+${cciData.alert.volumePercent.toFixed(1)}%)`);
+            
+            const sent = await sendCCIAlert(symbol, cciData.alert);
+            
+            if (sent) {
+                this.stats.alertsSent++;
+                cciAlertCooldownMap.set(symbol, Date.now());
+                
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            
+            return sent;
+            
+        } catch (error) {
+            console.log(`⚠️ Erro ${symbol}: ${error.message}`);
+            return false;
+        }
+    }
+
+    cleanupOldHistory() {
+        try {
+            const now = Date.now();
+            const oneHourAgo = now - 3600000;
+            
+            for (const [symbol, timestamp] of cciAlertCooldownMap.entries()) {
+                if (timestamp < oneHourAgo) {
+                    cciAlertCooldownMap.delete(symbol);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Erro em cleanupOldHistory:', error.message);
+        }
+    }
+
+    logStats() {
+        try {
+            const uptime = Date.now() - this.stats.startTime;
+            const hours = Math.floor(uptime / 3600000);
+            const minutes = Math.floor((uptime % 3600000) / 60000);
+            
+            const successRate = this.stats.totalChecks > 0 ? 
+                ((this.stats.crossoversDetected / this.stats.totalChecks) * 100).toFixed(2) : 0;
+            
+            // Mostrar status do contador diário
+            const currentDate = alertCounter.getCurrentDateBrazil();
+            const brazilTime = new Date(Date.now() - 3 * 60 * 60 * 1000);
+            const currentHour = brazilTime.getUTCHours();
+            
+            console.log(`\n📊 ESTATÍSTICAS CCI (${hours}h${minutes}m):`);
+            console.log(`   • Pares verificados: ${this.stats.totalChecks}`);
+            console.log(`   • Cruzamentos detectados: ${this.stats.crossoversDetected}`);
+            console.log(`   • Alertas enviados: ${this.stats.alertsSent}`);
+            console.log(`   • Taxa de detecção: ${successRate}%`);
+            console.log(`   • Em cooldown: ${cciAlertCooldownMap.size} pares`);
+            console.log(`   • Contador diário: Data ${currentDate} | Hora Brasil: ${currentHour}h`);
+            console.log(`   • Reset automático: Todos os dias às 21h (horário Brasil)`);
+            console.log(`   • 🆕 Alertas especiais: Score fraco + RSI fora da zona`);
+        } catch (error) {
+            console.error('❌ Erro em logStats:', error.message);
+        }
+    }
+}
+
+// =====================================================================
+// 🔄 LIMPEZA DE CACHE
+// =====================================================================
+function cleanupCaches() {
+    try {
+        const now = Date.now();
+
+        Object.keys(candleCache).forEach(key => {
+            if (now - candleCache[key].timestamp > MAX_CACHE_AGE) {
+                delete candleCache[key];
+            }
+        });
+
+        Object.keys(marketDataCache).forEach(key => {
+            if (now - marketDataCache[key].timestamp > 600000) {
+                delete marketDataCache[key];
+            }
+        });
+
+        Object.keys(lsrCache).forEach(key => {
+            if (now - lsrCache[key].timestamp > 300000) {
+                delete lsrCache[key];
+            }
+        });
+
+        Object.keys(fundingCache).forEach(key => {
+            if (now - fundingCache[key].timestamp > 300000) {
+                delete fundingCache[key];
+            }
+        });
+
+        Object.keys(cciCache).forEach(key => {
+            if (now - cciCache[key].timestamp > 300000) {
+                delete cciCache[key];
+            }
+        });
+        
+        Object.keys(supportResistanceCache).forEach(key => {
+            if (now - supportResistanceCache[key].timestamp > 300000) {
+                delete supportResistanceCache[key];
+            }
+        });
+        
+        Object.keys(cci12hCache).forEach(key => {
+            if (now - cci12hCache[key].timestamp > 300000) {
+                delete cci12hCache[key];
+            }
+        });
+        
+        Object.keys(cci1hCache).forEach(key => {
+            if (now - cci1hCache[key].timestamp > 300000) {
+                delete cci1hCache[key];
+            }
+        });
+        
+        Object.keys(adxCache).forEach(key => {
+            if (now - adxCache[key].timestamp > 300000) {
+                delete adxCache[key];
+            }
+        });
+        
+        Object.keys(volume3mCache).forEach(key => {
+            if (now - volume3mCache[key].timestamp > 300000) {
+                delete volume3mCache[key];
+            }
+        });
+        
+        Object.keys(volatilityCache).forEach(key => {
+            if (now - volatilityCache[key].timestamp > 300000) {
+                delete volatilityCache[key];
+            }
+        });
+        
+        Object.keys(ema55Cache).forEach(key => {
+            if (now - ema55Cache[key].timestamp > 300000) {
+                delete ema55Cache[key];
+            }
+        });
+        
+        Object.keys(ema55_15mCache).forEach(key => {
+            if (ema55_15mCache[key] && now - ema55_15mCache[key].timestamp > 300000) {
+                delete ema55_15mCache[key];
+            }
+        });
+        
+        const hourAgo = Date.now() - (60 * 60 * 1000);
+        for (const [symbol, timestamp] of cciAlertCooldownMap.entries()) {
+            if (timestamp < hourAgo) {
+                cciAlertCooldownMap.delete(symbol);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Erro em cleanupCaches:', error.message);
+    }
+}
+
+// =====================================================================
+// 🚀 LOOP PRINCIPAL
+// =====================================================================
+async function mainCCIMonitorLoop() {
+    const cciAlertMonitor = new CCIDailyAlertMonitor();
+
+    await cciAlertMonitor.initializeSymbols();
+
+    console.log(`\n🚨 SISTEMA DE ALERTA CCI DIÁRIO COM SCORE 128%`);
+    console.log('='.repeat(80));
+    console.log(`⚙️  CONFIGURAÇÃO DO SCORE:`);
+    console.log(`   🟢 COMPRA (BULLISH) - 13 CRITÉRIOS (128 PTS):`);
+    console.log(`      1. RSI < 63 (8 pts)`);
+    console.log(`      2. Funding negativo (8 pts)`);
+    console.log(`      3. LSR ≤ 2.5 (13 pts)`);
+    console.log(`      4. Suporte ≤ 1.5% (8 pts)`);
+    console.log(`      5. Resistência ≥ 2.0% (8 pts)`);
+    console.log(`      6. Volatilidade > 0.6% (8 pts)`);
+    console.log(`      7. ADX > 20 (8 pts)`);
+    console.log(`      8. Volume 3m COMPRADOR Z > 1 (13 pts)`);
+    console.log(`      9. CCI 12h acima EMA5 (13 pts)`);
+    console.log(`     10. CCI 1h acima EMA5 (12 pts)`);
+    console.log(`     11. Volume ↑ ≥10% (13 pts)`);
+    console.log(`     12. Preço acima EMA55 1h (8 pts) ← NOVO`);
+    console.log(`     13. Fechou acima EMA55 15m (10 pts) ← NOVO`);
+    console.log(`     14. PENALIDADE: Funding > 0.01% (-10 pts) ← NOVO`);
+    console.log(`   🔴 VENDA (BEARISH) - 13 CRITÉRIOS (128 PTS):`);
+    console.log(`      1. RSI > 65 (8 pts)`);
+    console.log(`      2. Funding positivo (8 pts)`);
+    console.log(`      3. LSR ≥ 3 (13 pts)`);
+    console.log(`      4. Resistência ≤ 1.5% (8 pts)`);
+    console.log(`      5. Suporte ≥ 2.0% (8 pts)`);
+    console.log(`      6. ADX > 20 (8 pts)`);
+    console.log(`      7. Volatilidade > 0.6% (8 pts)`);
+    console.log(`      8. Volume 3m VENDEDOR Z > 1 (13 pts)`);
+    console.log(`      9. CCI 12h abaixo EMA5 (13 pts)`);
+    console.log(`     10. CCI 1h abaixo EMA5 (12 pts)`);
+    console.log(`     11. Volume ↑ ≥10% (13 pts)`);
+    console.log(`     12. Preço abaixo EMA55 1h (8 pts) ← NOVO`);
+    console.log(`     13. Fechou abaixo EMA55 15m (10 pts) ← NOVO`);
+    console.log(`     14. PENALIDADE: Funding < -0.01% (-10 pts) ← NOVO`);
+    console.log('='.repeat(80));
+    console.log(`🎯 QUALIDADE DO SCORE:`);
+    console.log(`   90-110% ✨🟢✨ Excelente`);
+    console.log(`   70-89% 🏆✨ Muito Bom`);
+    console.log(`   50-69% 🏆 Bom`);
+    console.log(`   <50% 🔴 Fraco`);
+    console.log('='.repeat(80));
+    console.log(`🚨 ALERTAS ESPECIAIS:`);
+    console.log(`   • Score fraco (<55%) + VENDA com RSI < 60 → "Possível Pullback de Alta"`);
+    console.log(`   • Score fraco (<55%) + COMPRA com RSI > 65 → "Possível Correção"`);
+    console.log(`   • Os outros alertas continuam com os nomes originais`);
+    console.log('='.repeat(80));
+    console.log(`📊 CONTADOR DE ALERTAS:`);
+    console.log(`   • Contador por moeda e direção (ex: BTCUSDT_BULLISH)`);
+    console.log(`   • Cada alerta mostra: "Alerta 1", "Alerta 2", etc.`);
+    console.log(`   • Reset automático diário às 21h (horário Brasil)`);
+    console.log(`   • Exemplo: "01/01/2024 14:30 - Alerta 3 Diário"`);
+    console.log('='.repeat(80));
+    console.log(`🎯 CRITÉRIOS BASE (OBRIGATÓRIOS):`);
+    console.log(`   🟢 BULLISH: CCI cruza EMA5 PARA CIMA + vela 1h bullish + volume ↑ ≥10%`);
+    console.log(`   🔴 BEARISH: CCI cruza EMA5 PARA BAIXO + vela 1h bearish + volume ↑ ≥10%`);
+    console.log('='.repeat(80));
+    console.log(`🤖 Iniciando monitoramento...\n`);
+
+    let consecutiveErrors = 0;
+    let lastReportTime = Date.now();
+
+    while (true) {
+        try {
+            const startTime = Date.now();
+            
+            await cciAlertMonitor.monitorCCICrossovers();
+            
+            const endTime = Date.now();
+            const processingTime = (endTime - startTime) / 1000;
+            
+            console.log(`\n✅ Verificação concluída em ${processingTime.toFixed(1)}s`);
+            
+            cleanupCaches();
+            consecutiveErrors = 0;
+
+            if (Date.now() - lastReportTime >= 300000) {
+                cciAlertMonitor.logStats();
+                lastReportTime = Date.now();
+            }
+
+            const waitTime = CCI_ALERT_SETTINGS.alertCheckInterval;
+            console.log(`⏱️  Próxima verificação em ${waitTime/1000}s...\n${'─'.repeat(80)}`);
+            await new Promise(r => setTimeout(r, waitTime));
+
+        } catch (error) {
+            consecutiveErrors++;
+            console.error(`\n❌ ERRO NO LOOP (${consecutiveErrors}):`, error.message);
+
+            if (consecutiveErrors >= 3) {
+                console.log('🔄 Muitos erros. Pausa de 60s...');
+                await new Promise(r => setTimeout(r, 60000));
+                consecutiveErrors = 0;
+            }
+
+            await new Promise(r => setTimeout(r, Math.min(10000 * consecutiveErrors, 60000)));
+        }
+    }
+}
+
+// =====================================================================
+// 🛡️ HANDLERS DE ERRO GLOBAL
+// =====================================================================
+process.on('unhandledRejection', (error) => {
+    console.error('❌ Unhandled Rejection:', error.message);
+    logToFile(`❌ Unhandled Rejection: ${error.message}`);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error.message);
+    logToFile(`❌ Uncaught Exception: ${error.message}`);
+    setTimeout(() => {
+        mainCCIMonitorLoop();
+    }, 60000);
+});
+
+// =====================================================================
+// ▶️ INICIALIZAÇÃO
+// =====================================================================
+async function startCCIBot() {
+    try {
+        if (!fs.existsSync(LOG_DIR)) {
+            try {
+                fs.mkdirSync(LOG_DIR, { recursive: true });
+            } catch (error) {
+                console.error('❌ Erro ao criar diretório de logs:', error.message);
+            }
+        }
+
+        console.log('\n' + '='.repeat(80));
+        console.log('🚀 CCI ALERT SYSTEM COM SCORE 128% E CONTADOR DIÁRIO');
+        console.log('='.repeat(80));
+        
+        console.log('🔍 Iniciando sistema...');
+        console.log('📊 Monitorando TODOS os pares Futures USDT da Binance');
+        console.log('🎯 Score visual (não bloqueante) para análise de qualidade');
+        console.log('🔢 Contador de alertas por moeda/direção (reset às 21h)');
+        console.log('✨ Novos critérios: EMA55 1h e EMA55 15m');
+        console.log('⚠️  Penalidades: Funding > 0.01% em compra (-10 pts), Funding < -0.01% em venda (-10 pts)');
+        console.log('🚨 ALERTAS ESPECIAIS: Score fraco com RSI fora da zona → "Possível Correção/Pullback"');
+        console.log('='.repeat(80) + '\n');
+
+        await mainCCIMonitorLoop();
+
+    } catch (error) {
+        console.error(`\n🚨 ERRO CRÍTICO: ${error.message}`);
+        console.log('🔄 Reiniciando em 30 segundos...');
+        await new Promise(r => setTimeout(r, 30000));
+        await startCCIBot();
+    }
+}
+
+// =====================================================================
+// 🚀 INICIAR O BOT
+// =====================================================================
+startCCIBot();
