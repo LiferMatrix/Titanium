@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_o0A';
-const TELEGRAM_CHAT_ID = '-10017';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -58,14 +58,14 @@ const VOLUME_SETTINGS = {
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 13,
-    emaAlpha: 0.3,
-    baseZScoreLookback: 40,
-    minZScoreLookback: 15,
-    maxZScoreLookback: 80,
-    zScoreThreshold: 1.6,          // ↑ de 1.5
-    vptThreshold: 0.30,            // ↑ de 0.25
-    minPriceMovement: 0.12,        // ↑ de 0.10
+    emaPeriod: 9,
+    emaAlpha: 0.4,
+    baseZScoreLookback: 25,
+    minZScoreLookback: 10,
+    maxZScoreLookback: 50,
+    zScoreThreshold: 1.4,          // ↑ de 1.5
+    vptThreshold: 0.20,            // ↑ de 0.25
+    minPriceMovement: 0.08,        // ↑ de 0.10
     requirePositiveCorrelation: true, // ⚠️ CRUCIAL: só opera se alinhado com BTC
     combinedMultiplier: 1.05,
     volumeWeight: 0.35,
@@ -172,8 +172,8 @@ const VOLATILITY_THRESHOLD = 0.6; // ↑ de 0.5 (exige volatilidade mínima real
 
 // === CONFIGURAÇÕES LSR ===
 const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.5;     // ↓ de 2.8 (mais conservador na compra)
-const LSR_SELL_THRESHOLD = 2.8;    // ↑ de 2.9 (mais exigente na venda)
+const LSR_BUY_THRESHOLD = 2.7;     // ↓ de 2.8 (mais conservador na compra)
+const LSR_SELL_THRESHOLD = 2.9;    // ↑ de 2.9 (mais exigente na venda)
 
 // === CONFIGURAÇÕES RSI ===
 const RSI_BUY_MAX = 62;            // ↓ de 62 (evita comprar em sobrecompra)
@@ -188,15 +188,15 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 77;       // ↑ de 70 (filtro mais rigoroso)
+const QUALITY_THRESHOLD = 78;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
-    volume: 25,                    // ↑ de 42 (volume ainda mais crítico)
+    volume: 28,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 4,
     volatility: 6,                 // ↑ de 7
-    lsr: 8,                        // ↑ de 8
+    lsr: 10,                        // ↑ de 8
     rsi: 10,                       // ↑ de 18
     emaAlignment: 10,              // ↑ de 10
-    stoch1h: 8,                   // ↑ de 10
+    stoch1h: 10,                   // ↑ de 10
     stoch4h: 10,                   // ↑ de 10
     breakoutRisk: 5,              // ↑ de 10
     supportResistance: 8,          // ↑ de 12
