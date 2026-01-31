@@ -6,9 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID = '-1001990889297';
-
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -32,11 +31,11 @@ const VOLUME_SETTINGS = {
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO ATUALIZADAS PARA 3m - MAIS SENSÍVEIS ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 13,           // Reduzido de 15 para 12
+    emaPeriod: 9,           // Reduzido de 15 para 12
     emaAlpha: 0.4,           // Aumentado de 0.35 para 0.4
     baseZScoreLookback: 25,  // Reduzido de 30 para 25
     minZScoreLookback: 6,    // Reduzido de 8 para 6
-    maxZScoreLookback: 50,   // Reduzido de 60 para 50
+    maxZScoreLookback: 40,   // Reduzido de 60 para 50
     zScoreThreshold: 1.0,    // Reduzido de 1.2 para 1.0
     vptThreshold: 0.15,      // Reduzido de 0.20 para 0.15
     minPriceMovement: 0.06,  // Reduzido de 0.08 para 0.06
@@ -59,7 +58,7 @@ const VOLATILITY_THRESHOLD = 0.3;    // Reduzido de 0.4 para 0.3
 
 // === CONFIGURAÇÕES RSI - MAIS SENSÍVEIS ===
 const RSI_BUY_MAX = 60;              // Aumentado de 63 para 65
-const RSI_SELL_MIN = 30;             // Ajustado de 32 para 30
+const RSI_SELL_MIN = 65;             // Ajustado de 32 para 30
 
 // === CONFIGURAÇÕES DE SENSIBILIDADE ===
 const SENSITIVITY_SETTINGS = {
@@ -87,17 +86,17 @@ const QUALITY_THRESHOLD = 80; // Reduzido de 65 para 60
 
 // === PESOS AJUSTADOS PARA MAIOR SENSIBILIDADE A BTC ===
 const QUALITY_WEIGHTS = {
-    volume: 28,           // Reduzido de 36 para 28
+    volume: 25,           // Reduzido de 36 para 28
     volatility: 8,        // Reduzido de 10 para 8
     rsi: 14,              // Reduzido de 16 para 14
     emaAlignment: 14,     // Reduzido de 16 para 14
-    stoch1h: 8,           // Reduzido de 10 para 8
+    stoch1h: 10,           // Reduzido de 10 para 8
     stoch4h: 10,           // Reduzido de 8 para 6
     cci4h: 0,             // Reduzido de 8 para 6
-    breakoutRisk: 6,      // Reduzido de 10 para 8
-    supportResistance: 9, // Reduzido de 10 para 8
-    pivotPoints: 9,       // Reduzido de 10 para 8
-    btcCorrelation: 38,   // Aumentado de 28 para 38 (MÁXIMO FOCO)
+    breakoutRisk: 10,      // Reduzido de 10 para 8
+    supportResistance: 10, // Reduzido de 10 para 8
+    pivotPoints: 8,       // Reduzido de 10 para 8
+    btcCorrelation: 30,   // Aumentado de 28 para 38 (MÁXIMO FOCO)
     momentum: 8,          // Aumentado de 5 para 8
     volumeConfirmation: 10, // Novo: confirmação de volume
     trendAlignment: 10      // Novo: alinhamento com tendência BTC
@@ -3070,7 +3069,7 @@ async function sendSignalAlertWithRisk(signal) {
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         const analysisType = determineAnalysisType(signal);
         
-        const direction = signal.isBullish ? '🟢Reversão / Compra' : '🔴Correção';
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         
         const riskAssessment = await global.riskLayer.assessSignalRisk(signal);
@@ -3191,7 +3190,7 @@ async function sendSignalAlertWithRisk(signal) {
         // Tentar versão simplificada como fallback
         try {
             const now = getBrazilianDateTime();
-            const simpleMessage = `${signal.symbol} - ${signal.isBullish ? '🟢Reversão / Compra' : '🔴Correção'}\n${now.date} ${now.time}\nScore: ${signal.qualityScore.score}/100\nPreço: ${signal.price.toFixed(8)} BTC\n\nTitanium Pares BTC`;
+            const simpleMessage = `${signal.symbol} - ${signal.isBullish ? 'COMPRA' : 'VENDA'}\n${now.date} ${now.time}\nScore: ${signal.qualityScore.score}/100\nPreço: ${signal.price.toFixed(8)} BTC\n\nTitanium Pares BTC`;
             await sendTelegramAlert(simpleMessage);
             console.log('✅ Alerta simplificado enviado como fallback');
         } catch (fallbackError) {
@@ -3357,7 +3356,6 @@ function determineAnalysisType(signal) {
         emoji: '📊'
     };
 }
-
 // =====================================================================
 // 📤 FUNÇÃO ALTERNATIVA (FALLBACK)
 // =====================================================================
@@ -3371,7 +3369,7 @@ async function sendSignalAlert(signal) {
         const isVolumeConfirmed = checkVolumeConfirmation(volumeData);
         const analysisType = determineAnalysisType(signal);
         
-        const direction = signal.isBullish ? '🟢Reversão / Compra' : '🔴Correção';
+        const direction = signal.isBullish ? 'COMPRA' : 'VENDA';
         const directionEmoji = signal.isBullish ? '🟢' : '🔴';
         
         const priority = determineAlertPriority(signal);
@@ -6085,3 +6083,6 @@ function re() {
 
 // Iniciar
 startBot();
+
+
+
