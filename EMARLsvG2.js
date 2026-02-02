@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVLhKcbJavdg';
-const TELEGRAM_CHAT_ID = '-100259';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -104,9 +104,9 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 75;       // ↑ de 70 (filtro mais rigoroso)
+const QUALITY_THRESHOLD = 70;       // ↑ de 70 (filtro mais rigoroso)
 const QUALITY_WEIGHTS = {
-    volume: 20,                    // ↑ de 42 (volume ainda mais crítico)
+    volume: 25,                    // ↑ de 42 (volume ainda mais crítico)
     oi: 2,
     volatility: 4,                 // ↑ de 7
     lsr: 7,                       // ↑ de 8
@@ -117,11 +117,11 @@ const QUALITY_WEIGHTS = {
     breakoutRisk: 4,               // ↑ de 10
     supportResistance: 7,         // ↑ de 12
     pivotPoints: 7,               // ↑ de 15
-    funding: 4,
+    funding: 5,
     stochastic12h: 7,             // ↑ de 8
-    stochasticDaily: 7,            // ↑ de 8
-    volume1hEMA9: 7,              // NOVO: Peso para volume 1h com EMA 9
-    cciDailyEMA5: 7               // NOVO: Peso para CCI diário com EMA 5
+    stochasticDaily: 5,            // ↑ de 8
+    volume1hEMA9: 10,              // NOVO: Peso para volume 1h com EMA 9
+    cciDailyEMA5: 5               // NOVO: Peso para CCI diário com EMA 5
 };
 
 // === NOVA CONFIGURAÇÃO: VOLUME 1H COM EMA 9 ===
