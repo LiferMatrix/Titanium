@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AGavdg';
-const TELEGRAM_CHAT_ID = '-1002559';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';;
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -49,17 +49,17 @@ const VOLUME_MINIMUM_THRESHOLDS = {
 
 // === CONFIGURAÇÕES OTIMIZADAS - MAIS SELETIVAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.5,            // ↑ de 1.5 (menos ruído)
-    minThreshold: 1.3,             // ↑ de 1.3
+    baseThreshold: 1.4,            // ↑ de 1.5 (menos ruído)
+    minThreshold: 1.2,             // ↑ de 1.3
     maxThreshold: 2.0,             // mantém
     volatilityMultiplier: 0.5,
     useAdaptive: true,
-    adaptiveSensitivity: 0.40      // ↓ de 0.85 (ligeiramente menos sensível)
+    adaptiveSensitivity: 0.35      // ↓ de 0.85 (ligeiramente menos sensível)
 };
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 13,
+    emaPeriod: 9,
     emaAlpha: 0.4,
     baseZScoreLookback: 25,
     minZScoreLookback: 10,
@@ -111,16 +111,16 @@ const QUALITY_WEIGHTS = {
     volatility: 4,                 // ↑ de 7
     lsr: 7,                       // ↑ de 8
     rsi: 7,                       // ↑ de 18
-    emaAlignment: 7,              // ↑ de 10
+    emaAlignment: 0,              // ↑ de 10
     stoch1h: 7,                   // ↑ de 10
     stoch4h: 7,                   // ↑ de 10
     breakoutRisk: 4,               // ↑ de 10
     supportResistance: 7,         // ↑ de 12
     pivotPoints: 7,               // ↑ de 15
-    funding: 5,
+    funding: 7,
     stochastic12h: 7,             // ↑ de 8
-    stochasticDaily: 5,            // ↑ de 8
-    volume1hEMA9: 10,              // NOVO: Peso para volume 1h com EMA 9
+    stochasticDaily: 7,            // ↑ de 8
+    volume1hEMA9: 15,              // NOVO: Peso para volume 1h com EMA 9
     cciDailyEMA5: 5               // NOVO: Peso para CCI diário com EMA 5
 };
 
