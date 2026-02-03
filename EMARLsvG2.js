@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6Avdg';
-const TELEGRAM_CHAT_ID = '-100279';;
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
@@ -37,93 +37,99 @@ const fallbackCache = {
     timestamp: Date.now()
 };
 
-// === CONFIGURAÇÕES DE VOLUME MÍNIMO REVISTAS ===
+// === CONFIGURAÇÕES DE VOLUME MÍNIMO OTIMIZADAS ===
 const VOLUME_MINIMUM_THRESHOLDS = {
-    absoluteScore: 0.32,           // ↑ de 0.28 (evita ruído)
-    combinedScore: 0.36,           // ↑ de 0.32
-    classification: 'MODERADO',     // ↑ de 'MODERADO-BAIXO' (exige volume mais sólido)
-    requireConfirmation: true,      // ↑ reativa confirmação (reduz falsos)
-    minZScore: 0.4,                // ↑ de 0.3
-    requireVolumeTrend: true        // ↑ exige tendência de volume (confirmação adicional)
+    absoluteScore: 0.25,           // ↓ de 0.32 (MAIS oportunidades)
+    combinedScore: 0.28,           // ↓ de 0.36
+    classification: 'MODERADO-BAIXO', // ↓ de 'MODERADO' (aceita mais setups)
+    requireConfirmation: false,    // ⚠️ DESATIVADO para entradas mais rápidas
+    minZScore: 0.3,                // ↓ de 0.4
+    requireVolumeTrend: false      // ⚠️ DESATIVADO (não espera tendência)
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS - MAIS SELETIVAS ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS AGRESSIVAS ===
 const VOLUME_SETTINGS = {
-    baseThreshold: 1.4,            // ↑ de 1.5 (menos ruído)
-    minThreshold: 1.2,             // ↑ de 1.3
+    baseThreshold: 1.2,            // ↓ de 1.4 (mais sensível)
+    minThreshold: 1.0,             // ↓ de 1.2 (menos ruído)
     maxThreshold: 2.0,             // mantém
-    volatilityMultiplier: 0.5,
+    volatilityMultiplier: 0.6,     // ↑ de 0.5 (mais adaptativo)
     useAdaptive: true,
-    adaptiveSensitivity: 0.35      // ↓ de 0.85 (ligeiramente menos sensível)
-};
-
-// === CONFIGURAÇÕES DE VOLUME ROBUSTO REVISTAS ===
-const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 9,
-    emaAlpha: 0.4,
-    baseZScoreLookback: 25,
-    minZScoreLookback: 10,
-    maxZScoreLookback: 50,
-    zScoreThreshold: 1.4,          // ↑ de 1.5
-    vptThreshold: 0.20,            // ↑ de 0.25
-    minPriceMovement: 0.08,        // ↑ de 0.10
-    requirePositiveCorrelation: true, // ⚠️ CRUCIAL: só opera se alinhado com BTC
-    combinedMultiplier: 1.05,
-    volumeWeight: 0.35,
-    emaWeight: 0.30,
-    zScoreWeight: 0.25,
-    vptWeight: 0.10,
-    minimumThresholds: {
-        combinedScore: 0.32,       // ↑ de 0.28
-        emaRatio: 1.3,             // ↑ de 1.2
-        zScore: 0.9,               // ↑ de 0.8
-        classification: 'MODERADO' // ↑ de 'MODERADO-BAIXO'
+    adaptiveSensitivity: 0.5,      // ↑ de 0.35 (mais sensível a mudanças)
+    
+    // Modo lucro rápido
+    quickEntryMode: {
+        enabled: true,
+        minVolumeSpike: 1.8,       // Detecta spikes mais cedo
+        acceptPartialVolume: true
     }
 };
 
-// === CONFIGURAÇÕES DE VOLATILIDADE ===
-const VOLATILITY_PERIOD = 20;
-const VOLATILITY_TIMEFRAME = '15m';
-const VOLATILITY_THRESHOLD = 0.6; // ↑ de 0.5 (exige volatilidade mínima real)
+// === CONFIGURAÇÕES DE VOLUME ROBUSTO OTIMIZADO ===
+const VOLUME_ROBUST_SETTINGS = {
+    emaPeriod: 9,                  // ↓ de 9 (mais rápido)
+    emaAlpha: 0.45,                // ↑ de 0.4 (responde mais rápido)
+    baseZScoreLookback: 20,        // ↓ de 25 (detecta spikes mais rápido)
+    minZScoreLookback: 8,          // ↓ de 10
+    maxZScoreLookback: 40,         // ↓ de 50
+    zScoreThreshold: 1.2,          // ↓ de 1.4 (mais sensível)
+    vptThreshold: 0.15,            // ↓ de 0.20 (menos exigente)
+    minPriceMovement: 0.06,        // ↓ de 0.08 (pega movimentos menores)
+    requirePositiveCorrelation: false, // ⚠️ DESATIVADO para mais oportunidades
+    combinedMultiplier: 1.15,      // ↑ de 1.05 (recompensa setups fortes)
+    volumeWeight: 0.30,            // ↓ de 0.35
+    emaWeight: 0.40,               // ↑ de 0.30 (mais ênfase no EMA - entradas rápidas)
+    zScoreWeight: 0.20,            // ↓ de 0.25
+    vptWeight: 0.10,               // mantém
+    minimumThresholds: {
+        combinedScore: 0.25,       // ↓ de 0.32 (MUITO mais acessível)
+        emaRatio: 1.15,            // ↓ de 1.3 (aceita volume moderado)
+        zScore: 0.6,               // ↓ de 0.9 (mais flexível)
+        classification: 'MODERADO-BAIXO' // ↓ de 'MODERADO'
+    }
+};
 
-// === CONFIGURAÇÕES LSR ===
-const LSR_TIMEFRAME = '15m';
-const LSR_BUY_THRESHOLD = 2.7;     // ↓ de 2.8 (mais conservador na compra)
-const LSR_SELL_THRESHOLD = 2.9;    // ↑ de 2.9 (mais exigente na venda)
+// === CONFIGURAÇÕES DE VOLATILIDADE OTIMIZADAS ===
+const VOLATILITY_PERIOD = 15;      // ↓ de 20 (mais rápido)
+const VOLATILITY_TIMEFRAME = '5m'; // ↓ de '15m' (mais sensível)
+const VOLATILITY_THRESHOLD = 0.4;  // ↓ de 0.6 (aceita mais mercados)
 
-// === CONFIGURAÇÕES RSI ===
-const RSI_BUY_MAX = 62;            // ↓ de 62 (evita comprar em sobrecompra)
-const RSI_SELL_MIN = 32;           // ↑ de 63 (evita vender cedo demais)
+// === CONFIGURAÇÕES LSR OTIMIZADAS ===
+const LSR_TIMEFRAME = '5m';        // ↓ de '15m' (mais atualizado)
+const LSR_BUY_THRESHOLD = 2.5;     // ↓ de 2.7 (mais agressivo na compra)
+const LSR_SELL_THRESHOLD = 3.0;    // ↑ de 2.9 (mais espaço para venda)
 
-// === COOLDOWN ===
+// === CONFIGURAÇÕES RSI OTIMIZADAS ===
+const RSI_BUY_MAX = 65;            // ↑ de 62 (compra mais cedo, não perde rally)
+const RSI_SELL_MIN = 30;           // ↓ de 32 (venda mais cedo, captura mais queda)
+
+// === COOLDOWN OTIMIZADO ===
 const COOLDOWN_SETTINGS = {
-    sameDirection: 10 * 60 * 1000,   // ↑ de 15min (evita overtrade)
-    oppositeDirection: 5 * 60 * 1000, // ↑ de 5min
-    useDifferentiated: true,
-    symbolCooldown: 15 * 60 * 1000   // ↑ de 20min
+    sameDirection: 3 * 60 * 1000,   // ↓ de 10min (permite mais trades)
+    oppositeDirection: 1 * 60 * 1000, // ↓ de 5min
+    useDifferentiated: false,       // ⚠️ DESATIVADO (simplifica)
+    symbolCooldown: 5 * 60 * 1000   // ↓ de 15min (re-entrada mais rápida)
 };
 
-// === QUALITY SCORE - MAIS EXIGENTE ===
-const QUALITY_THRESHOLD = 70;       // ↑ de 70 (filtro mais rigoroso)
+// === QUALITY SCORE - MAIS FLEXÍVEL ===
+const QUALITY_THRESHOLD = 70;       // ↓ de 70 (aceita mais sinais)
 const QUALITY_WEIGHTS = {
-    volume: 25,                    // ↑ de 42 (volume ainda mais crítico)
-    oi: 2,
-    volatility: 4,                 // ↑ de 7
-    lsr: 7,                       // ↑ de 8
-    rsi: 7,                       // ↑ de 18
-    emaAlignment: 0,              // ↑ de 10
-    stoch1h: 7,                   // ↑ de 10
-    stoch4h: 7,                   // ↑ de 10
-    breakoutRisk: 4,               // ↑ de 10
-    supportResistance: 7,         // ↑ de 12
-    pivotPoints: 7,               // ↑ de 15
-    funding: 7,
-    stochastic12h: 7,             // ↑ de 8
-    stochasticDaily: 7,            // ↑ de 8
-    volume1hEMA9: 15,              // NOVO: Peso para volume 1h com EMA 9
-    cciDailyEMA5: 5               // NOVO: Peso para CCI diário com EMA 5
+    volume: 25,                    // ↓ de 25 (menos rígido com volume)
+    oi: 3,                         // ↑ de 2
+    volatility: 3,                 // ↓ de 4
+    lsr: 6,                        // ↓ de 7
+    rsi: 8,                        // ↑ de 7 (mais importância ao RSI)
+    emaAlignment: 5,               // ↑ de 0 (considera EMA novamente)
+    stoch1h: 8,                    // ↑ de 7
+    stoch4h: 8,                    // ↑ de 7
+    breakoutRisk: 3,               // ↓ de 4 (menos medo de rompimento)
+    supportResistance: 6,          // ↓ de 7
+    pivotPoints: 6,                // ↓ de 7
+    funding: 8,                    // ↑ de 7
+    stochastic12h: 8,              // ↑ de 7
+    stochasticDaily: 8,            // ↑ de 7
+    volume1hEMA9: 15,              // ↓ de 15 (menos peso, mais flexível)
+    cciDailyEMA5: 8                // ↑ de 5 (mais importância ao CCI)
 };
-
 // === NOVA CONFIGURAÇÃO: VOLUME 1H COM EMA 9 ===
 const VOLUME_1H_EMA9_SETTINGS = {
     timeframe: '1h',
