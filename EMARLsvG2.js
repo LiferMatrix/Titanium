@@ -6,9 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AGvdg';
-const TELEGRAM_CHAT_ID = '-100279';
-
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -111,25 +110,26 @@ const COOLDOWN_SETTINGS = {
 };
 
 // === QUALITY SCORE - MAIS FLEXÍVEL ===
-const QUALITY_THRESHOLD = 70;       // ↓ de 70 (aceita mais sinais)
+const QUALITY_THRESHOLD = 68;       // ↓ de 70 (aceita mais sinais)
 const QUALITY_WEIGHTS = {
-    volume: 25,                    // ↓ de 25 (menos rígido com volume)
-    oi: 3,                         // ↑ de 2
+    volume: 20,                    // ↓ de 25 (menos rígido com volume)
+    oi: 2,                         // ↑ de 2
     volatility: 3,                 // ↓ de 4
     lsr: 6,                        // ↓ de 7
-    rsi: 8,                        // ↑ de 7 (mais importância ao RSI)
-    emaAlignment: 5,               // ↑ de 0 (considera EMA novamente)
+    rsi: 7,                        // ↑ de 7 (mais importância ao RSI)
+    emaAlignment: 6,               // ↑ de 0 (considera EMA novamente)
     stoch1h: 8,                    // ↑ de 7
-    stoch4h: 8,                    // ↑ de 7
+    stoch4h: 6,                    // ↑ de 7 (AGORA SOMENTE NO SCORE, NÃO OBRIGATÓRIO)
     breakoutRisk: 3,               // ↓ de 4 (menos medo de rompimento)
     supportResistance: 6,          // ↓ de 7
     pivotPoints: 6,                // ↓ de 7
-    funding: 8,                    // ↑ de 7
-    stochastic12h: 8,              // ↑ de 7
-    stochasticDaily: 8,            // ↑ de 7
-    volume1hEMA9: 15,              // ↓ de 15 (menos peso, mais flexível)
-    cciDailyEMA5: 8                // ↑ de 5 (mais importância ao CCI)
+    funding: 6,                    // ↑ de 7
+    stochastic12h: 5,              // ↑ de 7
+    stochasticDaily: 5,            // ↑ de 7
+    volume1hEMA9: 10,              // ↓ de 15 (menos peso, mais flexível)
+    cciDailyEMA5: 5                // ↑ de 5 (mais importância ao CCI)
 };
+
 // === NOVA CONFIGURAÇÃO: VOLUME 1H COM EMA 9 ===
 const VOLUME_1H_EMA9_SETTINGS = {
     timeframe: '1h',
@@ -6215,15 +6215,7 @@ async function monitorSymbol(symbol) {
             checkFundingRate(symbol, isBullish)
         ]);
 
-        if (!lsrData.isValid) {
-            console.log(`❌ ${symbol}: LSR não válido para ${isBullish ? 'compra' : 'venda'}`);
-            return null;
-        }
         
-        if (!stoch4hData.isValid) {
-            console.log(`❌ ${symbol}: Stochastic 4h não confirmado para ${isBullish ? 'compra' : 'venda'}`);
-            return null;
-        }
 
         const marketData = {
             volume: volumeData,
@@ -6348,7 +6340,6 @@ async function monitorSymbol(symbol) {
         console.log(`   📊 Volume 1h: ${volume1hInfo}`);
         console.log(`   📊 CCI Diário: ${cciDailyInfo}`);
         console.log(`   📊 Stoch 1h: ${stochData.isValid ? '✅' : '❌'} (K:${stochData.kValue?.toFixed(1) || 'N/A'}, D:${stochData.dValue?.toFixed(1) || 'N/A'})`);
-        console.log(`   📊 Stoch 4h: ${stoch4hData.isValid ? '✅' : '❌'} (K:${stoch4hData.kValue?.toFixed(1) || 'N/A'}, D:${stoch4hData.dValue?.toFixed(1) || 'N/A'})`);
         console.log(`   📊 Stoch 12h: ${stoch12hInfo}`);
         console.log(`   📊 Stoch Diário: ${stochDailyInfo}`);
         console.log(`   💰 Funding: ${fundingRateText}`);
