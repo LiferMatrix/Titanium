@@ -70,7 +70,7 @@ const VOLUME_MINIMUM_THRESHOLDS = {
     requireVolumeTrend: false
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS - MAIS CONSERVADORAS ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS AGRESSIVAS ===
 const VOLUME_SETTINGS = {
     baseThreshold: 1.2,
     minThreshold: 1.0,
@@ -80,9 +80,9 @@ const VOLUME_SETTINGS = {
     adaptiveSensitivity: 0.5,
     
     quickEntryMode: {
-        enabled: false,           // ⚠️ DESATIVADO para capital real (reduz ruído)
-        minVolumeSpike: 2.0,      // ⬆️ Aumentado de 1.8 para exigir spike mais forte
-        acceptPartialVolume: false // ⚠️ Exige confirmação completa de volume
+        enabled: true,
+        minVolumeSpike: 1.8,
+        acceptPartialVolume: true
     }
 };
 
@@ -112,7 +112,7 @@ const VOLUME_ROBUST_SETTINGS = {
 
 // === CONFIGURAÇÕES LSR OTIMIZADAS ===
 const LSR_TIMEFRAME = '5m';
-const LSR_BUY_THRESHOLD = 2.7;
+const LSR_BUY_THRESHOLD = 2.6;
 const LSR_SELL_THRESHOLD = 3.0;
 
 // === CONFIGURAÇÕES RSI OTIMIZADAS ===
@@ -130,7 +130,7 @@ const COOLDOWN_SETTINGS = {
 // === QUALITY SCORE - MAIS FLEXÍVEL ===
 const QUALITY_THRESHOLD = 70;
 const QUALITY_WEIGHTS = {
-    volume: 20,
+    volume: 18,
     oi: 2,
     volatility: 3,
     lsr: 6,
@@ -144,8 +144,8 @@ const QUALITY_WEIGHTS = {
     funding: 6,
     stochastic12h: 5,
     stochasticDaily: 5,
-    volume1hEMA9: 10,
-    cciDailyEMA5: 5
+    volume1hEMA9: 8,
+    cciDailyEMA5: 8
 };
 
 // === NOVA CONFIGURAÇÃO: VOLUME 1H COM EMA 9 ===
