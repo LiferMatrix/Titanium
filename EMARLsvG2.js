@@ -6,8 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR, CCI } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AGJavdg';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE OPERAÇÃO ===
 const LIVE_MODE = true;
@@ -70,7 +70,7 @@ const VOLUME_MINIMUM_THRESHOLDS = {
     requireVolumeTrend: false
 };
 
-// === CONFIGURAÇÕES OTIMIZADAS - MAIS CONSERVADORAS ===
+// === CONFIGURAÇÕES OTIMIZADAS - MAIS AGRESSIVAS ===
 const VOLUME_SETTINGS = {
     baseThreshold: 1.2,
     minThreshold: 1.0,
@@ -80,15 +80,15 @@ const VOLUME_SETTINGS = {
     adaptiveSensitivity: 0.5,
     
     quickEntryMode: {
-        enabled: false,           // ⚠️ DESATIVADO para capital real (reduz ruído)
-        minVolumeSpike: 2.0,      // ⬆️ Aumentado de 1.8 para exigir spike mais forte
-        acceptPartialVolume: false // ⚠️ Exige confirmação completa de volume
+        enabled: true,
+        minVolumeSpike: 1.8,
+        acceptPartialVolume: true
     }
 };
 
 // === CONFIGURAÇÕES DE VOLUME ROBUSTO OTIMIZADO ===
 const VOLUME_ROBUST_SETTINGS = {
-    emaPeriod: 13,
+    emaPeriod: 9,
     emaAlpha: 0.45,
     baseZScoreLookback: 20,
     minZScoreLookback: 8,
@@ -112,7 +112,7 @@ const VOLUME_ROBUST_SETTINGS = {
 
 // === CONFIGURAÇÕES LSR OTIMIZADAS ===
 const LSR_TIMEFRAME = '5m';
-const LSR_BUY_THRESHOLD = 2.7;
+const LSR_BUY_THRESHOLD = 2.6;
 const LSR_SELL_THRESHOLD = 3.0;
 
 // === CONFIGURAÇÕES RSI OTIMIZADAS ===
@@ -130,14 +130,14 @@ const COOLDOWN_SETTINGS = {
 // === QUALITY SCORE - MAIS FLEXÍVEL ===
 const QUALITY_THRESHOLD = 70;
 const QUALITY_WEIGHTS = {
-    volume: 20,
+    volume: 18,
     oi: 2,
     volatility: 3,
     lsr: 6,
     rsi: 7,
     emaAlignment: 6,
     stoch1h: 8,
-    stoch4h: 6,
+    stoch4h: 10,
     breakoutRisk: 3,
     supportResistance: 6,
     pivotPoints: 6,
@@ -145,7 +145,7 @@ const QUALITY_WEIGHTS = {
     stochastic12h: 5,
     stochasticDaily: 5,
     volume1hEMA9: 10,
-    cciDailyEMA5: 5
+    cciDailyEMA5: 10
 };
 
 // === NOVA CONFIGURAÇÃO: VOLUME 1H COM EMA 9 ===
