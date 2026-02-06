@@ -31,7 +31,7 @@ const PRIORITY_CONFIG = {
     
     // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
     // Ex: 50 = monitora os 50 mais líquidos primeiro
-    MAX_LIQUID_SYMBOLS: 50,
+    MAX_LIQUID_SYMBOLS: 200,
     
     // PESO DA LIQUIDEZ NO CÁLCULO DE PRIORIDADE (0-100)
     // Quanto maior, mais importante é a liquidez
@@ -1558,15 +1558,7 @@ async function mainBotLoop() {
         const symbols = await fetchAllFuturesSymbols();
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM ATIVADO - SISTEMA DE PRIORIDADE AVANÇADO');
-        console.log('📊 Símbolos encontrados:', symbols.length);
-        console.log('🎯 Configurações de Prioridade:');
-        console.log(`   • LSR Compra Ideal: < ${PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR}`);
-        console.log(`   • LSR Venda Ideal: > ${PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR}`);
-        console.log(`   • Liquidez Mínima: $${(PRIORITY_CONFIG.LIQUIDITY.MIN_LIQUIDITY_USDT/1000).toFixed(0)}K`);
-        console.log(`   • Modo: ${PRIORITY_CONFIG.GENERAL.SORT_MODE}`);
-        console.log('📈 Sinais Técnicos Ativos');
-        console.log('🔄 Contadores zeram automaticamente às 21h (horário BR)');
+        console.log(' TITANIUM ATIVADO - SISTEMA DE PRIORIDADE AVANÇADO');
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
