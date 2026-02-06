@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfo4N0A';
-const TELEGRAM_CHAT_ID = '-1001997';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -31,7 +31,7 @@ const PRIORITY_CONFIG = {
     
     // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
     // Ex: 50 = monitora os 50 mais líquidos primeiro
-    MAX_LIQUID_SYMBOLS: 200,
+    MAX_LIQUID_SYMBOLS: 300,
     
     // PESO DA LIQUIDEZ NO CÁLCULO DE PRIORIDADE (0-100)
     // Quanto maior, mais importante é a liquidez
@@ -804,35 +804,20 @@ function resetDailyCounters() {
     console.log(`✅ Contadores diários zerados. Global: ${globalAlerts} | Diário: ${dailyAlerts}`);
 }
 
-// === MENSAGEM DE INICIALIZAÇÃO ===
+// === MENSAGEM DE INICIALIZAÇÃO SIMPLIFICADA ===
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
         
         const message = `
-<b>🚀 TITANIUM ATIVADO - SISTEMA DE PRIORIDADE AVANÇADO</b>
+<b>🚀 TITANIUM INICIADO</b>
 
 📅 ${now.full}
 
-✅ Sistema iniciado com sucesso!
-📊 Monitorando Futuros Binance
-🎯 Alertas de Compra/Venda ativos
-📈 Entradas com retração ajustada
-🔄 Contadores zeram às 21h (BR)
+✅ Sistema ativo e monitorando
+✨ Prioridade por LSR e Liquidez
 
-🔧 <b>Sistema de Prioridade Ativo:</b>
-• Liquidez mínima: $${(PRIORITY_CONFIG.LIQUIDITY.MIN_LIQUIDITY_USDT/1000).toFixed(0)}K
-• LSR ideal compra: < ${PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR}
-• LSR ideal venda: > ${PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR}
-• Modo: ${PRIORITY_CONFIG.GENERAL.SORT_MODE}
-
-🔧 <b>Sistema de Limpeza Ativo:</b>
-• Limpeza automática de cache
-• Remoção de logs antigos
-• Monitoramento de memória
-• Rate limiting adaptativo
-
-<i>✨ Titanium by @J4Rviz</i>
+<i>Alerta de inicialização automática</i>
 `;
 
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -1181,7 +1166,7 @@ function calculateTargets(entryPrice, stopPrice, isBullish) {
 }
 
 // === SINAIS DE COMPRA E VENDA ===
-async function checkBuySignal(symbol) {
+async function checkBuySignal(symbol, prioritySystem) {
     try {
         // Verificar cooldown
         if (prioritySystem.isInCooldown(symbol)) {
@@ -1253,7 +1238,7 @@ async function checkBuySignal(symbol) {
     }
 }
 
-async function checkSellSignal(symbol) {
+async function checkSellSignal(symbol, prioritySystem) {
     try {
         // Verificar cooldown
         if (prioritySystem.isInCooldown(symbol)) {
@@ -1326,7 +1311,7 @@ async function checkSellSignal(symbol) {
 }
 
 // === MENSAGENS DE ALERTA ===
-async function sendBuyAlert(signal) {
+async function sendBuyAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'buy');
     
     // Registrar alerta para cooldown
@@ -1380,41 +1365,41 @@ async function sendBuyAlert(signal) {
     const volume1hRatio = signal.volume1h ? ` (1h: ${signal.volume1h.ratio.toFixed(2)}x)` : '';
     
     const message = `
-🟢 <b>${signal.symbol} - COMPRA ${lsrIdealIndicator}</b>
+🟢 <i>${signal.symbol} - COMPRA ${lsrIdealIndicator}</i>
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
 Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
 
-<i>📈 Preços:</i>
+<i> Preços:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <b>ENTRADA (com retração):</b> $${signal.entryPrice.toFixed(6)}
-• Retração: ${signal.retracementPercentage}% do movimento
+• <i>ENTRADA :</i> $${signal.entryPrice.toFixed(6)}
+•💡Dica, entrada na Retração ou no Pivô: ${signal.retracementPercentage}% do movimento
 
-<i>📊 Indicadores:</i>
+<i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi < 62 ? '✅' : '❌'})
 • Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hRatio}
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr < 2.6 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
 ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
 
-<i>🎯 Níveis Importantes:</i>${pivotInfo}
+<i> Níveis Importantes:</i>${pivotInfo}
 
-<i>💰 Alvos:</i>
+<i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
 
-<i>🛑 STOP:</i>
+<i>🛑STOP:</i>
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨ Titanium Priority System v2.0 ✨</i>
+<i>✨Titanium Volume Priority ✨</i>
 `;
 
     await sendTelegramAlert(message);
     console.log(`✅ Alerta de COMPRA enviado: ${signal.symbol} (Alerta #${alertCount.symbolTotal} deste ativo)`);
 }
 
-async function sendSellAlert(signal) {
+async function sendSellAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'sell');
     
     // Registrar alerta para cooldown
@@ -1468,34 +1453,34 @@ async function sendSellAlert(signal) {
     const volume1hRatio = signal.volume1h ? ` (1h: ${signal.volume1h.ratio.toFixed(2)}x)` : '';
     
     const message = `
-🔴 <b>${signal.symbol} - VENDA ${lsrIdealIndicator}</b>
+🔴 <i>${signal.symbol} - VENDA ${lsrIdealIndicator}</i>
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
 Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
 
-<i>📉 Preços:</i>
+<i> Preços:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <b>ENTRADA (com retração):</b> $${signal.entryPrice.toFixed(6)}
-• Retração: ${signal.retracementPercentage}% do movimento
+• <i>ENTRADA:</i> $${signal.entryPrice.toFixed(6)}
+•💡Dica, entrada na Retração ou no Pivô: ${signal.retracementPercentage}% do movimento
 
-<i>📊 Indicadores:</i>
+<i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi > 35 ? '✅' : '❌'})
 • Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hRatio}
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr > 3.0 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
 ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
 
-<i>🎯 Níveis Importantes:</i>${pivotInfo}
+<i> Níveis Importantes:</i>${pivotInfo}
 
-<i>💰 Alvos:</i>
+<i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
 
-<i>🛑 STOP:</i>
+<i>🛑STOP:</i>
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨ Titanium Priority System v2.0 ✨</i>
+<i>✨Titanium Volume Priority ✨</i>
 `;
 
     await sendTelegramAlert(message);
@@ -1524,7 +1509,7 @@ async function fetchAllFuturesSymbols() {
     }
 }
 
-async function monitorSymbol(symbol) {
+async function monitorSymbol(symbol, prioritySystem) {
     try {
         console.log(`🔍 Analisando ${symbol}...`);
         
@@ -1534,15 +1519,15 @@ async function monitorSymbol(symbol) {
             console.log(`   📊 Prioridade: ${priorityInfo.score.toFixed(1)} | LSR: ${priorityInfo.lsr?.toFixed(2) || 'N/A'}`);
         }
         
-        const buySignal = await checkBuySignal(symbol);
+        const buySignal = await checkBuySignal(symbol, prioritySystem);
         if (buySignal) {
-            await sendBuyAlert(buySignal);
+            await sendBuyAlert(buySignal, prioritySystem);
             return true;
         }
         
-        const sellSignal = await checkSellSignal(symbol);
+        const sellSignal = await checkSellSignal(symbol, prioritySystem);
         if (sellSignal) {
-            await sendSellAlert(sellSignal);
+            await sendSellAlert(sellSignal, prioritySystem);
             return true;
         }
         
@@ -1562,7 +1547,7 @@ async function mainBotLoop() {
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
-        const prioritySystemInstance = new PrioritySystem();
+        const prioritySystem = new PrioritySystem();
         
         let cycle = 0;
         while (true) {
@@ -1581,7 +1566,7 @@ async function mainBotLoop() {
             // Ordenar símbolos por prioridade
             let symbolsToMonitor = symbols;
             if (PRIORITY_CONFIG.ENABLED) {
-                symbolsToMonitor = await prioritySystemInstance.prioritizeSymbols(symbols);
+                symbolsToMonitor = await prioritySystem.prioritizeSymbols(symbols);
                 
                 // Limitar número de símbolos por ciclo se configurado
                 if (PERFORMANCE_CONFIG.MAX_SYMBOLS_PER_CYCLE > 0) {
@@ -1595,7 +1580,7 @@ async function mainBotLoop() {
             
             for (const symbol of symbolsToMonitor) {
                 try {
-                    const foundSignal = await monitorSymbol(symbol);
+                    const foundSignal = await monitorSymbol(symbol, prioritySystem);
                     if (foundSignal) signalsFound++;
                     
                     symbolsAnalyzed++;
@@ -1631,7 +1616,6 @@ async function mainBotLoop() {
 
 // === INICIALIZAÇÃO ===
 let rateLimiter = new AdaptiveRateLimiter();
-let prioritySystem = new PrioritySystem();
 
 async function startBot() {
     try {
@@ -1681,4 +1665,5 @@ if (global.gc) {
     console.log('🗑️  Coleta de lixo forçada disponível');
 }
 
+// Corrigido: Chama startBot() corretamente
 startBot();
