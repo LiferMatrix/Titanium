@@ -797,7 +797,7 @@ ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.pri
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨ Titanium by @J4Rviz (Zera 21h BR)</i>
+<i>✨ Titanium by @J4Rviz </i>
 `;
 
     await sendTelegramAlert(message);
@@ -863,7 +863,7 @@ ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.pri
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨ Titanium by @J4Rviz (Zera 21h BR)</i>
+<i>✨ Titanium by @J4Rviz </i>
 `;
 
     await sendTelegramAlert(message);
