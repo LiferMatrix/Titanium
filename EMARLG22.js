@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6dg';
-const TELEGRAM_CHAT_ID = '-100259';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -27,7 +27,7 @@ const PRIORITY_CONFIG = {
     // - 100.000 = 100 mil USDT (padrão)
     // - 50.000 = 50 mil USDT (agressivo)
     // - 0 = desconsiderar liquidez (monitora tudo)
-    MIN_LIQUIDITY_USDT: 50000,
+    MIN_LIQUIDITY_USDT: 100000,
     
     // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
     // Ex: 50 = monitora os 50 mais líquidos primeiro
@@ -45,7 +45,7 @@ const PRIORITY_CONFIG = {
     
     // LSR IDEAL PARA COMPRAS (quanto menor, melhor para comprar)
     // Ativos com LSR abaixo deste valor têm PRIORIDADE ALTA para COMPRA
-    IDEAL_BUY_LSR: 2.7,
+    IDEAL_BUY_LSR: 2.5,
     
     // LSR IDEAL PARA VENDAS (quanto maior, melhor para vender)
     // Ativos com LSR acima deste valor têm PRIORIDADE ALTA para VENDA
@@ -1369,13 +1369,13 @@ async function sendBuyAlert(signal, prioritySystem) {
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
-Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
+⚠️ ${priorityInfo}
 
 <i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
 • <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)} 
   (Tolerância até suporte: $${signal.pivotData.nearestSupport.price.toFixed(6)} - ${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)
-• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte, o valor da prioridade quanto mais alto melhor.
 
 <i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi < 62 ? '✅' : '❌'})
@@ -1426,7 +1426,7 @@ async function sendSellAlert(signal, prioritySystem) {
     // Informações de prioridade
     let priorityInfo = '';
     if (signal.priorityInfo) {
-        priorityInfo = `\n🎯 Prioridade: ${signal.priorityInfo.score.toFixed(1)}`;
+        priorityInfo = `\n Prioridade: ${signal.priorityInfo.score.toFixed(1)}`;
         if (signal.priorityInfo.liquidity) {
             priorityInfo += ` | Liq: $${(signal.priorityInfo.liquidity/1000).toFixed(0)}K`;
         }
@@ -1456,13 +1456,13 @@ async function sendSellAlert(signal, prioritySystem) {
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
-Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
+⚠️ ${priorityInfo}
 
 <i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
 • <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)}
   (Tolerância até resistência: $${signal.pivotData.nearestResistance.price.toFixed(6)} - ${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)
-• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência, o valor da prioridade quanto mais alto melhor.
 
 <i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi > 35 ? '✅' : '❌'})
