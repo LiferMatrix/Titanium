@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vdg';
-const TELEGRAM_CHAT_ID = '-1002559';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -1369,12 +1369,12 @@ async function sendBuyAlert(signal, prioritySystem) {
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
-⚠️ ${priorityInfo}
+${priorityInfo}
 
 <i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)} 
-  (Tolerância até suporte: $${signal.pivotData.nearestSupport.price.toFixed(6)} - ${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)
+• <i>⚠️Região de Entrada:</i> $${signal.entryPrice.toFixed(6)} 
+  (... até suporte: $${signal.pivotData.nearestSupport.price.toFixed(6)} - ${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)
 • 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte, o valor da prioridade quanto mais alto melhor.
 
 <i> Indicadores:</i>
@@ -1387,8 +1387,7 @@ ${fundingRateText}
 <i> Níveis Importantes:</i>${pivotInfo}
 <i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-<i>🛑STOP:</i>
-• Preço: $${signal.stopPrice.toFixed(6)}
+<i>🛑STOP:</i> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
 <i>✨Titanium Volume Priority ✨</i>
@@ -1456,12 +1455,12 @@ async function sendSellAlert(signal, prioritySystem) {
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
-⚠️ ${priorityInfo}
+${priorityInfo}
 
 <i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)}
-  (Tolerância até resistência: $${signal.pivotData.nearestResistance.price.toFixed(6)} - ${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)
+• <i>⚠️Região de Entrada:</i> $${signal.entryPrice.toFixed(6)}
+  (...até resistência: $${signal.pivotData.nearestResistance.price.toFixed(6)} - ${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)
 • 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência, o valor da prioridade quanto mais alto melhor.
 
 <i> Indicadores:</i>
@@ -1474,8 +1473,7 @@ ${fundingRateText}
 <i> Níveis Importantes:</i>${pivotInfo}
 <i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-<i>🛑STOP:</i>
-• Preço: $${signal.stopPrice.toFixed(6)}
+<i>🛑STOP:</i> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
 <i>✨Titanium Volume Priority ✨</i>
