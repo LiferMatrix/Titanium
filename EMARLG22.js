@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8vdg';
-const TELEGRAM_CHAT_ID = '-1009';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -27,7 +27,7 @@ const PRIORITY_CONFIG = {
     // - 100.000 = 100 mil USDT (padrão)
     // - 50.000 = 50 mil USDT (agressivo)
     // - 0 = desconsiderar liquidez (monitora tudo)
-    MIN_LIQUIDITY_USDT: 500000,
+    MIN_LIQUIDITY_USDT: 50000,
     
     // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
     // Ex: 50 = monitora os 50 mais líquidos primeiro
@@ -45,7 +45,7 @@ const PRIORITY_CONFIG = {
     
     // LSR IDEAL PARA COMPRAS (quanto menor, melhor para comprar)
     // Ativos com LSR abaixo deste valor têm PRIORIDADE ALTA para COMPRA
-    IDEAL_BUY_LSR: 2.5,
+    IDEAL_BUY_LSR: 2.7,
     
     // LSR IDEAL PARA VENDAS (quanto maior, melhor para vender)
     // Ativos com LSR acima deste valor têm PRIORIDADE ALTA para VENDA
