@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVJavdg';
-const TELEGRAM_CHAT_ID = '-1002';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -27,11 +27,11 @@ const PRIORITY_CONFIG = {
     // - 100.000 = 100 mil USDT (padrão)
     // - 50.000 = 50 mil USDT (agressivo)
     // - 0 = desconsiderar liquidez (monitora tudo)
-    MIN_LIQUIDITY_USDT: 100000,
+    MIN_LIQUIDITY_USDT: 500000,
     
     // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
     // Ex: 50 = monitora os 50 mais líquidos primeiro
-    MAX_LIQUID_SYMBOLS: 400,
+    MAX_LIQUID_SYMBOLS: 500,
     
     // PESO DA LIQUIDEZ NO CÁLCULO DE PRIORIDADE (0-100)
     // Quanto maior, mais importante é a liquidez
@@ -1371,10 +1371,11 @@ ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
 Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
 
-<i> Preços:</i>
+<i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <i>ENTRADA :</i> $${signal.entryPrice.toFixed(6)}
-•💡Dica, entrada na Retração ou no Pivô: ${signal.retracementPercentage}% do movimento
+• <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)} 
+  (Tolerância até suporte: $${signal.pivotData.nearestSupport.price.toFixed(6)} - ${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte
 
 <i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi < 62 ? '✅' : '❌'})
@@ -1384,10 +1385,8 @@ ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
 
 <i> Níveis Importantes:</i>${pivotInfo}
-
 <i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-
 <i>🛑STOP:</i>
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
@@ -1459,10 +1458,11 @@ ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
 Diário: ${alertCount.symbolDailyTotal} alertas${priorityInfo}
 
-<i> Preços:</i>
+<i>Operação:</i>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
-• <i>ENTRADA:</i> $${signal.entryPrice.toFixed(6)}
-•💡Dica, entrada na Retração ou no Pivô: ${signal.retracementPercentage}% do movimento
+• <b>⚠️Região de Entrada:</b> $${signal.entryPrice.toFixed(6)}
+  (Tolerância até resistência: $${signal.pivotData.nearestResistance.price.toFixed(6)} - ${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência
 
 <i> Indicadores:</i>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi > 35 ? '✅' : '❌'})
@@ -1472,10 +1472,8 @@ ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
 
 <i> Níveis Importantes:</i>${pivotInfo}
-
 <i> Alvos:</i>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-
 <i>🛑STOP:</i>
 • Preço: $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
