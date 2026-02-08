@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_N0A';
+const TELEGRAM_CHAT_ID = '-1001997';
 
 
 // === SISTEMA DE PRIORIDADE POR VOLUME 1H, LIQUIDEZ E LSR ===
