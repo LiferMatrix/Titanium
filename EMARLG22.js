@@ -10,97 +10,76 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVbJavdg';
-const TELEGRAM_CHAT_ID = '-1002579';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
-// === SISTEMA DE PRIORIDADE POR LIQUIDEZ E LSR ===
+
+// === SISTEMA DE PRIORIDADE POR VOLUME 1H, LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
   // ATIVAR/DESATIVAR sistema de prioridade
   ENABLED: true,
   
+  // ========== CONFIGURAÇÕES DE VOLUME 1H ==========
+  VOLUME_1H: {
+    // PESO DO VOLUME 1H NO CÁLCULO DE PRIORIDADE (0-100)
+    VOLUME_WEIGHT: 50,
+    
+    // PERÍODO DA EMA PARA VOLUME 1H (agora EMA9 - mais sensível)
+    EMA_PERIOD: 9,
+    
+    // VOLUME MÍNIMO RELATIVO (múltiplo da EMA)
+    MIN_VOLUME_RATIO: 1.0,
+    
+    // PARA COMPRA: Volume 1h deve estar SUBINDO (ratio > 1.0)
+    // PARA VENDA: Volume 1h deve estar DESCENDO (ratio < 1.0)
+    VOLUME_DIRECTION_STRICT: true,
+    
+    // BÔNUS para volume na direção correta
+    VOLUME_DIRECTION_BONUS: 30,
+    
+    // SENSIBILIDADE DO VOLUME (1.0 = padrão, 1.2 = mais sensível)
+    SENSITIVITY_MULTIPLIER: 1.1
+  },
+  
   // ========== CONFIGURAÇÕES DE LIQUIDEZ ==========
   LIQUIDITY: {
-    // VALOR MÍNIMO DE LIQUIDEZ (em USDT) para ser considerado "líquido"
-    // Ajuste este valor conforme necessário:
-    // - 1.000.000 = 1 milhão USDT (muito conservador)
-    // - 500.000 = 500 mil USDT (conservador)
-    // - 100.000 = 100 mil USDT (padrão)
-    // - 50.000 = 50 mil USDT (agressivo)
-    // - 0 = desconsiderar liquidez (monitora tudo)
     MIN_LIQUIDITY_USDT: 100000,
-    
-    // NÚMERO MÁXIMO DE ATIVOS LÍQUIDOS PARA PRIORIZAR
-    // Ex: 50 = monitora os 50 mais líquidos primeiro
     MAX_LIQUID_SYMBOLS: 500,
-    
-    // PESO DA LIQUIDEZ NO CÁLCULO DE PRIORIDADE (0-100)
-    // Quanto maior, mais importante é a liquidez
-    LIQUIDITY_WEIGHT: 40
+    LIQUIDITY_WEIGHT: 25
   },
   
   // ========== CONFIGURAÇÕES DE LSR (LONG/SHORT RATIO) ==========
   LSR: {
-    // ATIVAR PRIORIDADE POR LSR
     ENABLED: true,
-    
-    // LSR IDEAL PARA COMPRAS (quanto menor, melhor para comprar)
-    // Ativos com LSR abaixo deste valor têm PRIORIDADE ALTA para COMPRA
     IDEAL_BUY_LSR: 2.5,
-    
-    // LSR IDEAL PARA VENDAS (quanto maior, melhor para vender)
-    // Ativos com LSR acima deste valor têm PRIORIDADE ALTA para VENDA
     IDEAL_SELL_LSR: 2.8,
-    
-    // PESO DO LSR NO CÁLCULO DE PRIORIDADE (0-100)
-    // Quanto maior, mais importante é o LSR
-    LSR_WEIGHT: 60,
-    
-    // BÔNUS DE PRIORIDADE PARA LSR IDEAL
-    // Valor adicional na pontuação quando LSR está na zona ideal
-    PRIORITY_BONUS: 50
+    LSR_WEIGHT: 25,
+    PRIORITY_BONUS: 20
   },
   
   // ========== CONFIGURAÇÕES GERAIS DE PRIORIDADE ==========
   GENERAL: {
-    // TEMPO DE CACHE PARA DADOS DE PRIORIDADE (em milissegundos)
-    // 300000 = 5 minutos
     PRIORITY_CACHE_TTL: 300000,
-    
-    // MODO DE ORDENAÇÃO:
-    // 'LIQUIDITY_ONLY' = apenas pela liquidez
-    // 'LSR_ONLY' = apenas pelo LSR
-    // 'HYBRID' = combinação de liquidez e LSR (recomendado)
-    // 'DYNAMIC' = ajusta pesos automaticamente
     SORT_MODE: 'HYBRID',
-    
-    // EXIBIR LOGS DETALHADOS DE PRIORIDADE
     VERBOSE_LOGS: true,
-    
-    // ATUALIZAR PRIORIDADES A CADA CICLO
     UPDATE_EACH_CYCLE: true,
-    
-    // MÍNIMO DE SÍMBOLOS PARA CONSIDERAR PRIORIDADE
-    // Se tiver menos símbolos que isso, ignora prioridade
-    MIN_SYMBOLS_FOR_PRIORITY: 10
+    MIN_SYMBOLS_FOR_PRIORITY: 10,
+    EMOJI_RANKINGS: {
+      'EXCELLENT': '🏆🏆🏆',
+      'GOOD': '🏆🏆',
+      'MEDIUM': '🏆',
+      'LOW': '⚡',
+      'POOR': '📉'
+    }
   }
 };
 
 // === CONFIGURAÇÕES DE PERFORMANCE ===
 const PERFORMANCE_CONFIG = {
-  // TEMPO DE ESPERA ENTRE SÍMBOLOS (em milissegundos)
   SYMBOL_DELAY_MS: 200,
-  
-  // TEMPO ENTRE CICLOS COMPLETOS (em milissegundos)
   CYCLE_DELAY_MS: 30000,
-  
-  // NÚMERO MÁXIMO DE SÍMBOLOS POR CICLO
-  // 0 = ilimitado (processa todos)
   MAX_SYMBOLS_PER_CYCLE: 0,
-  
-  // PRIORIZAR SÍMBOLOS COM SINAIS RECENTES
   PRIORITIZE_RECENT_SIGNALS: true,
-  
-  // TEMPO DE RESFRIAMENTO ENTRE ALERTAS DO MESMO SÍMBOLO (minutos)
   COOLDOWN_MINUTES: 5
 };
 
@@ -360,14 +339,13 @@ class AdvancedCleanupSystem {
     }
 }
 
-// === SISTEMA DE PRIORIDADE AVANÇADO ===
+// === SISTEMA DE PRIORIDADE AVANÇADO COM VOLUME 1H EMA9 ===
 class PrioritySystem {
     constructor() {
         this.liquidityData = null;
         this.lastUpdate = 0;
     }
     
-    // Verificar se símbolo está em cooldown
     isInCooldown(symbol) {
         if (!symbolCooldown[symbol]) return false;
         
@@ -375,12 +353,10 @@ class PrioritySystem {
         return (Date.now() - symbolCooldown[symbol]) < cooldownMs;
     }
     
-    // Registrar alerta para cooldown
     registerAlert(symbol) {
         symbolCooldown[symbol] = Date.now();
     }
     
-    // Buscar dados de ticker para liquidez (volume 24h)
     async fetchTickerData() {
         try {
             const url = 'https://fapi.binance.com/fapi/v1/ticker/24hr';
@@ -393,7 +369,7 @@ class PrioritySystem {
                         volume: parseFloat(ticker.volume),
                         quoteVolume: parseFloat(ticker.quoteVolume),
                         lastPrice: parseFloat(ticker.lastPrice),
-                        liquidity: parseFloat(ticker.quoteVolume) // Volume em USDT
+                        liquidity: parseFloat(ticker.quoteVolume)
                     };
                 }
             });
@@ -405,13 +381,11 @@ class PrioritySystem {
         }
     }
     
-    // Buscar dados de LSR para múltiplos símbolos
     async fetchLSRData(symbols) {
         try {
             const lsrData = {};
             
-            // Buscar LSR para cada símbolo (limitado para evitar rate limit)
-            const symbolsToFetch = symbols.slice(0, 20); // Limitar a 20 por vez
+            const symbolsToFetch = symbols.slice(0, 20);
             
             for (const symbol of symbolsToFetch) {
                 try {
@@ -427,7 +401,6 @@ class PrioritySystem {
                             timestamp: data.timestamp
                         };
                         
-                        // Pequena pausa entre requisições
                         await new Promise(r => setTimeout(r, 100));
                     }
                 } catch (error) {
@@ -442,98 +415,147 @@ class PrioritySystem {
         }
     }
     
-    // Calcular pontuação de prioridade para um símbolo
-    calculatePriorityScore(symbol, tickerData, lsrData) {
+    async fetchVolume1hData(symbols) {
+        try {
+            const volumeData = {};
+            
+            const symbolsToFetch = symbols.slice(0, 30);
+            
+            for (const symbol of symbolsToFetch) {
+                try {
+                    const volume1h = await getVolume1h(symbol);
+                    if (volume1h) {
+                        volumeData[symbol] = {
+                            ratio: volume1h.ratio,
+                            currentVolume: volume1h.currentVolume,
+                            emaVolume: volume1h.emaVolume,
+                            isRising: volume1h.isRising,
+                            isFalling: volume1h.isFalling,
+                            emaPeriod: volume1h.emaPeriod,
+                            trendStrength: volume1h.trendStrength
+                        };
+                    }
+                    
+                    await new Promise(r => setTimeout(r, 50));
+                } catch (error) {
+                    console.log(`⚠️  Erro ao buscar volume 1h para ${symbol}: ${error.message}`);
+                }
+            }
+            
+            return volumeData;
+        } catch (error) {
+            console.log(`⚠️  Erro geral ao buscar dados volume 1h: ${error.message}`);
+            return null;
+        }
+    }
+    
+    calculatePriorityScore(symbol, tickerData, lsrData, volume1hData, signalType = null) {
         let score = 0;
         const details = {
             symbol: symbol,
+            volume1hScore: 0,
             liquidityScore: 0,
             lsrScore: 0,
-            buyPriority: 0,
-            sellPriority: 0,
-            finalScore: 0
+            volumeDirectionBonus: 0,
+            finalScore: 0,
+            emojiRanking: '📉'
         };
         
-        // Pontuação baseada na liquidez
+        // ========== PONTUAÇÃO DO VOLUME 1H (EMA9 - MAIS SENSÍVEL) ==========
+        if (volume1hData && volume1hData[symbol]) {
+            const volumeInfo = volume1hData[symbol];
+            const volumeRatio = volumeInfo.ratio;
+            const sensitivity = PRIORITY_CONFIG.VOLUME_1H.SENSITIVITY_MULTIPLIER;
+            
+            // Pontuação com EMA9 (mais sensível à mudanças recentes)
+            let volumeScore = 0;
+            const adjustedRatio = volumeRatio * sensitivity;
+            
+            if (adjustedRatio >= 2.0) volumeScore = 100;
+            else if (adjustedRatio >= 1.5) volumeScore = 80;
+            else if (adjustedRatio >= 1.2) volumeScore = 60;
+            else if (adjustedRatio >= 1.0) volumeScore = 40;
+            else if (adjustedRatio >= 0.8) volumeScore = 20;
+            else volumeScore = 0;
+            
+            details.volume1hScore = volumeScore;
+            
+            // BÔNUS DE DIREÇÃO DO VOLUME
+            if (signalType) {
+                if (signalType === 'COMPRA' && volumeInfo.isRising) {
+                    details.volumeDirectionBonus = PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_BONUS;
+                    score += details.volumeDirectionBonus;
+                } else if (signalType === 'VENDA' && volumeInfo.isFalling) {
+                    details.volumeDirectionBonus = PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_BONUS;
+                    score += details.volumeDirectionBonus;
+                }
+            }
+            
+            score += volumeScore * (PRIORITY_CONFIG.VOLUME_1H.VOLUME_WEIGHT / 100);
+        }
+        
+        // ========== PONTUAÇÃO DA LIQUIDEZ ==========
         if (tickerData && tickerData[symbol]) {
             const liquidity = tickerData[symbol].liquidity || 0;
             const minLiquidity = PRIORITY_CONFIG.LIQUIDITY.MIN_LIQUIDITY_USDT;
             
             if (liquidity >= minLiquidity) {
-                // Normalizar liquidez (0-100)
-                const maxExpectedLiquidity = 100000000; // 100 milhões USDT
+                const maxExpectedLiquidity = 100000000;
                 const normalizedLiquidity = Math.min((liquidity / maxExpectedLiquidity) * 100, 100);
                 details.liquidityScore = normalizedLiquidity;
                 score += normalizedLiquidity * (PRIORITY_CONFIG.LIQUIDITY.LIQUIDITY_WEIGHT / 100);
             }
         }
         
-        // Pontuação baseada no LSR
+        // ========== PONTUAÇÃO DO LSR ==========
         if (lsrData && lsrData[symbol]) {
             const lsr = lsrData[symbol].lsr;
             const idealBuyLSR = PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR;
             const idealSellLSR = PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR;
             
-            // Pontuação para COMPRA (LSR baixo é bom)
-            if (lsr <= idealBuyLSR) {
-                const buyScore = 100 - ((lsr / idealBuyLSR) * 100);
-                details.buyPriority = buyScore;
-                details.lsrScore += buyScore;
-                score += buyScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
-                
-                // Bônus adicional para LSR ideal
-                if (lsr < idealBuyLSR * 0.8) { // 20% abaixo do ideal
-                    score += PRIORITY_CONFIG.LSR.PRIORITY_BONUS;
+            if (signalType === 'COMPRA' || !signalType) {
+                if (lsr <= idealBuyLSR) {
+                    const buyScore = 100 - ((lsr / idealBuyLSR) * 100);
+                    details.lsrScore = Math.max(details.lsrScore, buyScore);
+                    score += buyScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
+                    
+                    if (lsr < idealBuyLSR * 0.8) {
+                        score += PRIORITY_CONFIG.LSR.PRIORITY_BONUS;
+                    }
                 }
             }
             
-            // Pontuação para VENDA (LSR alto é bom)
-            if (lsr >= idealSellLSR) {
-                const sellScore = Math.min((lsr / idealSellLSR) * 100, 150);
-                details.sellPriority = sellScore;
-                details.lsrScore += sellScore;
-                score += sellScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
-                
-                // Bônus adicional para LSR ideal
-                if (lsr > idealSellLSR * 1.2) { // 20% acima do ideal
-                    score += PRIORITY_CONFIG.LSR.PRIORITY_BONUS;
-                }
-            }
-            
-            // Pontuação neutra (entre os thresholds)
-            if (lsr > idealBuyLSR && lsr < idealSellLSR) {
-                // Mais perto do buy threshold = melhor para compra
-                // Mais perto do sell threshold = melhor para venda
-                const distanceToBuy = Math.abs(lsr - idealBuyLSR);
-                const distanceToSell = Math.abs(lsr - idealSellLSR);
-                
-                if (distanceToBuy < distanceToSell) {
-                    const neutralBuyScore = 50 - ((distanceToBuy / idealBuyLSR) * 50);
-                    details.buyPriority = neutralBuyScore;
-                    details.lsrScore = neutralBuyScore;
-                    score += neutralBuyScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
-                } else {
-                    const neutralSellScore = 50 - ((distanceToSell / idealSellLSR) * 50);
-                    details.sellPriority = neutralSellScore;
-                    details.lsrScore = neutralSellScore;
-                    score += neutralSellScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
+            if (signalType === 'VENDA' || !signalType) {
+                if (lsr >= idealSellLSR) {
+                    const sellScore = Math.min((lsr / idealSellLSR) * 100, 150);
+                    details.lsrScore = Math.max(details.lsrScore, sellScore);
+                    score += sellScore * (PRIORITY_CONFIG.LSR.LSR_WEIGHT / 100);
+                    
+                    if (lsr > idealSellLSR * 1.2) {
+                        score += PRIORITY_CONFIG.LSR.PRIORITY_BONUS;
+                    }
                 }
             }
         }
+        
+        // ========== CLASSIFICAÇÃO COM EMOJIS ==========
+        if (score >= 80) details.emojiRanking = PRIORITY_CONFIG.GENERAL.EMOJI_RANKINGS.EXCELLENT;
+        else if (score >= 60) details.emojiRanking = PRIORITY_CONFIG.GENERAL.EMOJI_RANKINGS.GOOD;
+        else if (score >= 40) details.emojiRanking = PRIORITY_CONFIG.GENERAL.EMOJI_RANKINGS.MEDIUM;
+        else if (score >= 20) details.emojiRanking = PRIORITY_CONFIG.GENERAL.EMOJI_RANKINGS.LOW;
+        else details.emojiRanking = PRIORITY_CONFIG.GENERAL.EMOJI_RANKINGS.POOR;
         
         details.finalScore = Math.round(score);
         return details;
     }
     
-    // Ordenar símbolos por prioridade
-    async prioritizeSymbols(symbols) {
+    async prioritizeSymbols(symbols, signalType = null) {
         if (!PRIORITY_CONFIG.ENABLED || symbols.length < PRIORITY_CONFIG.GENERAL.MIN_SYMBOLS_FOR_PRIORITY) {
-            return symbols; // Retorna na ordem original se desativado ou poucos símbolos
+            return symbols;
         }
         
         const now = Date.now();
         
-        // Usar cache se disponível e recente
         if (priorityCache.symbols && 
             (now - priorityCache.timestamp) < PRIORITY_CONFIG.GENERAL.PRIORITY_CACHE_TTL &&
             !PRIORITY_CONFIG.GENERAL.UPDATE_EACH_CYCLE) {
@@ -544,22 +566,21 @@ class PrioritySystem {
         }
         
         console.log(`📊 Calculando prioridades para ${symbols.length} símbolos...`);
+        console.log(`📈 Volume 1h usando EMA${PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD} (mais sensível)`);
         
         try {
-            // Buscar dados necessários
             const tickerData = await this.fetchTickerData();
             const lsrData = await this.fetchLSRData(symbols);
+            const volume1hData = await this.fetchVolume1hData(symbols);
             
-            if (!tickerData && !lsrData) {
+            if (!tickerData && !lsrData && !volume1hData) {
                 console.log('⚠️  Dados insuficientes para calcular prioridades, usando ordem original');
                 return symbols;
             }
             
-            // Calcular pontuações para cada símbolo
             const symbolScores = [];
             
             for (const symbol of symbols) {
-                // Pular símbolos em cooldown
                 if (this.isInCooldown(symbol)) {
                     if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
                         console.log(`⏸️  ${symbol} em cooldown, pulando priorização`);
@@ -567,29 +588,15 @@ class PrioritySystem {
                     continue;
                 }
                 
-                const scoreDetails = this.calculatePriorityScore(symbol, tickerData, lsrData);
+                const scoreDetails = this.calculatePriorityScore(symbol, tickerData, lsrData, volume1hData, signalType);
                 
-                // Aplicar modo de ordenação
                 let finalScore = scoreDetails.finalScore;
                 
                 switch (PRIORITY_CONFIG.GENERAL.SORT_MODE) {
-                    case 'LIQUIDITY_ONLY':
-                        finalScore = scoreDetails.liquidityScore;
-                        break;
-                    case 'LSR_ONLY':
-                        finalScore = scoreDetails.lsrScore;
+                    case 'VOLUME_1H_ONLY':
+                        finalScore = scoreDetails.volume1hScore + scoreDetails.volumeDirectionBonus;
                         break;
                     case 'HYBRID':
-                        // Já calculado no calculatePriorityScore
-                        break;
-                    case 'DYNAMIC':
-                        // Ajustar pesos dinamicamente baseado no mercado
-                        const marketCondition = this.assessMarketCondition(lsrData);
-                        if (marketCondition === 'BULLISH') {
-                            finalScore = scoreDetails.liquidityScore * 0.3 + scoreDetails.buyPriority * 0.7;
-                        } else if (marketCondition === 'BEARISH') {
-                            finalScore = scoreDetails.liquidityScore * 0.3 + scoreDetails.sellPriority * 0.7;
-                        }
                         break;
                 }
                 
@@ -597,62 +604,77 @@ class PrioritySystem {
                     symbol: symbol,
                     score: finalScore,
                     details: scoreDetails,
+                    volume1h: volume1hData && volume1hData[symbol] ? volume1hData[symbol] : null,
                     liquidity: tickerData && tickerData[symbol] ? tickerData[symbol].liquidity : 0,
                     lsr: lsrData && lsrData[symbol] ? lsrData[symbol].lsr : null
                 });
                 
-                // Armazenar no cache de pontuações
                 priorityCache.scores[symbol] = {
                     score: finalScore,
+                    volume1h: volume1hData && volume1hData[symbol] ? volume1hData[symbol] : null,
                     liquidity: tickerData && tickerData[symbol] ? tickerData[symbol].liquidity : 0,
                     lsr: lsrData && lsrData[symbol] ? lsrData[symbol].lsr : null,
-                    timestamp: now
+                    timestamp: now,
+                    emojiRanking: scoreDetails.emojiRanking
                 };
             }
             
-            // Ordenar por pontuação (maior primeiro)
             symbolScores.sort((a, b) => b.score - a.score);
             
-            // Limitar número de símbolos se configurado
             let prioritizedSymbols = symbolScores.map(item => item.symbol);
             if (PRIORITY_CONFIG.LIQUIDITY.MAX_LIQUID_SYMBOLS > 0) {
                 prioritizedSymbols = prioritizedSymbols.slice(0, PRIORITY_CONFIG.LIQUIDITY.MAX_LIQUID_SYMBOLS);
             }
             
-            // Log detalhado se ativado
             if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS && symbolScores.length > 0) {
-                console.log('\n🏆 TOP 10 SÍMBOLOS POR PRIORIDADE:');
+                console.log('\n🏆 TOP 10 SÍMBOLOS POR PRIORIDADE (Volume 1h EMA9):');
                 symbolScores.slice(0, 10).forEach((item, index) => {
+                    const volumeInfo = item.volume1h ? 
+                        `Vol1h: ${item.volume1h.ratio.toFixed(2)}x (EMA${item.volume1h.emaPeriod})` : 
+                        'Vol1h: N/A';
                     const lsrInfo = item.lsr ? `LSR: ${item.lsr.toFixed(2)}` : 'LSR: N/A';
                     const liquidityInfo = item.liquidity ? `Liq: $${(item.liquidity/1000).toFixed(0)}K` : 'Liq: N/A';
-                    console.log(`${index + 1}. ${item.symbol} - Score: ${item.score.toFixed(1)} | ${lsrInfo} | ${liquidityInfo}`);
+                    console.log(`${index + 1}. ${item.symbol} ${item.details.emojiRanking}`);
+                    console.log(`   Score: ${item.score.toFixed(1)} | ${volumeInfo} | ${lsrInfo} | ${liquidityInfo}`);
                 });
                 
-                // Mostrar símbolos ideais para compra/venda baseado no LSR
+                const bestVolume = symbolScores
+                    .filter(item => item.volume1h && item.volume1h.ratio > 1.5)
+                    .slice(0, 5);
+                
+                if (bestVolume.length > 0) {
+                    console.log('\n📈 MELHOR VOLUME 1H (acima de 1.5x - EMA9):');
+                    bestVolume.forEach(item => {
+                        const direction = item.volume1h.isRising ? '📈 SUBINDO' : 
+                                        item.volume1h.isFalling ? '📉 DESCENDO' : '➡️ NEUTRO';
+                        const strength = item.volume1h.trendStrength || 'N/A';
+                        console.log(`   ${item.symbol} - Ratio: ${item.volume1h.ratio.toFixed(2)}x | ${direction} | Força: ${strength} | Score: ${item.score.toFixed(1)}`);
+                    });
+                }
+                
                 const idealBuys = symbolScores
-                    .filter(item => item.lsr && item.lsr < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR)
+                    .filter(item => item.volume1h && item.volume1h.isRising && item.lsr && item.lsr < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR)
                     .slice(0, 5);
                 
                 const idealSells = symbolScores
-                    .filter(item => item.lsr && item.lsr > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR)
+                    .filter(item => item.volume1h && item.volume1h.isFalling && item.lsr && item.lsr > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR)
                     .slice(0, 5);
                 
                 if (idealBuys.length > 0) {
-                    console.log('\n🟢 IDEAL PARA COMPRA (LSR baixo):');
+                    console.log('\n🟢 IDEAL PARA COMPRA (Volume SUBINDO + LSR baixo):');
                     idealBuys.forEach(item => {
-                        console.log(`   ${item.symbol} - LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
+                        console.log(`   ${item.symbol} - Vol1h: ${item.volume1h.ratio.toFixed(2)}x 📈 | LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
                     });
                 }
                 
                 if (idealSells.length > 0) {
-                    console.log('\n🔴 IDEAL PARA VENDA (LSR alto):');
+                    console.log('\n🔴 IDEAL PARA VENDA (Volume DESCENDO + LSR alto):');
                     idealSells.forEach(item => {
-                        console.log(`   ${item.symbol} - LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
+                        console.log(`   ${item.symbol} - Vol1h: ${item.volume1h.ratio.toFixed(2)}x 📉 | LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
                     });
                 }
             }
             
-            // Atualizar cache
             priorityCache.symbols = prioritizedSymbols;
             priorityCache.timestamp = now;
             
@@ -665,24 +687,21 @@ class PrioritySystem {
         }
     }
     
-    // Avaliar condição geral do mercado baseado no LSR
-    assessMarketCondition(lsrData) {
-        if (!lsrData) return 'NEUTRAL';
-        
-        const lsrValues = Object.values(lsrData).map(d => d.lsr).filter(v => v);
-        if (lsrValues.length === 0) return 'NEUTRAL';
-        
-        const avgLSR = lsrValues.reduce((a, b) => a + b, 0) / lsrValues.length;
-        
-        if (avgLSR < 2.0) return 'BULLISH'; // Muito otimismo pode indicar topo
-        if (avgLSR > 2.6) return 'BEARISH'; // Muito pessimismo pode indicar fundo
-        
-        return 'NEUTRAL';
-    }
-    
-    // Obter informações de prioridade para um símbolo específico
     getSymbolPriorityInfo(symbol) {
         return priorityCache.scores[symbol] || null;
+    }
+    
+    isVolumeDirectionCorrect(symbol, signalType) {
+        const priorityInfo = this.getSymbolPriorityInfo(symbol);
+        if (!priorityInfo || !priorityInfo.volume1h) return true;
+        
+        if (signalType === 'COMPRA') {
+            return priorityInfo.volume1h.isRising;
+        } else if (signalType === 'VENDA') {
+            return priorityInfo.volume1h.isFalling;
+        }
+        
+        return true;
     }
 }
 
@@ -745,7 +764,6 @@ async function sendTelegramAlert(message) {
     }
 }
 
-// === CONTADOR DE ALERTAS COM RESET DIÁRIO ===
 function getAlertCountForSymbol(symbol, type) {
     const currentDate = getBrazilianDateString();
     
@@ -804,7 +822,6 @@ function resetDailyCounters() {
     console.log(`✅ Contadores diários zerados. Global: ${globalAlerts} | Diário: ${dailyAlerts}`);
 }
 
-// === MENSAGEM DE INICIALIZAÇÃO SIMPLIFICADA ===
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
@@ -814,10 +831,7 @@ async function sendInitializationMessage() {
 
 📅 ${now.full}
 
-✅ Sistema ativo e monitorando
-✨ Prioridade por LSR e Liquidez
-
-<i>Alerta de inicialização automática</i>
+<i>Sistema otimizado para resposta rápida</i>
 `;
 
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -965,24 +979,74 @@ async function getVolume3m(symbol) {
 async function getVolume1h(symbol) {
     try {
         const candles = await getCandles(symbol, '1h', 20);
-        if (candles.length < 10) {
+        if (candles.length < PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD) {
             return null;
         }
 
         const volumes = candles.map(c => c.volume);
         const currentVolume = volumes[volumes.length - 1];
-        const avgVolume = volumes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-        const volumeRatio = currentVolume / avgVolume;
-
+        
+        // CALCULAR EMA9 PARA VOLUME (MAIS SENSÍVEL)
+        const emaPeriod = PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD;
+        const emaVolume = calculateEMA(volumes, emaPeriod);
+        const volumeRatio = currentVolume / emaVolume;
+        
+        // Calcular força da tendência
+        const previousVolume = volumes.length > 1 ? volumes[volumes.length - 2] : currentVolume;
+        const trendStrength = calculateVolumeTrendStrength(volumes, emaPeriod);
+        
         return {
             currentVolume: currentVolume,
-            avgVolume: avgVolume,
-            ratio: volumeRatio
+            emaVolume: emaVolume,
+            ratio: volumeRatio,
+            isRising: volumeRatio > 1.0,
+            isFalling: volumeRatio < 1.0,
+            emaPeriod: emaPeriod,
+            trendStrength: trendStrength,
+            previousVolume: previousVolume,
+            volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(1)
         };
     } catch (error) {
         console.log(`⚠️ Erro ao calcular volume 1h para ${symbol}: ${error.message}`);
         return null;
     }
+}
+
+// Função para calcular EMA (Exponential Moving Average)
+function calculateEMA(values, period) {
+    if (values.length < period) {
+        return values.reduce((a, b) => a + b, 0) / values.length;
+    }
+    
+    const multiplier = 2 / (period + 1);
+    let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    
+    for (let i = period; i < values.length; i++) {
+        ema = (values[i] - ema) * multiplier + ema;
+    }
+    
+    return ema;
+}
+
+// Função para calcular força da tendência de volume
+function calculateVolumeTrendStrength(volumes, period) {
+    if (volumes.length < period * 2) return 'N/A';
+    
+    const recentVolumes = volumes.slice(-period);
+    const previousVolumes = volumes.slice(-period * 2, -period);
+    
+    const recentAvg = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+    const previousAvg = previousVolumes.reduce((a, b) => a + b, 0) / previousVolumes.length;
+    
+    const changePercent = ((recentAvg - previousAvg) / previousAvg) * 100;
+    
+    if (changePercent > 50) return 'MUITO FORTE 📈📈';
+    if (changePercent > 25) return 'FORTE 📈';
+    if (changePercent > 10) return 'MODERADA ↗️';
+    if (changePercent > -10) return 'NEUTRA ➡️';
+    if (changePercent > -25) return 'FRACA ↘️';
+    if (changePercent > -50) return 'MUITO FRACA 📉';
+    return 'MUITO FRACA 📉📉';
 }
 
 async function getLSR(symbol) {
@@ -1168,7 +1232,6 @@ function calculateTargets(entryPrice, stopPrice, isBullish) {
 // === SINAIS DE COMPRA E VENDA ===
 async function checkBuySignal(symbol, prioritySystem) {
     try {
-        // Verificar cooldown
         if (prioritySystem.isInCooldown(symbol)) {
             if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
                 console.log(`⏸️  ${symbol} em cooldown, pulando análise de compra`);
@@ -1176,13 +1239,22 @@ async function checkBuySignal(symbol, prioritySystem) {
             return null;
         }
 
-        const [emaData, rsiData, volume3mData] = await Promise.all([
+        const [emaData, rsiData, volume3mData, volume1hData] = await Promise.all([
             getEMAs3m(symbol),
             getRSI1h(symbol),
-            getVolume3m(symbol)
+            getVolume3m(symbol),
+            getVolume1h(symbol)
         ]);
 
-        if (!emaData || !rsiData || !volume3mData) {
+        if (!emaData || !rsiData || !volume3mData || !volume1hData) {
+            return null;
+        }
+
+        // VERIFICAÇÃO CRÍTICA COM EMA9 (MAIS SENSÍVEL)
+        if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && !volume1hData.isRising) {
+            if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                console.log(`⚠️  ${symbol}: Volume 1h (EMA${volume1hData.emaPeriod}) não está SUBINDO (ratio: ${volume1hData.ratio.toFixed(2)}x), ignorando sinal de COMPRA`);
+            }
             return null;
         }
 
@@ -1196,18 +1268,15 @@ async function checkBuySignal(symbol, prioritySystem) {
             return null;
         }
 
-        const [lsrData, fundingData, atrData, pivotData, volume1hData] = await Promise.all([
+        const [lsrData, fundingData, atrData, pivotData] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
             getATR(symbol),
-            analyzePivotPoints(symbol, emaData.currentPrice, true),
-            getVolume1h(symbol)
+            analyzePivotPoints(symbol, emaData.currentPrice, true)
         ]);
 
-        // Verificar se LSR está na zona ideal para compra
         const isIdealLSR = lsrData && lsrData.lsrValue < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR;
         
-        // Calcular entrada com retração
         const entryData = calculateEntryWithRetracement(emaData.currentPrice, true, atrData);
         const targets = calculateTargets(entryData.entryPrice, entryData.stopPrice, true);
 
@@ -1240,7 +1309,6 @@ async function checkBuySignal(symbol, prioritySystem) {
 
 async function checkSellSignal(symbol, prioritySystem) {
     try {
-        // Verificar cooldown
         if (prioritySystem.isInCooldown(symbol)) {
             if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
                 console.log(`⏸️  ${symbol} em cooldown, pulando análise de venda`);
@@ -1248,13 +1316,22 @@ async function checkSellSignal(symbol, prioritySystem) {
             return null;
         }
 
-        const [emaData, rsiData, volume3mData] = await Promise.all([
+        const [emaData, rsiData, volume3mData, volume1hData] = await Promise.all([
             getEMAs3m(symbol),
             getRSI1h(symbol),
-            getVolume3m(symbol)
+            getVolume3m(symbol),
+            getVolume1h(symbol)
         ]);
 
-        if (!emaData || !rsiData || !volume3mData) {
+        if (!emaData || !rsiData || !volume3mData || !volume1hData) {
+            return null;
+        }
+
+        // VERIFICAÇÃO CRÍTICA COM EMA9 (MAIS SENSÍVEL)
+        if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && !volume1hData.isFalling) {
+            if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                console.log(`⚠️  ${symbol}: Volume 1h (EMA${volume1hData.emaPeriod}) não está DESCENDO (ratio: ${volume1hData.ratio.toFixed(2)}x), ignorando sinal de VENDA`);
+            }
             return null;
         }
 
@@ -1268,18 +1345,15 @@ async function checkSellSignal(symbol, prioritySystem) {
             return null;
         }
 
-        const [lsrData, fundingData, atrData, pivotData, volume1hData] = await Promise.all([
+        const [lsrData, fundingData, atrData, pivotData] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
             getATR(symbol),
-            analyzePivotPoints(symbol, emaData.currentPrice, false),
-            getVolume1h(symbol)
+            analyzePivotPoints(symbol, emaData.currentPrice, false)
         ]);
 
-        // Verificar se LSR está na zona ideal para venda
         const isIdealLSR = lsrData && lsrData.lsrValue > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR;
         
-        // Calcular entrada com retração
         const entryData = calculateEntryWithRetracement(emaData.currentPrice, false, atrData);
         const targets = calculateTargets(entryData.entryPrice, entryData.stopPrice, false);
 
@@ -1314,7 +1388,6 @@ async function checkSellSignal(symbol, prioritySystem) {
 async function sendBuyAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'buy');
     
-    // Registrar alerta para cooldown
     prioritySystem.registerAlert(signal.symbol);
     
     const fundingRate = parseFloat(signal.funding || 0) / 100;
@@ -1333,18 +1406,27 @@ async function sendBuyAlert(signal, prioritySystem) {
     
     const lsrEmoji = signal.lsr < 2.6 ? '🟢' : '🔴';
     
-    // Adicionar indicador de LSR ideal
-    const lsrIdealIndicator = signal.isIdealLSR ? '🏆 IDEAL' : '';
+    let priorityEmoji = '📉';
+    let priorityScore = 0;
+    if (signal.priorityInfo) {
+        priorityScore = signal.priorityInfo.score;
+        priorityEmoji = signal.priorityInfo.emojiRanking || '📉';
+    }
     
-    // Informações de prioridade
+    const volume1hDirection = signal.volume1h.isRising ? '📈 SUBINDO' : '📉 DESCENDO';
+    const volume1hDirectionEmoji = signal.volume1h.isRising ? '✅' : '❌';
+    
     let priorityInfo = '';
     if (signal.priorityInfo) {
-        priorityInfo = `\n🎯 Prioridade: ${signal.priorityInfo.score.toFixed(1)}`;
+        priorityInfo = `\n${priorityEmoji} <b>PRIORIDADE: ${priorityScore.toFixed(1)}</b>`;
         if (signal.priorityInfo.liquidity) {
             priorityInfo += ` | Liq: $${(signal.priorityInfo.liquidity/1000).toFixed(0)}K`;
         }
         if (signal.priorityInfo.lsr) {
             priorityInfo += ` | LSR: ${signal.priorityInfo.lsr.toFixed(2)}`;
+        }
+        if (signal.priorityInfo.volume1h) {
+            priorityInfo += ` | Vol1h EMA${signal.priorityInfo.volume1h.emaPeriod}: ${signal.priorityInfo.volume1h.ratio.toFixed(2)}x`;
         }
     }
     
@@ -1362,45 +1444,46 @@ async function sendBuyAlert(signal, prioritySystem) {
     }
     
     const volume3mChange = ((signal.volume3m.currentVolume - signal.volume3m.avgVolume) / signal.volume3m.avgVolume * 100).toFixed(1);
-    const volume1hRatio = signal.volume1h ? ` (1h: ${signal.volume1h.ratio.toFixed(2)}x)` : '';
+    const volume1hInfo = signal.volume1h ? 
+        ` (1h EMA${signal.volume1h.emaPeriod}: ${signal.volume1h.ratio.toFixed(2)}x ${volume1hDirectionEmoji})` : '';
     
     const message = `
-🟢 <i>${signal.symbol} - COMPRA ${lsrIdealIndicator}</i>
+🟢 <b><i>${signal.symbol} - COMPRA ${signal.isIdealLSR ? '🏆 IDEAL' : ''}</i></b>
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
 ${priorityInfo}
+<i>VOLUME 1H: ${volume1hDirection}</i>
+<i>Tendência: ${signal.volume1h.trendStrength || 'N/A'}</i>
 
-<i>Operação:</i>
+<b><i>Operação:</i></b>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
 • <i>⚠️Região de Entrada:</i> $${signal.entryPrice.toFixed(6)} 
   (... até suporte: $${signal.pivotData.nearestSupport.price.toFixed(6)} - ${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)
-• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte, o valor da prioridade quanto mais alto melhor.
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte.
 
-<i> Indicadores:</i>
+<b><i>Indicadores:</i></b>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi < 62 ? '✅' : '❌'})
-• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hRatio}
+• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hInfo}
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr < 2.6 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
-${fundingRateText}
+• Funding Rate:${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
-
-<i> Níveis Importantes:</i>${pivotInfo}
-<i> Alvos:</i>
+<b><i>Níveis Importantes:</i></b>${pivotInfo}
+<b><i>Alvos:</i></b>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-<i>🛑STOP:</i> $${signal.stopPrice.toFixed(6)}
+<b><i>🛑STOP:</i></b> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨Titanium Volume Priority ✨</i>
+<b><i>✨TITANIUM PRIORITY SYSTEM✨</i></b>
 `;
 
     await sendTelegramAlert(message);
-    console.log(`✅ Alerta de COMPRA enviado: ${signal.symbol} (Alerta #${alertCount.symbolTotal} deste ativo)`);
+    console.log(`✅ Alerta de COMPRA enviado: ${signal.symbol} (Prioridade: ${priorityScore.toFixed(1)} ${priorityEmoji})`);
 }
 
 async function sendSellAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'sell');
     
-    // Registrar alerta para cooldown
     prioritySystem.registerAlert(signal.symbol);
     
     const fundingRate = parseFloat(signal.funding || 0) / 100;
@@ -1419,18 +1502,27 @@ async function sendSellAlert(signal, prioritySystem) {
     
     const lsrEmoji = signal.lsr > 3.0 ? '🔴' : '🟢';
     
-    // Adicionar indicador de LSR ideal
-    const lsrIdealIndicator = signal.isIdealLSR ? '🏆 IDEAL' : '';
+    let priorityEmoji = '📉';
+    let priorityScore = 0;
+    if (signal.priorityInfo) {
+        priorityScore = signal.priorityInfo.score;
+        priorityEmoji = signal.priorityInfo.emojiRanking || '📉';
+    }
     
-    // Informações de prioridade
+    const volume1hDirection = signal.volume1h.isFalling ? '📉 DESCENDO' : '📈 SUBINDO';
+    const volume1hDirectionEmoji = signal.volume1h.isFalling ? '✅' : '❌';
+    
     let priorityInfo = '';
     if (signal.priorityInfo) {
-        priorityInfo = `\n Prioridade: ${signal.priorityInfo.score.toFixed(1)}`;
+        priorityInfo = `\n${priorityEmoji} <b>PRIORIDADE: ${priorityScore.toFixed(1)}</b>`;
         if (signal.priorityInfo.liquidity) {
             priorityInfo += ` | Liq: $${(signal.priorityInfo.liquidity/1000).toFixed(0)}K`;
         }
         if (signal.priorityInfo.lsr) {
             priorityInfo += ` | LSR: ${signal.priorityInfo.lsr.toFixed(2)}`;
+        }
+        if (signal.priorityInfo.volume1h) {
+            priorityInfo += ` | Vol1h EMA${signal.priorityInfo.volume1h.emaPeriod}: ${signal.priorityInfo.volume1h.ratio.toFixed(2)}x`;
         }
     }
     
@@ -1448,39 +1540,41 @@ async function sendSellAlert(signal, prioritySystem) {
     }
     
     const volume3mChange = ((signal.volume3m.currentVolume - signal.volume3m.avgVolume) / signal.volume3m.avgVolume * 100).toFixed(1);
-    const volume1hRatio = signal.volume1h ? ` (1h: ${signal.volume1h.ratio.toFixed(2)}x)` : '';
+    const volume1hInfo = signal.volume1h ? 
+        ` (1h EMA${signal.volume1h.emaPeriod}: ${signal.volume1h.ratio.toFixed(2)}x ${volume1hDirectionEmoji})` : '';
     
     const message = `
-🔴 <i>${signal.symbol} - VENDA ${lsrIdealIndicator}</i>
+🔴 <b><i>${signal.symbol} - VENDA ${signal.isIdealLSR ? '🏆 IDEAL' : ''}</i></b>
 
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
 ${priorityInfo}
+<i>VOLUME 1H:${volume1hDirection}</i>
+<i>Tendência: ${signal.volume1h.trendStrength || 'N/A'}</i>
 
-<i>Operação:</i>
+<b><i>Operação:</i></b>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
 • <i>⚠️Região de Entrada:</i> $${signal.entryPrice.toFixed(6)}
   (...até resistência: $${signal.pivotData.nearestResistance.price.toFixed(6)} - ${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)
-• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência, o valor da prioridade quanto mais alto melhor.
+• 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência.
 
-<i> Indicadores:</i>
+<b><i>Indicadores:</i></b>
 • RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi > 35 ? '✅' : '❌'})
-• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hRatio}
+• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hInfo}
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr > 3.0 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
-${fundingRateText}
+• Funding Rate: ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
-
-<i> Níveis Importantes:</i>${pivotInfo}
-<i> Alvos:</i>
+<b><i>Níveis Importantes:</i></b>${pivotInfo}
+<b><i>Alvos:</i></b>
 ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.price} `).join('\n')}
-<i>🛑STOP:</i> $${signal.stopPrice.toFixed(6)}
+<b><i>🛑STOP:</i></b> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<i>✨Titanium Volume Priority ✨</i>
+<b><i>✨TITANIUM PRIORITY SYSTEM✨</i></b>
 `;
 
     await sendTelegramAlert(message);
-    console.log(`✅ Alerta de VENDA enviado: ${signal.symbol} (Alerta #${alertCount.symbolTotal} deste ativo)`);
+    console.log(`✅ Alerta de VENDA enviado: ${signal.symbol} (Prioridade: ${priorityScore.toFixed(1)} ${priorityEmoji})`);
 }
 
 // === MONITORAMENTO PRINCIPAL ===
@@ -1509,10 +1603,12 @@ async function monitorSymbol(symbol, prioritySystem) {
     try {
         console.log(`🔍 Analisando ${symbol}...`);
         
-        // Verificar informações de prioridade
         const priorityInfo = prioritySystem.getSymbolPriorityInfo(symbol);
         if (priorityInfo && PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
-            console.log(`   📊 Prioridade: ${priorityInfo.score.toFixed(1)} | LSR: ${priorityInfo.lsr?.toFixed(2) || 'N/A'}`);
+            const volumeInfo = priorityInfo.volume1h ? 
+                `Vol1h EMA${priorityInfo.volume1h.emaPeriod}: ${priorityInfo.volume1h.ratio.toFixed(2)}x ${priorityInfo.volume1h.isRising ? '📈' : priorityInfo.volume1h.isFalling ? '📉' : '➡️'}` : 
+                'Vol1h: N/A';
+            console.log(`   ${priorityInfo.emojiRanking} Prioridade: ${priorityInfo.score.toFixed(1)} | ${volumeInfo} | LSR: ${priorityInfo.lsr?.toFixed(2) || 'N/A'}`);
         }
         
         const buySignal = await checkBuySignal(symbol, prioritySystem);
@@ -1539,7 +1635,7 @@ async function mainBotLoop() {
         const symbols = await fetchAllFuturesSymbols();
         
         console.log('\n' + '='.repeat(80));
-        console.log(' TITANIUM ATIVADO - SISTEMA DE PRIORIDADE AVANÇADO');
+        console.log(' TITANIUM ATIVADO - SISTEMA DE PRIORIDADE POR VOLUME 1H EMA9');
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -1550,24 +1646,20 @@ async function mainBotLoop() {
             cycle++;
             console.log(`\n🔄 Ciclo ${cycle} iniciado...`);
             
-            // Executar limpeza automática
             cleanupSystem.performFullCleanup();
             
-            // Verificar reset de contadores
             const currentHour = getBrazilianHour();
             if (currentHour >= 21 && lastResetDate !== getBrazilianDateString()) {
                 resetDailyCounters();
             }
             
-            // Ordenar símbolos por prioridade
             let symbolsToMonitor = symbols;
             if (PRIORITY_CONFIG.ENABLED) {
                 symbolsToMonitor = await prioritySystem.prioritizeSymbols(symbols);
                 
-                // Limitar número de símbolos por ciclo se configurado
                 if (PERFORMANCE_CONFIG.MAX_SYMBOLS_PER_CYCLE > 0) {
                     symbolsToMonitor = symbolsToMonitor.slice(0, PERFORMANCE_CONFIG.MAX_SYMBOLS_PER_CYCLE);
-                    console.log(`📊 Monitorando ${symbolsToMonitor.length}/${symbols.length} símbolos (priorizados)`);
+                    console.log(`📊 Monitorando ${symbolsToMonitor.length}/${symbols.length} símbolos (priorizados por Volume 1h EMA9)`);
                 }
             }
             
@@ -1581,7 +1673,6 @@ async function mainBotLoop() {
                     
                     symbolsAnalyzed++;
                     
-                    // Pausa entre símbolos
                     await new Promise(r => setTimeout(r, PERFORMANCE_CONFIG.SYMBOL_DELAY_MS));
                 } catch (error) {
                     continue;
@@ -1594,10 +1685,8 @@ async function mainBotLoop() {
             console.log(`📈 Total global: ${globalAlerts} | Total diário: ${dailyAlerts}`);
             console.log(`🔍 Ativos monitorados: ${Object.keys(alertCounter).length}`);
             
-            // Limpar cache básico
             cleanupSystem.cleanupCaches();
             
-            // Pausa entre ciclos
             console.log(`\n⏳ Próximo ciclo em ${PERFORMANCE_CONFIG.CYCLE_DELAY_MS/1000} segundos...`);
             await new Promise(r => setTimeout(r, PERFORMANCE_CONFIG.CYCLE_DELAY_MS));
         }
@@ -1615,24 +1704,26 @@ let rateLimiter = new AdaptiveRateLimiter();
 
 async function startBot() {
     try {
-        // Criar diretórios necessários
         if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - SISTEMA DE PRIORIDADE AVANÇADO v2.0');
-        console.log('📊 Sistema de Prioridade por Liquidez e LSR');
+        console.log('🚀 TITANIUM - SISTEMA DE PRIORIDADE POR VOLUME 1H EMA9 v3.1');
+        console.log('📊 Sistema de Prioridade: Volume 1h EMA9 + Liquidez + LSR');
         console.log('🎯 Configurações Ativas:');
+        console.log(`   • Volume 1h EMA${PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD}: ${PRIORITY_CONFIG.VOLUME_1H.VOLUME_WEIGHT}% (MAIS SENSÍVEL)`);
+        console.log(`   • Sensibilidade: ${PRIORITY_CONFIG.VOLUME_1H.SENSITIVITY_MULTIPLIER}x`);
+        console.log(`   • Compra: Volume 1h deve estar SUBINDO 📈`);
+        console.log(`   • Venda: Volume 1h deve estar DESCENDO 📉`);
         console.log(`   • LSR Compra Ideal: < ${PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR}`);
         console.log(`   • LSR Venda Ideal: > ${PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR}`);
         console.log(`   • Liquidez: > $${(PRIORITY_CONFIG.LIQUIDITY.MIN_LIQUIDITY_USDT/1000).toFixed(0)}K`);
-        console.log(`   • Peso LSR: ${PRIORITY_CONFIG.LSR.LSR_WEIGHT}%`);
         console.log(`   • Peso Liquidez: ${PRIORITY_CONFIG.LIQUIDITY.LIQUIDITY_WEIGHT}%`);
+        console.log(`   • Peso LSR: ${PRIORITY_CONFIG.LSR.LSR_WEIGHT}%`);
         console.log('🗑️  Sistema de Limpeza Avançado Ativado');
         console.log('⏱️  Cooldown entre alertas: 5 minutos');
         console.log('='.repeat(80) + '\n');
         
-        // Verificar dependências
         try {
             require('technicalindicators');
         } catch (error) {
@@ -1640,13 +1731,11 @@ async function startBot() {
             process.exit(1);
         }
         
-        // Inicializar data do último reset
         lastResetDate = getBrazilianDateString();
         
-        // Enviar mensagem de inicialização para Telegram
         await sendInitializationMessage();
         
-        console.log('✅ Tudo pronto! Iniciando monitoramento com sistema de prioridade...');
+        console.log('✅ Tudo pronto! Iniciando monitoramento com sistema de prioridade por Volume 1h EMA9...');
         
         await mainBotLoop();
         
@@ -1656,10 +1745,8 @@ async function startBot() {
     }
 }
 
-// Executar com coleta de lixo forçada se disponível
 if (global.gc) {
     console.log('🗑️  Coleta de lixo forçada disponível');
 }
 
-// Corrigido: Chama startBot() corretamente
 startBot();
