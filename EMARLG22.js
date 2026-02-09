@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6bJavdg';
-const TELEGRAM_CHAT_ID = '-10025';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE RSI - AJUSTE FÁCIL ===
 const RSI_CONFIG = {
@@ -1573,8 +1573,9 @@ async function checkStochasticSignal(symbol, prioritySystem) {
         }
 
         if (stochastic.isCrossingUp || stochastic.isCrossingDown) {
-            const [rsiData, fundingData, pivotData, currentPrice] = await Promise.all([
+            const [rsiData, lsrData, fundingData, pivotData, currentPrice] = await Promise.all([
                 getRSI1h(symbol),
+                getLSR(symbol),
                 getFundingRate(symbol),
                 analyzePivotPoints(symbol, await getCurrentPrice(symbol), stochastic.isCrossingUp),
                 getCurrentPrice(symbol)
@@ -1582,11 +1583,23 @@ async function checkStochasticSignal(symbol, prioritySystem) {
 
             const signalType = stochastic.isCrossingUp ? 'STOCHASTIC_COMPRA' : 'STOCHASTIC_VENDA';
             
+            // Verificar se LSR é ideal
+            let isIdealLSR = false;
+            if (lsrData) {
+                if (signalType === 'STOCHASTIC_COMPRA') {
+                    isIdealLSR = lsrData.lsrValue < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR;
+                } else {
+                    isIdealLSR = lsrData.lsrValue > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR;
+                }
+            }
+            
             return {
                 symbol: symbol,
                 type: signalType,
                 stochastic: stochastic,
                 rsi: rsiData?.value,
+                lsr: lsrData?.lsrValue,
+                isIdealLSR: isIdealLSR,
                 funding: fundingData?.ratePercent,
                 pivotData: pivotData,
                 currentPrice: currentPrice,
@@ -1611,7 +1624,7 @@ async function getCurrentPrice(symbol) {
     }
 }
 
-// === ALERTA DE ESTOCÁSTICO ===
+// === ALERTA DE ESTOCÁSTICO (ATUALIZADO COM LSR) ===
 async function sendStochasticAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'stochastic');
     
@@ -1630,6 +1643,11 @@ async function sendStochasticAlert(signal, prioritySystem) {
     const fundingRateText = fundingRate !== 0
         ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
         : '🔹 Indisp.';
+    
+    // LSR - Emoji e status
+    const lsrEmoji = signal.type === 'STOCHASTIC_COMPRA' 
+        ? (signal.lsr < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR ? '🟢' : '🔴')
+        : (signal.lsr > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR ? '🔴' : '🟢');
     
     const stochStatus = signal.stochastic.isOversold ? 'Baixo 🔵' : 
                        signal.stochastic.isOverbought ? 'Alto 🔴' : 'Neutro ⚪';
@@ -1652,21 +1670,21 @@ async function sendStochasticAlert(signal, prioritySystem) {
     const rsiEmoji = signal.rsi < 30 ? '🔵' : signal.rsi > 70 ? '🔴' : '⚪';
     
     const message = `
- <b><i>${signal.symbol} - ESTOCÁSTICO ${STOCHASTIC_CONFIG.TIMEFRAME}</i></b>
+<b><i>${signal.symbol} - STOCH ${STOCHASTIC_CONFIG.TIMEFRAME} ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
 ${action}
 
 ${signal.time.full}
-Estocástico #${alertCount.symbolStochastic}
+STOCH #${alertCount.symbolStochastic}
 • Preço Atual: $${signal.currentPrice.toFixed(6)}
 
 <b><i>Indicadores:</i></b>
-• Estocástico ${signal.stochastic.config} ${STOCHASTIC_CONFIG.TIMEFRAME}: 
+• STOCH ${signal.stochastic.config}: 
   %K: ${signal.stochastic.k.toFixed(2)} | %D: ${signal.stochastic.d.toFixed(2)}
   Status: ${stochStatus}
 • ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️ %D ' : '📉 %K ⤵️ %D '}
 • RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
+${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆' : ''}
 • Funding Rate: ${fundingRateText}
-
 <b><i>Níveis de Suporte/Resistência:</i></b>${pivotInfo}
 <b><i>Ação:</i></b>
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
@@ -1679,6 +1697,7 @@ ${signal.type === 'STOCHASTIC_COMPRA' ?
     await sendTelegramAlert(message);
     console.log(`✅ Alerta Estocástico enviado: ${signal.symbol} (${action})`);
     console.log(`   📈 Estocástico: %K=${signal.stochastic.k.toFixed(2)}, %D=${signal.stochastic.d.toFixed(2)}`);
+    console.log(`   📊 LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆 IDEAL' : ''}`);
 }
 
 // === SINAIS DE COMPRA E VENDA - ATUALIZADOS COM EMA9 SEPARADA ===
