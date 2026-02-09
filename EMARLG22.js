@@ -10,9 +10,49 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVxg';
-const TELEGRAM_CHAT_ID = '-100255';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
+// === CONFIGURAÇÕES DE RSI - AJUSTE FÁCIL ===
+const RSI_CONFIG = {
+    COMPRA: {
+        MAX_VALUE: 60,    // RSI deve ser MENOR que este valor para COMPRA
+        OVERSOLD: 25      // RSI abaixo disso é considerado OVERSOLD
+    },
+    VENDA: {
+        MIN_VALUE: 45,    // RSI deve ser MAIOR que este valor para VENDA
+        OVERBOUGHT: 70    // RSI acima disso é considerado OVERBOUGHT
+    }
+};
+
+// === CONFIGURAÇÃO DO ESTOCÁSTICO ===
+const STOCHASTIC_CONFIG = {
+    ENABLED: true, // Ativar/Desativar alertas do Estocástico
+    K_PERIOD: 5,   // Período da linha %K
+    D_PERIOD: 3,   // Período da linha %D
+    SLOWING: 3,    // Fator de suavização
+    TIMEFRAME: '12h', // Timeframe para análise
+    OVERBOUGHT: 80,  // Nível de sobrecompra
+    OVERSOLD: 20     // Nível de sobrevenda
+};
+
+// === CONFIGURAÇÃO DE ANÁLISE DE VOLUME COMPRADOR/VENDEDOR ===
+const VOLUME_ANALYSIS_CONFIG = {
+    ENABLED: true,
+    MIN_CANDLES_FOR_ANALYSIS: 20,
+    VOLUME_THRESHOLD: 0.6, // 60% para considerar dominância clara
+    STRONG_THRESHOLD: 0.7, // 70% para considerar dominância forte
+    VERY_STRONG_THRESHOLD: 0.8, // 80% para considerar dominância muito forte
+    // NOVO: Exigir dominância específica para compra/venda
+    REQUIRE_DOMINANCE: true,
+    MIN_DOMINANCE_PERCENTAGE: 60, // Mínimo 60% de dominância
+    // NOVO: Configurações EMA9 para volume separado
+    USE_SEPARATE_EMA_ANALYSIS: true,
+    BUYER_EMA_PERIOD: 9,
+    SELLER_EMA_PERIOD: 9,
+    MIN_BUYER_RATIO: 1.2,  // Comprador deve estar 20% acima da EMA9
+    MAX_SELLER_RATIO: 0.8  // Vendedor deve estar 20% abaixo da EMA9 para compra
+};
 
 // === SISTEMA DE PRIORIDADE POR VOLUME 1H, LIQUIDEZ E LSR ===
 const PRIORITY_CONFIG = {
@@ -63,7 +103,7 @@ const PRIORITY_CONFIG = {
     SORT_MODE: 'HYBRID',
     VERBOSE_LOGS: true,
     UPDATE_EACH_CYCLE: true,
-    MIN_SYMBOLS_FOR_PRIORITY: 10,
+    MIN_SYMBOLS_FOR_PRIORIDADE: 10,
     EMOJI_RANKINGS: {
       'EXCELLENT': '🏆🏆🏆',
       'GOOD': '🏆🏆',
@@ -106,6 +146,9 @@ const priorityCache = {
 
 // Sistema de cooldown por símbolo
 const symbolCooldown = {};
+
+// Sistema de cooldown específico para Estocástico
+const stochasticCooldown = {};
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 class AdaptiveRateLimiter {
@@ -353,8 +396,19 @@ class PrioritySystem {
         return (Date.now() - symbolCooldown[symbol]) < cooldownMs;
     }
     
+    isInStochasticCooldown(symbol) {
+        if (!stochasticCooldown[symbol]) return false;
+        
+        const cooldownMs = 60 * 60 * 1000; // 1 hora de cooldown para estocástico
+        return (Date.now() - stochasticCooldown[symbol]) < cooldownMs;
+    }
+    
     registerAlert(symbol) {
         symbolCooldown[symbol] = Date.now();
+    }
+    
+    registerStochasticAlert(symbol) {
+        stochasticCooldown[symbol] = Date.now();
     }
     
     async fetchTickerData() {
@@ -423,17 +477,9 @@ class PrioritySystem {
             
             for (const symbol of symbolsToFetch) {
                 try {
-                    const volume1h = await getVolume1h(symbol);
+                    const volume1h = await getVolume1hEnhanced(symbol);
                     if (volume1h) {
-                        volumeData[symbol] = {
-                            ratio: volume1h.ratio,
-                            currentVolume: volume1h.currentVolume,
-                            emaVolume: volume1h.emaVolume,
-                            isRising: volume1h.isRising,
-                            isFalling: volume1h.isFalling,
-                            emaPeriod: volume1h.emaPeriod,
-                            trendStrength: volume1h.trendStrength
-                        };
+                        volumeData[symbol] = volume1h;
                     }
                     
                     await new Promise(r => setTimeout(r, 50));
@@ -464,12 +510,11 @@ class PrioritySystem {
         // ========== PONTUAÇÃO DO VOLUME 1H (EMA9 - MAIS SENSÍVEL) ==========
         if (volume1hData && volume1hData[symbol]) {
             const volumeInfo = volume1hData[symbol];
-            const volumeRatio = volumeInfo.ratio;
             const sensitivity = PRIORITY_CONFIG.VOLUME_1H.SENSITIVITY_MULTIPLIER;
             
-            // Pontuação com EMA9 (mais sensível à mudanças recentes)
+            // Pontuação baseada no volume total vs EMA9
             let volumeScore = 0;
-            const adjustedRatio = volumeRatio * sensitivity;
+            const adjustedRatio = volumeInfo.totalRatio * sensitivity;
             
             if (adjustedRatio >= 2.0) volumeScore = 100;
             else if (adjustedRatio >= 1.5) volumeScore = 80;
@@ -482,12 +527,22 @@ class PrioritySystem {
             
             // BÔNUS DE DIREÇÃO DO VOLUME
             if (signalType) {
-                if (signalType === 'COMPRA' && volumeInfo.isRising) {
+                if (signalType === 'COMPRA' && volumeInfo.isTotalRising) {
                     details.volumeDirectionBonus = PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_BONUS;
                     score += details.volumeDirectionBonus;
-                } else if (signalType === 'VENDA' && volumeInfo.isFalling) {
+                    
+                    // BÔNUS EXTRA para volume comprador subindo
+                    if (volumeInfo.isBuyerVolumeRising && !volumeInfo.isSellerVolumeRising) {
+                        score += 15;
+                    }
+                } else if (signalType === 'VENDA' && !volumeInfo.isTotalRising) {
                     details.volumeDirectionBonus = PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_BONUS;
                     score += details.volumeDirectionBonus;
+                    
+                    // BÔNUS EXTRA para volume vendedor subindo
+                    if (volumeInfo.isSellerVolumeRising && !volumeInfo.isBuyerVolumeRising) {
+                        score += 15;
+                    }
                 }
             }
             
@@ -550,7 +605,7 @@ class PrioritySystem {
     }
     
     async prioritizeSymbols(symbols, signalType = null) {
-        if (!PRIORITY_CONFIG.ENABLED || symbols.length < PRIORITY_CONFIG.GENERAL.MIN_SYMBOLS_FOR_PRIORITY) {
+        if (!PRIORITY_CONFIG.ENABLED || symbols.length < PRIORITY_CONFIG.GENERAL.MIN_SYMBOLS_FOR_PRIORIDADE) {
             return symbols;
         }
         
@@ -566,7 +621,7 @@ class PrioritySystem {
         }
         
         console.log(`📊 Calculando prioridades para ${symbols.length} símbolos...`);
-        console.log(`📈 Volume 1h usando EMA${PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD} (mais sensível)`);
+        console.log(`📈 Volume 1h usando EMA9 SEPARADA para comprador/vendedor`);
         
         try {
             const tickerData = await this.fetchTickerData();
@@ -627,10 +682,10 @@ class PrioritySystem {
             }
             
             if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS && symbolScores.length > 0) {
-                console.log('\n🏆 TOP 10 SÍMBOLOS POR PRIORIDADE (Volume 1h EMA9):');
+                console.log('\n🏆 TOP 10 SÍMBOLOS POR PRIORIDADE (Volume 1h EMA9 SEPARADO):');
                 symbolScores.slice(0, 10).forEach((item, index) => {
                     const volumeInfo = item.volume1h ? 
-                        `Vol1h: ${item.volume1h.ratio.toFixed(2)}x (EMA${item.volume1h.emaPeriod})` : 
+                        `Total: ${item.volume1h.totalRatio.toFixed(2)}x | Comp: ${item.volume1h.buyerRatio.toFixed(2)}x | Vend: ${item.volume1h.sellerRatio.toFixed(2)}x` : 
                         'Vol1h: N/A';
                     const lsrInfo = item.lsr ? `LSR: ${item.lsr.toFixed(2)}` : 'LSR: N/A';
                     const liquidityInfo = item.liquidity ? `Liq: $${(item.liquidity/1000).toFixed(0)}K` : 'Liq: N/A';
@@ -638,39 +693,43 @@ class PrioritySystem {
                     console.log(`   Score: ${item.score.toFixed(1)} | ${volumeInfo} | ${lsrInfo} | ${liquidityInfo}`);
                 });
                 
-                const bestVolume = symbolScores
-                    .filter(item => item.volume1h && item.volume1h.ratio > 1.5)
+                // Análise de volume separado
+                const strongBuyVolume = symbolScores
+                    .filter(item => item.volume1h && 
+                           item.volume1h.trueBuyerDominance && 
+                           item.volume1h.buyerRatio > 1.5)
                     .slice(0, 5);
                 
-                if (bestVolume.length > 0) {
-                    console.log('\n📈 MELHOR VOLUME 1H (acima de 1.5x - EMA9):');
-                    bestVolume.forEach(item => {
-                        const direction = item.volume1h.isRising ? '📈 SUBINDO' : 
-                                        item.volume1h.isFalling ? '📉 DESCENDO' : '➡️ NEUTRO';
-                        const strength = item.volume1h.trendStrength || 'N/A';
-                        console.log(`   ${item.symbol} - Ratio: ${item.volume1h.ratio.toFixed(2)}x | ${direction} | Força: ${strength} | Score: ${item.score.toFixed(1)}`);
+                const strongSellVolume = symbolScores
+                    .filter(item => item.volume1h && 
+                           item.volume1h.trueSellerDominance && 
+                           item.volume1h.sellerRatio > 1.5)
+                    .slice(0, 5);
+                
+                if (strongBuyVolume.length > 0) {
+                    console.log('\n🟢 VOLUME COMPRADOR FORTE (Comprador > 1.5x EMA9):');
+                    strongBuyVolume.forEach(item => {
+                        console.log(`   ${item.symbol} - Comp: ${item.volume1h.buyerRatio.toFixed(2)}x 📈 | Vend: ${item.volume1h.sellerRatio.toFixed(2)}x ${item.volume1h.isSellerVolumeRising ? '📈' : '📉'} | Score: ${item.score.toFixed(1)}`);
                     });
                 }
                 
-                const idealBuys = symbolScores
-                    .filter(item => item.volume1h && item.volume1h.isRising && item.lsr && item.lsr < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR)
-                    .slice(0, 5);
-                
-                const idealSells = symbolScores
-                    .filter(item => item.volume1h && item.volume1h.isFalling && item.lsr && item.lsr > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR)
-                    .slice(0, 5);
-                
-                if (idealBuys.length > 0) {
-                    console.log('\n🟢 IDEAL PARA COMPRA (Volume SUBINDO + LSR baixo):');
-                    idealBuys.forEach(item => {
-                        console.log(`   ${item.symbol} - Vol1h: ${item.volume1h.ratio.toFixed(2)}x 📈 | LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
+                if (strongSellVolume.length > 0) {
+                    console.log('\n🔴 VOLUME VENDEDOR FORTE (Vendedor > 1.5x EMA9):');
+                    strongSellVolume.forEach(item => {
+                        console.log(`   ${item.symbol} - Vend: ${item.volume1h.sellerRatio.toFixed(2)}x 📈 | Comp: ${item.volume1h.buyerRatio.toFixed(2)}x ${item.volume1h.isBuyerVolumeRising ? '📈' : '📉'} | Score: ${item.score.toFixed(1)}`);
                     });
                 }
                 
-                if (idealSells.length > 0) {
-                    console.log('\n🔴 IDEAL PARA VENDA (Volume DESCENDO + LSR alto):');
-                    idealSells.forEach(item => {
-                        console.log(`   ${item.symbol} - Vol1h: ${item.volume1h.ratio.toFixed(2)}x 📉 | LSR: ${item.lsr.toFixed(2)} | Score: ${item.score.toFixed(1)}`);
+                // Sinais conflitantes
+                const conflictSignals = symbolScores
+                    .filter(item => item.volume1h && 
+                           item.volume1h.conflictVolume)
+                    .slice(0, 5);
+                
+                if (conflictSignals.length > 0) {
+                    console.log('\n⚠️  VOLUME CONFLITANTE (Ambos subindo):');
+                    conflictSignals.forEach(item => {
+                        console.log(`   ${item.symbol} - Comp: ${item.volume1h.buyerRatio.toFixed(2)}x 📈 | Vend: ${item.volume1h.sellerRatio.toFixed(2)}x 📈 | Batalha!`);
                     });
                 }
             }
@@ -696,9 +755,9 @@ class PrioritySystem {
         if (!priorityInfo || !priorityInfo.volume1h) return true;
         
         if (signalType === 'COMPRA') {
-            return priorityInfo.volume1h.isRising;
+            return priorityInfo.volume1h.isTotalRising;
         } else if (signalType === 'VENDA') {
-            return priorityInfo.volume1h.isFalling;
+            return !priorityInfo.volume1h.isTotalRising;
         }
         
         return true;
@@ -776,10 +835,12 @@ function getAlertCountForSymbol(symbol, type) {
         alertCounter[symbol] = {
             buy: 0,
             sell: 0,
+            stochastic: 0,
             total: 0,
             lastAlert: null,
             dailyBuy: 0,
             dailySell: 0,
+            dailyStochastic: 0,
             dailyTotal: 0
         };
     }
@@ -797,9 +858,11 @@ function getAlertCountForSymbol(symbol, type) {
         symbolTotal: alertCounter[symbol].total,
         symbolBuy: alertCounter[symbol].buy,
         symbolSell: alertCounter[symbol].sell,
+        symbolStochastic: alertCounter[symbol].stochastic,
         symbolDailyTotal: alertCounter[symbol].dailyTotal,
         symbolDailyBuy: alertCounter[symbol].dailyBuy,
         symbolDailySell: alertCounter[symbol].dailySell,
+        symbolDailyStochastic: alertCounter[symbol].dailyStochastic,
         globalTotal: globalAlerts,
         dailyTotal: dailyAlerts
     };
@@ -813,6 +876,7 @@ function resetDailyCounters() {
     Object.keys(alertCounter).forEach(symbol => {
         alertCounter[symbol].dailyBuy = 0;
         alertCounter[symbol].dailySell = 0;
+        alertCounter[symbol].dailyStochastic = 0;
         alertCounter[symbol].dailyTotal = 0;
     });
     
@@ -827,11 +891,13 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         
         const message = `
-<b>🚀 TITANIUM INICIADO</b>
+<b>🚀 TITANIUM INICIADO - COM ESTOCÁSTICO 5.3.3 12H</b>
+<b>📊 SISTEMA DE VOLUME EMA9 SEPARADO ATIVADO</b>
 
 📅 ${now.full}
 
-<i>Sistema otimizado para resposta rápida</i>
+<i>Sistema otimizado com análise de volume comprador/vendedor separada</i>
+<i>Alertas Estocástico 5.3.3 12H ativados</i>
 `;
 
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -886,6 +952,97 @@ async function getCandles(symbol, timeframe, limit = 80) {
     } catch (error) {
         console.log(`⚠️ Erro ao buscar candles ${symbol} ${timeframe}: ${error.message}`);
         throw error;
+    }
+}
+
+// === FUNÇÃO PARA CALCULAR ESTOCÁSTICO 5.3.3 ===
+async function getStochastic(symbol, timeframe = STOCHASTIC_CONFIG.TIMEFRAME) {
+    try {
+        const candles = await getCandles(symbol, timeframe, 50);
+        if (candles.length < 14) {
+            return null;
+        }
+
+        const kPeriod = STOCHASTIC_CONFIG.K_PERIOD;
+        const dPeriod = STOCHASTIC_CONFIG.D_PERIOD;
+        const slowing = STOCHASTIC_CONFIG.SLOWING;
+        
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        // Calcular Estocástico
+        const stochValues = [];
+        
+        for (let i = kPeriod - 1; i < candles.length; i++) {
+            const highSlice = highs.slice(i - kPeriod + 1, i + 1);
+            const lowSlice = lows.slice(i - kPeriod + 1, i + 1);
+            
+            const highestHigh = Math.max(...highSlice);
+            const lowestLow = Math.min(...lowSlice);
+            
+            if (highestHigh === lowestLow) {
+                stochValues.push(50); // Evitar divisão por zero
+            } else {
+                const k = ((closes[i] - lowestLow) / (highestHigh - lowestLow)) * 100;
+                stochValues.push(k);
+            }
+        }
+        
+        // Suavizar %K (slow stochastic)
+        const smoothedK = [];
+        for (let i = slowing - 1; i < stochValues.length; i++) {
+            const kSlice = stochValues.slice(i - slowing + 1, i + 1);
+            const avgK = kSlice.reduce((a, b) => a + b, 0) / kSlice.length;
+            smoothedK.push(avgK);
+        }
+        
+        // Calcular %D (média móvel simples de %K)
+        const dValues = [];
+        for (let i = dPeriod - 1; i < smoothedK.length; i++) {
+            const dSlice = smoothedK.slice(i - dPeriod + 1, i + 1);
+            const d = dSlice.reduce((a, b) => a + b, 0) / dSlice.length;
+            dValues.push(d);
+        }
+        
+        if (smoothedK.length < 2 || dValues.length < 2) {
+            return null;
+        }
+        
+        const latestK = smoothedK[smoothedK.length - 1];
+        const latestD = dValues[dValues.length - 1];
+        const previousK = smoothedK[smoothedK.length - 2];
+        const previousD = dValues[dValues.length - 2];
+        
+        // Verificar cruzamentos
+        const isCrossingUp = previousK <= previousD && latestK > latestD;
+        const isCrossingDown = previousK >= previousD && latestK < latestD;
+        
+        // Determinar estado
+        let status = 'NEUTRAL';
+        if (latestK < STOCHASTIC_CONFIG.OVERSOLD && latestD < STOCHASTIC_CONFIG.OVERSOLD) {
+            status = 'OVERSOLD';
+        } else if (latestK > STOCHASTIC_CONFIG.OVERBOUGHT && latestD > STOCHASTIC_CONFIG.OVERBOUGHT) {
+            status = 'OVERBOUGHT';
+        }
+        
+        return {
+            k: latestK,
+            d: latestD,
+            previousK: previousK,
+            previousD: previousD,
+            isCrossingUp: isCrossingUp,
+            isCrossingDown: isCrossingDown,
+            status: status,
+            isOversold: status === 'OVERSOLD',
+            isOverbought: status === 'OVERBOUGHT',
+            timeframe: timeframe,
+            config: `${kPeriod}.${dPeriod}.${slowing}`
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular Estocástico para ${symbol}: ${error.message}`);
+        return null;
     }
 }
 
@@ -976,42 +1133,6 @@ async function getVolume3m(symbol) {
     }
 }
 
-async function getVolume1h(symbol) {
-    try {
-        const candles = await getCandles(symbol, '1h', 20);
-        if (candles.length < PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD) {
-            return null;
-        }
-
-        const volumes = candles.map(c => c.volume);
-        const currentVolume = volumes[volumes.length - 1];
-        
-        // CALCULAR EMA9 PARA VOLUME (MAIS SENSÍVEL)
-        const emaPeriod = PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD;
-        const emaVolume = calculateEMA(volumes, emaPeriod);
-        const volumeRatio = currentVolume / emaVolume;
-        
-        // Calcular força da tendência
-        const previousVolume = volumes.length > 1 ? volumes[volumes.length - 2] : currentVolume;
-        const trendStrength = calculateVolumeTrendStrength(volumes, emaPeriod);
-        
-        return {
-            currentVolume: currentVolume,
-            emaVolume: emaVolume,
-            ratio: volumeRatio,
-            isRising: volumeRatio > 1.0,
-            isFalling: volumeRatio < 1.0,
-            emaPeriod: emaPeriod,
-            trendStrength: trendStrength,
-            previousVolume: previousVolume,
-            volumeChange: ((currentVolume - previousVolume) / previousVolume * 100).toFixed(1)
-        };
-    } catch (error) {
-        console.log(`⚠️ Erro ao calcular volume 1h para ${symbol}: ${error.message}`);
-        return null;
-    }
-}
-
 // Função para calcular EMA (Exponential Moving Average)
 function calculateEMA(values, period) {
     if (values.length < period) {
@@ -1028,25 +1149,235 @@ function calculateEMA(values, period) {
     return ema;
 }
 
-// Função para calcular força da tendência de volume
-function calculateVolumeTrendStrength(volumes, period) {
-    if (volumes.length < period * 2) return 'N/A';
+// Função para analisar volume comprador vs vendedor
+function analyzeBuyerSellerVolume(candles) {
+    if (!VOLUME_ANALYSIS_CONFIG.ENABLED || candles.length < VOLUME_ANALYSIS_CONFIG.MIN_CANDLES_FOR_ANALYSIS) {
+        return null;
+    }
     
-    const recentVolumes = volumes.slice(-period);
-    const previousVolumes = volumes.slice(-period * 2, -period);
+    let buyerVolume = 0;
+    let sellerVolume = 0;
+    let totalVolume = 0;
+    let bullishCandles = 0;
+    let bearishCandles = 0;
     
-    const recentAvg = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
-    const previousAvg = previousVolumes.reduce((a, b) => a + b, 0) / previousVolumes.length;
+    // Analisa os últimos candles para determinar dominância
+    candles.forEach(candle => {
+        const volume = candle.volume;
+        totalVolume += volume;
+        
+        if (candle.close > candle.open) {
+            // Candle verde - dominância compradora
+            buyerVolume += volume * 0.8; // 80% do volume atribuído a compradores
+            sellerVolume += volume * 0.2; // 20% do volume atribuído a vendedores
+            bullishCandles++;
+        } else if (candle.close < candle.open) {
+            // Candle vermelho - dominância vendedora
+            buyerVolume += volume * 0.2; // 20% do volume atribuído a compradores
+            sellerVolume += volume * 0.8; // 80% do volume atribuído a vendedores
+            bearishCandles++;
+        } else {
+            // Doji - divisão igual
+            buyerVolume += volume * 0.5;
+            sellerVolume += volume * 0.5;
+        }
+    });
     
-    const changePercent = ((recentAvg - previousAvg) / previousAvg) * 100;
+    // Calcula percentuais
+    const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 0;
+    const sellerPercentage = totalVolume > 0 ? (sellerVolume / totalVolume) * 100 : 0;
     
-    if (changePercent > 50) return 'MUITO FORTE 📈📈';
-    if (changePercent > 25) return 'FORTE 📈';
-    if (changePercent > 10) return 'MODERADA ↗️';
-    if (changePercent > -10) return 'NEUTRA ➡️';
-    if (changePercent > -25) return 'FRACA ↘️';
-    if (changePercent > -50) return 'MUITO FRACA 📉';
-    return 'MUITO FRACA 📉📉';
+    // Determina dominância
+    let dominance = 'NEUTRO';
+    let dominanceEmoji = '➡️';
+    let dominanceStrength = 'NEUTRA';
+    let strengthEmoji = '';
+    
+    if (buyerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.VERY_STRONG_THRESHOLD * 100) {
+        dominance = 'COMPRADOR FORTE';
+        dominanceEmoji = '🟢🟢🟢';
+        dominanceStrength = 'MUITO FORTE';
+        strengthEmoji = '💪💪💪';
+    } else if (buyerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.STRONG_THRESHOLD * 100) {
+        dominance = 'COMPRADOR';
+        dominanceEmoji = '🟢🟢';
+        dominanceStrength = 'FORTE';
+        strengthEmoji = '💪💪';
+    } else if (buyerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.VOLUME_THRESHOLD * 100) {
+        dominance = 'COMPRADOR';
+        dominanceEmoji = '🟢';
+        dominanceStrength = 'MODERADA';
+        strengthEmoji = '💪';
+    } else if (sellerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.VERY_STRONG_THRESHOLD * 100) {
+        dominance = 'VENDEDOR FORTE';
+        dominanceEmoji = '🔴🔴🔴';
+        dominanceStrength = 'MUITO FORTE';
+        strengthEmoji = '💪💪💪';
+    } else if (sellerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.STRONG_THRESHOLD * 100) {
+        dominance = 'VENDEDOR';
+        dominanceEmoji = '🔴🔴';
+        dominanceStrength = 'FORTE';
+        strengthEmoji = '💪💪';
+    } else if (sellerPercentage >= 100 - VOLUME_ANALYSIS_CONFIG.VOLUME_THRESHOLD * 100) {
+        dominance = 'VENDEDOR';
+        dominanceEmoji = '🔴';
+        dominanceStrength = 'MODERADA';
+        strengthEmoji = '💪';
+    }
+    
+    // Relação bullish/bearish
+    const totalCandles = bullishCandles + bearishCandles;
+    const bullishRatio = totalCandles > 0 ? (bullishCandles / totalCandles) * 100 : 0;
+    const bearishRatio = totalCandles > 0 ? (bearishCandles / totalCandles) * 100 : 0;
+    
+    return {
+        buyerVolume,
+        sellerVolume,
+        totalVolume,
+        buyerPercentage: buyerPercentage.toFixed(1),
+        sellerPercentage: sellerPercentage.toFixed(1),
+        dominance,
+        dominanceEmoji,
+        dominanceStrength,
+        strengthEmoji,
+        bullishCandles,
+        bearishCandles,
+        bullishRatio: bullishRatio.toFixed(1),
+        bearishRatio: bearishRatio.toFixed(1),
+        netVolume: buyerVolume - sellerVolume,
+        netPercentage: ((buyerVolume - sellerVolume) / totalVolume * 100).toFixed(1),
+        hasBuyerDominance: dominance.includes('COMPRADOR') && parseFloat(buyerPercentage) >= VOLUME_ANALYSIS_CONFIG.MIN_DOMINANCE_PERCENTAGE,
+        hasSellerDominance: dominance.includes('VENDEDOR') && parseFloat(sellerPercentage) >= VOLUME_ANALYSIS_CONFIG.MIN_DOMINANCE_PERCENTAGE
+    };
+}
+
+// NOVA FUNÇÃO: Volume 1h com EMA9 separada para comprador/vendedor
+async function getVolume1hEnhanced(symbol) {
+    try {
+        const candles = await getCandles(symbol, '1h', 20);
+        if (candles.length < 9) {
+            return null;
+        }
+
+        // Separar volumes por tipo
+        const totalVolumes = [];
+        const buyerVolumes = [];
+        const sellerVolumes = [];
+        
+        candles.forEach(candle => {
+            const volume = candle.volume;
+            totalVolumes.push(volume);
+            
+            if (candle.close > candle.open) {
+                // Candle verde - dominância compradora
+                buyerVolumes.push(volume * 0.8);    // 80% comprador
+                sellerVolumes.push(volume * 0.2);   // 20% vendedor
+            } else if (candle.close < candle.open) {
+                // Candle vermelho - dominância vendedora
+                buyerVolumes.push(volume * 0.2);    // 20% comprador
+                sellerVolumes.push(volume * 0.8);   // 80% vendedor
+            } else {
+                // Doji
+                buyerVolumes.push(volume * 0.5);
+                sellerVolumes.push(volume * 0.5);
+            }
+        });
+
+        const currentTotalVolume = totalVolumes[totalVolumes.length - 1];
+        const currentBuyerVolume = buyerVolumes[buyerVolumes.length - 1];
+        const currentSellerVolume = sellerVolumes[sellerVolumes.length - 1];
+        
+        // Calcular EMA9 para cada tipo
+        const ema9Total = calculateEMA(totalVolumes, 9);
+        const ema9Buyer = calculateEMA(buyerVolumes, 9);
+        const ema9Seller = calculateEMA(sellerVolumes, 9);
+        
+        // Calcular ratios
+        const totalRatio = currentTotalVolume / ema9Total;
+        const buyerRatio = currentBuyerVolume / ema9Buyer;
+        const sellerRatio = currentSellerVolume / ema9Seller;
+        
+        // Determinar tendências
+        const isTotalRising = totalRatio > 1.0;
+        const isBuyerVolumeRising = buyerRatio > 1.0;
+        const isSellerVolumeRising = sellerRatio > 1.0;
+        
+        // Análise avançada
+        const trueBuyerDominance = isBuyerVolumeRising && !isSellerVolumeRising;
+        const trueSellerDominance = isSellerVolumeRising && !isBuyerVolumeRising;
+        const conflictVolume = isBuyerVolumeRising && isSellerVolumeRising;
+        const weakVolume = !isBuyerVolumeRising && !isSellerVolumeRising;
+        
+        // Análise tradicional (mantida para compatibilidade)
+        const buyerSellerAnalysis = analyzeBuyerSellerVolume(candles);
+        
+        return {
+            // Dados básicos
+            currentTotalVolume: currentTotalVolume,
+            currentBuyerVolume: currentBuyerVolume,
+            currentSellerVolume: currentSellerVolume,
+            
+            // Ratios vs EMA9
+            totalRatio: totalRatio,
+            buyerRatio: buyerRatio,
+            sellerRatio: sellerRatio,
+            
+            // EMAs
+            ema9Total: ema9Total,
+            ema9Buyer: ema9Buyer,
+            ema9Seller: ema9Seller,
+            
+            // Tendências
+            isTotalRising: isTotalRising,
+            isBuyerVolumeRising: isBuyerVolumeRising,
+            isSellerVolumeRising: isSellerVolumeRising,
+            
+            // Análise avançada
+            trueBuyerDominance: trueBuyerDominance,
+            trueSellerDominance: trueSellerDominance,
+            conflictVolume: conflictVolume,
+            weakVolume: weakVolume,
+            
+            // Análise tradicional
+            buyerSellerAnalysis: buyerSellerAnalysis,
+            
+            // Para compatibilidade com código antigo
+            ratio: totalRatio,
+            isRising: isTotalRising,
+            isFalling: !isTotalRising,
+            emaPeriod: 9,
+            trendStrength: getVolumeTrendStrength(totalVolumes)
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular volume 1h enhanced para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// Função auxiliar para força da tendência
+function getVolumeTrendStrength(volumes) {
+    if (volumes.length < 18) return 'N/A';
+    
+    const recent = volumes.slice(-9);
+    const previous = volumes.slice(-18, -9);
+    
+    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const previousAvg = previous.reduce((a, b) => a + b, 0) / previous.length;
+    
+    const change = ((recentAvg - previousAvg) / previousAvg) * 100;
+    
+    if (change > 50) return 'MUITO FORTE 📈📈';
+    if (change > 25) return 'FORTE 📈';
+    if (change > 10) return 'MODERADA ↗️';
+    if (change > -10) return 'NEUTRA ➡️';
+    if (change > -25) return 'FRACA ↘️';
+    return 'MUITO FRACA 📉';
+}
+
+// Função de volume 1h original (mantida para compatibilidade)
+async function getVolume1h(symbol) {
+    return await getVolume1hEnhanced(symbol);
 }
 
 async function getLSR(symbol) {
@@ -1229,7 +1560,129 @@ function calculateTargets(entryPrice, stopPrice, isBullish) {
     return targets;
 }
 
-// === SINAIS DE COMPRA E VENDA ===
+// === SINAIS DE ESTOCÁSTICO 5.3.3 12H ===
+async function checkStochasticSignal(symbol, prioritySystem) {
+    if (!STOCHASTIC_CONFIG.ENABLED || prioritySystem.isInStochasticCooldown(symbol)) {
+        return null;
+    }
+
+    try {
+        const stochastic = await getStochastic(symbol);
+        if (!stochastic) {
+            return null;
+        }
+
+        if (stochastic.isCrossingUp || stochastic.isCrossingDown) {
+            const [rsiData, fundingData, pivotData, currentPrice] = await Promise.all([
+                getRSI1h(symbol),
+                getFundingRate(symbol),
+                analyzePivotPoints(symbol, await getCurrentPrice(symbol), stochastic.isCrossingUp),
+                getCurrentPrice(symbol)
+            ]);
+
+            const signalType = stochastic.isCrossingUp ? 'STOCHASTIC_COMPRA' : 'STOCHASTIC_VENDA';
+            
+            return {
+                symbol: symbol,
+                type: signalType,
+                stochastic: stochastic,
+                rsi: rsiData?.value,
+                funding: fundingData?.ratePercent,
+                pivotData: pivotData,
+                currentPrice: currentPrice,
+                time: getBrazilianDateTime()
+            };
+        }
+
+        return null;
+    } catch (error) {
+        console.log(`⚠️ Erro ao verificar sinal Estocástico para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+async function getCurrentPrice(symbol) {
+    try {
+        const candles = await getCandles(symbol, '1m', 1);
+        return candles[candles.length - 1].close;
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar preço atual para ${symbol}: ${error.message}`);
+        return 0;
+    }
+}
+
+// === ALERTA DE ESTOCÁSTICO ===
+async function sendStochasticAlert(signal, prioritySystem) {
+    const alertCount = getAlertCountForSymbol(signal.symbol, 'stochastic');
+    
+    prioritySystem.registerStochasticAlert(signal.symbol);
+    
+    const fundingRate = parseFloat(signal.funding || 0) / 100;
+    let fundingRateEmoji = '';
+    if (fundingRate <= -0.002) fundingRateEmoji = '🟢🟢🟢';
+    else if (fundingRate <= -0.001) fundingRateEmoji = '🟢🟢';
+    else if (fundingRate <= -0.0005) fundingRateEmoji = '🟢';
+    else if (fundingRate >= 0.001) fundingRateEmoji = '🔴🔴🔴';
+    else if (fundingRate >= 0.0003) fundingRateEmoji = '🔴🔴';
+    else if (fundingRate >= 0.0002) fundingRateEmoji = '🔴';
+    else fundingRateEmoji = '🟢';
+    
+    const fundingRateText = fundingRate !== 0
+        ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
+        : '🔹 Indisp.';
+    
+    const stochStatus = signal.stochastic.isOversold ? 'OVERSOLD 🔵' : 
+                       signal.stochastic.isOverbought ? 'OVERBOUGHT 🔴' : 'NEUTRAL ⚪';
+    
+    const action = signal.type === 'STOCHASTIC_COMPRA' ? '🟢 MONITORAR COMPRA' : '🔴 MONITORAR CORREÇÃO';
+    
+    let pivotInfo = '';
+    if (signal.pivotData) {
+        if (signal.pivotData.nearestResistance) {
+            pivotInfo += `\n🔺 RESISTÊNCIA: ${signal.pivotData.nearestResistance.type} $${signal.pivotData.nearestResistance.price.toFixed(6)} (${signal.pivotData.nearestResistance.distancePercent.toFixed(2)}%)`;
+        }
+        if (signal.pivotData.nearestSupport) {
+            pivotInfo += `\n🔻 SUPORTE: ${signal.pivotData.nearestSupport.type} $${signal.pivotData.nearestSupport.price.toFixed(6)} (${signal.pivotData.nearestSupport.distancePercent.toFixed(2)}%)`;
+        }
+        if (signal.pivotData.pivot) {
+            pivotInfo += `\n⚖️ PIVÔ: $${signal.pivotData.pivot.toFixed(6)}`;
+        }
+    }
+    
+    const rsiEmoji = signal.rsi < 30 ? '🔵' : signal.rsi > 70 ? '🔴' : '⚪';
+    
+    const message = `
+🎯 <b><i>${signal.symbol} - ESTOCÁSTICO ${signal.stochastic.config} ${STOCHASTIC_CONFIG.TIMEFRAME}</i></b>
+${action}
+
+📅 ${signal.time.full}
+📊 Alerta Estocástico #${alertCount.symbolStochastic}
+
+<b><i>Indicadores:</i></b>
+• Estocástico ${signal.stochastic.config} ${STOCHASTIC_CONFIG.TIMEFRAME}: 
+  %K: ${signal.stochastic.k.toFixed(2)} | %D: ${signal.stochastic.d.toFixed(2)}
+  Status: ${stochStatus}
+• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K cruzou %D PARA CIMA' : '📉 %K cruzou %D PARA BAIXO'}
+• RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
+• Preço Atual: $${signal.currentPrice.toFixed(6)}
+• Funding Rate: ${fundingRateText}
+
+<b><i>Níveis de Suporte/Resistência:</i></b>${pivotInfo}
+
+<b><i>Ação:</i></b>
+${signal.type === 'STOCHASTIC_COMPRA' ? 
+'🟢 Monitorar oportunidades de COMPRA nos níveis de suporte\n📊 Aguardar confirmação de volume e momentum' : 
+'🔴 Monitorar possíveis CORREÇÕES nos níveis de resistência\n⚠️ Cautela com posições longas'}
+
+<b><i>✨Titanium by @J4Rviz✨</i></b>
+`;
+
+    await sendTelegramAlert(message);
+    console.log(`✅ Alerta Estocástico enviado: ${signal.symbol} (${action})`);
+    console.log(`   📈 Estocástico: %K=${signal.stochastic.k.toFixed(2)}, %D=${signal.stochastic.d.toFixed(2)}`);
+}
+
+// === SINAIS DE COMPRA E VENDA - ATUALIZADOS COM EMA9 SEPARADA ===
 async function checkBuySignal(symbol, prioritySystem) {
     try {
         if (prioritySystem.isInCooldown(symbol)) {
@@ -1243,25 +1696,58 @@ async function checkBuySignal(symbol, prioritySystem) {
             getEMAs3m(symbol),
             getRSI1h(symbol),
             getVolume3m(symbol),
-            getVolume1h(symbol)
+            getVolume1hEnhanced(symbol)
         ]);
 
         if (!emaData || !rsiData || !volume3mData || !volume1hData) {
             return null;
         }
 
-        // VERIFICAÇÃO CRÍTICA COM EMA9 (MAIS SENSÍVEL)
-        if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && !volume1hData.isRising) {
-            if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
-                console.log(`⚠️  ${symbol}: Volume 1h (EMA${volume1hData.emaPeriod}) não está SUBINDO (ratio: ${volume1hData.ratio.toFixed(2)}x), ignorando sinal de COMPRA`);
+        // VERIFICAÇÃO CRÍTICA COM EMA9 SEPARADA
+        if (VOLUME_ANALYSIS_CONFIG.USE_SEPARATE_EMA_ANALYSIS) {
+            // Compra: volume comprador deve estar subindo, vendedor não
+            if (!volume1hData.trueBuyerDominance) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume comprador NÃO dominante (Comp: ${volume1hData.buyerRatio.toFixed(2)}x, Vend: ${volume1hData.sellerRatio.toFixed(2)}x)`);
+                }
+                return null;
             }
-            return null;
+            
+            // Volume comprador mínimo
+            if (volume1hData.buyerRatio < VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume comprador baixo (${volume1hData.buyerRatio.toFixed(2)}x < ${VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO}x)`);
+                }
+                return null;
+            }
+        } else {
+            // Verificação antiga (para compatibilidade)
+            if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && !volume1hData.isTotalRising) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume total não está SUBINDO (ratio: ${volume1hData.totalRatio.toFixed(2)}x)`);
+                }
+                return null;
+            }
         }
 
+        // VERIFICAÇÃO DE DOMINÂNCIA COMPRADORA
+        if (VOLUME_ANALYSIS_CONFIG.REQUIRE_DOMINANCE && volume1hData.buyerSellerAnalysis) {
+            const analysis = volume1hData.buyerSellerAnalysis;
+            const hasRequiredDominance = analysis.hasBuyerDominance;
+            
+            if (!hasRequiredDominance) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: SEM dominância compradora suficiente (Comprador: ${analysis.buyerPercentage}%, Mínimo: ${VOLUME_ANALYSIS_CONFIG.MIN_DOMINANCE_PERCENTAGE}%)`);
+                }
+                return null;
+            }
+        }
+
+        // USANDO CONFIGURAÇÃO CENTRALIZADA DO RSI
         const isBuySignal = 
             emaData.isEMA13CrossingUp &&
             emaData.priceCloseAboveEMA55 &&
-            rsiData.value < 62 &&
+            rsiData.value < RSI_CONFIG.COMPRA.MAX_VALUE &&
             volume3mData.isRobust;
 
         if (!isBuySignal) {
@@ -1320,25 +1806,58 @@ async function checkSellSignal(symbol, prioritySystem) {
             getEMAs3m(symbol),
             getRSI1h(symbol),
             getVolume3m(symbol),
-            getVolume1h(symbol)
+            getVolume1hEnhanced(symbol)
         ]);
 
         if (!emaData || !rsiData || !volume3mData || !volume1hData) {
             return null;
         }
 
-        // VERIFICAÇÃO CRÍTICA COM EMA9 (MAIS SENSÍVEL)
-        if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && !volume1hData.isFalling) {
-            if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
-                console.log(`⚠️  ${symbol}: Volume 1h (EMA${volume1hData.emaPeriod}) não está DESCENDO (ratio: ${volume1hData.ratio.toFixed(2)}x), ignorando sinal de VENDA`);
+        // VERIFICAÇÃO CRÍTICA COM EMA9 SEPARADA
+        if (VOLUME_ANALYSIS_CONFIG.USE_SEPARATE_EMA_ANALYSIS) {
+            // Venda: volume vendedor deve estar subindo, comprador não
+            if (!volume1hData.trueSellerDominance) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume vendedor NÃO dominante (Vend: ${volume1hData.sellerRatio.toFixed(2)}x, Comp: ${volume1hData.buyerRatio.toFixed(2)}x)`);
+                }
+                return null;
             }
-            return null;
+            
+            // Volume vendedor mínimo
+            if (volume1hData.sellerRatio < VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume vendedor baixo (${volume1hData.sellerRatio.toFixed(2)}x < ${VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO}x)`);
+                }
+                return null;
+            }
+        } else {
+            // Verificação antiga (para compatibilidade)
+            if (PRIORITY_CONFIG.VOLUME_1H.VOLUME_DIRECTION_STRICT && volume1hData.isTotalRising) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: Volume total está SUBINDO, não descendo (ratio: ${volume1hData.totalRatio.toFixed(2)}x)`);
+                }
+                return null;
+            }
         }
 
+        // VERIFICAÇÃO DE DOMINÂNCIA VENDEDORA
+        if (VOLUME_ANALYSIS_CONFIG.REQUIRE_DOMINANCE && volume1hData.buyerSellerAnalysis) {
+            const analysis = volume1hData.buyerSellerAnalysis;
+            const hasRequiredDominance = analysis.hasSellerDominance;
+            
+            if (!hasRequiredDominance) {
+                if (PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
+                    console.log(`⚠️  ${symbol}: SEM dominância vendedora suficiente (Vendedor: ${analysis.sellerPercentage}%, Mínimo: ${VOLUME_ANALYSIS_CONFIG.MIN_DOMINANCE_PERCENTAGE}%)`);
+                }
+                return null;
+            }
+        }
+
+        // USANDO CONFIGURAÇÃO CENTRALIZADA DO RSI
         const isSellSignal = 
             emaData.isEMA13CrossingDown &&
             emaData.priceCloseBelowEMA55 &&
-            rsiData.value > 35 &&
+            rsiData.value > RSI_CONFIG.VENDA.MIN_VALUE &&
             volume3mData.isRobust;
 
         if (!isSellSignal) {
@@ -1384,7 +1903,7 @@ async function checkSellSignal(symbol, prioritySystem) {
     }
 }
 
-// === MENSAGENS DE ALERTA ===
+// === MENSAGENS DE ALERTA - ATUALIZADAS COM EMA9 SEPARADA ===
 async function sendBuyAlert(signal, prioritySystem) {
     const alertCount = getAlertCountForSymbol(signal.symbol, 'buy');
     
@@ -1413,8 +1932,42 @@ async function sendBuyAlert(signal, prioritySystem) {
         priorityEmoji = signal.priorityInfo.emojiRanking || '📉';
     }
     
-    const volume1hDirection = signal.volume1h.isRising ? '📈 SUBINDO' : '📉 DESCENDO';
-    const volume1hDirectionEmoji = signal.volume1h.isRising ? '✅' : '❌';
+    // ANÁLISE DE VOLUME COM EMA9 SEPARADA
+    let volumeAnalysisText = '';
+    let dominanceStatus = '';
+    let volumeStrength = '';
+    
+    if (signal.volume1h) {
+        const vol = signal.volume1h;
+        
+        // Status de dominância
+        if (vol.trueBuyerDominance) {
+            dominanceStatus = '✅ Vol Comprador';
+            volumeStrength = '🟢 Forte';
+        } else if (vol.conflictVolume) {
+            dominanceStatus = '⚠️ Vol Conflitante (Ambos subindo)';
+            volumeStrength = '🟡 Moderado';
+        } else if (vol.weakVolume) {
+            dominanceStatus = '⚠️  Volume Fraco (Ambos fracos)';
+            volumeStrength = '🔴 Fraco';
+        } else {
+            dominanceStatus = '❌ Sem Volume';
+            volumeStrength = '🔴 Fraco';
+        }
+        
+        volumeAnalysisText = `\n<i>${dominanceStatus}</i>`;
+        volumeAnalysisText += `\n<i>Volume Total: ${vol.totalRatio.toFixed(2)}x EMA9 ${vol.isTotalRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Comprador: ${vol.buyerRatio.toFixed(2)}x EMA9 ${vol.isBuyerVolumeRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Vendedor: ${vol.sellerRatio.toFixed(2)}x EMA9 ${vol.isSellerVolumeRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Força do Volume: ${volumeStrength}</i>`;
+        
+        // Análise tradicional (se disponível)
+        if (vol.buyerSellerAnalysis) {
+            const analysis = vol.buyerSellerAnalysis;
+            volumeAnalysisText += `\n<i>Distribuição: Comprador ${analysis.buyerPercentage}% | Vendedor ${analysis.sellerPercentage}%</i>`;
+            volumeAnalysisText += `\n<i>Candles: 🟢 ${analysis.bullishCandles} (${analysis.bullishRatio}%) | 🔴 ${analysis.bearishCandles} (${analysis.bearishRatio}%)</i>`;
+        }
+    }
     
     let priorityInfo = '';
     if (signal.priorityInfo) {
@@ -1426,7 +1979,7 @@ async function sendBuyAlert(signal, prioritySystem) {
             priorityInfo += ` | LSR: ${signal.priorityInfo.lsr.toFixed(2)}`;
         }
         if (signal.priorityInfo.volume1h) {
-            priorityInfo += ` | Vol1h EMA${signal.priorityInfo.volume1h.emaPeriod}: ${signal.priorityInfo.volume1h.ratio.toFixed(2)}x`;
+            priorityInfo += ` | Vol1h: ${signal.priorityInfo.volume1h.totalRatio.toFixed(2)}x`;
         }
     }
     
@@ -1444,8 +1997,9 @@ async function sendBuyAlert(signal, prioritySystem) {
     }
     
     const volume3mChange = ((signal.volume3m.currentVolume - signal.volume3m.avgVolume) / signal.volume3m.avgVolume * 100).toFixed(1);
-    const volume1hInfo = signal.volume1h ? 
-        ` (1h EMA${signal.volume1h.emaPeriod}: ${signal.volume1h.ratio.toFixed(2)}x ${volume1hDirectionEmoji})` : '';
+    
+    // USANDO CONFIGURAÇÃO DO RSI NA MENSAGEM
+    const rsiCheckEmoji = signal.rsi < RSI_CONFIG.COMPRA.MAX_VALUE ? '✅' : '❌';
     
     const message = `
 🟢 <b><i>${signal.symbol} - COMPRA ${signal.isIdealLSR ? '🏆 IDEAL' : ''}</i></b>
@@ -1453,8 +2007,9 @@ async function sendBuyAlert(signal, prioritySystem) {
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Compra #${alertCount.symbolBuy})
 ${priorityInfo}
-<i>VOLUME 1H: ${volume1hDirection}</i>
-<i>Tendência: ${signal.volume1h.trendStrength || 'N/A'}</i>
+
+<b><i>ANÁLISE DE VOLUME 1h:</i></b>
+${volumeAnalysisText}
 
 <b><i>Operação:</i></b>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
@@ -1463,8 +2018,8 @@ ${priorityInfo}
 • 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo ao suporte.
 
 <b><i>Indicadores:</i></b>
-• RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi < 62 ? '✅' : '❌'})
-• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hInfo}
+• RSI 1h: ${signal.rsi.toFixed(1)} ${rsiCheckEmoji} (${signal.rsi < RSI_CONFIG.COMPRA.MAX_VALUE ? `✅ < ${RSI_CONFIG.COMPRA.MAX_VALUE}` : `❌ > ${RSI_CONFIG.COMPRA.MAX_VALUE}`})
+• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr < 2.6 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
 • Funding Rate:${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
@@ -1474,11 +2029,12 @@ ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.pri
 <b><i>🛑STOP:</i></b> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<b><i>✨TITANIUM PRIORITY SYSTEM✨</i></b>
+<b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
 
     await sendTelegramAlert(message);
     console.log(`✅ Alerta de COMPRA enviado: ${signal.symbol} (Prioridade: ${priorityScore.toFixed(1)} ${priorityEmoji})`);
+    console.log(`   📊 Volume: Total ${signal.volume1h.totalRatio.toFixed(2)}x | Comp ${signal.volume1h.buyerRatio.toFixed(2)}x | Vend ${signal.volume1h.sellerRatio.toFixed(2)}x`);
 }
 
 async function sendSellAlert(signal, prioritySystem) {
@@ -1509,8 +2065,42 @@ async function sendSellAlert(signal, prioritySystem) {
         priorityEmoji = signal.priorityInfo.emojiRanking || '📉';
     }
     
-    const volume1hDirection = signal.volume1h.isFalling ? '📉 DESCENDO' : '📈 SUBINDO';
-    const volume1hDirectionEmoji = signal.volume1h.isFalling ? '✅' : '❌';
+    // ANÁLISE DE VOLUME COM EMA9 SEPARADA
+    let volumeAnalysisText = '';
+    let dominanceStatus = '';
+    let volumeStrength = '';
+    
+    if (signal.volume1h) {
+        const vol = signal.volume1h;
+        
+        // Status de dominância
+        if (vol.trueSellerDominance) {
+            dominanceStatus = '✅ Vol Vendedor ';
+            volumeStrength = '🔴 Forte';
+        } else if (vol.conflictVolume) {
+            dominanceStatus = '⚠️ Vol Conflitante (Ambos subindo)';
+            volumeStrength = '🟡 Moderado';
+        } else if (vol.weakVolume) {
+            dominanceStatus = '⚠️  Vol Fraco (Ambos fracos)';
+            volumeStrength = '🟢 Fraco';
+        } else {
+            dominanceStatus = '❌ Sem Volume';
+            volumeStrength = '🟢 Fraco';
+        }
+        
+        volumeAnalysisText = `\n<i>${dominanceStatus}</i>`;
+        volumeAnalysisText += `\n<i>Volume Total: ${vol.totalRatio.toFixed(2)}x EMA9 ${vol.isTotalRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Vendedor: ${vol.sellerRatio.toFixed(2)}x EMA9 ${vol.isSellerVolumeRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Comprador: ${vol.buyerRatio.toFixed(2)}x EMA9 ${vol.isBuyerVolumeRising ? '📈' : '📉'}</i>`;
+        volumeAnalysisText += `\n<i>Força do Volume: ${volumeStrength}</i>`;
+        
+        // Análise tradicional (se disponível)
+        if (vol.buyerSellerAnalysis) {
+            const analysis = vol.buyerSellerAnalysis;
+            volumeAnalysisText += `\n<i>Distribuição: Vendedor ${analysis.sellerPercentage}% | Comprador ${analysis.buyerPercentage}%</i>`;
+            volumeAnalysisText += `\n<i>Candles: 🔴 ${analysis.bearishCandles} (${analysis.bearishRatio}%) | 🟢 ${analysis.bullishCandles} (${analysis.bullishRatio}%)</i>`;
+        }
+    }
     
     let priorityInfo = '';
     if (signal.priorityInfo) {
@@ -1522,7 +2112,7 @@ async function sendSellAlert(signal, prioritySystem) {
             priorityInfo += ` | LSR: ${signal.priorityInfo.lsr.toFixed(2)}`;
         }
         if (signal.priorityInfo.volume1h) {
-            priorityInfo += ` | Vol1h EMA${signal.priorityInfo.volume1h.emaPeriod}: ${signal.priorityInfo.volume1h.ratio.toFixed(2)}x`;
+            priorityInfo += ` | Vol1h: ${signal.priorityInfo.volume1h.totalRatio.toFixed(2)}x`;
         }
     }
     
@@ -1540,8 +2130,9 @@ async function sendSellAlert(signal, prioritySystem) {
     }
     
     const volume3mChange = ((signal.volume3m.currentVolume - signal.volume3m.avgVolume) / signal.volume3m.avgVolume * 100).toFixed(1);
-    const volume1hInfo = signal.volume1h ? 
-        ` (1h EMA${signal.volume1h.emaPeriod}: ${signal.volume1h.ratio.toFixed(2)}x ${volume1hDirectionEmoji})` : '';
+    
+    // USANDO CONFIGURAÇÃO DO RSI NA MENSAGEM
+    const rsiCheckEmoji = signal.rsi > RSI_CONFIG.VENDA.MIN_VALUE ? '✅' : '❌';
     
     const message = `
 🔴 <b><i>${signal.symbol} - VENDA ${signal.isIdealLSR ? '🏆 IDEAL' : ''}</i></b>
@@ -1549,8 +2140,9 @@ async function sendSellAlert(signal, prioritySystem) {
 ${signal.time.full}
 Alerta #${alertCount.symbolTotal} (Venda #${alertCount.symbolSell})
 ${priorityInfo}
-<i>VOLUME 1H:${volume1hDirection}</i>
-<i>Tendência: ${signal.volume1h.trendStrength || 'N/A'}</i>
+
+<b><i>ANÁLISE DE VOLUME 1H (EMA9 SEPARADA):</i></b>
+${volumeAnalysisText}
 
 <b><i>Operação:</i></b>
 • Preço atual: $${signal.originalPrice.toFixed(6)}
@@ -1559,8 +2151,8 @@ ${priorityInfo}
 • 💡DICA: Entre na retração (${signal.retracementPercentage}%) ou próximo à resistência.
 
 <b><i>Indicadores:</i></b>
-• RSI 1h: ${signal.rsi.toFixed(1)} (${signal.rsi > 35 ? '✅' : '❌'})
-• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)${volume1hInfo}
+• RSI 1h: ${signal.rsi.toFixed(1)} ${rsiCheckEmoji} (${signal.rsi > RSI_CONFIG.VENDA.MIN_VALUE ? `✅ > ${RSI_CONFIG.VENDA.MIN_VALUE}` : `❌ < ${RSI_CONFIG.VENDA.MIN_VALUE}`})
+• Volume 3m: ${signal.volume3m.ratio.toFixed(2)}x (${volume3mChange}%)
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.lsr > 3.0 ? '✅' : '❌'} ${signal.isIdealLSR ? '🏆' : ''}
 • Funding Rate: ${fundingRateText}
 • ATR: ${signal.atr?.percentage?.toFixed(2) || 'N/A'}% (${signal.atr?.volatility || 'N/A'})
@@ -1570,11 +2162,12 @@ ${signal.targets.slice(0, 3).map(target => `• ${target.target}%: $${target.pri
 <b><i>🛑STOP:</i></b> $${signal.stopPrice.toFixed(6)}
 • Distância: ${signal.stopPercentage}%
 
-<b><i>✨TITANIUM PRIORITY SYSTEM✨</i></b>
+<b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
 
     await sendTelegramAlert(message);
     console.log(`✅ Alerta de VENDA enviado: ${signal.symbol} (Prioridade: ${priorityScore.toFixed(1)} ${priorityEmoji})`);
+    console.log(`   📊 Volume: Total ${signal.volume1h.totalRatio.toFixed(2)}x | Vend ${signal.volume1h.sellerRatio.toFixed(2)}x | Comp ${signal.volume1h.buyerRatio.toFixed(2)}x`);
 }
 
 // === MONITORAMENTO PRINCIPAL ===
@@ -1606,24 +2199,36 @@ async function monitorSymbol(symbol, prioritySystem) {
         const priorityInfo = prioritySystem.getSymbolPriorityInfo(symbol);
         if (priorityInfo && PRIORITY_CONFIG.GENERAL.VERBOSE_LOGS) {
             const volumeInfo = priorityInfo.volume1h ? 
-                `Vol1h EMA${priorityInfo.volume1h.emaPeriod}: ${priorityInfo.volume1h.ratio.toFixed(2)}x ${priorityInfo.volume1h.isRising ? '📈' : priorityInfo.volume1h.isFalling ? '📉' : '➡️'}` : 
+                `VolTotal: ${priorityInfo.volume1h.totalRatio.toFixed(2)}x | Comp: ${priorityInfo.volume1h.buyerRatio?.toFixed(2) || 'N/A'}x | Vend: ${priorityInfo.volume1h.sellerRatio?.toFixed(2) || 'N/A'}x` : 
                 'Vol1h: N/A';
-            console.log(`   ${priorityInfo.emojiRanking} Prioridade: ${priorityInfo.score.toFixed(1)} | ${volumeInfo} | LSR: ${priorityInfo.lsr?.toFixed(2) || 'N/A'}`);
+            console.log(`   ${priorityInfo.emojiRanking} Prioridade: ${priorityInfo.score.toFixed(1)} | ${volumeInfo}`);
         }
         
+        let signalsFound = 0;
+        
+        // Verificar sinal de Estocástico
+        if (STOCHASTIC_CONFIG.ENABLED) {
+            const stochasticSignal = await checkStochasticSignal(symbol, prioritySystem);
+            if (stochasticSignal) {
+                await sendStochasticAlert(stochasticSignal, prioritySystem);
+                signalsFound++;
+            }
+        }
+        
+        // Verificar sinais de compra/venda tradicionais
         const buySignal = await checkBuySignal(symbol, prioritySystem);
         if (buySignal) {
             await sendBuyAlert(buySignal, prioritySystem);
-            return true;
+            signalsFound++;
         }
         
         const sellSignal = await checkSellSignal(symbol, prioritySystem);
         if (sellSignal) {
             await sendSellAlert(sellSignal, prioritySystem);
-            return true;
+            signalsFound++;
         }
         
-        return false;
+        return signalsFound > 0;
     } catch (error) {
         console.log(`⚠️ Erro monitorando ${symbol}: ${error.message}`);
         return false;
@@ -1635,7 +2240,7 @@ async function mainBotLoop() {
         const symbols = await fetchAllFuturesSymbols();
         
         console.log('\n' + '='.repeat(80));
-        console.log(' TITANIUM ATIVADO - SISTEMA DE PRIORIDADE POR VOLUME 1H EMA9');
+        console.log(' TITANIUM ATIVADO - EMA9 SEPARADA + ESTOCÁSTICO 5.3.3 12H');
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -1659,7 +2264,7 @@ async function mainBotLoop() {
                 
                 if (PERFORMANCE_CONFIG.MAX_SYMBOLS_PER_CYCLE > 0) {
                     symbolsToMonitor = symbolsToMonitor.slice(0, PERFORMANCE_CONFIG.MAX_SYMBOLS_PER_CYCLE);
-                    console.log(`📊 Monitorando ${symbolsToMonitor.length}/${symbols.length} símbolos (priorizados por Volume 1h EMA9)`);
+                    console.log(`📊 Monitorando ${symbolsToMonitor.length}/${symbols.length} símbolos (priorizados por Volume 1h EMA9 separado)`);
                 }
             }
             
@@ -1708,20 +2313,30 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
         
         console.log('\n' + '='.repeat(80));
-        console.log('🚀 TITANIUM - SISTEMA DE PRIORIDADE POR VOLUME 1H EMA9 v3.1');
-        console.log('📊 Sistema de Prioridade: Volume 1h EMA9 + Liquidez + LSR');
-        console.log('🎯 Configurações Ativas:');
-        console.log(`   • Volume 1h EMA${PRIORITY_CONFIG.VOLUME_1H.EMA_PERIOD}: ${PRIORITY_CONFIG.VOLUME_1H.VOLUME_WEIGHT}% (MAIS SENSÍVEL)`);
-        console.log(`   • Sensibilidade: ${PRIORITY_CONFIG.VOLUME_1H.SENSITIVITY_MULTIPLIER}x`);
-        console.log(`   • Compra: Volume 1h deve estar SUBINDO 📈`);
-        console.log(`   • Venda: Volume 1h deve estar DESCENDO 📉`);
+        console.log('🚀 TITANIUM - EMA9 SEPARADA + ESTOCÁSTICO 5.3.3 12H v4.0');
+        console.log('📊 Sistema Inteligente: Análise de Volume Comprador/Vendedor com EMA9');
+        console.log('🎯 ESTOCÁSTICO 5.3.3 12H: Alertas separados ativados');
+        console.log('📈 Configurações Ativas:');
+        console.log(`   • EMA9 SEPARADA: Comprador e Vendedor analisados individualmente`);
+        console.log(`   • Compra: Comprador > ${VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO}x EMA9 + Vendedor não`);
+        console.log(`   • Venda: Vendedor > ${VOLUME_ANALYSIS_CONFIG.MIN_BUYER_RATIO}x EMA9 + Comprador não`);
+        console.log(`   • Dominância Obrigatória: ${VOLUME_ANALYSIS_CONFIG.REQUIRE_DOMINANCE ? '✅ ATIVADA' : '❌ DESATIVADA'}`);
+        console.log(`   • Dom. Mínima: ${VOLUME_ANALYSIS_CONFIG.MIN_DOMINANCE_PERCENTAGE}%`);
         console.log(`   • LSR Compra Ideal: < ${PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR}`);
         console.log(`   • LSR Venda Ideal: > ${PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR}`);
-        console.log(`   • Liquidez: > $${(PRIORITY_CONFIG.LIQUIDITY.MIN_LIQUIDITY_USDT/1000).toFixed(0)}K`);
-        console.log(`   • Peso Liquidez: ${PRIORITY_CONFIG.LIQUIDITY.LIQUIDITY_WEIGHT}%`);
-        console.log(`   • Peso LSR: ${PRIORITY_CONFIG.LSR.LSR_WEIGHT}%`);
+        console.log(`   • Estocástico: ${STOCHASTIC_CONFIG.ENABLED ? '✅ ATIVADO' : '❌ DESATIVADO'}`);
+        console.log(`   • Config Estocástico: ${STOCHASTIC_CONFIG.K_PERIOD}.${STOCHASTIC_CONFIG.D_PERIOD}.${STOCHASTIC_CONFIG.SLOWING} ${STOCHASTIC_CONFIG.TIMEFRAME}`);
+        console.log(`   • Overbought: ${STOCHASTIC_CONFIG.OVERBOUGHT} | Oversold: ${STOCHASTIC_CONFIG.OVERSOLD}`);
+        console.log('🎯 CONFIGURAÇÕES RSI:');
+        console.log(`   • COMPRA: RSI < ${RSI_CONFIG.COMPRA.MAX_VALUE} (Oversold: ${RSI_CONFIG.COMPRA.OVERSOLD})`);
+        console.log(`   • VENDA: RSI > ${RSI_CONFIG.VENDA.MIN_VALUE} (Overbought: ${RSI_CONFIG.VENDA.OVERBOUGHT})`);
+        console.log('🎯 CONFIGURAÇÕES ANÁLISE DE VOLUME:');
+        console.log(`   • Dominância CLARA: > ${VOLUME_ANALYSIS_CONFIG.VOLUME_THRESHOLD * 100}%`);
+        console.log(`   • Dominância FORTE: > ${VOLUME_ANALYSIS_CONFIG.STRONG_THRESHOLD * 100}%`);
+        console.log(`   • Dominância MUITO FORTE: > ${VOLUME_ANALYSIS_CONFIG.VERY_STRONG_THRESHOLD * 100}%`);
         console.log('🗑️  Sistema de Limpeza Avançado Ativado');
         console.log('⏱️  Cooldown entre alertas: 5 minutos');
+        console.log('⏱️  Cooldown Estocástico: 1 hora');
         console.log('='.repeat(80) + '\n');
         
         try {
@@ -1735,7 +2350,7 @@ async function startBot() {
         
         await sendInitializationMessage();
         
-        console.log('✅ Tudo pronto! Iniciando monitoramento com sistema de prioridade por Volume 1h EMA9...');
+        console.log('✅ Tudo pronto! Iniciando monitoramento com EMA9 separada e Estocástico...');
         
         await mainBotLoop();
         
