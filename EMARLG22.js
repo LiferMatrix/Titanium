@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6KcbJavdg';
-const TELEGRAM_CHAT_ID = '-1002';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // === CONFIGURAÇÕES DE RSI - AJUSTE FÁCIL ===
 const RSI_CONFIG = {
@@ -891,8 +891,8 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         
         const message = `
-<b>🚀 TITANIUM INICIADO - COM ESTOCÁSTICO 5.3.3 12H</b>
-<b>📊 SISTEMA DE VOLUME EMA9 SEPARADO ATIVADO</b>
+<b>🚀 TITANIUM INICIADO </b>
+<b>Matrix</b>
 
 📅 ${now.full}
 
@@ -1631,10 +1631,10 @@ async function sendStochasticAlert(signal, prioritySystem) {
         ? `${fundingRateEmoji} ${(fundingRate * 100).toFixed(5)}%`
         : '🔹 Indisp.';
     
-    const stochStatus = signal.stochastic.isOversold ? 'OVERSOLD 🔵' : 
-                       signal.stochastic.isOverbought ? 'OVERBOUGHT 🔴' : 'NEUTRAL ⚪';
+    const stochStatus = signal.stochastic.isOversold ? 'Baixo 🔵' : 
+                       signal.stochastic.isOverbought ? 'Alto 🔴' : 'Neutro ⚪';
     
-    const action = signal.type === 'STOCHASTIC_COMPRA' ? '🟢 MONITORAR COMPRA' : '🔴 MONITORAR CORREÇÃO';
+    const action = signal.type === 'STOCHASTIC_COMPRA' ? '⤴️🟢 MONITORAR COMPRA' : '⤵️🔴 MONITORAR CORREÇÃO';
     
     let pivotInfo = '';
     if (signal.pivotData) {
@@ -1652,27 +1652,26 @@ async function sendStochasticAlert(signal, prioritySystem) {
     const rsiEmoji = signal.rsi < 30 ? '🔵' : signal.rsi > 70 ? '🔴' : '⚪';
     
     const message = `
-🎯 <b><i>${signal.symbol} - ESTOCÁSTICO ${signal.stochastic.config} ${STOCHASTIC_CONFIG.TIMEFRAME}</i></b>
+ <b><i>${signal.symbol} - ESTOCÁSTICO ${STOCHASTIC_CONFIG.TIMEFRAME}</i></b>
 ${action}
 
-📅 ${signal.time.full}
-📊 Alerta Estocástico #${alertCount.symbolStochastic}
+${signal.time.full}
+Estocástico #${alertCount.symbolStochastic}
+• Preço Atual: $${signal.currentPrice.toFixed(6)}
 
 <b><i>Indicadores:</i></b>
 • Estocástico ${signal.stochastic.config} ${STOCHASTIC_CONFIG.TIMEFRAME}: 
   %K: ${signal.stochastic.k.toFixed(2)} | %D: ${signal.stochastic.d.toFixed(2)}
   Status: ${stochStatus}
-• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K cruzou %D PARA CIMA' : '📉 %K cruzou %D PARA BAIXO'}
+• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️ %D ' : '📉 %K ⤵️ %D '}
 • RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
-• Preço Atual: $${signal.currentPrice.toFixed(6)}
 • Funding Rate: ${fundingRateText}
 
 <b><i>Níveis de Suporte/Resistência:</i></b>${pivotInfo}
-
 <b><i>Ação:</i></b>
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
-'🟢 Monitorar oportunidades de COMPRA nos níveis de suporte\n📊 Aguardar confirmação de volume e momentum' : 
-'🔴 Monitorar possíveis CORREÇÕES nos níveis de resistência\n⚠️ Cautela com posições longas'}
+'🟢 Monitorar oportunidades de COMPRA nos níveis de Suporte\n Aguardar confirmação de volume ' : 
+'🔴 Monitorar CORREÇÕES nos níveis de Suporte\n Cautela com posições longas'}
 
 <b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
