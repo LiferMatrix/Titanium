@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHao4N0A';
-const TELEGRAM_CHAT_ID = '-100199';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE RSI - AJUSTE FÁCIL ===
 const RSI_CONFIG = {
@@ -1810,8 +1810,8 @@ ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆'
 • Fund. Rate: ${fundingRateText}
 <b><i>Suporte/Resistência:</i></b>${pivotInfo}
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
-'• Ação: 🟢 Monitorar oportunidade de COMPRA no nível de Suporte\n  ' : 
-'• Ação: 🔴 Monitorar CORREÇÃO no níveL de Suporte\n Evite Comprar'}
+'• Ação: 🟢 Monitorar oportunidade de COMPRA no Suporte\n  ' : 
+'• Ação: 🔴 Monitorar CORREÇÃO no Suporte\n '}
 
 <b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
