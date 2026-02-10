@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_N0A';
-const TELEGRAM_CHAT_ID = '-1001';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÕES DE RSI - AJUSTE FÁCIL ===
 const RSI_CONFIG = {
@@ -1795,7 +1795,7 @@ async function sendStochasticAlert(signal, prioritySystem) {
     }
     
     const message = `
-<b><i>${signal.symbol} - STOCH ${STOCHASTIC_CONFIG.TIMEFRAME} ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
+<b><i>🔍 ${signal.symbol} ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
 ${action}
 ${signal.time.full}
 STOCH #${alertCount.symbolStochastic}
@@ -1810,8 +1810,8 @@ ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆'
 • Fund. Rate: ${fundingRateText}
 <b><i>Suporte/Resistência:</i></b>${pivotInfo}
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
-'• Ação: 🟢 Monitorar oportunidades de COMPRA nos níveis de Suporte\n Aguardar confirmação de volume ' : 
-'• Ação: 🔴 Monitorar CORREÇÕES nos níveis de Suporte\n Cautela com posições longas'}
+'• Ação: 🟢 Monitorar oportunidade de COMPRA no nível de Suporte\n  ' : 
+'• Ação: 🔴 Monitorar CORREÇÃO no níveL de Suporte\n Evite Comprar'}
 
 <b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
