@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFN0A';
-const TELEGRAM_CHAT_ID = '-100197';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÃO DO ESTOCÁSTICO ===
 const STOCHASTIC_CONFIG = {
@@ -1213,7 +1213,7 @@ async function sendStochasticAlert(signal, prioritySystem) {
     const stochStatus = signal.stochastic.isOversold ? 'Baixo 🔵' : 
                        signal.stochastic.isOverbought ? 'Alto 🔴' : 'Neutro ⚪';
     
-    const action = signal.type === 'STOCHASTIC_COMPRA' ? '⤴️🟢 Monitorar COMPRA' : '⤵️🔴 Monitorar VENDA';
+    const action = signal.type === 'STOCHASTIC_COMPRA' ? '⤴️🟢 Monitorar COMPRA' : '⤵️🔴 Monitorar CORREÇÃO';
     
     let pivotInfo = '';
     if (signal.pivotData) {
@@ -1240,24 +1240,20 @@ async function sendStochasticAlert(signal, prioritySystem) {
     }
     
     const message = `
-<b><i> ${signal.symbol}  ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
+<b><i> ${signal.symbol} - Preço:$${signal.currentPrice.toFixed(6)}  ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
 ${action}
 ${signal.time.full}
-STOCH #${alertCount.symbolStochastic}
-• Preço Atual: $${signal.currentPrice.toFixed(6)}
+✨STOCH 12H #${alertCount.symbolStochastic}
 ${volumeInfo}
 <b><i>Indicadores:</i></b>
 • STOCH 12h: %K ${signal.stochastic.k.toFixed(2)} | %D: ${signal.stochastic.d.toFixed(2)}
-  Status: ${stochStatus}
-• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️  ' : '📉 %K ⤵️ '}
-• RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
-${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆' : ''}
+  Status: ${stochStatus} ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️  ' : '📉 %K ⤵️ '}
+${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆' : ''} | RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
 • Fund. Rate: ${fundingRateText}
 <b><i>Suporte/Resistência:</i></b>${pivotInfo}
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
-'• Ação: 🟢 MONITORAR OPORTUNIDADE DE COMPRA\n  ' : 
-'• Ação: 🔴 MONITORAR CORREÇÃO \n '}
-
+'• Ação: 🟢 Oportunidade de Compra\n  ' : 
+'• Ação: 🔴 Monitorar Zonas de Suporte \n '}
 <b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
 
