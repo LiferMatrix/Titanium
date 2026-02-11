@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_Do4N0A';
-const TELEGRAM_CHAT_ID = '-10017';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // === CONFIGURAÇÃO DO ESTOCÁSTICO ===
 const STOCHASTIC_CONFIG = {
@@ -118,6 +118,9 @@ const symbolCooldown = {};
 
 // Sistema de cooldown específico para Estocástico
 const stochasticCooldown = {};
+
+// === SISTEMA DE ESTADO DE CRUZAMENTO POR SÍMBOLO ===
+const stochCrossState = {};
 
 // === CONFIGURAÇÕES DE RATE LIMIT ADAPTATIVO ===
 class AdaptiveRateLimiter {
@@ -631,7 +634,7 @@ async function sendInitializationMessage() {
 📅 ${now.full}
 
 <i>Sistema otimizado para alertas Estocástico 5.3.3 12H</i>
-<i>Alertas com análise de volume 3m integrada</i>
+<i>Alertas somente no MOMENTO EXATO do cruzamento</i>
 `;
 
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -748,7 +751,7 @@ async function getStochastic(symbol, timeframe = STOCHASTIC_CONFIG.TIMEFRAME) {
         const previousK = smoothedK[smoothedK.length - 2];
         const previousD = dValues[dValues.length - 2];
         
-        // Verificar cruzamentos
+        // Verificar cruzamentos EXATOS
         const isCrossingUp = previousK <= previousD && latestK > latestD;
         const isCrossingDown = previousK >= previousD && latestK < latestD;
         
@@ -1081,46 +1084,95 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             return null;
         }
 
-        if (stochastic.isCrossingUp || stochastic.isCrossingDown) {
-            const [rsiData, lsrData, fundingData, pivotData, currentPrice] = await Promise.all([
-                getRSI1h(symbol),
-                getLSR(symbol),
-                getFundingRate(symbol),
-                analyzePivotPoints(symbol, await getCurrentPrice(symbol), stochastic.isCrossingUp),
-                getCurrentPrice(symbol)
-            ]);
+        // Verificar estado anterior
+        const previousState = stochCrossState[symbol] || {
+            wasCrossingUp: false,
+            wasCrossingDown: false,
+            lastCheck: 0
+        };
 
-            const signalType = stochastic.isCrossingUp ? 'STOCHASTIC_COMPRA' : 'STOCHASTIC_VENDA';
-            
-            // Verificar se LSR é ideal
-            let isIdealLSR = false;
-            if (lsrData) {
-                if (signalType === 'STOCHASTIC_COMPRA') {
-                    isIdealLSR = lsrData.lsrValue < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR;
-                } else {
-                    isIdealLSR = lsrData.lsrValue > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR;
-                }
+        let signalType = null;
+        let isFreshCross = false;
+
+        // VERIFICAÇÃO DE CRUZAMENTO FRESCO (MOMENTO EXATO)
+        if (stochastic.isCrossingUp) {
+            // Só gera alerta se NÃO estava cruzando para cima anteriormente
+            if (!previousState.wasCrossingUp) {
+                signalType = 'STOCHASTIC_COMPRA';
+                isFreshCross = true;
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para CIMA`);
             }
-            
-            // Analisar volume 3m específico para o tipo de alerta
-            const volumeAnalysis = await analyzeVolume3mForStochastic(symbol, signalType);
-            
-            return {
-                symbol: symbol,
-                type: signalType,
-                stochastic: stochastic,
-                rsi: rsiData?.value,
-                lsr: lsrData?.lsrValue,
-                isIdealLSR: isIdealLSR,
-                funding: fundingData?.ratePercent,
-                pivotData: pivotData,
-                currentPrice: currentPrice,
-                time: getBrazilianDateTime(),
-                volumeAnalysis: volumeAnalysis
+            // Atualizar estado atual
+            stochCrossState[symbol] = {
+                wasCrossingUp: true,
+                wasCrossingDown: false,
+                lastCheck: Date.now()
+            };
+        } 
+        else if (stochastic.isCrossingDown) {
+            // Só gera alerta se NÃO estava cruzando para baixo anteriormente
+            if (!previousState.wasCrossingDown) {
+                signalType = 'STOCHASTIC_VENDA';
+                isFreshCross = true;
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para BAIXO`);
+            }
+            // Atualizar estado atual
+            stochCrossState[symbol] = {
+                wasCrossingUp: false,
+                wasCrossingDown: true,
+                lastCheck: Date.now()
+            };
+        }
+        else {
+            // Nenhum cruzamento no momento - atualizar estado
+            stochCrossState[symbol] = {
+                wasCrossingUp: false,
+                wasCrossingDown: false,
+                lastCheck: Date.now()
             };
         }
 
-        return null;
+        // Só processa se for um cruzamento fresco
+        if (!isFreshCross || !signalType) {
+            return null;
+        }
+
+        // Buscar dados adicionais apenas se houver cruzamento fresco
+        const [rsiData, lsrData, fundingData, pivotData, currentPrice] = await Promise.all([
+            getRSI1h(symbol),
+            getLSR(symbol),
+            getFundingRate(symbol),
+            analyzePivotPoints(symbol, await getCurrentPrice(symbol), signalType === 'STOCHASTIC_COMPRA'),
+            getCurrentPrice(symbol)
+        ]);
+
+        // Verificar se LSR é ideal
+        let isIdealLSR = false;
+        if (lsrData) {
+            if (signalType === 'STOCHASTIC_COMPRA') {
+                isIdealLSR = lsrData.lsrValue < PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR;
+            } else {
+                isIdealLSR = lsrData.lsrValue > PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR;
+            }
+        }
+
+        // Analisar volume 3m específico para o tipo de alerta
+        const volumeAnalysis = await analyzeVolume3mForStochastic(symbol, signalType);
+
+        return {
+            symbol: symbol,
+            type: signalType,
+            stochastic: stochastic,
+            rsi: rsiData?.value,
+            lsr: lsrData?.lsrValue,
+            isIdealLSR: isIdealLSR,
+            funding: fundingData?.ratePercent,
+            pivotData: pivotData,
+            currentPrice: currentPrice,
+            time: getBrazilianDateTime(),
+            volumeAnalysis: volumeAnalysis,
+            isFreshCross: isFreshCross
+        };
     } catch (error) {
         console.log(`⚠️ Erro ao verificar sinal Estocástico para ${symbol}: ${error.message}`);
         return null;
@@ -1161,7 +1213,7 @@ async function sendStochasticAlert(signal, prioritySystem) {
     const stochStatus = signal.stochastic.isOversold ? 'Baixo 🔵' : 
                        signal.stochastic.isOverbought ? 'Alto 🔴' : 'Neutro ⚪';
     
-    const action = signal.type === 'STOCHASTIC_COMPRA' ? '⤴️🟢 MONITORAR COMPRA' : '⤵️🔴 MONITORAR CORREÇÃO';
+    const action = signal.type === 'STOCHASTIC_COMPRA' ? '⤴️🟢 Monitorar COMPRA' : '⤵️🔴 Monitorar VENDA';
     
     let pivotInfo = '';
     if (signal.pivotData) {
@@ -1188,7 +1240,7 @@ async function sendStochasticAlert(signal, prioritySystem) {
     }
     
     const message = `
-<b><i>🔍 ${signal.symbol} ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
+<b><i> ${signal.symbol}  ${signal.isIdealLSR ? '✨✨' : ''}</i></b>
 ${action}
 ${signal.time.full}
 STOCH #${alertCount.symbolStochastic}
@@ -1197,22 +1249,23 @@ ${volumeInfo}
 <b><i>Indicadores:</i></b>
 • STOCH 12h: %K ${signal.stochastic.k.toFixed(2)} | %D: ${signal.stochastic.d.toFixed(2)}
   Status: ${stochStatus}
-• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️ %D ' : '📉 %K ⤵️ %D '}
+• ${signal.type === 'STOCHASTIC_COMPRA' ? '📈 %K ⤴️  ' : '📉 %K ⤵️ '}
 • RSI 1h: ${rsiEmoji} ${signal.rsi?.toFixed(1) || 'N/A'}
 ${lsrEmoji} LSR: ${signal.lsr?.toFixed(3) || 'N/A'} ${signal.isIdealLSR ? '🏆' : ''}
 • Fund. Rate: ${fundingRateText}
 <b><i>Suporte/Resistência:</i></b>${pivotInfo}
 ${signal.type === 'STOCHASTIC_COMPRA' ? 
-'• Ação: 🟢 Monitorar oportunidade de COMPRA no Suporte\n  ' : 
-'• Ação: 🔴 Monitorar CORREÇÃO no Suporte\n '}
+'• Ação: 🟢 MONITORAR OPORTUNIDADE DE COMPRA\n  ' : 
+'• Ação: 🔴 MONITORAR CORREÇÃO \n '}
 
 <b><i>✨Titanium by @J4Rviz✨</i></b>
 `;
 
     await sendTelegramAlert(message);
-    console.log(`✅ Alerta Estocástico enviado: ${signal.symbol} (${action})`);
+    console.log(`✅ Alerta de CRUZAMENTO enviado: ${signal.symbol} (${action})`);
     console.log(`   📈 Estocástico: %K=${signal.stochastic.k.toFixed(2)}, %D=${signal.stochastic.d.toFixed(2)}`);
     console.log(`   📊 Volume 3m: ${signal.volumeAnalysis.analysis.volumeStatus}`);
+    console.log(`   ⚡ Tipo: CRUZAMENTO FRESCO (momento exato)`);
 }
 
 // === MONITORAMENTO PRINCIPAL ===
@@ -1268,6 +1321,7 @@ async function mainBotLoop() {
         
         console.log('\n' + '='.repeat(80));
         console.log(' TITANIUM ATIVADO - ESTOCÁSTICO 12H ');
+        console.log(' ALERTAS SOMENTE NO MOMENTO EXATO DO CRUZAMENTO ');
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -1313,9 +1367,17 @@ async function mainBotLoop() {
             
             console.log(`\n✅ Ciclo ${cycle} completo.`);
             console.log(`📊 Símbolos analisados: ${symbolsAnalyzed}/${symbols.length}`);
-            console.log(`🎯 Sinais encontrados: ${signalsFound}`);
+            console.log(`🎯 Cruzamentos detectados: ${signalsFound}`);
             console.log(`📈 Total global: ${globalAlerts} | Total diário: ${dailyAlerts}`);
             console.log(`🔍 Ativos monitorados: ${Object.keys(alertCounter).length}`);
+            
+            // Limpar estados antigos do cache de cruzamento
+            const now = Date.now();
+            Object.keys(stochCrossState).forEach(symbol => {
+                if (now - stochCrossState[symbol].lastCheck > 24 * 60 * 60 * 1000) {
+                    delete stochCrossState[symbol];
+                }
+            });
             
             cleanupSystem.cleanupCaches();
             
@@ -1341,7 +1403,7 @@ async function startBot() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - ESTOCÁSTICO 5.3.3 12H v4.0');
-        console.log('🎯 Sistema especializado em alertas Estocástico 12H');
+        console.log('🎯 Sistema especializado em alertas de CRUZAMENTO Estocástico');
         console.log('📈 Configurações Ativas:');
         console.log(`   • Estocástico: ${STOCHASTIC_CONFIG.ENABLED ? '✅ ATIVADO' : '❌ DESATIVADO'}`);
         console.log(`   • Config Estocástico: ${STOCHASTIC_CONFIG.K_PERIOD}.${STOCHASTIC_CONFIG.D_PERIOD}.${STOCHASTIC_CONFIG.SLOWING} ${STOCHASTIC_CONFIG.TIMEFRAME}`);
@@ -1352,6 +1414,7 @@ async function startBot() {
         console.log(`   • Volume 3m mínimo vendedor: ${STOCHASTIC_CONFIG.VOLUME_CONFIG.VENDA.MIN_VOLUME_ANORMAL * 100}%`);
         console.log(`   • LSR Compra Ideal: < ${PRIORITY_CONFIG.LSR.IDEAL_BUY_LSR}`);
         console.log(`   • LSR Venda Ideal: > ${PRIORITY_CONFIG.LSR.IDEAL_SELL_LSR}`);
+        console.log(`   • Alerta: SOMENTE NO MOMENTO EXATO DO CRUZAMENTO`);
         console.log('🗑️  Sistema de Limpeza Avançado Ativado');
         console.log('⏱️  Cooldown Estocástico: 1 hora');
         console.log('='.repeat(80) + '\n');
@@ -1360,7 +1423,8 @@ async function startBot() {
         
         await sendInitializationMessage();
         
-        console.log('✅ Tudo pronto! Iniciando monitoramento Estocástico 12H...');
+        console.log('✅ Tudo pronto! Iniciando monitoramento de CRUZAMENTOS Estocástico 12H...');
+        console.log('⚠️  Alertas serão enviados SOMENTE no momento exato do cruzamento %K x %D');
         
         await mainBotLoop();
         
