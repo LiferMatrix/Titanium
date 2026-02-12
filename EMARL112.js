@@ -12,8 +12,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 const CONFIG = {
     TELEGRAM: {
         // === CONFIGURE AQUI SEU BOT E CHAT ===
-        BOT_TOKEN: '7633398974:AAHaVFs_DN0A',
-        CHAT_ID: '100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
