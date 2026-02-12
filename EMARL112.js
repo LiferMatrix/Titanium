@@ -6,14 +6,30 @@ require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
+// === CONFIGURAÇÕES DE RSI 1H PARA ALERTAS - FÁCIL AJUSTE ===
+// =====================================================================
+const RSI_1H_CONFIG = {
+    COMPRA: {
+        // RSI 1h DEVE SER MENOR QUE 62 PARA COMPRA
+        MAX_RSI: 62,
+        ENABLED: true
+    },
+    VENDA: {
+        // RSI 1h DEVE SER MAIOR QUE 45 PARA VENDA
+        MIN_RSI: 45,
+        ENABLED: true
+    }
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS - OTIMIZADAS PARA NOTA 10.0 ===
 // =====================================================================
 
 const CONFIG = {
     TELEGRAM: {
         // === CONFIGURE AQUI SEU BOT E CHAT ===
-        BOT_TOKEN: '7633398974:A4N0A',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -1626,7 +1642,7 @@ async function waitForPullback(symbol, signalType, initialPrice, atrValue) {
 }
 
 // =====================================================================
-// === SINAIS DE ESTOCÁSTICO ===
+// === SINAIS DE ESTOCÁSTICO COM FILTRO DE RSI 1H ===
 // =====================================================================
 async function checkStochasticSignal(symbol, prioritySystem) {
     if (!CONFIG.STOCHASTIC.ENABLED || prioritySystem.isInStochasticCooldown(symbol)) {
@@ -1690,6 +1706,28 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             getCurrentPrice(symbol),
             calculateATR(symbol, CONFIG.RETRACTION.ATR_TIMEFRAME, CONFIG.RETRACTION.ATR_PERIOD)
         ]);
+
+        // =================================================================
+        // === FILTRO DE RSI 1H PARA COMPRA E VENDA ===
+        // =================================================================
+        
+        // Para COMPRA: RSI 1h DEVE ser MENOR que MAX_RSI (configurável, padrão 62)
+        if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
+            if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+                console.log(`⚠️ ${symbol}: Sinal de COMPRA ignorado - RSI 1h ${rsiData?.value?.toFixed(1) || 'N/A'} >= ${RSI_1H_CONFIG.COMPRA.MAX_RSI}`);
+                return null;
+            }
+            console.log(`✅ ${symbol}: RSI 1h ${rsiData.value.toFixed(1)} < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} - OK para COMPRA`);
+        }
+        
+        // Para VENDA: RSI 1h DEVE ser MAIOR que MIN_RSI (configurável, padrão 45)
+        if (signalType === 'STOCHASTIC_VENDA' && RSI_1H_CONFIG.VENDA.ENABLED) {
+            if (!rsiData || rsiData.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+                console.log(`⚠️ ${symbol}: Sinal de VENDA ignorado - RSI 1h ${rsiData?.value?.toFixed(1) || 'N/A'} <= ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
+                return null;
+            }
+            console.log(`✅ ${symbol}: RSI 1h ${rsiData.value.toFixed(1)} > ${RSI_1H_CONFIG.VENDA.MIN_RSI} - OK para VENDA`);
+        }
 
         let isIdealLSR = false;
         if (lsrData) {
@@ -2384,7 +2422,7 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
 
 /// =====================================================================
 // === ALERTA PRINCIPAL COM MENSAGEM RESUMIDA PROFISSIONAL ===
-// === COM TECNOLOGIA STOP HUNTING E ANTI MANIPULAÇÃO ===
+// === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR (PULLBACK CONFIRMATION) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     if (!signal.volumeAnalysis.isValid) {
@@ -2451,7 +2489,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     
     // =================================================================
     // === CONSTRUÇÃO DA MENSAGEM RESUMIDA PROFISSIONAL ===
-    // === COM TECNOLOGIA STOP HUNTING E ANTI MANIPULAÇÃO ===
+    // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR ===
     // =================================================================
     
     // CALCULAR ALVOS PRINCIPAIS (T2, T4, T6) - EM VALOR (USDT)
@@ -2629,20 +2667,27 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     }
     
     // =================================================================
-    // === TECNOLOGIA STOP HUNTING E ANTI MANIPULAÇÃO ===
-    // === ADICIONADO LOGO APÓS OPERAÇÃO FAVORÁVEL OU DESFAVORÁVEL ===
+    // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR ===
+    // === (PULLBACK CONFIRMATION SYSTEM) ===
     // =================================================================
-    let stopHuntingInfo = '';
+    let retractionStatus = '';
+    let signalQuality = '';
+    
     if (pullbackResult && pullbackResult.confirmed) {
-        // Se a retração foi confirmada, indica que evitamos stop hunting
-        stopHuntingInfo = `🛡️ Stop Hunting: 🟢 Protegido | Anti manipulação: ✅ Ativo`;
+        // RETRAÇÃO CONFIRMADA - Sinal de alta qualidade
+        retractionStatus = '🟢 Confirmada';
+        signalQuality = '✅ Qualificado';
     } else if (pullbackResult && !pullbackResult.confirmed) {
-        // Se a retração não foi confirmada, alerta sobre possível manipulação
-        stopHuntingInfo = `🛡️ Stop Hunting: 🔴 Risco detectado | Anti manipulação: ⚠️ Alerta`;
+        // RETRAÇÃO NÃO CONFIRMADA - Sinal fraco, evitar
+        retractionStatus = '🔴 Não confirmada';
+        signalQuality = '⚠️ Evitar';
     } else {
-        // Caso não tenha retração configurada
-        stopHuntingInfo = `🛡️ Stop Hunting: ⚪ Não ativado | Anti manipulação: ⚪ Desativado`;
+        // SISTEMA DE RETRAÇÃO DESATIVADO - Análise manual necessária
+        retractionStatus = '⚪ Não ativada';
+        signalQuality = '⚪ Manual';
     }
+    
+    const pullbackInfo = `🛡️ Retração: ${retractionStatus} | Sinal: ${signalQuality}`;
     
     // DEFINIR ÍCONES PRINCIPAIS
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
@@ -2650,7 +2695,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const lsrIcon = signal.type === 'STOCHASTIC_COMPRA' ? '📈' : '📉';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM - COM STOP HUNTING E ANTI MANIPULAÇÃO ===
+    // === CONSTRUÇÃO DA MENSAGEM - SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO ===
     // === ADICIONADO LOGO APÓS OPERAÇÃO FAVORÁVEL OU DESFAVORÁVEL ===
     // =================================================================
     
@@ -2661,7 +2706,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
 📊 <i>Stoch</i> ${stochText} | <i>RSI</i> ${rsiText}
 ${lsrIcon} <i>LSR</i> ${lsrEmoji} ${lsrText} | <i>Fund</i> ${fundingEmoji} ${fundingText}
 <b><i>${factors.summary}</i></b> | ${candleAnalysis}
-${stopHuntingInfo}
+${pullbackInfo}
 ${takeProfitCompact}
 ${stopCompact}
 ${pullbackCompact}
@@ -2681,9 +2726,9 @@ ${scoreCompact}
     console.log(`   📊 Score: ${factors.score}% | ${shortSummary}`);
     console.log(`   💰 Preço: $${entryPrice.toFixed(6)}`);
     console.log(`   🎯 Alvos: T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)} T6:$${signal.fibonacci?.targets.t6.toFixed(6)}`);
-    console.log(`   🛡️ Stop Hunting: ${pullbackResult?.confirmed ? 'Protegido' : 'Risco detectado'}`);
+    console.log(`   🛡️ Retração: ${pullbackResult?.confirmed ? 'Confirmada ✅' : 'Não confirmada ❌'}`);
     if (pullbackResult) {
-        console.log(`   📉 Retração: ${pullbackResult.statusEmoji} $${parseFloat(pullbackResult.pullbackTarget).toFixed(6)}`);
+        console.log(`   📉 Pullback: ${pullbackResult.statusEmoji} $${parseFloat(pullbackResult.pullbackTarget).toFixed(6)}`);
     }
     if (srInfo) {
         console.log(`   🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
@@ -2751,7 +2796,8 @@ async function mainBotLoop() {
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
         console.log('📊 Estratégia: Estocástico 12h + Fibonacci 4h');
-        console.log('🛡️ Tecnologia: Stop Hunting + Anti Manipulação');
+        console.log('🛡️ Sistema: Confirmação de Retração por ATR');
+        console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -2833,7 +2879,8 @@ async function startBot() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - INICIANDO...');
-        console.log('🛡️ Tecnologia Stop Hunting e Anti Manipulação ATIVADA');
+        console.log('🛡️ Sistema de Confirmação de Retração por ATR ATIVADO');
+        console.log(`📊 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log('='.repeat(80) + '\n');
         
         lastResetDate = getBrazilianDateString();
