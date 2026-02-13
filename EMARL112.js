@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZA',
-        CHAT_ID: '-1001'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -2178,9 +2178,9 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         atrValue = atr;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            atrTargetsText = `Alvos ATR: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
+            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
         } else {
-            atrTargetsText = `Alvos ATR: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
+            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
         }
     }
     
@@ -2339,7 +2339,6 @@ ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
 Stoch ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
-${fibTargetsText}
 ${atrTargetsText}
 🛑 ${stopCompact}
 ${srCompact}
