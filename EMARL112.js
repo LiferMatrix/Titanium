@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D4NA',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -1304,6 +1304,82 @@ async function calculateFibonacciLevels4h(symbol, isBullish) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO: CALCULAR ATR 4H ===
+// =====================================================================
+async function calculateATR4h(symbol, period = 14) {
+    try {
+        const candles = await getCandles(symbol, '4h', period + 1);
+        if (candles.length < period + 1) {
+            return null;
+        }
+
+        let trValues = [];
+        
+        for (let i = 1; i < candles.length; i++) {
+            const high = candles[i].high;
+            const low = candles[i].low;
+            const prevClose = candles[i - 1].close;
+            
+            const tr1 = high - low;
+            const tr2 = Math.abs(high - prevClose);
+            const tr3 = Math.abs(low - prevClose);
+            
+            const trueRange = Math.max(tr1, tr2, tr3);
+            trValues.push(trueRange);
+        }
+        
+        // Pegar os últimos 'period' valores
+        trValues = trValues.slice(-period);
+        
+        // Calcular ATR como média simples
+        const atr = trValues.reduce((a, b) => a + b, 0) / trValues.length;
+        
+        return atr;
+    } catch (error) {
+        ErrorHandler.handle(error, `CalculateATR-${symbol}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO: CALCULAR ALVOS BASEADOS EM ATR ===
+// =====================================================================
+async function calculateATRTargets(symbol, entryPrice, isBullish) {
+    try {
+        const atr = await calculateATR4h(symbol, 14);
+        if (!atr) {
+            return null;
+        }
+        
+        // Multiplicadores para alvos curtos baseados em ATR
+        const multipliers = [0.5, 1.0, 1.5, 2.0];
+        
+        const targets = {};
+        
+        if (isBullish) {
+            targets.t1 = entryPrice + atr * multipliers[0];
+            targets.t2 = entryPrice + atr * multipliers[1];
+            targets.t3 = entryPrice + atr * multipliers[2];
+            targets.t4 = entryPrice + atr * multipliers[3];
+        } else {
+            targets.t1 = entryPrice - atr * multipliers[0];
+            targets.t2 = entryPrice - atr * multipliers[1];
+            targets.t3 = entryPrice - atr * multipliers[2];
+            targets.t4 = entryPrice - atr * multipliers[3];
+        }
+        
+        return {
+            atr,
+            targets,
+            multipliers
+        };
+    } catch (error) {
+        ErrorHandler.handle(error, `CalculateATRTargets-${symbol}`);
+        return null;
+    }
+}
+
 async function calculateSupportResistance15m(symbol, currentPrice) {
     try {
         const candles = await getCandles(symbol, '15m', 100);
@@ -1338,6 +1414,79 @@ async function calculateSupportResistance15m(symbol, currentPrice) {
     } catch (error) {
         ErrorHandler.handle(error, `CalculateSR-${symbol}`);
         return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO: ANALISAR VOLUME 1H COM EMA 9 ===
+// =====================================================================
+async function analyzeVolume1hWithEMA9(symbol) {
+    try {
+        const candles = await getCandles(symbol, '1h', 50);
+        if (candles.length < 10) {
+            return { direction: 'Desconhecido', percentage: 0, emoji: '❓' };
+        }
+
+        const volumes = candles.map(c => c.volume);
+        const closes = candles.map(c => c.close);
+        
+        // Calcular EMA 9 dos preços
+        const ema9 = calculateEMA(closes, 9);
+        
+        // Calcular volume comprador/vendedor baseado na relação preço/EMA
+        let buyerVolume = 0;
+        let sellerVolume = 0;
+        let totalVolume = 0;
+        
+        // Analisar últimos 24 candles (1 dia) para média
+        const recentCandles = candles.slice(-24);
+        
+        recentCandles.forEach((candle, index) => {
+            const volume = candle.volume;
+            totalVolume += volume;
+            
+            // Se preço fechou acima da EMA9, considera volume comprador
+            // Se preço fechou abaixo da EMA9, considera volume vendedor
+            if (candle.close > ema9) {
+                buyerVolume += volume;
+            } else if (candle.close < ema9) {
+                sellerVolume += volume;
+            } else {
+                // Se igual, divide meio a meio
+                buyerVolume += volume / 2;
+                sellerVolume += volume / 2;
+            }
+        });
+        
+        const buyerPercentage = (buyerVolume / totalVolume) * 100;
+        const sellerPercentage = (sellerVolume / totalVolume) * 100;
+        
+        let direction = '';
+        let emoji = '';
+        
+        if (buyerPercentage > 55) {
+            direction = 'Comprador';
+            emoji = '🟢';
+        } else if (sellerPercentage > 55) {
+            direction = 'Vendedor';
+            emoji = '🔴';
+        } else {
+            direction = 'Neutro';
+            emoji = '⚪';
+        }
+        
+        return {
+            direction,
+            percentage: Math.round(buyerPercentage),
+            sellerPercentage: Math.round(sellerPercentage),
+            emoji,
+            buyerVolume,
+            sellerVolume,
+            totalVolume
+        };
+    } catch (error) {
+        ErrorHandler.handle(error, `AnalyzeVolume1h-${symbol}`);
+        return { direction: 'Erro', percentage: 0, emoji: '❌' };
     }
 }
 
@@ -1421,12 +1570,13 @@ async function checkStochasticSignal(symbol, prioritySystem) {
         
         console.log(`✅ ${symbol}: EMA 3m confirmou o sinal`);
 
-        const [rsiData, lsrData, fundingData, pivotData, currentPrice] = await Promise.all([
+        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData] = await Promise.all([
             getRSI1h(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
             analyzePivotPoints(symbol, await getCurrentPrice(symbol), signalType === 'STOCHASTIC_COMPRA'),
-            getCurrentPrice(symbol)
+            getCurrentPrice(symbol),
+            analyzeVolume1hWithEMA9(symbol)
         ]);
 
         // =================================================================
@@ -1461,6 +1611,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
         }
 
         const fibonacciLevels = await calculateFibonacciLevels4h(symbol, signalType === 'STOCHASTIC_COMPRA');
+        const atrTargets = await calculateATRTargets(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
 
         return {
@@ -1476,8 +1627,10 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             time: getBrazilianDateTime(),
             isFreshCross: isFreshCross,
             fibonacci: fibonacciLevels,
+            atrTargets: atrTargets,
             srLevels: srLevels,
-            emaCheck: emaCheck
+            emaCheck: emaCheck,
+            volumeData: volumeData
         };
     } catch (error) {
         ErrorHandler.handle(error, `CheckStochasticSignal-${symbol}`);
@@ -1975,7 +2128,7 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (COM CONTADOR NA LINHA ABAIXO DA DATA/HORA) ===
+// === ALERTA PRINCIPAL (COM 4 ALVOS ATR + FIBONACCI) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const entryPrice = signal.currentPrice;
@@ -2016,18 +2169,32 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     }
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM (COM CONTADOR DE ALERTAS) ===
+    // === CALCULAR ALVOS ATR (4 ALVOS CURTOS) ===
     // =================================================================
+    let atrTargetsText = 'Alvos ATR: N/A';
+    let atrValue = 0;
+    if (signal.atrTargets) {
+        const atr = signal.atrTargets.atr;
+        atrValue = atr;
+        
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            atrTargetsText = `Alvos ATR: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
+        } else {
+            atrTargetsText = `Alvos ATR: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
+        }
+    }
     
-    // CALCULAR ALVOS PRINCIPAIS (T4, T5, T6)
-    let takeProfitCompact = 'Alvos: N/A';
+    // =================================================================
+    // === CALCULAR ALVOS FIBONACCI (4 ALVOS CURTOS) ===
+    // =================================================================
+    let fibTargetsText = 'Alvos Fib: N/A';
     if (signal.fibonacci) {
         const fib = signal.fibonacci;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
+            fibTargetsText = `Alvos Fib: T1: $${fib.targets.t1.toFixed(6)} | T2: $${fib.targets.t2.toFixed(6)} | T3: $${fib.targets.t3.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)}`;
         } else {
-            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
+            fibTargetsText = `Alvos Fib: T1: $${fib.targets.t1.toFixed(6)} | T2: $${fib.targets.t2.toFixed(6)} | T3: $${fib.targets.t3.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)}`;
         }
     }
     
@@ -2036,24 +2203,17 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     let stopPrice = 0;
     let stopPercent = 0;
     
-    if (signal.stopLoss) {
-        stopPrice = signal.stopLoss.stopPrice;
-        stopPercent = signal.stopLoss.stopPercent;
-        
-        if (signal.type === 'STOCHASTIC_COMPRA') {
-            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
-        } else {
-            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
-        }
-    } else if (signal.fibonacci) {
-        // Fallback para o método antigo se o adaptativo falhar
+    if (signal.fibonacci) {
         const fib = signal.fibonacci;
         const price = entryPrice;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            const stop1 = Math.max(fib.targets.t1 * 0.985, fib.swingLow * 0.99);
+            // Stop abaixo do suporte ou abaixo do swing low
+            stopPrice = Math.min(
+                fib.swingLow * 0.985,
+                fib.targets.t1 * 0.98
+            );
             
-            stopPrice = stop1;
             if (signal.srLevels && signal.srLevels.nearestSupport) {
                 stopPrice = Math.min(stopPrice, signal.srLevels.nearestSupport * 0.99);
             }
@@ -2062,9 +2222,12 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
             stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
             
         } else {
-            const stop1 = Math.max(fib.targets.t1 * 1.015, fib.swingHigh * 1.01);
+            // Stop acima da resistência ou acima do swing high
+            stopPrice = Math.max(
+                fib.swingHigh * 1.015,
+                fib.targets.t1 * 1.02
+            );
             
-            stopPrice = stop1;
             if (signal.srLevels && signal.srLevels.nearestResistance) {
                 stopPrice = Math.max(stopPrice, signal.srLevels.nearestResistance * 1.01);
             }
@@ -2141,6 +2304,22 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         rsiText = signal.rsi.toFixed(0);
     }
     
+    // FORMATAR VOLUME 1H
+    let volumeText = 'Volume 1h: Desconhecido';
+    if (signal.volumeData) {
+        const volData = signal.volumeData;
+        volumeText = `Volume 1h: ${volData.percentage}% ${volData.direction}`;
+        if (volData.emoji) {
+            volumeText = `${volData.emoji} ${volumeText}`;
+        }
+    }
+    
+    // FORMATAR ATR
+    let atrText = '';
+    if (atrValue > 0) {
+        atrText = `ATR 4h: $${atrValue.toFixed(6)}`;
+    }
+    
     // FORMATAR CONTADOR DE ALERTAS
     const alertCounterText = `Alerta ${alertCount.symbolDailyStochastic || 0}`;
     
@@ -2149,16 +2328,19 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM (COM CONTADOR ABAIXO DA DATA/HORA) ===
+    // === CONSTRUÇÃO DA MENSAGEM (COM 4 ALVOS ATR + FIB) ===
     // =================================================================
     
     let message = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${entryPrice.toFixed(6)}
+${volumeText}
+${atrText}
 ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
-Stoch ${stochText} | RSI ${rsiText}
+Stoch ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
-${takeProfitCompact}
+${fibTargetsText}
+${atrTargetsText}
 🛑 ${stopCompact}
 ${srCompact}
 ${scoreCompact}
@@ -2171,11 +2353,13 @@ ${scoreCompact}
     await sendTelegramAlert(message);
     
     console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText})`);
+    console.log(`   📊 Volume 1h: ${signal.volumeData?.percentage || 0}% ${signal.volumeData?.direction || 'Desconhecido'}`);
+    console.log(`   📊 ATR 4h: $${atrValue.toFixed(6)}`);
     console.log(`   📊 Score: ${factors.score}% | ${shortSummary}`);
     console.log(`   💰 Preço: $${entryPrice.toFixed(6)}`);
     console.log(`   📊 EMA 3m: ${signal.emaCheck.analysis}`);
     console.log(`   🛑 Stop adaptativo: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`);
-    console.log(`   🎯 Alvos: T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)} T6:$${signal.fibonacci?.targets.t6.toFixed(6)}`);
+    console.log(`   🎯 Alvos ATR: T1:$${signal.atrTargets?.targets.t1.toFixed(6)} T2:$${signal.atrTargets?.targets.t2.toFixed(6)} T3:$${signal.atrTargets?.targets.t3.toFixed(6)} T4:$${signal.atrTargets?.targets.t4.toFixed(6)}`);
     if (srInfo) {
         console.log(`   🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
         console.log(`   🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
@@ -2241,9 +2425,12 @@ async function mainBotLoop() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + Fibonacci 4h + EMA 3m');
+        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + Fibonacci 4h + ATR 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
+        console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
+        console.log(`📊 ATR 4h: Calculando 4 alvos curtos (0.5x, 1.0x, 1.5x, 2.0x ATR)`);
+        console.log(`📊 Fibonacci 4h: Calculando 4 alvos curtos (38.2%, 61.8%, 78.6%, 100%)`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
 
@@ -2329,6 +2516,9 @@ async function startBot() {
         console.log(`📊 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 EMA 3m: Ativado (13/34/55)`);
+        console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
+        console.log(`📊 ATR 4h: Calculando 4 alvos curtos (0.5x, 1.0x, 1.5x, 2.0x ATR)`);
+        console.log(`📊 Fibonacci 4h: Calculando 4 alvos curtos (38.2%, 61.8%, 78.6%, 100%)`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
         
