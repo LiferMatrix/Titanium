@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVF0A',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -2030,11 +2030,22 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         }
     }
     
-    // CALCULAR STOP LOSS
+    // CALCULAR STOP LOSS ADAPTATIVO
     let stopCompact = 'Stop: N/A';
     let stopPrice = 0;
+    let stopPercent = 0;
     
-    if (signal.fibonacci) {
+    if (signal.stopLoss) {
+        stopPrice = signal.stopLoss.stopPrice;
+        stopPercent = signal.stopLoss.stopPercent;
+        
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
+        } else {
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
+        }
+    } else if (signal.fibonacci) {
+        // Fallback para o método antigo se o adaptativo falhar
         const fib = signal.fibonacci;
         const price = entryPrice;
         
@@ -2046,8 +2057,8 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
                 stopPrice = Math.min(stopPrice, signal.srLevels.nearestSupport * 0.99);
             }
             
-            const stopPercent = ((price - stopPrice) / price * 100).toFixed(1);
-            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            stopPercent = ((price - stopPrice) / price * 100);
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
             
         } else {
             const stop1 = Math.max(fib.targets.t1 * 1.015, fib.swingHigh * 1.01);
@@ -2057,8 +2068,8 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
                 stopPrice = Math.max(stopPrice, signal.srLevels.nearestResistance * 1.01);
             }
             
-            const stopPercent = ((stopPrice - price) / price * 100).toFixed(1);
-            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            stopPercent = ((stopPrice - price) / price * 100);
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
         }
     }
     
@@ -2138,7 +2149,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // =================================================================
     
     let message = `${actionEmoji} ${actionText} • ${signal.symbol}
- $${entryPrice.toFixed(6)} • ${signal.time.time}hs
+ $${entryPrice.toFixed(6)} • ${signal.time.full}hs
 ━━━━━━━━━━━━━━
  Stoch ${stochText} | RSI ${rsiText}
  LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
@@ -2158,13 +2169,13 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     console.log(`   📊 Score: ${factors.score}% | ${shortSummary}`);
     console.log(`   💰 Preço: $${entryPrice.toFixed(6)}`);
     console.log(`   📊 EMA 3m: ${signal.emaCheck.analysis}`);
+    console.log(`   🛑 Stop adaptativo: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`);
     console.log(`   🎯 Alvos: T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)} T6:$${signal.fibonacci?.targets.t6.toFixed(6)}`);
     if (srInfo) {
         console.log(`   🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
         console.log(`   🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
     }
 }
-
 // =====================================================================
 // === MONITORAMENTO PRINCIPAL ===
 // =====================================================================
