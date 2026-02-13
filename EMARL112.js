@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_A',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -107,6 +107,7 @@ const EMA_CONFIG = {
 const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
+// CONTADOR DE ALERTAS - ZERA TODO DIA ÀS 21H
 let alertCounter = {};
 let dailyAlerts = 0;
 let globalAlerts = 0;
@@ -1974,7 +1975,7 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (CORRIGIDO) ===
+// === ALERTA PRINCIPAL (COM CONTADOR NA LINHA ABAIXO DA DATA/HORA) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const entryPrice = signal.currentPrice;
@@ -2015,7 +2016,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     }
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM (CORRIGIDA) ===
+    // === CONSTRUÇÃO DA MENSAGEM (COM CONTADOR DE ALERTAS) ===
     // =================================================================
     
     // CALCULAR ALVOS PRINCIPAIS (T4, T5, T6)
@@ -2140,23 +2141,27 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         rsiText = signal.rsi.toFixed(0);
     }
     
+    // FORMATAR CONTADOR DE ALERTAS
+    const alertCounterText = `Alerta ${alertCount.symbolDailyStochastic || 0}`;
+    
     // DEFINIR ÍCONES
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM (FORMATO SIMPLIFICADO) ===
+    // === CONSTRUÇÃO DA MENSAGEM (COM CONTADOR ABAIXO DA DATA/HORA) ===
     // =================================================================
     
     let message = `${actionEmoji} ${actionText} • ${signal.symbol}
- $${entryPrice.toFixed(6)} • ${signal.time.full}hs
-━━━━━━━━━━━━━━
- Stoch ${stochText} | RSI ${rsiText}
- LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
- ${takeProfitCompact}
+Preço: $${entryPrice.toFixed(6)}
+${alertCounterText} - ${signal.time.full}hs
+❅──────✧❅✨❅✧──────❅
+Stoch ${stochText} | RSI ${rsiText}
+LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
+${takeProfitCompact}
 🛑 ${stopCompact}
-📊 ${srCompact}
-📈 ${scoreCompact}
+${srCompact}
+${scoreCompact}
 
 ✨ Titanium by @J4Rviz ✨`;
 
@@ -2176,6 +2181,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         console.log(`   🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
     }
 }
+
 // =====================================================================
 // === MONITORAMENTO PRINCIPAL ===
 // =====================================================================
@@ -2238,6 +2244,7 @@ async function mainBotLoop() {
         console.log('📊 Estratégia: Estocástico 4h 14.3.3 + Fibonacci 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
+        console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -2322,6 +2329,7 @@ async function startBot() {
         console.log(`📊 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 EMA 3m: Ativado (13/34/55)`);
+        console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
         
         lastResetDate = getBrazilianDateString();
