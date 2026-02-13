@@ -33,10 +33,10 @@ const CONFIG = {
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 5,
+        K_PERIOD: 8,           // ALTERADO DE 5 PARA 8
         D_PERIOD: 3,
         SLOWING: 3,
-        TIMEFRAME: '12h',
+        TIMEFRAME: '4h',       // ALTERADO DE 12h PARA 4h
         OVERBOUGHT: 80,
         OVERSOLD: 20,
         VOLUME_CONFIG: {
@@ -873,7 +873,7 @@ async function getCandles(symbol, timeframe, limit = 80) {
             '12h': '12h', '1d': '1d'
         };
 
-        const interval = intervalMap[timeframe] || '3m';
+        const interval = intervalMap[timeframe] || '4h';
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
 
         const data = await ErrorHandler.retry(
@@ -976,7 +976,7 @@ function calculateRSIForPeriod(closes, period) {
 
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 50);
+        const candles = await getCandles(symbol, timeframe, 80);
         if (candles.length < 14) {
             return null;
         }
@@ -1668,7 +1668,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             if (!previousState.wasCrossingUp) {
                 signalType = 'STOCHASTIC_COMPRA';
                 isFreshCross = true;
-                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para CIMA`);
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para CIMA (4h 8.3.3)`);
             }
             stochCrossState[symbol] = {
                 wasCrossingUp: true,
@@ -1679,7 +1679,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             if (!previousState.wasCrossingDown) {
                 signalType = 'STOCHASTIC_VENDA';
                 isFreshCross = true;
-                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para BAIXO`);
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para BAIXO (4h 8.3.3)`);
             }
             stochCrossState[symbol] = {
                 wasCrossingUp: false,
@@ -2423,6 +2423,7 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
 /// =====================================================================
 // === ALERTA PRINCIPAL COM MENSAGEM RESUMIDA PROFISSIONAL ===
 // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR (PULLBACK CONFIRMATION) ===
+// === 3 ALVOS MAIS CURTOS NAS MENSAGENS (T2, T3, T4) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     if (!signal.volumeAnalysis.isValid) {
@@ -2490,17 +2491,18 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // =================================================================
     // === CONSTRUÇÃO DA MENSAGEM RESUMIDA PROFISSIONAL ===
     // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR ===
+    // === 3 ALVOS MAIS CURTOS (T2, T3, T4) ===
     // =================================================================
     
-    // CALCULAR ALVOS PRINCIPAIS (T2, T4, T6) - EM VALOR (USDT)
+    // CALCULAR ALVOS PRINCIPAIS (T2, T3, T4) - OS 3 MAIS CURTOS - EM VALOR (USDT)
     let takeProfitCompact = ' <i>Alvos:</i> N/A';
     if (signal.fibonacci) {
         const fib = signal.fibonacci;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)} | T6:$${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T3:$${fib.targets.t3.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)}`;
         } else {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)} | T6:$${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T3:$${fib.targets.t3.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)}`;
         }
     }
     
@@ -2627,8 +2629,8 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         }
     }
     
-    // FORMATAR STOCH
-    const stochText = `K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)}`;
+    // FORMATAR STOCH - MOSTRAR CONFIGURAÇÃO 8.3.3 4h
+    const stochText = `K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)} (4h 8.3.3)`;
     
     // FORMATAR RSI
     let rsiText = 'N/A';
@@ -2697,6 +2699,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // =================================================================
     // === CONSTRUÇÃO DA MENSAGEM - SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO ===
     // === ADICIONADO LOGO APÓS OPERAÇÃO FAVORÁVEL OU DESFAVORÁVEL ===
+    // === 3 ALVOS MAIS CURTOS INCLUÍDOS (T2, T3, T4) ===
     // =================================================================
     
     let message = `
@@ -2725,7 +2728,7 @@ ${scoreCompact}
     console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText})`);
     console.log(`   📊 Score: ${factors.score}% | ${shortSummary}`);
     console.log(`   💰 Preço: $${entryPrice.toFixed(6)}`);
-    console.log(`   🎯 Alvos: T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)} T6:$${signal.fibonacci?.targets.t6.toFixed(6)}`);
+    console.log(`   🎯 Alvos (3 mais curtos): T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T3:$${signal.fibonacci?.targets.t3.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)}`);
     console.log(`   🛡️ Retração: ${pullbackResult?.confirmed ? 'Confirmada ✅' : 'Não confirmada ❌'}`);
     if (pullbackResult) {
         console.log(`   📉 Pullback: ${pullbackResult.statusEmoji} $${parseFloat(pullbackResult.pullbackTarget).toFixed(6)}`);
@@ -2795,9 +2798,10 @@ async function mainBotLoop() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 12h + Fibonacci 4h');
+        console.log('📊 Estratégia: Estocástico 4h 8.3.3 + Fibonacci 4h');
         console.log('🛡️ Sistema: Confirmação de Retração por ATR');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
+        console.log('🎯 Alvos: 3 mais curtos (T2, T3, T4)');
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -2880,7 +2884,9 @@ async function startBot() {
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - INICIANDO...');
         console.log('🛡️ Sistema de Confirmação de Retração por ATR ATIVADO');
-        console.log(`📊 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
+        console.log(`📊 Estocástico: 4h 8.3.3 (ALTERADO DE 12h 5.3.3)`);
+        console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
+        console.log(`🎯 Alvos nas mensagens: 3 mais curtos (T2, T3, T4)`);
         console.log('='.repeat(80) + '\n');
         
         lastResetDate = getBrazilianDateString();
