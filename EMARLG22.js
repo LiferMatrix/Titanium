@@ -10,72 +10,32 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const RSI_1H_CONFIG = {
     COMPRA: {
-        // RSI 1h DEVE SER MENOR QUE 62 PARA COMPRA
         MAX_RSI: 62,
         ENABLED: true
     },
     VENDA: {
-        // RSI 1h DEVE SER MAIOR QUE 45 PARA VENDA
         MIN_RSI: 45,
         ENABLED: true
     }
 };
 
 // =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS - OTIMIZADAS PARA NOTA 10.0 ===
+// === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 
 const CONFIG = {
     TELEGRAM: {
-        // === CONFIGURE AQUI SEU BOT E CHAT ===
-        BOT_TOKEN: '7708427979:AAvdg',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 8,           // ALTERADO DE 5 PARA 8
+        K_PERIOD: 14,
         D_PERIOD: 3,
         SLOWING: 3,
-        TIMEFRAME: '4h',       // ALTERADO DE 12h PARA 4h
-        OVERBOUGHT: 80,
-        OVERSOLD: 20,
-        VOLUME_CONFIG: {
-            COMPRA: {
-                ENABLED: true,
-                TIMEFRAME: '3m',
-                MIN_VOLUME_ANORMAL: 0.6,
-                ANALYZE_CANDLES: 20,
-                REQUIRE_BUYER_DOMINANCE: true
-            },
-            VENDA: {
-                ENABLED: true,
-                TIMEFRAME: '3m',
-                MIN_VOLUME_ANORMAL: 0.6,
-                ANALYZE_CANDLES: 20,
-                REQUIRE_SELLER_DOMINANCE: true
-            }
-        }
-    },
-    RETRACTION: {
-        ENABLED: true,
-        ATR_TIMEFRAME: '15m',
-        ATR_PERIOD: 14,
-        COMPRA: {
-            ENABLED: true,
-            USE_ATR_MULTIPLIER: 0.5,
-            MIN_PULLBACK_PERCENT: 0.1,
-            MAX_PULLBACK_PERCENT: 2.0,
-            WAIT_TIME_MS: 30000,
-            REQUIRE_CLOSED_CANDLE: true
-        },
-        VENDA: {
-            ENABLED: true,
-            USE_ATR_MULTIPLIER: 0.5,
-            MIN_PULLBACK_PERCENT: 0.1,
-            MAX_PULLBACK_PERCENT: 2.0,
-            WAIT_TIME_MS: 30000,
-            REQUIRE_CLOSED_CANDLE: true
-        }
+        TIMEFRAME: '4h',
+        OVERBOUGHT: 74,
+        OVERSOLD: 67
     },
     PRIORITY: {
         ENABLED: true,
@@ -132,11 +92,22 @@ const CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÃO EMA 3 MINUTOS ===
+// =====================================================================
+const EMA_CONFIG = {
+    TIMEFRAME: '3m',
+    EMA13: 13,
+    EMA34: 34,
+    EMA55: 55
+};
+
+// =====================================================================
 // === DIRETÓRIOS E VARIÁVEIS GLOBAIS ===
 // =====================================================================
 const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
+// CONTADOR DE ALERTAS - ZERA TODO DIA ÀS 21H
 let alertCounter = {};
 let dailyAlerts = 0;
 let globalAlerts = 0;
@@ -154,9 +125,6 @@ const stochCrossState = {};
 
 // === CACHE DE CANDLES ===
 const candleCache = {};
-
-// === CACHE DE RETRAÇÃO POR ATR ===
-const pullbackState = {};
 
 // =====================================================================
 // === ERROR HANDLER GRANULAR ===
@@ -396,13 +364,6 @@ class AdvancedCleanupSystem {
             Object.keys(candleCache).forEach(key => {
                 if (now - candleCache[key].timestamp > CONFIG.PERFORMANCE.MAX_CACHE_AGE) {
                     delete candleCache[key];
-                    deletedCount++;
-                }
-            });
-            
-            Object.keys(pullbackState).forEach(key => {
-                if (now - pullbackState[key].timestamp > 60000) {
-                    delete pullbackState[key];
                     deletedCount++;
                 }
             });
@@ -833,10 +794,9 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         
         const message = `
-<b>🚀 TITANIUM INICIADO  ✅</b>
-<b>Matrix </b>
+<b>🚀 TITANIUM INICIADO ✅</b>
 📅 ${now.full}
-<i>✅ ALERTAs</i>
+<i>✅ ALERTAS ATIVOS</i>
 `;
 
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -873,7 +833,7 @@ async function getCandles(symbol, timeframe, limit = 80) {
             '12h': '12h', '1d': '1d'
         };
 
-        const interval = intervalMap[timeframe] || '4h';
+        const interval = intervalMap[timeframe] || '3m';
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
 
         const data = await ErrorHandler.retry(
@@ -976,7 +936,7 @@ function calculateRSIForPeriod(closes, period) {
 
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 80);
+        const candles = await getCandles(symbol, timeframe, 50);
         if (candles.length < 14) {
             return null;
         }
@@ -1060,105 +1020,68 @@ async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
 }
 
 // =====================================================================
-// === FUNÇÃO DE VOLUME 3M - OTIMIZADA PARA NOTA 10 ===
+// === FUNÇÃO: VERIFICAÇÃO EMA 3 MINUTOS ===
 // =====================================================================
-async function analyzeVolume3mForStochastic(symbol, signalType) {
+async function checkEMA3m(symbol, signalType) {
     try {
-        const config = signalType === 'STOCHASTIC_COMPRA' 
-            ? CONFIG.STOCHASTIC.VOLUME_CONFIG.COMPRA
-            : CONFIG.STOCHASTIC.VOLUME_CONFIG.VENDA;
-        
-        if (!config.ENABLED) {
-            return { isValid: true, analysis: null };
+        const candles = await getCandles(symbol, EMA_CONFIG.TIMEFRAME, 100);
+        if (candles.length < Math.max(EMA_CONFIG.EMA55, EMA_CONFIG.EMA34)) {
+            return { isValid: false, error: 'Candles insuficientes' };
         }
+
+        const closes = candles.map(c => c.close);
+        const lastCandle = candles[candles.length - 1];
         
-        const candles = await getCandles(symbol, config.TIMEFRAME, config.ANALYZE_CANDLES);
-        if (candles.length < config.ANALYZE_CANDLES) {
-            return { isValid: false, analysis: null, error: 'Candles insuficientes' };
-        }
+        // Calcular EMAs
+        const ema13 = calculateEMA(closes, EMA_CONFIG.EMA13);
+        const ema34 = calculateEMA(closes, EMA_CONFIG.EMA34);
+        const ema55 = calculateEMA(closes, EMA_CONFIG.EMA55);
         
-        let buyerVolume = 0;
-        let sellerVolume = 0;
-        let totalVolume = 0;
-        
-        const closedCandles = candles.filter(c => c.isClosed === true);
-        
-        if (closedCandles.length < 10) {
-            console.log(`⚠️ ${symbol}: Poucos candles fechados (${closedCandles.length}), usando análise parcial`);
-        }
-        
-        const candlesToAnalyze = closedCandles.length > 0 ? closedCandles : candles;
-        
-        candlesToAnalyze.forEach(candle => {
-            const volume = candle.volume;
-            totalVolume += volume;
-            
-            const bodySize = Math.abs(candle.close - candle.open);
-            const rangeSize = candle.high - candle.low;
-            
-            const bodyRatio = rangeSize > 0 ? Math.min(bodySize / rangeSize, 1) : 0.5;
-            
-            if (candle.close > candle.open) {
-                const buyerRatio = 0.5 + (bodyRatio * 0.3);
-                buyerVolume += volume * buyerRatio;
-                sellerVolume += volume * (1 - buyerRatio);
-            } else if (candle.close < candle.open) {
-                const sellerRatio = 0.5 + (bodyRatio * 0.3);
-                sellerVolume += volume * sellerRatio;
-                buyerVolume += volume * (1 - sellerRatio);
-            } else {
-                buyerVolume += volume * 0.5;
-                sellerVolume += volume * 0.5;
-            }
-        });
-        
-        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 0;
-        const sellerPercentage = totalVolume > 0 ? (sellerVolume / totalVolume) * 100 : 0;
+        // Calcular EMAs do candle anterior
+        const prevCloses = closes.slice(0, -1);
+        const prevEma13 = calculateEMA(prevCloses, EMA_CONFIG.EMA13);
+        const prevEma34 = calculateEMA(prevCloses, EMA_CONFIG.EMA34);
         
         let isValid = false;
-        let volumeStatus = '';
+        let analysis = '';
         
         if (signalType === 'STOCHASTIC_COMPRA') {
-            if (config.REQUIRE_BUYER_DOMINANCE) {
-                isValid = buyerPercentage >= config.MIN_VOLUME_ANORMAL * 100;
-                volumeStatus = isValid 
-                    ? `✅ VOLUME COMPRADOR 3m: ${buyerPercentage.toFixed(1)}% (${candlesToAnalyze.length} candles fechados)` 
-                    : `❌ VOLUME COMPRADOR INSUFICIENTE: ${buyerPercentage.toFixed(1)}%`;
-            } else {
-                isValid = true;
-                volumeStatus = '⚠️ VOLUME NÃO OBRIGATÓRIO';
-            }
-        } else if (signalType === 'STOCHASTIC_VENDA') {
-            if (config.REQUIRE_SELLER_DOMINANCE) {
-                isValid = sellerPercentage >= config.MIN_VOLUME_ANORMAL * 100;
-                volumeStatus = isValid 
-                    ? `🔴 VOLUME VENDEDOR 3m: ${sellerPercentage.toFixed(1)}% (${candlesToAnalyze.length} candles fechados)` 
-                    : `❌ VOLUME VENDEDOR INSUFICIENTE: ${sellerPercentage.toFixed(1)}%`;
-            } else {
-                isValid = true;
-                volumeStatus = '⚠️ VOLUME NÃO OBRIGATÓRIO';
-            }
+            // COMPRA: EMA13 cruzando para cima da EMA34 E preço fechando acima da EMA55
+            const emaCrossUp = prevEma13 <= prevEma34 && ema13 > ema34;
+            const priceAboveEma55 = lastCandle.close > ema55;
+            
+            isValid = emaCrossUp && priceAboveEma55;
+            
+            analysis = `📊 EMA 3m: ${emaCrossUp ? '✅' : '❌'} Cruzamento 13/34 | ${priceAboveEma55 ? '✅' : '❌'} Preço > EMA55`;
+            
+            console.log(`   • EMA 13/34: ${emaCrossUp ? 'Cruzou para CIMA' : 'Sem cruzamento'}`);
+            console.log(`   • EMA 55: ${priceAboveEma55 ? 'Preço ACIMA' : 'Preço ABAIXO'}`);
+            
+        } else {
+            // VENDA: EMA13 cruzando para baixo da EMA34 E preço fechando abaixo da EMA55
+            const emaCrossDown = prevEma13 >= prevEma34 && ema13 < ema34;
+            const priceBelowEma55 = lastCandle.close < ema55;
+            
+            isValid = emaCrossDown && priceBelowEma55;
+            
+            analysis = `📊 EMA 3m: ${emaCrossDown ? '✅' : '❌'} Cruzamento 13/34 | ${priceBelowEma55 ? '✅' : '❌'} Preço < EMA55`;
+            
+            console.log(`   • EMA 13/34: ${emaCrossDown ? 'Cruzou para BAIXO' : 'Sem cruzamento'}`);
+            console.log(`   • EMA 55: ${priceBelowEma55 ? 'Preço ABAIXO' : 'Preço ACIMA'}`);
         }
         
         return {
-            isValid: isValid,
-            analysis: {
-                buyerVolume: buyerVolume,
-                sellerVolume: sellerVolume,
-                totalVolume: totalVolume,
-                buyerPercentage: buyerPercentage.toFixed(1),
-                sellerPercentage: sellerPercentage.toFixed(1),
-                volumeStatus: volumeStatus,
-                timeframe: config.TIMEFRAME,
-                candlesAnalyzed: candlesToAnalyze.length,
-                closedCandlesOnly: closedCandles.length > 0,
-                method: 'heurística_proporcional_body_ratio'
-            }
+            isValid,
+            analysis,
+            ema13,
+            ema34,
+            ema55,
+            lastPrice: lastCandle.close
         };
         
     } catch (error) {
-        ErrorHandler.handle(error, `AnalyzeVolume-${symbol}`);
-        return { isValid: false, analysis: null, error: error.message };
+        ErrorHandler.handle(error, `CheckEMA3m-${symbol}`);
+        return { isValid: false, error: error.message };
     }
 }
 
@@ -1313,7 +1236,7 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === FUNÇÕES: FIBONACCI 4H E STOP POR VOLATILIDADE ADAPTATIVA 15M ===
+// === FUNÇÕES: FIBONACCI 4H ===
 // =====================================================================
 
 async function calculateFibonacciLevels4h(symbol, isBullish) {
@@ -1381,42 +1304,6 @@ async function calculateFibonacciLevels4h(symbol, isBullish) {
     }
 }
 
-async function calculateATR(symbol, timeframe = '15m', period = 14) {
-    try {
-        const candles = await getCandles(symbol, timeframe, period + 1);
-        if (candles.length < period + 1) {
-            return null;
-        }
-
-        let trSum = 0;
-        for (let i = 1; i < candles.length; i++) {
-            const high = candles[i].high;
-            const low = candles[i].low;
-            const prevClose = candles[i - 1].close;
-            
-            const tr = Math.max(
-                high - low,
-                Math.abs(high - prevClose),
-                Math.abs(low - prevClose)
-            );
-            trSum += tr;
-        }
-
-        const atr = trSum / period;
-        const atrPercent = (atr / candles[candles.length - 1].close) * 100;
-
-        return {
-            atr,
-            atrPercent,
-            period,
-            currentPrice: candles[candles.length - 1].close
-        };
-    } catch (error) {
-        ErrorHandler.handle(error, `CalculateATR-${symbol}`);
-        return null;
-    }
-}
-
 async function calculateSupportResistance15m(symbol, currentPrice) {
     try {
         const candles = await getCandles(symbol, '15m', 100);
@@ -1455,194 +1342,80 @@ async function calculateSupportResistance15m(symbol, currentPrice) {
 }
 
 // =====================================================================
-// === SISTEMA DE RETRAÇÃO CONTROLADA POR ATR - AGORA NÃO BLOQUEIA MAIS ===
+// === FUNÇÃO: ANALISAR VOLUME 1H COM EMA 9 ===
 // =====================================================================
-async function waitForPullback(symbol, signalType, initialPrice, atrValue) {
-    if (!CONFIG.RETRACTION.ENABLED) {
-        return { 
-            confirmed: false, 
-            price: initialPrice, 
-            pullbackPercent: 0,
-            pullbackTarget: initialPrice,
-            initialPrice: initialPrice,
-            volumeConfirmed: false,
-            volumeInfo: '',
-            retractionInfo: '⚠️ RETRAÇÃO: Desativada'
-        };
-    }
-
-    const config = signalType === 'STOCHASTIC_COMPRA' 
-        ? CONFIG.RETRACTION.COMPRA 
-        : CONFIG.RETRACTION.VENDA;
-
-    if (!config.ENABLED) {
-        return { 
-            confirmed: false, 
-            price: initialPrice, 
-            pullbackPercent: 0,
-            pullbackTarget: initialPrice,
-            initialPrice: initialPrice,
-            volumeConfirmed: false,
-            volumeInfo: '',
-            retractionInfo: '⚠️ RETRAÇÃO: Desativada'
-        };
-    }
-
-    const cacheKey = `${symbol}_${signalType}_${Date.now()}`;
-    const pullbackTarget = signalType === 'STOCHASTIC_COMPRA'
-        ? initialPrice * (1 - (atrValue * config.USE_ATR_MULTIPLIER / 100))
-        : initialPrice * (1 + (atrValue * config.USE_ATR_MULTIPLIER / 100));
-
-    const minPullback = signalType === 'STOCHASTIC_COMPRA'
-        ? initialPrice * (1 - config.MAX_PULLBACK_PERCENT / 100)
-        : initialPrice * (1 + config.MAX_PULLBACK_PERCENT / 100);
-
-    pullbackState[cacheKey] = {
-        symbol,
-        signalType,
-        initialPrice,
-        pullbackTarget,
-        minPullback,
-        timestamp: Date.now(),
-        status: 'waiting'
-    };
-
-    console.log(`⏳ Aguardando retração para ${symbol}:`);
-    console.log(`   • Preço inicial: $${initialPrice.toFixed(6)}`);
-    console.log(`   • ATR ${config.USE_ATR_MULTIPLIER * 100}%: $${(atrValue * config.USE_ATR_MULTIPLIER).toFixed(6)}`);
-    console.log(`   • Alvo retração: $${pullbackTarget.toFixed(6)}`);
-    console.log(`   • Aguardando ${config.WAIT_TIME_MS / 1000}s...`);
-
-    await new Promise(resolve => setTimeout(resolve, config.WAIT_TIME_MS));
-
+async function analyzeVolume1hWithEMA9(symbol) {
     try {
-        let currentPrice;
-        
-        if (config.REQUIRE_CLOSED_CANDLE) {
-            const candles1m = await getCandles(symbol, '1m', 2);
-            const lastClosedCandle = candles1m.find(c => c.isClosed === true) || candles1m[candles1m.length - 1];
-            currentPrice = lastClosedCandle.close;
-            console.log(`   • Usando candle fechado para confirmação: $${currentPrice.toFixed(6)}`);
-        } else {
-            currentPrice = await getCurrentPrice(symbol);
+        const candles = await getCandles(symbol, '1h', 50);
+        if (candles.length < 10) {
+            return { direction: 'Desconhecido', percentage: 0, emoji: '❓' };
         }
+
+        const volumes = candles.map(c => c.volume);
+        const closes = candles.map(c => c.close);
         
-        const volumeAnalysis = await analyzeVolume3mForStochastic(symbol, signalType);
-        let volumeInfo = '';
-        let volumeConfirmed = false;
+        // Calcular EMA 9 dos preços
+        const ema9 = calculateEMA(closes, 9);
         
-        if (volumeAnalysis.analysis) {
-            const vol = volumeAnalysis.analysis;
-            if (signalType === 'STOCHASTIC_COMPRA' && vol.buyerPercentage >= 55) {
-                volumeInfo = `✅ VOLUME CONFIRMA RETRAÇÃO: ${vol.buyerPercentage}% comprador`;
-                volumeConfirmed = true;
-                console.log(`   • Volume confirma retração: ${vol.buyerPercentage}% comprador`);
-            } else if (signalType === 'STOCHASTIC_VENDA' && vol.sellerPercentage >= 55) {
-                volumeInfo = `✅ VOLUME CONFIRMA RETRAÇÃO: ${vol.sellerPercentage}% vendedor`;
-                volumeConfirmed = true;
-                console.log(`   • Volume confirma retração: ${vol.sellerPercentage}% vendedor`);
+        // Calcular volume comprador/vendedor baseado na relação preço/EMA
+        let buyerVolume = 0;
+        let sellerVolume = 0;
+        let totalVolume = 0;
+        
+        // Analisar últimos 24 candles (1 dia) para média
+        const recentCandles = candles.slice(-24);
+        
+        recentCandles.forEach((candle, index) => {
+            const volume = candle.volume;
+            totalVolume += volume;
+            
+            // Se preço fechou acima da EMA9, considera volume comprador
+            // Se preço fechou abaixo da EMA9, considera volume vendedor
+            if (candle.close > ema9) {
+                buyerVolume += volume;
+            } else if (candle.close < ema9) {
+                sellerVolume += volume;
             } else {
-                volumeInfo = `⚠️ VOLUME NEUTRO NA RETRAÇÃO: ${vol.buyerPercentage}% / ${vol.sellerPercentage}%`;
-                console.log(`   • Volume neutro na retração`);
+                // Se igual, divide meio a meio
+                buyerVolume += volume / 2;
+                sellerVolume += volume / 2;
             }
-        }
+        });
         
-        // Calcula o valor da retração em porcentagem
-        let pullbackPercent = 0;
-        if (signalType === 'STOCHASTIC_COMPRA') {
-            pullbackPercent = ((initialPrice - currentPrice) / initialPrice * 100);
+        const buyerPercentage = (buyerVolume / totalVolume) * 100;
+        const sellerPercentage = (sellerVolume / totalVolume) * 100;
+        
+        let direction = '';
+        let emoji = '';
+        
+        if (buyerPercentage > 55) {
+            direction = 'Comprador';
+            emoji = '🟢';
+        } else if (sellerPercentage > 55) {
+            direction = 'Vendedor';
+            emoji = '🔴';
         } else {
-            pullbackPercent = ((currentPrice - initialPrice) / initialPrice * 100);
+            direction = 'Neutro';
+            emoji = '⚪';
         }
         
-        // Determinar se a retração foi confirmada
-        let confirmed = false;
-        let statusEmoji = '';
-        let statusText = '';
-        
-        if (signalType === 'STOCHASTIC_COMPRA') {
-            if (currentPrice <= pullbackTarget && currentPrice >= minPullback) {
-                confirmed = true;
-                statusEmoji = '✅';
-                statusText = 'RETRAÇÃO CONFIRMADA';
-                pullbackState[cacheKey].status = 'confirmed';
-                console.log(`✅ Retração CONFIRMADA para ${symbol}: $${currentPrice.toFixed(6)} (${pullbackPercent.toFixed(2)}%)`);
-            } else if (currentPrice > initialPrice) {
-                confirmed = false;
-                statusEmoji = '❌';
-                statusText = 'PREÇO SUBIU';
-                pullbackState[cacheKey].status = 'cancelled_up';
-                console.log(`❌ Retração NÃO confirmada - preço subiu: $${currentPrice.toFixed(6)}`);
-            } else {
-                confirmed = false;
-                statusEmoji = '❌';
-                statusText = 'NÃO ATINGIU ALVO';
-                pullbackState[cacheKey].status = 'cancelled';
-                console.log(`❌ Retração NÃO confirmada - não atingiu alvo: $${currentPrice.toFixed(6)}`);
-            }
-        } else {
-            if (currentPrice >= pullbackTarget && currentPrice <= minPullback) {
-                confirmed = true;
-                statusEmoji = '✅';
-                statusText = 'CONFIRMADA';
-                pullbackState[cacheKey].status = 'confirmed';
-                console.log(`✅ Retração CONFIRMADA para ${symbol}: $${currentPrice.toFixed(6)} (${pullbackPercent.toFixed(2)}%)`);
-            } else if (currentPrice < initialPrice) {
-                confirmed = false;
-                statusEmoji = '❌';
-                statusText = 'PREÇO CAIU';
-                pullbackState[cacheKey].status = 'cancelled_down';
-                console.log(`❌ Retração NÃO confirmada - preço caiu: $${currentPrice.toFixed(6)}`);
-            } else {
-                confirmed = false;
-                statusEmoji = '❌';
-                statusText = 'NÃO ATINGIU ALVO';
-                pullbackState[cacheKey].status = 'cancelled';
-                console.log(`❌ Retração NÃO confirmada - não atingiu alvo: $${currentPrice.toFixed(6)}`);
-            }
-        }
-        
-        // Criar string de informação de retração para incluir na mensagem
-        const retractionInfo = `
-<b><i>📊RETRAÇÃO:</i></b>
-<i>• Status: ${statusEmoji} ${statusText}</i>
-<i>• Retração ate: $${pullbackTarget.toFixed(6)}</i>
-<i>• Candle fechado: ✅ OK</i>
-<i>• Volume: ${volumeInfo}</i>
-`;
-        
-        return { 
-            confirmed: confirmed,
-            price: currentPrice, 
-            pullbackPercent: pullbackPercent.toFixed(2),
-            pullbackTarget: pullbackTarget,
-            initialPrice: initialPrice,
-            volumeConfirmed: volumeConfirmed,
-            volumeInfo: volumeInfo,
-            retractionInfo: retractionInfo,
-            statusEmoji: statusEmoji,
-            statusText: statusText
+        return {
+            direction,
+            percentage: Math.round(buyerPercentage),
+            sellerPercentage: Math.round(sellerPercentage),
+            emoji,
+            buyerVolume,
+            sellerVolume,
+            totalVolume
         };
-        
     } catch (error) {
-        ErrorHandler.handle(error, `WaitForPullback-${symbol}`);
-        return { 
-            confirmed: false, 
-            price: initialPrice,
-            pullbackPercent: '0.00',
-            pullbackTarget: initialPrice,
-            initialPrice: initialPrice,
-            volumeConfirmed: false,
-            volumeInfo: '❌ Erro na análise',
-            retractionInfo: '\n<i>❌ Erro ao verificar retração</i>',
-            statusEmoji: '⚠️',
-            statusText: 'ERRO NA VERIFICAÇÃO'
-        };
+        ErrorHandler.handle(error, `AnalyzeVolume1h-${symbol}`);
+        return { direction: 'Erro', percentage: 0, emoji: '❌' };
     }
 }
 
 // =====================================================================
-// === SINAIS DE ESTOCÁSTICO COM FILTRO DE RSI 1H ===
+// === SINAIS DE ESTOCÁSTICO COM FILTRO DE RSI 1H E EMA 3M ===
 // =====================================================================
 async function checkStochasticSignal(symbol, prioritySystem) {
     if (!CONFIG.STOCHASTIC.ENABLED || prioritySystem.isInStochasticCooldown(symbol)) {
@@ -1668,7 +1441,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             if (!previousState.wasCrossingUp) {
                 signalType = 'STOCHASTIC_COMPRA';
                 isFreshCross = true;
-                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para CIMA (4h 8.3.3)`);
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para CIMA (K=${stochastic.k.toFixed(1)})`);
             }
             stochCrossState[symbol] = {
                 wasCrossingUp: true,
@@ -1679,7 +1452,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             if (!previousState.wasCrossingDown) {
                 signalType = 'STOCHASTIC_VENDA';
                 isFreshCross = true;
-                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para BAIXO (4h 8.3.3)`);
+                console.log(`🎯 CRUZAMENTO FRESCO DETECTADO: ${symbol} - %K cruzou %D para BAIXO (K=${stochastic.k.toFixed(1)})`);
             }
             stochCrossState[symbol] = {
                 wasCrossingUp: false,
@@ -1698,20 +1471,43 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             return null;
         }
 
-        const [rsiData, lsrData, fundingData, pivotData, currentPrice, atrData] = await Promise.all([
+        // FILTRO ESTOCÁSTICO: Só alertar se estiver abaixo de 20 (compra) ou acima de 80 (venda)
+        if (signalType === 'STOCHASTIC_COMPRA' && stochastic.k >= CONFIG.STOCHASTIC.OVERSOLD) {
+            console.log(`⚠️ ${symbol}: Cruzamento de COMPRA ignorado - Estocástico K=${stochastic.k.toFixed(1)} (deve ser < ${CONFIG.STOCHASTIC.OVERSOLD})`);
+            return null;
+        }
+        
+        if (signalType === 'STOCHASTIC_VENDA' && stochastic.k <= CONFIG.STOCHASTIC.OVERBOUGHT) {
+            console.log(`⚠️ ${symbol}: Cruzamento de VENDA ignorado - Estocástico K=${stochastic.k.toFixed(1)} (deve ser > ${CONFIG.STOCHASTIC.OVERBOUGHT})`);
+            return null;
+        }
+
+        // Verificar EMA 3m
+        const emaCheck = await checkEMA3m(symbol, signalType);
+        if (!emaCheck.isValid) {
+            console.log(`⚠️ ${symbol}: Sinal ignorado - EMA 3m não confirmou`);
+            if (emaCheck.analysis) {
+                console.log(`   ${emaCheck.analysis}`);
+            }
+            return null;
+        }
+        
+        console.log(`✅ ${symbol}: EMA 3m confirmou o sinal`);
+
+        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData] = await Promise.all([
             getRSI1h(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
             analyzePivotPoints(symbol, await getCurrentPrice(symbol), signalType === 'STOCHASTIC_COMPRA'),
             getCurrentPrice(symbol),
-            calculateATR(symbol, CONFIG.RETRACTION.ATR_TIMEFRAME, CONFIG.RETRACTION.ATR_PERIOD)
+            analyzeVolume1hWithEMA9(symbol)
         ]);
 
         // =================================================================
         // === FILTRO DE RSI 1H PARA COMPRA E VENDA ===
         // =================================================================
         
-        // Para COMPRA: RSI 1h DEVE ser MENOR que MAX_RSI (configurável, padrão 62)
+        // Para COMPRA: RSI 1h DEVE ser MENOR que MAX_RSI
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
                 console.log(`⚠️ ${symbol}: Sinal de COMPRA ignorado - RSI 1h ${rsiData?.value?.toFixed(1) || 'N/A'} >= ${RSI_1H_CONFIG.COMPRA.MAX_RSI}`);
@@ -1720,7 +1516,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             console.log(`✅ ${symbol}: RSI 1h ${rsiData.value.toFixed(1)} < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} - OK para COMPRA`);
         }
         
-        // Para VENDA: RSI 1h DEVE ser MAIOR que MIN_RSI (configurável, padrão 45)
+        // Para VENDA: RSI 1h DEVE ser MAIOR que MIN_RSI
         if (signalType === 'STOCHASTIC_VENDA' && RSI_1H_CONFIG.VENDA.ENABLED) {
             if (!rsiData || rsiData.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
                 console.log(`⚠️ ${symbol}: Sinal de VENDA ignorado - RSI 1h ${rsiData?.value?.toFixed(1) || 'N/A'} <= ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
@@ -1738,7 +1534,6 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             }
         }
 
-        const volumeAnalysis = await analyzeVolume3mForStochastic(symbol, signalType);
         const fibonacciLevels = await calculateFibonacciLevels4h(symbol, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
 
@@ -1753,11 +1548,11 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             pivotData: pivotData,
             currentPrice: currentPrice,
             time: getBrazilianDateTime(),
-            volumeAnalysis: volumeAnalysis,
             isFreshCross: isFreshCross,
             fibonacci: fibonacciLevels,
-            atr: atrData,
-            srLevels: srLevels
+            srLevels: srLevels,
+            emaCheck: emaCheck,
+            volumeData: volumeData
         };
     } catch (error) {
         ErrorHandler.handle(error, `CheckStochasticSignal-${symbol}`);
@@ -1875,142 +1670,38 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     
     if (indicators.rsi) {
         const rsiValue = indicators.rsi;
-        const rsiDetailed = indicators.rsiDetailed;
-        
-        let rsiTrend = 'NEUTRO';
-        let rsiTrendEmoji = '➡️';
-        let rsiDirection = 0;
-        
-        if (rsiDetailed) {
-            const rsi7 = parseFloat(rsiDetailed.rsi7);
-            const rsi14 = parseFloat(rsiDetailed.rsi14);
-            const rsi21 = parseFloat(rsiDetailed.rsi21);
-            const rsiMA5 = parseFloat(rsiDetailed.rsiMA5);
-            
-            if (rsi7 > rsi14 && rsi14 > rsi21) {
-                rsiTrend = 'ALTA FORTE';
-                rsiTrendEmoji = '📈📈';
-                rsiDirection = 2;
-            } else if (rsi7 > rsi14 || rsi14 > rsi21) {
-                rsiTrend = 'ALTA';
-                rsiTrendEmoji = '📈';
-                rsiDirection = 1;
-            } else if (rsi7 < rsi14 && rsi14 < rsi21) {
-                rsiTrend = 'BAIXA FORTE';
-                rsiTrendEmoji = '📉📉';
-                rsiDirection = -2;
-            } else if (rsi7 < rsi14 || rsi14 < rsi21) {
-                rsiTrend = 'BAIXA';
-                rsiTrendEmoji = '📉';
-                rsiDirection = -1;
-            }
-            
-            if (rsiValue > rsiMA5) {
-                rsiTrend += ' +MOM';
-                rsiTrendEmoji = rsiTrendEmoji + '⚡';
-                rsiDirection += 0.5;
-            }
-        }
         
         if (signalType === 'STOCHASTIC_COMPRA') {
             if (rsiValue < 25) {
-                factors.positive.push(`🟢🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido forte) ${rsiTrendEmoji}`);
+                factors.positive.push(`🟢🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido forte)`);
                 totalScore += weights.RSI;
             } else if (rsiValue < 30) {
-                factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido) ${rsiTrendEmoji}`);
+                factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido)`);
                 totalScore += weights.RSI * 0.9;
             } else if (rsiValue < 40) {
-                if (rsiDirection > 0) {
-                    factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (recuperação) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.8;
-                } else {
-                    factors.neutral.push(`🟡 RSI: ${rsiValue.toFixed(1)} (próx sobrevenda) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.5;
-                }
+                factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (próx sobrevenda)`);
+                totalScore += weights.RSI * 0.8;
             } else if (rsiValue < 50) {
-                if (rsiDirection > 0) {
-                    factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (consolidação de ALTA) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.7;
-                } else {
-                    factors.neutral.push(`⚪ RSI: ${rsiValue.toFixed(1)} (neutro) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.3;
-                }
-            } else if (rsiValue < 60) {
-                if (rsiDirection > 0) {
-                    factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (viés positivo) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.5;
-                } else {
-                    factors.neutral.push(`⚪ RSI: ${rsiValue.toFixed(1)} (neutro) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.2;
-                }
-            } else if (rsiValue < 70) {
-                if (rsiDirection < 0 || rsiDetailed?.divergence === 'POSSÍVEL DIVERGÊNCIA DE BAIXA') {
-                    factors.negative.push(`🔴 RSI: ${rsiValue.toFixed(1)} (perdendo força) ${rsiTrendEmoji}`);
-                } else {
-                    factors.neutral.push(`🟡 RSI: ${rsiValue.toFixed(1)} (elevado) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.2;
-                }
+                factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (neutro)`);
+                totalScore += weights.RSI * 0.5;
             } else {
-                if (rsiDetailed?.divergence === 'POSSÍVEL DIVERGÊNCIA DE BAIXA') {
-                    factors.negative.push(`🔴🔴 RSI: ${rsiValue.toFixed(1)} (divergência baixa) ${rsiTrendEmoji}`);
-                } else {
-                    factors.negative.push(`🔴🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado) ${rsiTrendEmoji}`);
-                }
+                factors.negative.push(`🔴 RSI: ${rsiValue.toFixed(1)} (elevado)`);
             }
         } else {
             if (rsiValue > 75) {
-                factors.positive.push(`🔴🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado forte) ${rsiTrendEmoji}`);
+                factors.positive.push(`🔴🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado forte)`);
                 totalScore += weights.RSI;
             } else if (rsiValue > 70) {
-                factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado) ${rsiTrendEmoji}`);
+                factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado)`);
                 totalScore += weights.RSI * 0.9;
             } else if (rsiValue > 60) {
-                if (rsiDirection < 0) {
-                    factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (queda) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.8;
-                } else {
-                    factors.neutral.push(`🟡 RSI: ${rsiValue.toFixed(1)} (próx sobrecompra) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.5;
-                }
+                factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (próx sobrecompra)`);
+                totalScore += weights.RSI * 0.8;
             } else if (rsiValue > 50) {
-                if (rsiDirection < 0) {
-                    factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (consolidação de BAIXA) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.7;
-                } else {
-                    factors.neutral.push(`⚪ RSI: ${rsiValue.toFixed(1)} (neutro) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.3;
-                }
-            } else if (rsiValue > 40) {
-                if (rsiDirection < 0) {
-                    factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (viés negativo) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.5;
-                } else {
-                    factors.neutral.push(`⚪ RSI: ${rsiValue.toFixed(1)} (neutro) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.2;
-                }
-            } else if (rsiValue > 30) {
-                if (rsiDirection > 0 || rsiDetailed?.divergence === 'POSSÍVEL DIVERGÊNCIA DE ALTA') {
-                    factors.negative.push(`🟢 RSI: ${rsiValue.toFixed(1)} (recuperando) ${rsiTrendEmoji}`);
-                } else {
-                    factors.neutral.push(`🟡 RSI: ${rsiValue.toFixed(1)} (baixo) ${rsiTrendEmoji}`);
-                    totalScore += weights.RSI * 0.2;
-                }
+                factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (neutro)`);
+                totalScore += weights.RSI * 0.5;
             } else {
-                if (rsiDetailed?.divergence === 'POSSÍVEL DIVERGÊNCIA DE ALTA') {
-                    factors.negative.push(`🟢🟢 RSI: ${rsiValue.toFixed(1)} (divergência alta) ${rsiTrendEmoji}`);
-                } else {
-                    factors.negative.push(`🟢🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido) ${rsiTrendEmoji}`);
-                }
-            }
-        }
-        
-        if (rsiDetailed?.divergence) {
-            if (signalType === 'STOCHASTIC_COMPRA' && rsiDetailed.divergence === 'POSSÍVEL DIVERGÊNCIA DE ALTA') {
-                factors.positive.push(`🟢🟢 DIVERGÊNCIA BULLISH DETECTADA`);
-                totalScore += 10;
-            } else if (signalType === 'STOCHASTIC_VENDA' && rsiDetailed.divergence === 'POSSÍVEL DIVERGÊNCIA DE BAIXA') {
-                factors.positive.push(`🔴🔴 DIVERGÊNCIA BEARISH DETECTADA`);
-                totalScore += 10;
+                factors.negative.push(`🟢 RSI: ${rsiValue.toFixed(1)} (baixo)`);
             }
         }
     } else {
@@ -2068,36 +1759,9 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         }
     }
     
-    if (indicators.volumeAnalysis && indicators.volumeAnalysis.analysis) {
-        const vol = indicators.volumeAnalysis.analysis;
-        
-        if (signalType === 'STOCHASTIC_COMPRA') {
-            if (vol.buyerPercentage >= 60) {
-                factors.positive.push(`🟢🟢 VOLUME: ${vol.buyerPercentage}% comprador`);
-                totalScore += 15;
-            } else if (vol.buyerPercentage >= 55) {
-                factors.positive.push(`🟢 VOLUME: ${vol.buyerPercentage}% comprador`);
-                totalScore += 10;
-            } else if (vol.buyerPercentage >= 50) {
-                factors.positive.push(`🟡 VOLUME: ${vol.buyerPercentage}% comprador`);
-                totalScore += 5;
-            } else {
-                factors.negative.push(`🔵 VOLUME: ${vol.sellerPercentage}% vendedor`);
-            }
-        } else {
-            if (vol.sellerPercentage >= 60) {
-                factors.positive.push(`🔴🔴 VOLUME: ${vol.sellerPercentage}% vendedor`);
-                totalScore += 15;
-            } else if (vol.sellerPercentage >= 55) {
-                factors.positive.push(`🔴 VOLUME: ${vol.sellerPercentage}% vendedor`);
-                totalScore += 10;
-            } else if (vol.sellerPercentage >= 50) {
-                factors.positive.push(`🟡 VOLUME: ${vol.buyerPercentage}% comp / ${vol.sellerPercentage}% vend`);
-                totalScore += 5;
-            } else {
-                factors.negative.push(`🟢 VOLUME: ${vol.buyerPercentage}% comprador`);
-            }
-        }
+    if (indicators.emaCheck && indicators.emaCheck.analysis) {
+        factors.positive.push(`📊 ${indicators.emaCheck.analysis}`);
+        totalScore += 15;
     }
     
     factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
@@ -2139,41 +1803,6 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     }
     
     return factors;
-}
-
-function formatFactorsAnalysis(factors) {
-    let analysisText = '\n<b><i> ANÁLISE DE FATORES:</i></b>\n';
-    analysisText += `<b>Score: ${factors.score}% | Máx: ${factors.maxScore}</b>\n`;
-    analysisText += `<b>${factors.summary}</b>\n\n`;
-    
-    analysisText += '<b><i>✅ FATORES POSITIVOS:</i></b>\n';
-    if (factors.positive && factors.positive.length > 0) {
-        factors.positive.slice(0, 5).forEach(f => {
-            analysisText += `${f}\n`;
-        });
-    } else {
-        analysisText += '⚪ Nenhum fator positivo significativo\n';
-    }
-    
-    analysisText += '\n<b><i>❌ FATORES NEGATIVOS:</i></b>\n';
-    if (factors.negative && factors.negative.length > 0) {
-        factors.negative.slice(0, 5).forEach(f => {
-            analysisText += `${f}\n`;
-        });
-    } else {
-        analysisText += '⚪ Nenhum fator negativo significativo\n';
-    }
-    
-    if (factors.neutral && factors.neutral.length > 0) {
-        analysisText += '\n<b><i>⚪ FATORES NEUTROS:</i></b>\n';
-        factors.neutral.slice(0, 3).forEach(f => {
-            analysisText += `${f}\n`;
-        });
-    }
-    
-    analysisText += `\n<b><i>💡 RECOMENDAÇÃO:</i></b>\n${factors.recommendation}\n`;
-    
-    return analysisText;
 }
 
 // =====================================================================
@@ -2420,37 +2049,11 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
     }
 }
 
-/// =====================================================================
-// === ALERTA PRINCIPAL COM MENSAGEM RESUMIDA PROFISSIONAL ===
-// === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR (PULLBACK CONFIRMATION) ===
-// === 3 ALVOS MAIS CURTOS NAS MENSAGENS (T2, T3, T4) ===
+// =====================================================================
+// === ALERTA PRINCIPAL (COM CONTADOR NA LINHA ABAIXO DA DATA/HORA) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
-    if (!signal.volumeAnalysis.isValid) {
-        console.log(`⚠️  ${signal.symbol}: Volume 3m não atende aos critérios para alerta ${signal.type}`);
-        return;
-    }
-    
-    let entryPrice = signal.currentPrice;
-    let pullbackResult = null;
-    
-    if (CONFIG.RETRACTION.ENABLED && signal.atr) {
-        const config = signal.type === 'STOCHASTIC_COMPRA' 
-            ? CONFIG.RETRACTION.COMPRA 
-            : CONFIG.RETRACTION.VENDA;
-        
-        if (config.ENABLED) {
-            pullbackResult = await waitForPullback(
-                signal.symbol, 
-                signal.type, 
-                signal.currentPrice, 
-                signal.atr.atrPercent
-            );
-            
-            entryPrice = pullbackResult.price;
-            console.log(`📊 ${signal.symbol}: Retração ${pullbackResult.statusEmoji} - $${parseFloat(pullbackResult.pullbackTarget).toFixed(6)}`);
-        }
-    }
+    const entryPrice = signal.currentPrice;
     
     const alertCount = getAlertCountForSymbol(signal.symbol, 'stochastic');
     prioritySystem.registerStochasticAlert(signal.symbol);
@@ -2471,10 +2074,9 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         funding: signal.funding,
         lsr: signal.lsr,
         rsi: signal.rsi,
-        rsiDetailed: signal.rsiDetailed,
         pivotData: signal.pivotData,
         currentPrice: entryPrice,
-        volumeAnalysis: signal.volumeAnalysis
+        emaCheck: signal.emaCheck
     });
     
     // =================================================================
@@ -2483,89 +2085,71 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     let srInfo = null;
     try {
         srInfo = await calculateSupportResistance15m(signal.symbol, entryPrice);
-        console.log(`📊 ${signal.symbol}: S/R 15m calculado - R: $${srInfo?.nearestResistance?.toFixed(6) || 'N/A'} | S: $${srInfo?.nearestSupport?.toFixed(6) || 'N/A'}`);
+        console.log(` ${signal.symbol}: S/R 15m calculado - R: $${srInfo?.nearestResistance?.toFixed(6) || 'N/A'} | S: $${srInfo?.nearestSupport?.toFixed(6) || 'N/A'}`);
     } catch (error) {
         ErrorHandler.handle(error, `GetSR-${signal.symbol}`);
     }
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM RESUMIDA PROFISSIONAL ===
-    // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR ===
-    // === 3 ALVOS MAIS CURTOS (T2, T3, T4) ===
+    // === CONSTRUÇÃO DA MENSAGEM (COM CONTADOR DE ALERTAS) ===
     // =================================================================
     
-    // CALCULAR ALVOS PRINCIPAIS (T2, T3, T4) - OS 3 MAIS CURTOS - EM VALOR (USDT)
-    let takeProfitCompact = ' <i>Alvos:</i> N/A';
+    // CALCULAR ALVOS PRINCIPAIS (T4, T5, T6)
+    let takeProfitCompact = 'Alvos: N/A';
     if (signal.fibonacci) {
         const fib = signal.fibonacci;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T3:$${fib.targets.t3.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
         } else {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T3:$${fib.targets.t3.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
         }
     }
     
-    // CALCULAR STOP LOSS COMPACTO - COM 6 CASAS DECIMAIS
-    let stopCompact = '🛑 <i>Stop:</i> N/A';
+    // CALCULAR STOP LOSS ADAPTATIVO
+    let stopCompact = 'Stop: N/A';
     let stopPrice = 0;
+    let stopPercent = 0;
     
-    if (signal.fibonacci) {
+    if (signal.stopLoss) {
+        stopPrice = signal.stopLoss.stopPrice;
+        stopPercent = signal.stopLoss.stopPercent;
+        
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
+        } else {
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
+        }
+    } else if (signal.fibonacci) {
+        // Fallback para o método antigo se o adaptativo falhar
         const fib = signal.fibonacci;
         const price = entryPrice;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
             const stop1 = Math.max(fib.targets.t1 * 0.985, fib.swingLow * 0.99);
             
-            if (signal.atr) {
-                const atrStop = price - (signal.atr.atr * 2.0);
-                stopPrice = Math.min(stop1, atrStop);
-                if (signal.srLevels && signal.srLevels.nearestSupport) {
-                    stopPrice = Math.min(stopPrice, signal.srLevels.nearestSupport * 0.99);
-                }
-            } else {
-                stopPrice = stop1;
-                if (signal.srLevels && signal.srLevels.nearestSupport) {
-                    stopPrice = Math.min(stopPrice, signal.srLevels.nearestSupport * 0.99);
-                }
+            stopPrice = stop1;
+            if (signal.srLevels && signal.srLevels.nearestSupport) {
+                stopPrice = Math.min(stopPrice, signal.srLevels.nearestSupport * 0.99);
             }
-            const stopPercent = ((price - stopPrice) / price * 100).toFixed(1);
-            stopCompact = `🛑 <i>Stop:</i> $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            
+            stopPercent = ((price - stopPrice) / price * 100);
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
             
         } else {
             const stop1 = Math.max(fib.targets.t1 * 1.015, fib.swingHigh * 1.01);
             
-            if (signal.atr) {
-                const atrStop = price + (signal.atr.atr * 2.0);
-                stopPrice = Math.max(stop1, atrStop);
-                if (signal.srLevels && signal.srLevels.nearestResistance) {
-                    stopPrice = Math.max(stopPrice, signal.srLevels.nearestResistance * 1.01);
-                }
-            } else {
-                stopPrice = stop1;
-                if (signal.srLevels && signal.srLevels.nearestResistance) {
-                    stopPrice = Math.max(stopPrice, signal.srLevels.nearestResistance * 1.01);
-                }
+            stopPrice = stop1;
+            if (signal.srLevels && signal.srLevels.nearestResistance) {
+                stopPrice = Math.max(stopPrice, signal.srLevels.nearestResistance * 1.01);
             }
-            const stopPercent = ((stopPrice - price) / price * 100).toFixed(1);
-            stopCompact = `🛑 <i>Stop:</i> $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            
+            stopPercent = ((stopPrice - price) / price * 100);
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`;
         }
     }
     
-    // =================================================================
-    // === FORMATAR RETRAÇÃO COMPACTA - AGORA EM VALOR (USDT) ===
-    // =================================================================
-    let pullbackCompact = '';
-    if (pullbackResult) {
-        const emoji = pullbackResult.confirmed ? '✅' : '⏳';
-        const status = pullbackResult.confirmed ? '' : ' (não confirmada)';
-        const pullbackValue = parseFloat(pullbackResult.pullbackTarget).toFixed(6);
-        pullbackCompact = `${emoji} <i>Retração:</i> $${pullbackValue}${status}`;
-    }
-    
-    // =================================================================
-    // === FORMATAR SUPORTE E RESISTÊNCIA 15M - APÓS RETRAÇÃO ===
-    // =================================================================
+    // FORMATAR SUPORTE E RESISTÊNCIA 15M
     let srCompact = '';
     if (srInfo) {
         const resistance = srInfo.nearestResistance;
@@ -2573,24 +2157,18 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         const distR = resistance ? ((resistance - entryPrice) / entryPrice * 100).toFixed(1) : 'N/A';
         const distS = support ? ((entryPrice - support) / entryPrice * 100).toFixed(1) : 'N/A';
         
-        srCompact = `🔺 <i>Resist:</i> $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | 🔻 <i>Supt:</i> $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
+        srCompact = `Resist: $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | Supt: $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
     }
     
-    // FORMATAR VOLUME COMPACTO
-    let volumeCompact = '';
-    if (signal.volumeAnalysis?.analysis) {
-        const vol = signal.volumeAnalysis.analysis;
-        if (signal.type === 'STOCHASTIC_COMPRA') {
-            volumeCompact = `📈 <i>Vol:</i> ${vol.buyerPercentage}% comprador`;
-        } else {
-            volumeCompact = `📉 <i>Vol:</i> ${vol.sellerPercentage}% vendedor`;
-        }
+    // FORMATAR EMA 3m (removendo os emojis duplicados)
+    let emaCompact = '';
+    if (signal.emaCheck && signal.emaCheck.analysis) {
+        emaCompact = signal.emaCheck.analysis.replace(/📊 /g, '');
     }
     
-    // FORMATAR SCORE E RESUMO
+    // FORMATAR SCORE
     const scoreValue = factors?.score || 0;
     
-    // Extrair resumo curto do summary
     let shortSummary = '💡';
     if (factors?.summary) {
         const words = factors.summary.split(' ');
@@ -2601,7 +2179,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         }
     }
     
-    const scoreCompact = ` <i>Score:</i> ${scoreValue}% | ${shortSummary}`;
+    const scoreCompact = `Score: ${scoreValue}% | ${shortSummary}`;
     
     // FORMATAR LSR
     let lsrText = 'N/A';
@@ -2609,9 +2187,9 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            lsrEmoji = signal.lsr < CONFIG.PRIORITY.LSR.IDEAL_BUY_LSR ? '🟢' : '🟡';
+            lsrEmoji = signal.lsr < CONFIG.PRIORITY.LSR.IDEAL_BUY_LSR ? '✅' : '⚠️';
         } else {
-            lsrEmoji = signal.lsr > CONFIG.PRIORITY.LSR.IDEAL_SELL_LSR ? '🔴' : '🟡';
+            lsrEmoji = signal.lsr > CONFIG.PRIORITY.LSR.IDEAL_SELL_LSR ? '✅' : '⚠️';
         }
     }
     
@@ -2623,14 +2201,14 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         fundingText = `${fundingValue > 0 ? '+' : ''}${(fundingValue * 100).toFixed(4)}%`;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            fundingEmoji = fundingValue < 0 ? '🟢' : fundingValue > 0.0003 ? '🔴' : '🟡';
+            fundingEmoji = fundingValue < 0 ? '✅' : fundingValue > 0.0003 ? '❌' : '⚠️';
         } else {
-            fundingEmoji = fundingValue > 0 ? '🔴' : fundingValue < -0.0003 ? '🟢' : '🟡';
+            fundingEmoji = fundingValue > 0 ? '✅' : fundingValue < -0.0003 ? '❌' : '⚠️';
         }
     }
     
-    // FORMATAR STOCH - MOSTRAR CONFIGURAÇÃO 8.3.3 4h
-    const stochText = `K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)} (4h 8.3.3)`;
+    // FORMATAR STOCH
+    const stochText = `K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)}`;
     
     // FORMATAR RSI
     let rsiText = 'N/A';
@@ -2638,101 +2216,53 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         rsiText = signal.rsi.toFixed(0);
     }
     
-    // FORMATAR ANÁLISE DE CANDLE (REGULAR OU IRREGULAR)
-    let candleAnalysis = '';
-    if (signal.volumeAnalysis?.analysis) {
-        const vol = signal.volumeAnalysis.analysis;
-        const buyerPerc = parseFloat(vol.buyerPercentage);
-        const sellerPerc = parseFloat(vol.sellerPercentage);
-        
-        if (signal.type === 'STOCHASTIC_COMPRA') {
-            if (buyerPerc >= 60) {
-                candleAnalysis = 'Candle regular';
-            } else if (buyerPerc >= 55) {
-                candleAnalysis = 'Candle regular';
-            } else if (buyerPerc >= 50) {
-                candleAnalysis = 'Candle irregular';
-            } else {
-                candleAnalysis = 'Candle irregular';
-            }
-        } else {
-            if (sellerPerc >= 60) {
-                candleAnalysis = 'Candle regular';
-            } else if (sellerPerc >= 55) {
-                candleAnalysis = 'Candle regular';
-            } else if (sellerPerc >= 50) {
-                candleAnalysis = 'Candle irregular';
-            } else {
-                candleAnalysis = 'Candle irregular';
-            }
+    // FORMATAR VOLUME 1H
+    let volumeText = 'Volume 1h: Desconhecido';
+    if (signal.volumeData) {
+        const volData = signal.volumeData;
+        volumeText = `Volume 1h: ${volData.percentage}% ${volData.direction}`;
+        if (volData.emoji) {
+            volumeText = `${volData.emoji} ${volumeText}`;
         }
     }
     
-    // =================================================================
-    // === SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO POR ATR ===
-    // === (PULLBACK CONFIRMATION SYSTEM) ===
-    // =================================================================
-    let retractionStatus = '';
-    let signalQuality = '';
+    // FORMATAR CONTADOR DE ALERTAS
+    const alertCounterText = `Alerta ${alertCount.symbolDailyStochastic || 0}`;
     
-    if (pullbackResult && pullbackResult.confirmed) {
-        // RETRAÇÃO CONFIRMADA - Sinal de alta qualidade
-        retractionStatus = '🟢 Confirmada';
-        signalQuality = '✅ Qualificado';
-    } else if (pullbackResult && !pullbackResult.confirmed) {
-        // RETRAÇÃO NÃO CONFIRMADA - Sinal fraco, evitar
-        retractionStatus = '🔴 Não confirmada';
-        signalQuality = '⚠️ Evitar';
-    } else {
-        // SISTEMA DE RETRAÇÃO DESATIVADO - Análise manual necessária
-        retractionStatus = '⚪ Não ativada';
-        signalQuality = '⚪ Manual';
-    }
-    
-    const pullbackInfo = `🛡️ Retração: ${retractionStatus} | Sinal: ${signalQuality}`;
-    
-    // DEFINIR ÍCONES PRINCIPAIS
+    // DEFINIR ÍCONES
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
-    const lsrIcon = signal.type === 'STOCHASTIC_COMPRA' ? '📈' : '📉';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM - SISTEMA DE CONFIRMAÇÃO DE RETRAÇÃO ===
-    // === ADICIONADO LOGO APÓS OPERAÇÃO FAVORÁVEL OU DESFAVORÁVEL ===
-    // === 3 ALVOS MAIS CURTOS INCLUÍDOS (T2, T3, T4) ===
+    // === CONSTRUÇÃO DA MENSAGEM (COM VOLUME 1H INCLUÍDO) ===
     // =================================================================
     
-    let message = `
-<i>${actionEmoji} ${actionText} • ${signal.symbol}</i>
- <i>$${entryPrice.toFixed(6)}</i> • ${signal.time.time}
-━━━━━━━━━━━━━━
-📊 <i>Stoch</i> ${stochText} | <i>RSI</i> ${rsiText}
-${lsrIcon} <i>LSR</i> ${lsrEmoji} ${lsrText} | <i>Fund</i> ${fundingEmoji} ${fundingText}
-<b><i>${factors.summary}</i></b> | ${candleAnalysis}
-${pullbackInfo}
+    let message = `${actionEmoji} ${actionText} • ${signal.symbol}
+Preço: $${entryPrice.toFixed(6)}
+${volumeText}
+${alertCounterText} - ${signal.time.full}hs
+❅──────✧❅✨❅✧──────❅
+Stoch ${stochText} | RSI 1H ${rsiText}
+LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 ${takeProfitCompact}
-${stopCompact}
-${pullbackCompact}
+🛑 ${stopCompact}
 ${srCompact}
-${volumeCompact}
 ${scoreCompact}
-━━━━━━━━━━━━━━
-✨ Titanium by @J4Rviz ✨
-`;
 
-    // REMOVER LINHAS VAZIAS
-    message = message.replace(/^\s*[\n\r]+/gm, '\n').trim();
+✨ Titanium by @J4Rviz ✨`;
+
+    // REMOVER LINHAS VAZIAS E ESPAÇOS EXTRAS
+    message = message.replace(/\n\s*\n/g, '\n').trim();
 
     await sendTelegramAlert(message);
     
     console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText})`);
+    console.log(`   📊 Volume 1h: ${signal.volumeData?.percentage || 0}% ${signal.volumeData?.direction || 'Desconhecido'}`);
     console.log(`   📊 Score: ${factors.score}% | ${shortSummary}`);
     console.log(`   💰 Preço: $${entryPrice.toFixed(6)}`);
-    console.log(`   🎯 Alvos (3 mais curtos): T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T3:$${signal.fibonacci?.targets.t3.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)}`);
-    console.log(`   🛡️ Retração: ${pullbackResult?.confirmed ? 'Confirmada ✅' : 'Não confirmada ❌'}`);
-    if (pullbackResult) {
-        console.log(`   📉 Pullback: ${pullbackResult.statusEmoji} $${parseFloat(pullbackResult.pullbackTarget).toFixed(6)}`);
-    }
+    console.log(`   📊 EMA 3m: ${signal.emaCheck.analysis}`);
+    console.log(`   🛑 Stop adaptativo: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(1)}%)`);
+    console.log(`   🎯 Alvos: T2:$${signal.fibonacci?.targets.t2.toFixed(6)} T4:$${signal.fibonacci?.targets.t4.toFixed(6)} T6:$${signal.fibonacci?.targets.t6.toFixed(6)}`);
     if (srInfo) {
         console.log(`   🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
         console.log(`   🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
@@ -2798,10 +2328,11 @@ async function mainBotLoop() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 4h 8.3.3 + Fibonacci 4h');
-        console.log('🛡️ Sistema: Confirmação de Retração por ATR');
+        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + Fibonacci 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
-        console.log('🎯 Alvos: 3 mais curtos (T2, T3, T4)');
+        console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
+        console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
+        console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
 
         const cleanupSystem = new AdvancedCleanupSystem();
@@ -2883,10 +2414,11 @@ async function startBot() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - INICIANDO...');
-        console.log('🛡️ Sistema de Confirmação de Retração por ATR ATIVADO');
-        console.log(`📊 Estocástico: 4h 8.3.3 (ALTERADO DE 12h 5.3.3)`);
-        console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
-        console.log(`🎯 Alvos nas mensagens: 3 mais curtos (T2, T3, T4)`);
+        console.log(`📊 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
+        console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
+        console.log(`📊 EMA 3m: Ativado (13/34/55)`);
+        console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
+        console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
         
         lastResetDate = getBrazilianDateString();
