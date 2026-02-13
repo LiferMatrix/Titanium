@@ -25,17 +25,17 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_A',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 5,
+        K_PERIOD: 14,
         D_PERIOD: 3,
         SLOWING: 3,
-        TIMEFRAME: '12h',
-        OVERBOUGHT: 70,
-        OVERSOLD: 40
+        TIMEFRAME: '4h',
+        OVERBOUGHT: 74,
+        OVERSOLD: 67
     },
     PRIORITY: {
         ENABLED: true,
@@ -1397,7 +1397,7 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             return null;
         }
 
-        // FILTRO ESTOCÁSTICO: Só alertar se estiver abaixo de 30 (compra) ou acima de 77 (venda)
+        // FILTRO ESTOCÁSTICO: Só alertar se estiver abaixo de 20 (compra) ou acima de 80 (venda)
         if (signalType === 'STOCHASTIC_COMPRA' && stochastic.k >= CONFIG.STOCHASTIC.OVERSOLD) {
             console.log(`⚠️ ${symbol}: Cruzamento de COMPRA ignorado - Estocástico K=${stochastic.k.toFixed(1)} (deve ser < ${CONFIG.STOCHASTIC.OVERSOLD})`);
             return null;
@@ -1974,7 +1974,7 @@ async function analyzeStructureDetailed4h(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL ===
+// === ALERTA PRINCIPAL (CORRIGIDO) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const entryPrice = signal.currentPrice;
@@ -2015,23 +2015,23 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     }
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM ===
+    // === CONSTRUÇÃO DA MENSAGEM (CORRIGIDA) ===
     // =================================================================
     
     // CALCULAR ALVOS PRINCIPAIS (T2, T4, T6)
-    let takeProfitCompact = ' <i>Alvos:</i> N/A';
+    let takeProfitCompact = 'Alvos: N/A';
     if (signal.fibonacci) {
         const fib = signal.fibonacci;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)} | T6:$${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T2: $${fib.targets.t2.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)} | T6: $${fib.targets.t6.toFixed(6)}`;
         } else {
-            takeProfitCompact = ` <i>Alvos:</i> T2:$${fib.targets.t2.toFixed(6)} | T4:$${fib.targets.t4.toFixed(6)} | T6:$${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T2: $${fib.targets.t2.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)} | T6: $${fib.targets.t6.toFixed(6)}`;
         }
     }
     
     // CALCULAR STOP LOSS
-    let stopCompact = '🛑 <i>Stop:</i> N/A';
+    let stopCompact = 'Stop: N/A';
     let stopPrice = 0;
     
     if (signal.fibonacci) {
@@ -2047,7 +2047,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
             }
             
             const stopPercent = ((price - stopPrice) / price * 100).toFixed(1);
-            stopCompact = `🛑 <i>Stop:</i> $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent}%)`;
             
         } else {
             const stop1 = Math.max(fib.targets.t1 * 1.015, fib.swingHigh * 1.01);
@@ -2058,7 +2058,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
             }
             
             const stopPercent = ((stopPrice - price) / price * 100).toFixed(1);
-            stopCompact = `🛑 <i>Stop:</i> $${stopPrice.toFixed(6)} (${stopPercent}%)`;
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent}%)`;
         }
     }
     
@@ -2070,13 +2070,13 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         const distR = resistance ? ((resistance - entryPrice) / entryPrice * 100).toFixed(1) : 'N/A';
         const distS = support ? ((entryPrice - support) / entryPrice * 100).toFixed(1) : 'N/A';
         
-        srCompact = `🔺 <i>Resist:</i> $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | 🔻 <i>Supt:</i> $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
+        srCompact = `Resist: $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | Supt: $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
     }
     
-    // FORMATAR EMA 3m
+    // FORMATAR EMA 3m (removendo os emojis duplicados)
     let emaCompact = '';
     if (signal.emaCheck && signal.emaCheck.analysis) {
-        emaCompact = `${signal.emaCheck.analysis}`;
+        emaCompact = signal.emaCheck.analysis.replace(/📊 /g, '');
     }
     
     // FORMATAR SCORE
@@ -2092,7 +2092,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         }
     }
     
-    const scoreCompact = ` <i>Score:</i> ${scoreValue}% | ${shortSummary}`;
+    const scoreCompact = `Score: ${scoreValue}% | ${shortSummary}`;
     
     // FORMATAR LSR
     let lsrText = 'N/A';
@@ -2100,9 +2100,9 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            lsrEmoji = signal.lsr < CONFIG.PRIORITY.LSR.IDEAL_BUY_LSR ? '🟢' : '🟡';
+            lsrEmoji = signal.lsr < CONFIG.PRIORITY.LSR.IDEAL_BUY_LSR ? '✅' : '⚠️';
         } else {
-            lsrEmoji = signal.lsr > CONFIG.PRIORITY.LSR.IDEAL_SELL_LSR ? '🔴' : '🟡';
+            lsrEmoji = signal.lsr > CONFIG.PRIORITY.LSR.IDEAL_SELL_LSR ? '✅' : '⚠️';
         }
     }
     
@@ -2114,9 +2114,9 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         fundingText = `${fundingValue > 0 ? '+' : ''}${(fundingValue * 100).toFixed(4)}%`;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            fundingEmoji = fundingValue < 0 ? '🟢' : fundingValue > 0.0003 ? '🔴' : '🟡';
+            fundingEmoji = fundingValue < 0 ? '✅' : fundingValue > 0.0003 ? '❌' : '⚠️';
         } else {
-            fundingEmoji = fundingValue > 0 ? '🔴' : fundingValue < -0.0003 ? '🟢' : '🟡';
+            fundingEmoji = fundingValue > 0 ? '✅' : fundingValue < -0.0003 ? '❌' : '⚠️';
         }
     }
     
@@ -2132,30 +2132,27 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // DEFINIR ÍCONES
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
-    const lsrIcon = signal.type === 'STOCHASTIC_COMPRA' ? '📈' : '📉';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM ===
+    // === CONSTRUÇÃO DA MENSAGEM (FORMATO SIMPLIFICADO) ===
     // =================================================================
     
-    let message = `
-<i>${actionEmoji} ${actionText} • ${signal.symbol}</i>
- <i>$${entryPrice.toFixed(6)}</i> • ${signal.time.time}
+    let message = `${actionEmoji} ${actionText} • ${signal.symbol}
+💰 $${entryPrice.toFixed(6)} • ${signal.time.time}
 ━━━━━━━━━━━━━━
-📊 <i>Stoch</i> ${stochText} | <i>RSI</i> ${rsiText}
-${lsrIcon} <i>LSR</i> ${lsrEmoji} ${lsrText} | <i>Fund</i> ${fundingEmoji} ${fundingText}
-<b><i>${factors.summary}</i></b>
+📊 Stoch ${stochText} | RSI ${rsiText}
+📈 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
+📌 ${factors.summary}
 ${emaCompact}
-${takeProfitCompact}
-${stopCompact}
-${srCompact}
-${scoreCompact}
+🎯 ${takeProfitCompact}
+🛑 ${stopCompact}
+📊 ${srCompact}
+📈 ${scoreCompact}
 ━━━━━━━━━━━━━━
-✨ Titanium by @J4Rviz ✨
-`;
+✨ Titanium by @J4Rviz ✨`;
 
-    // REMOVER LINHAS VAZIAS
-    message = message.replace(/^\s*[\n\r]+/gm, '\n').trim();
+    // REMOVER LINHAS VAZIAS E ESPAÇOS EXTRAS
+    message = message.replace(/\n\s*\n/g, '\n').trim();
 
     await sendTelegramAlert(message);
     
@@ -2229,7 +2226,7 @@ async function mainBotLoop() {
         
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 12h + Fibonacci 4h + EMA 3m');
+        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + Fibonacci 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log('='.repeat(80) + '\n');
