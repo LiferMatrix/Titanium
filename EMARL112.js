@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_0A',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -2009,7 +2009,7 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     let srInfo = null;
     try {
         srInfo = await calculateSupportResistance15m(signal.symbol, entryPrice);
-        console.log(`📊 ${signal.symbol}: S/R 15m calculado - R: $${srInfo?.nearestResistance?.toFixed(6) || 'N/A'} | S: $${srInfo?.nearestSupport?.toFixed(6) || 'N/A'}`);
+        console.log(` ${signal.symbol}: S/R 15m calculado - R: $${srInfo?.nearestResistance?.toFixed(6) || 'N/A'} | S: $${srInfo?.nearestSupport?.toFixed(6) || 'N/A'}`);
     } catch (error) {
         ErrorHandler.handle(error, `GetSR-${signal.symbol}`);
     }
@@ -2018,15 +2018,15 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // === CONSTRUÇÃO DA MENSAGEM (CORRIGIDA) ===
     // =================================================================
     
-    // CALCULAR ALVOS PRINCIPAIS (T2, T4, T6)
+    // CALCULAR ALVOS PRINCIPAIS (T4, T5, T6)
     let takeProfitCompact = 'Alvos: N/A';
     if (signal.fibonacci) {
         const fib = signal.fibonacci;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            takeProfitCompact = `Alvos: T2: $${fib.targets.t2.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)} | T6: $${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
         } else {
-            takeProfitCompact = `Alvos: T2: $${fib.targets.t2.toFixed(6)} | T4: $${fib.targets.t4.toFixed(6)} | T6: $${fib.targets.t6.toFixed(6)}`;
+            takeProfitCompact = `Alvos: T1: $${fib.targets.t4.toFixed(6)} | T2: $${fib.targets.t5.toFixed(6)} | T3: $${fib.targets.t6.toFixed(6)}`;
         }
     }
     
@@ -2138,17 +2138,15 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     // =================================================================
     
     let message = `${actionEmoji} ${actionText} • ${signal.symbol}
-💰 $${entryPrice.toFixed(6)} • ${signal.time.time}
+ $${entryPrice.toFixed(6)} • ${signal.time.time}hs
 ━━━━━━━━━━━━━━
-📊 Stoch ${stochText} | RSI ${rsiText}
-📈 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
-📌 ${factors.summary}
-${emaCompact}
-🎯 ${takeProfitCompact}
+ Stoch ${stochText} | RSI ${rsiText}
+ LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
+ ${takeProfitCompact}
 🛑 ${stopCompact}
 📊 ${srCompact}
 📈 ${scoreCompact}
-━━━━━━━━━━━━━━
+
 ✨ Titanium by @J4Rviz ✨`;
 
     // REMOVER LINHAS VAZIAS E ESPAÇOS EXTRAS
