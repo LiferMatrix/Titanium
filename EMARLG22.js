@@ -25,8 +25,8 @@ const RSI_1H_CONFIG = {
 
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAFdg',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -2254,13 +2254,12 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
     
     // =================================================================
-    // === CONSTRUÇÃO DA MENSAGEM (COM 4 ALVOS ATR APENAS) ===
+    // === CONSTRUÇÃO DA MENSAGEM ===
     // =================================================================
     
     let message = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${entryPrice.toFixed(6)}
 ${volumeText}
-${atrText}
 ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
 Stoch ${stochText} | RSI 1H ${rsiText}
