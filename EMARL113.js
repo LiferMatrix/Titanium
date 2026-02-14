@@ -21,8 +21,8 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
-        CHAT_ID: '-1001990889297'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswIA',
+        CHAT_ID: '-1001'
     },
     STOCHASTIC: {
         ENABLED: true,
