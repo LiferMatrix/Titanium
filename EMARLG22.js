@@ -21,8 +21,8 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -1645,6 +1645,29 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     return factors;
 }
 // =====================================================================
+// === FUNÇÕES AUXILIARES PARA ANÁLISE DETALHADA (NÃO IMPLEMENTADAS) ===
+// =====================================================================
+async function analyzeFundingRateDetailed(symbol) {
+    // Função placeholder - implementar se necessário
+    return null;
+}
+
+async function analyzeLSRDetailed(symbol) {
+    // Função placeholder - implementar se necessário
+    return null;
+}
+
+async function analyzeRSIDetailed(symbol) {
+    // Função placeholder - implementar se necessário
+    return null;
+}
+
+async function analyzeStructureDetailed4h(symbol, price, isBullish) {
+    // Função placeholder - implementar se necessário
+    return null;
+}
+
+// =====================================================================
 // === ALERTA PRINCIPAL (COM 4 ALVOS ATR APENAS) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal, prioritySystem) {
@@ -1762,6 +1785,36 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         srCompact = `Resist: $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | Supt: $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
     }
    
+    // ========== NOVO CÓDIGO: FORMATAR DISTÂNCIA AOS PIVÔS ==========
+    let pivotDistanceText = '';
+    if (signal.pivotData) {
+        const pivot = signal.pivotData;
+        const currentPrice = entryPrice;
+        
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            // Para COMPRA: mostrar distância até a resistência mais próxima
+            if (pivot.nearestResistance) {
+                const distToResistance = pivot.nearestResistance.distancePercent;
+                const emoji = distToResistance > 5 ? '🟢' : distToResistance > 3 ? '🟡' : '🔴';
+                pivotDistanceText = `📊 Pivô: Resistência em $${pivot.nearestResistance.price.toFixed(6)} (${distToResistance.toFixed(2)}% ${emoji})`;
+            } else {
+                pivotDistanceText = `📊 Pivô: N/A`;
+            }
+        } else {
+            // Para VENDA: mostrar distância até o suporte mais próximo
+            if (pivot.nearestSupport) {
+                const distToSupport = pivot.nearestSupport.distancePercent;
+                const emoji = distToSupport > 5 ? '🔴' : distToSupport > 3 ? '🟡' : '🔵';
+                pivotDistanceText = `📊 Pivô: Suporte em $${pivot.nearestSupport.price.toFixed(6)} (${distToSupport.toFixed(2)}% ${emoji})`;
+            } else {
+                pivotDistanceText = `📊 Pivô: N/A`;
+            }
+        }
+    } else {
+        pivotDistanceText = `📊 Pivô: Indisponível`;
+    }
+    // ========== FIM DO NOVO CÓDIGO ==========
+   
     // FORMATAR EMA 3m (removendo os emojis duplicados)
     let emaCompact = '';
     if (signal.emaCheck && signal.emaCheck.analysis) {
@@ -1855,10 +1908,13 @@ LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 ${atrTargetsText}
 🛑 ${stopCompact}
 ${srCompact}
+${pivotDistanceText}
 ${scoreCompact}
 ✨ Titanium by @J4Rviz ✨`;
+   
     // REMOVER LINHAS VAZIAS E ESPAÇOS EXTRAS
     message = message.replace(/\n\s*\n/g, '\n').trim();
+   
     await sendTelegramAlert(message);
    
     console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText})`);
@@ -1869,6 +1925,7 @@ ${scoreCompact}
     console.log(` 📊 EMA 3m: ${signal.emaCheck.analysis}`);
     console.log(` 🛑 Stop curto: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(2)}%)`);
     console.log(` 🎯 Alvos ATR: T1:$${signal.atrTargets?.targets.t1.toFixed(6)} T2:$${signal.atrTargets?.targets.t2.toFixed(6)} T3:$${signal.atrTargets?.targets.t3.toFixed(6)} T4:$${signal.atrTargets?.targets.t4.toFixed(6)}`);
+    console.log(` 📊 Pivô: ${pivotDistanceText.replace('📊 Pivô: ', '')}`);
     if (srInfo) {
         console.log(` 🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
         console.log(` 🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
@@ -1937,6 +1994,7 @@ async function mainBotLoop() {
         console.log(`📊 Stop curto baseado na estrutura 15m (0.5% abaixo do suporte / acima da resistência)`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
+       
         const cleanupSystem = new AdvancedCleanupSystem();
         const prioritySystem = new PrioritySystem();
        
