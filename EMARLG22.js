@@ -84,6 +84,18 @@ const CONFIG = {
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
         MEMORY_THRESHOLD: 500 * 1024 * 1024
+    },
+    RETEST: {
+        ENABLED: true,
+        TOLERANCE_PERCENT: 0.3,        // Tolerância para agrupar níveis
+        MAX_DISTANCE_PERCENT: 1.0,      // Distância máxima para considerar reteste
+        MIN_TESTS_FOR_HISTORIC: 3,      // Mínimo de testes para nível histórico
+        VOLUME_THRESHOLD: 1.2,           // Volume 20% acima da média
+        TIMEFRAMES: {
+            PRIMARY: '15m',
+            CONFIRMATION: '5m',
+            CONTEXT: '1h'
+        }
     }
 };
 // =====================================================================
@@ -1252,6 +1264,239 @@ async function analyzeVolume1hWithEMA9(symbol) {
         return { direction: 'Erro', percentage: 0, emoji: '❌' };
     }
 }
+
+// =====================================================================
+// === NOVA FUNÇÃO: ENCONTRAR NÍVEIS SIGNIFICATIVOS ===
+// =====================================================================
+function findSignificantLevels(values, tolerancePercent) {
+    const levels = [];
+    const sortedValues = [...values].sort((a, b) => a - b);
+    
+    for (let i = 0; i < sortedValues.length; i++) {
+        const currentValue = sortedValues[i];
+        let found = false;
+        
+        // Verificar se já existe um nível próximo
+        for (const level of levels) {
+            const diffPercent = Math.abs((currentValue - level) / level) * 100;
+            if (diffPercent <= tolerancePercent) {
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            levels.push(currentValue);
+        }
+    }
+    
+    return levels;
+}
+
+// =====================================================================
+// === NOVA FUNÇÃO: ANALISAR RETESTE DE SUPORTE/RESISTÊNCIA ===
+// =====================================================================
+async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) {
+    if (!CONFIG.RETEST.ENABLED) return null;
+    
+    try {
+        // Buscar candles de diferentes timeframes
+        const candles15m = await getCandles(symbol, CONFIG.RETEST.TIMEFRAMES.PRIMARY, 200);
+        const candles5m = await getCandles(symbol, CONFIG.RETEST.TIMEFRAMES.CONFIRMATION, 100);
+        const candles1h = await getCandles(symbol, CONFIG.RETEST.TIMEFRAMES.CONTEXT, 48);
+        
+        if (candles15m.length < 100 || candles5m.length < 50) {
+            return null;
+        }
+
+        // =============================================================
+        // 1. IDENTIFICAR NÍVEIS IMPORTANTES
+        // =============================================================
+        
+        const highs = candles15m.map(c => c.high);
+        const lows = candles15m.map(c => c.low);
+        
+        const resistanceLevels = findSignificantLevels(highs, CONFIG.RETEST.TOLERANCE_PERCENT);
+        const supportLevels = findSignificantLevels(lows, CONFIG.RETEST.TOLERANCE_PERCENT);
+        
+        // =============================================================
+        // 2. VERIFICAR SE O PREÇO ESTÁ PRÓXIMO DE UM NÍVEL IMPORTANTE
+        // =============================================================
+        
+        let nearestLevel = null;
+        let levelType = null;
+        let distanceToLevel = 100;
+        let levelHistory = [];
+        
+        if (signalType === 'STOCHASTIC_COMPRA') {
+            // Para COMPRA: procurar suportes
+            for (const level of supportLevels) {
+                const distance = ((currentPrice - level) / currentPrice) * 100;
+                if (level < currentPrice && distance < CONFIG.RETEST.MAX_DISTANCE_PERCENT && distance < distanceToLevel) {
+                    distanceToLevel = distance;
+                    nearestLevel = level;
+                    levelType = 'SUPORTE';
+                }
+            }
+        } else {
+            // Para VENDA: procurar resistências
+            for (const level of resistanceLevels) {
+                const distance = ((level - currentPrice) / currentPrice) * 100;
+                if (level > currentPrice && distance < CONFIG.RETEST.MAX_DISTANCE_PERCENT && distance < distanceToLevel) {
+                    distanceToLevel = distance;
+                    nearestLevel = level;
+                    levelType = 'RESISTÊNCIA';
+                }
+            }
+        }
+        
+        if (!nearestLevel) {
+            return null; // Não está próximo de nenhum nível significativo
+        }
+        
+        // =============================================================
+        // 3. ANALISAR HISTÓRICO DO NÍVEL
+        // =============================================================
+        
+        const tests = [];
+        let totalTests = 0;
+        let successfulTests = 0;
+        let volumeAtTest = 0;
+        let avgVolume = 0;
+        
+        // Calcular volume médio (5m) para comparação
+        const volumes5m = candles5m.map(c => c.volume);
+        avgVolume = volumes5m.reduce((a, b) => a + b, 0) / volumes5m.length;
+        
+        // Analisar candles 15m para encontrar testes anteriores
+        for (let i = 0; i < candles15m.length - 1; i++) {
+            const candle = candles15m[i];
+            const nextCandle = candles15m[i + 1];
+            
+            if (levelType === 'SUPORTE') {
+                // Teste de suporte: mínima próxima ao nível
+                if (Math.abs((candle.low - nearestLevel) / nearestLevel) * 100 < CONFIG.RETEST.TOLERANCE_PERCENT) {
+                    tests.push({
+                        time: candle.time,
+                        price: candle.low,
+                        volume: candle.volume,
+                        respected: candle.close > nearestLevel // Respeitou se fechou acima
+                    });
+                    
+                    if (candle.close > nearestLevel) {
+                        successfulTests++;
+                    }
+                    totalTests++;
+                    
+                    // Volume no teste atual (último candle)
+                    if (i === candles15m.length - 2) {
+                        volumeAtTest = candle.volume;
+                    }
+                }
+            } else {
+                // Teste de resistência: máxima próxima ao nível
+                if (Math.abs((candle.high - nearestLevel) / nearestLevel) * 100 < CONFIG.RETEST.TOLERANCE_PERCENT) {
+                    tests.push({
+                        time: candle.time,
+                        price: candle.high,
+                        volume: candle.volume,
+                        respected: candle.close < nearestLevel // Respeitou se fechou abaixo
+                    });
+                    
+                    if (candle.close < nearestLevel) {
+                        successfulTests++;
+                    }
+                    totalTests++;
+                    
+                    // Volume no teste atual (último candle)
+                    if (i === candles15m.length - 2) {
+                        volumeAtTest = candle.volume;
+                    }
+                }
+            }
+        }
+        
+        // =============================================================
+        // 4. ANALISAR CANDLE ATUAL (5m) PARA REJEIÇÃO
+        // =============================================================
+        
+        const lastCandle5m = candles5m[candles5m.length - 1];
+        const prevCandle5m = candles5m[candles5m.length - 2];
+        
+        let rejectionPattern = null;
+        let rejectionStrength = 0;
+        
+        if (levelType === 'SUPORTE') {
+            // Martelo (hammer) em suporte
+            const body = Math.abs(lastCandle5m.close - lastCandle5m.open);
+            const lowerShadow = Math.min(lastCandle5m.open, lastCandle5m.close) - lastCandle5m.low;
+            const upperShadow = lastCandle5m.high - Math.max(lastCandle5m.open, lastCandle5m.close);
+            
+            if (lowerShadow > body * 2 && upperShadow < body * 0.3) {
+                rejectionPattern = 'MARTELO (HAMMER)';
+                rejectionStrength = lowerShadow / body;
+            }
+        } else {
+            // Estrela cadente (shooting star) em resistência
+            const body = Math.abs(lastCandle5m.close - lastCandle5m.open);
+            const upperShadow = lastCandle5m.high - Math.max(lastCandle5m.open, lastCandle5m.close);
+            const lowerShadow = Math.min(lastCandle5m.open, lastCandle5m.close) - lastCandle5m.low;
+            
+            if (upperShadow > body * 2 && lowerShadow < body * 0.3) {
+                rejectionPattern = 'ESTRELA CADENTE';
+                rejectionStrength = upperShadow / body;
+            }
+        }
+        
+        // =============================================================
+        // 5. VERIFICAR FALSA RUPTURA
+        // =============================================================
+        
+        let falseBreakout = false;
+        let breakoutVolume = 0;
+        
+        if (levelType === 'SUPORTE' && lastCandle5m.low < nearestLevel && lastCandle5m.close > nearestLevel) {
+            // Rompeu suporte mas fechou acima (falsa ruptura)
+            falseBreakout = true;
+            breakoutVolume = lastCandle5m.volume;
+        } else if (levelType === 'RESISTÊNCIA' && lastCandle5m.high > nearestLevel && lastCandle5m.close < nearestLevel) {
+            // Rompeu resistência mas fechou abaixo (falsa ruptura)
+            falseBreakout = true;
+            breakoutVolume = lastCandle5m.volume;
+        }
+        
+        // =============================================================
+        // 6. MONTAR OBJETO DE RETORNO
+        // =============================================================
+        
+        const volumeRatio = volumeAtTest / avgVolume;
+        const successRate = totalTests > 0 ? (successfulTests / totalTests) * 100 : 0;
+        
+        return {
+            level: nearestLevel,
+            type: levelType,
+            distance: distanceToLevel,
+            tests: tests,
+            totalTests: totalTests,
+            successfulTests: successfulTests,
+            successRate: successRate,
+            volumeAtTest: volumeAtTest,
+            avgVolume: avgVolume,
+            volumeRatio: volumeRatio,
+            rejectionPattern: rejectionPattern,
+            rejectionStrength: rejectionStrength,
+            falseBreakout: falseBreakout,
+            breakoutVolume: breakoutVolume,
+            isHistoric: totalTests >= CONFIG.RETEST.MIN_TESTS_FOR_HISTORIC,
+            timestamp: Date.now()
+        };
+        
+    } catch (error) {
+        ErrorHandler.handle(error, `AnalyzeRetest-${symbol}`);
+        return null;
+    }
+}
+
 // =====================================================================
 // === SINAIS DE ESTOCÁSTICO COM FILTRO DE RSI 1H E EMA 3M ===
 // =====================================================================
@@ -1324,13 +1569,14 @@ async function checkStochasticSignal(symbol, prioritySystem) {
         }
        
         console.log(`✅ ${symbol}: EMA 3m confirmou o sinal`);
-        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData] = await Promise.all([
+        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData, retestData] = await Promise.all([
             getRSI1h(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
             analyzePivotPoints(symbol, await getCurrentPrice(symbol), signalType === 'STOCHASTIC_COMPRA'),
             getCurrentPrice(symbol),
-            analyzeVolume1hWithEMA9(symbol)
+            analyzeVolume1hWithEMA9(symbol),
+            analyzeSupportResistanceRetest(symbol, await getCurrentPrice(symbol), signalType)
         ]);
         // =================================================================
         // === FILTRO DE RSI 1H PARA COMPRA E VENDA ===
@@ -1378,7 +1624,8 @@ async function checkStochasticSignal(symbol, prioritySystem) {
             atrTargets: atrTargets,
             srLevels: srLevels,
             emaCheck: emaCheck,
-            volumeData: volumeData
+            volumeData: volumeData,
+            retestData: retestData
         };
     } catch (error) {
         ErrorHandler.handle(error, `CheckStochasticSignal-${symbol}`);
@@ -1396,7 +1643,8 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         score: 0,
         maxScore: 0,
         summary: '',
-        recommendation: ''
+        recommendation: '',
+        resumoInteligente: '' // NOVO: Campo para o resumo rápido
     };
 
     const weights = {
@@ -1404,7 +1652,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         LSR: 30,
         RSI: 20,
         STRUCTURE: 25,
-        PIVOT_DISTANCE: 25  // Novo peso para distância aos pivôs (importante!)
+        PIVOT_DISTANCE: 25
     };
 
     factors.maxScore = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -1605,6 +1853,66 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     // Cálculo final do score (agora maxScore inclui PIVOT_DISTANCE)
     factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
 
+    // =================================================================
+    // === NOVA LÓGICA: GERAR RESUMO INTELIGENTE ===
+    // =================================================================
+    const isBadTrade = factors.score < 50; // Considera ruim/desfavorável se score < 50
+    const isNearResistance = indicators.pivotData?.nearestResistance?.distancePercent < 3.0; // Menos de 3% da resistência
+    const isNearSupport = indicators.pivotData?.nearestSupport?.distancePercent < 3.0; // Menos de 3% do suporte
+    const volumeData = indicators.volumeData; // Pegamos o volume do indicador passado
+    const buyerVolumeWeak = volumeData && volumeData.direction === 'Comprador' && volumeData.percentage < 50;
+    const sellerVolumeWeak = volumeData && volumeData.direction === 'Vendedor' && volumeData.percentage < 50;
+
+    let resumo = '';
+
+    if (signalType === 'STOCHASTIC_COMPRA') {
+        if (isBadTrade) {
+            resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA COMPRA. `;
+            if (isNearResistance && buyerVolumeWeak) {
+                resumo += `Preço próximo da resistência (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%) e volume comprador fraco (${volumeData?.percentage}%). Pode ser um PULLBACK DE BAIXA (rejeição). CUIDADO!`;
+            } else if (isNearResistance) {
+                resumo += `Preço próximo da resistência (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%). Pouco espaço para alta imediata.`;
+            } else if (buyerVolumeWeak) {
+                resumo += `Volume comprador fraco (${volumeData?.percentage}%). Falta força para sustentar alta.`;
+            } else {
+                resumo += `Múltiplos fatores negativos. Evitar entrada.`;
+            }
+        } else {
+            resumo = `✅ OPERAÇÃO FAVORÁVEL PARA COMPRA. `;
+            if (indicators.pivotData?.nearestResistance?.distancePercent > 5) {
+                resumo += `Bom espaço até resistência (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%). `;
+            }
+            if (volumeData && volumeData.direction === 'Comprador' && volumeData.percentage > 55) {
+                resumo += `Volume comprador forte (${volumeData.percentage}%). `;
+            }
+            resumo += `Fatores positivos: ${factors.positive.length}.`;
+        }
+    } else { // VENDA
+        if (isBadTrade) {
+            resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA CORREÇÃO. `;
+            if (isNearSupport && sellerVolumeWeak) {
+                resumo += `Preço próximo do suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%) e volume vendedor fraco (${volumeData?.sellerPercentage}%). Pode ser um PULLBACK DE ALTA (possível reversão). CUIDADO!`;
+            } else if (isNearSupport) {
+                resumo += `Preço próximo do suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%). Pouco espaço para queda imediata.`;
+            } else if (sellerVolumeWeak) {
+                resumo += `Volume vendedor fraco (${volumeData?.sellerPercentage}%). Falta força para sustentar queda.`;
+            } else {
+                resumo += `Múltiplos fatores negativos. Evitar entrada.`;
+            }
+        } else {
+            resumo = `✅ OPERAÇÃO FAVORÁVEL PARA CORREÇÃO. `;
+            if (indicators.pivotData?.nearestSupport?.distancePercent > 5) {
+                resumo += `Bom espaço até suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%). `;
+            }
+            if (volumeData && volumeData.direction === 'Vendedor' && volumeData.sellerPercentage > 55) {
+                resumo += `Volume vendedor forte (${volumeData.sellerPercentage}%). `;
+            }
+            resumo += `Fatores positivos: ${factors.positive.length}.`;
+        }
+    }
+
+    factors.resumoInteligente = resumo;
+
     // Resumo e recomendação (mantido igual, mas agora score mais preciso)
     if (signalType === 'STOCHASTIC_COMPRA') {
         if (factors.score >= 80) {
@@ -1694,7 +2002,8 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
         rsi: signal.rsi,
         pivotData: signal.pivotData,
         currentPrice: entryPrice,
-        emaCheck: signal.emaCheck
+        emaCheck: signal.emaCheck,
+        volumeData: signal.volumeData
     });
    
     // =================================================================
@@ -1815,6 +2124,35 @@ async function sendStochasticAlertEnhanced(signal, prioritySystem) {
     }
     // ========== FIM DO NOVO CÓDIGO ==========
    
+    // ========== NOVA SEÇÃO: ANÁLISE DE RETESTE ==========
+    let retestText = '';
+    if (signal.retestData) {
+        const rt = signal.retestData;
+        
+        retestText = `\n🤖#Titanium #IA 🔍Análise`;
+        retestText += `\n📊 Nível de ${rt.type}: $${rt.level.toFixed(6)} (distância ${rt.distance.toFixed(2)}%)`;
+        
+        if (rt.totalTests > 0) {
+            retestText += `\n📈 Histórico: ${rt.totalTests} testes, ${rt.successRate.toFixed(0)}% de aprovação`;
+            if (rt.volumeRatio > CONFIG.RETEST.VOLUME_THRESHOLD) {
+                retestText += `\n📊 Volume no teste: ${(rt.volumeRatio * 100).toFixed(0)}% acima da média ✅`;
+            }
+        }
+        
+        if (rt.rejectionPattern) {
+            retestText += `\n🎯 Padrão de rejeição: ${rt.rejectionPattern}`;
+        }
+        
+        if (rt.falseBreakout) {
+            retestText += `\n⚠️ FALSA RUPTURA detectada!`;
+        }
+        
+        if (rt.isHistoric) {
+            retestText += `\n🏆 Nível HISTÓRICO (${rt.totalTests} testes)`;
+        }
+    }
+    // ========== FIM DA NOVA SEÇÃO ==========
+   
     // FORMATAR EMA 3m (removendo os emojis duplicados)
     let emaCompact = '';
     if (signal.emaCheck && signal.emaCheck.analysis) {
@@ -1907,9 +2245,11 @@ Stoch ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 ${atrTargetsText}
 🛑 ${stopCompact}
+✨Níveis Importantes:
 ${srCompact}
 ${pivotDistanceText}
-${scoreCompact}
+${retestText}
+💡 ${factors.resumoInteligente}
 ✨ Titanium by @J4Rviz ✨`;
    
     // REMOVER LINHAS VAZIAS E ESPAÇOS EXTRAS
@@ -1926,6 +2266,10 @@ ${scoreCompact}
     console.log(` 🛑 Stop curto: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(2)}%)`);
     console.log(` 🎯 Alvos ATR: T1:$${signal.atrTargets?.targets.t1.toFixed(6)} T2:$${signal.atrTargets?.targets.t2.toFixed(6)} T3:$${signal.atrTargets?.targets.t3.toFixed(6)} T4:$${signal.atrTargets?.targets.t4.toFixed(6)}`);
     console.log(` 📊 Pivô: ${pivotDistanceText.replace('📊 Pivô: ', '')}`);
+    console.log(` 💡 Resumo: ${factors.resumoInteligente}`);
+    if (signal.retestData) {
+        console.log(` 🔄 Reteste: ${signal.retestData.type} em $${signal.retestData.level.toFixed(6)} (${signal.retestData.totalTests} testes)`);
+    }
     if (srInfo) {
         console.log(` 🔺 Resistência 15m: $${srInfo.nearestResistance?.toFixed(6) || 'N/A'}`);
         console.log(` 🔻 Suporte 15m: $${srInfo.nearestSupport?.toFixed(6) || 'N/A'}`);
@@ -1992,6 +2336,7 @@ async function mainBotLoop() {
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
         console.log(`📊 ATR 4h: Calculando 4 alvos (0.5x, 1.0x, 1.5x, 2.0x ATR)`);
         console.log(`📊 Stop curto baseado na estrutura 15m (0.5% abaixo do suporte / acima da resistência)`);
+        console.log(`🔄 Análise de Reteste: Ativada (tolerância ${CONFIG.RETEST.TOLERANCE_PERCENT}%)`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
        
@@ -2134,6 +2479,7 @@ async function startBot() {
         console.log(`📊 EMA 3m: Ativado (13/34/55)`);
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
         console.log(`📊 ATR 4h: Calculando 4 alvos`);
+        console.log(`🔄 Análise de Reteste: Ativada`);
         console.log(`🕘 Contador zera às 21h BR`);
         console.log('='.repeat(80) + '\n');
 
