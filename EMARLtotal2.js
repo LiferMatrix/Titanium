@@ -16,22 +16,39 @@ const RSI_1H_CONFIG = {
         ENABLED: true
     }
 };
+
+// =====================================================================
+// === NOVAS CONFIGURAÇÕES PARA ALERTAS DE RSI 1H MONITOR ===
+// =====================================================================
+const RSI_1H_MONITOR_CONFIG = {
+    ENABLED: true,
+    OVERSOLD_LEVEL: 25,
+    OVERBOUGHT_LEVEL: 75,
+    TIMEFRAME: '1h',
+    PERIOD: 14,
+    COOLDOWN_MINUTES: 60, // Cooldown de 1 hora para evitar spam
+    CHECK_INTERVAL: 5 * 60 * 1000 // Verificar a cada 5 minutos
+};
+
+// Cache para controlar alertas de RSI 1h monitor
+const rsi1hMonitorCache = {};
+
 // =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 14,
-        D_PERIOD: 3,
-        SLOWING: 3,
-        TIMEFRAME: '4h',
-        OVERBOUGHT: 74,
-        OVERSOLD: 69
+        K_PERIOD: 5,           // ALTERADO: de 14 para 5
+        D_PERIOD: 3,            // Mantido 3
+        SLOWING: 3,             // Mantido 3
+        TIMEFRAME: '12h',       // ALTERADO: de 4h para 12h
+        OVERBOUGHT: 80,         // Mantido (ajuste se necessário)
+        OVERSOLD: 20            // Mantido (ajuste se necessário)
     },
     PRIORITY: {
         ENABLED: true,
@@ -261,6 +278,13 @@ class AdvancedCleanupSystem {
                     deletedCount++;
                 }
             }
+
+            // Limpa cache do RSI Monitor
+            Object.keys(rsi1hMonitorCache).forEach(key => {
+                if (now - rsi1hMonitorCache[key].timestamp > RSI_1H_MONITOR_CONFIG.COOLDOWN_MINUTES * 60 * 1000) {
+                    delete rsi1hMonitorCache[key];
+                }
+            });
 
             if (deletedCount > 0) {
                 console.log(`🗑️ Cache limpo: ${deletedCount} entradas removidas (total restante: ${Object.keys(candleCache).length})`);
@@ -625,9 +649,13 @@ function getAlertCountForSymbol(symbol, type) {
     if (!alertCounter[symbol]) {
         alertCounter[symbol] = {
             stochastic: 0,
+            rsiOversold: 0,
+            rsiOverbought: 0,
             total: 0,
             lastAlert: null,
             dailyStochastic: 0,
+            dailyRsiOversold: 0,
+            dailyRsiOverbought: 0,
             dailyTotal: 0
         };
     }
@@ -644,8 +672,12 @@ function getAlertCountForSymbol(symbol, type) {
     return {
         symbolTotal: alertCounter[symbol].total,
         symbolStochastic: alertCounter[symbol].stochastic,
+        symbolRsiOversold: alertCounter[symbol].rsiOversold,
+        symbolRsiOverbought: alertCounter[symbol].rsiOverbought,
         symbolDailyTotal: alertCounter[symbol].dailyTotal,
         symbolDailyStochastic: alertCounter[symbol].dailyStochastic,
+        symbolDailyRsiOversold: alertCounter[symbol].dailyRsiOversold,
+        symbolDailyRsiOverbought: alertCounter[symbol].dailyRsiOverbought,
         globalTotal: globalAlerts,
         dailyTotal: dailyAlerts
     };
@@ -657,6 +689,8 @@ function resetDailyCounters() {
    
     Object.keys(alertCounter).forEach(symbol => {
         alertCounter[symbol].dailyStochastic = 0;
+        alertCounter[symbol].dailyRsiOversold = 0;
+        alertCounter[symbol].dailyRsiOverbought = 0;
         alertCounter[symbol].dailyTotal = 0;
     });
    
@@ -673,6 +707,8 @@ async function sendInitializationMessage() {
 <b>🚀 TITANIUM INICIADO ✅</b>
 📅 ${now.full}
 <i>✅ ALERTAS ATIVOS</i>
+<i>📊 Estocástico 12h 5.3.3</i>
+<i>🤖 RSI 1h Monitor (25/75) Ativado</i>
 `;
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
         const success = await sendTelegramAlert(message);
@@ -1498,6 +1534,129 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
 }
 
 // =====================================================================
+// === NOVA FUNÇÃO: VERIFICAR E ENVIAR ALERTA DE RSI 1h MONITOR ===
+// =====================================================================
+async function checkAndSendRSI1hMonitor(symbol) {
+    if (!RSI_1H_MONITOR_CONFIG.ENABLED) return null;
+    
+    try {
+        // Verificar cooldown
+        const now = Date.now();
+        const cacheKey = `${symbol}_RSI_MONITOR`;
+        const cached = rsi1hMonitorCache[cacheKey];
+        
+        if (cached && (now - cached.timestamp) < (RSI_1H_MONITOR_CONFIG.COOLDOWN_MINUTES * 60 * 1000)) {
+            if (cached.lastStatus === cached.status) {
+                return null; // Ainda em cooldown e mesmo status
+            }
+        }
+        
+        // Buscar RSI 1h
+        const rsiData = await getRSI1h(symbol);
+        if (!rsiData) return null;
+        
+        const rsiValue = rsiData.value;
+        let alertType = null;
+        
+        // Verificar zonas extremas
+        if (rsiValue <= RSI_1H_MONITOR_CONFIG.OVERSOLD_LEVEL) {
+            alertType = 'OVERSOLD';
+        } else if (rsiValue >= RSI_1H_MONITOR_CONFIG.OVERBOUGHT_LEVEL) {
+            alertType = 'OVERBOUGHT';
+        } else {
+            // Atualizar cache com status neutro
+            rsi1hMonitorCache[cacheKey] = {
+                timestamp: now,
+                lastStatus: 'NEUTRAL',
+                status: 'NEUTRAL'
+            };
+            return null;
+        }
+        
+        // Verificar se já alertamos para este status recentemente
+        if (cached && cached.lastStatus === alertType && (now - cached.timestamp) < (RSI_1H_MONITOR_CONFIG.COOLDOWN_MINUTES * 60 * 1000)) {
+            return null; // Já alertamos para este status recentemente
+        }
+        
+        // Buscar dados adicionais
+        const [currentPrice, lsrData, fundingData, srLevels, volumeData] = await Promise.all([
+            getCurrentPrice(symbol),
+            getLSR(symbol),
+            getFundingRate(symbol),
+            calculateSupportResistance15m(symbol, await getCurrentPrice(symbol)),
+            analyzeVolume1hWithEMA9(symbol)
+        ]);
+        
+        // Atualizar contador
+        const alertTypeStr = alertType === 'OVERSOLD' ? 'rsiOversold' : 'rsiOverbought';
+        const alertCount = getAlertCountForSymbol(symbol, alertTypeStr);
+        
+        // Formatar mensagem
+        const actionEmoji = alertType === 'OVERSOLD' ? '🟢' : '🔴';
+        const actionText = alertType === 'OVERSOLD' ? 'SOBREVENDA (25)' : 'SOBRECOMPRA (75)';
+        
+        // Formatar LSR
+        let lsrText = 'N/A';
+        if (lsrData) {
+            lsrText = lsrData.lsrValue.toFixed(2);
+        }
+        
+        // Formatar Funding
+        let fundingText = '0.0000%';
+        if (fundingData) {
+            const fundingValue = parseFloat(fundingData.ratePercent) / 100;
+            fundingText = `${fundingValue > 0 ? '+' : ''}${(fundingValue * 100).toFixed(4)}%`;
+        }
+        
+        // Formatar S/R
+        let srText = '';
+        if (srLevels) {
+            srText = `Resist: $${srLevels.nearestResistance?.toFixed(6) || 'N/A'} | Supt: $${srLevels.nearestSupport?.toFixed(6) || 'N/A'}`;
+        }
+        
+        // Formatar Volume
+        let volumeText = '';
+        if (volumeData) {
+            volumeText = `Vol 1h: ${volumeData.percentage}% ${volumeData.direction} ${volumeData.emoji}`;
+        }
+        
+        const message = `
+🤖#Titanium #IA 🔍RSI 1h Monitor
+${actionEmoji} ${symbol} • RSI 1h: ${rsiValue.toFixed(1)} ${actionEmoji}
+💰 Preço: $${currentPrice.toFixed(6)}
+📊 ${volumeText}
+💹 LSR: ${lsrText} | Funding: ${fundingText}
+📈 ${srText}
+✨ Titanium by @J4Rviz ✨
+`;
+        
+        // Enviar alerta
+        await sendTelegramAlert(message);
+        
+        // Atualizar cache
+        rsi1hMonitorCache[cacheKey] = {
+            timestamp: now,
+            lastStatus: alertType,
+            status: alertType,
+            rsiValue: rsiValue
+        };
+        
+        console.log(`✅ Alerta RSI Monitor enviado: ${symbol} (${actionText}) - RSI: ${rsiValue.toFixed(1)}`);
+        
+        return {
+            symbol,
+            type: alertType,
+            rsiValue,
+            currentPrice
+        };
+        
+    } catch (error) {
+        ErrorHandler.handle(error, `CheckRSI1hMonitor-${symbol}`);
+        return null;
+    }
+}
+
+// =====================================================================
 // === SINAIS DE ESTOCÁSTICO COM FILTRO DE RSI 1H E EMA 3M ===
 // =====================================================================
 async function checkStochasticSignal(symbol, prioritySystem) {
@@ -1861,7 +2020,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     const isNearSupport = indicators.pivotData?.nearestSupport?.distancePercent < 3.0; // Menos de 3% do suporte
     const volumeData = indicators.volumeData; // Pegamos o volume do indicador passado
     const buyerVolumeWeak = volumeData && volumeData.direction === 'Comprador' && volumeData.percentage < 50;
-    const sellerVolumeWeak = volumeData && volumeData.direction === 'Vendedor' && volumeData.percentage < 50;
+    const sellerVolumeWeak = volumeData && volumeData.direction === 'Vendedor' && volumeData.sellerPercentage < 50;
 
     let resumo = '';
 
@@ -2310,6 +2469,11 @@ async function monitorSymbol(symbol, prioritySystem) {
             console.log(` ${priorityInfo.emojiRanking} Prioridade: ${priorityInfo.score.toFixed(1)}`);
         }
        
+        // Verificar alertas de RSI 1h Monitor (a cada ciclo)
+        if (RSI_1H_MONITOR_CONFIG.ENABLED) {
+            await checkAndSendRSI1hMonitor(symbol);
+        }
+       
         if (CONFIG.STOCHASTIC.ENABLED) {
             const stochasticSignal = await checkStochasticSignal(symbol, prioritySystem);
             if (stochasticSignal) {
@@ -2330,13 +2494,14 @@ async function mainBotLoop() {
        
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + ATR 4h + EMA 3m');
+        console.log('📊 Estratégia: Estocástico 12h 5.3.3 + ATR 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
         console.log(`📊 ATR 4h: Calculando 4 alvos (0.5x, 1.0x, 1.5x, 2.0x ATR)`);
         console.log(`📊 Stop curto baseado na estrutura 15m (0.5% abaixo do suporte / acima da resistência)`);
         console.log(`🔄 Análise de Reteste: Ativada (tolerância ${CONFIG.RETEST.TOLERANCE_PERCENT}%)`);
+        console.log(`🤖 RSI 1h Monitor: Ativado (Sobrevenda ${RSI_1H_MONITOR_CONFIG.OVERSOLD_LEVEL} | Sobrecompra ${RSI_1H_MONITOR_CONFIG.OVERBOUGHT_LEVEL})`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
        
@@ -2480,6 +2645,7 @@ async function startBot() {
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
         console.log(`📊 ATR 4h: Calculando 4 alvos`);
         console.log(`🔄 Análise de Reteste: Ativada`);
+        console.log(`🤖 RSI 1h Monitor: Ativado (Sobrevenda ${RSI_1H_MONITOR_CONFIG.OVERSOLD_LEVEL} | Sobrecompra ${RSI_1H_MONITOR_CONFIG.OVERBOUGHT_LEVEL})`);
         console.log(`🕘 Contador zera às 21h BR`);
         console.log('='.repeat(80) + '\n');
 
