@@ -1,8 +1,173 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const z = require('zod');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
+
+// =====================================================================
+// === SCHEMAS DE VALIDAÇÃO ZOD ===
+// =====================================================================
+
+// Schemas para dados da Binance
+const CandleSchema = z.object({
+    open: z.number().positive(),
+    high: z.number().positive(),
+    low: z.number().positive(),
+    close: z.number().positive(),
+    volume: z.number().positive(),
+    time: z.number().int(),
+    isClosed: z.boolean()
+});
+
+const KlineResponseSchema = z.array(
+    z.tuple([
+        z.number(), // open time
+        z.string(), // open
+        z.string(), // high
+        z.string(), // low
+        z.string(), // close
+        z.string(), // volume
+        z.number(), // close time
+        z.string(), // quote asset volume
+        z.number(), // number of trades
+        z.string(), // taker buy base asset volume
+        z.string(), // taker buy quote asset volume
+        z.string()  // ignore
+    ])
+);
+
+const LSRResponseSchema = z.array(
+    z.object({
+        longShortRatio: z.string(),
+        longAccount: z.string(),
+        shortAccount: z.string(),
+        symbol: z.string().optional()
+    })
+);
+
+const FundingRateSchema = z.array(
+    z.object({
+        symbol: z.string(),
+        fundingRate: z.string(),
+        fundingTime: z.number()
+    })
+);
+
+const ExchangeInfoSchema = z.object({
+    symbols: z.array(
+        z.object({
+            symbol: z.string(),
+            status: z.string()
+        })
+    )
+});
+
+// Schemas para indicadores
+const StochasticSchema = z.object({
+    k: z.number().min(0).max(100),
+    d: z.number().min(0).max(100),
+    previousK: z.number().min(0).max(100),
+    previousD: z.number().min(0).max(100),
+    isCrossingUp: z.boolean(),
+    isCrossingDown: z.boolean(),
+    status: z.enum(['OVERSOLD', 'OVERBOUGHT', 'NEUTRAL']),
+    isOversold: z.boolean(),
+    isOverbought: z.boolean(),
+    timeframe: z.string(),
+    config: z.string()
+});
+
+const RSISchema = z.object({
+    value: z.number().min(0).max(100),
+    status: z.enum(['OVERSOLD', 'OVERBOUGHT', 'NEUTRAL'])
+});
+
+const EMACheckSchema = z.object({
+    isValid: z.boolean(),
+    analysis: z.string().optional(),
+    ema13: z.number(),
+    ema34: z.number(),
+    ema55: z.number(),
+    lastPrice: z.number(),
+    error: z.string().optional()
+}).passthrough();
+
+const VolumeAnalysisSchema = z.object({
+    direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
+    percentage: z.number().min(0).max(100),
+    sellerPercentage: z.number().min(0).max(100).optional(),
+    emoji: z.string()
+});
+
+const PivotPointSchema = z.object({
+    pivot: z.number(),
+    resistances: z.array(z.any()),
+    supports: z.array(z.any()),
+    nearestResistance: z.any().nullable(),
+    nearestSupport: z.any().nullable(),
+    nearestPivot: z.any().nullable()
+}).passthrough();
+
+const ATRTargetsSchema = z.object({
+    atr: z.number().positive(),
+    targets: z.record(z.string(), z.number()),
+    multipliers: z.array(z.number())
+}).nullable();
+
+const RetestDataSchema = z.object({
+    level: z.number(),
+    type: z.enum(['SUPORTE', 'RESISTÊNCIA']),
+    distance: z.number(),
+    totalTests: z.number().int(),
+    successRate: z.number(),
+    volumeRatio: z.number(),
+    falseBreakout: z.boolean(),
+    isHistoric: z.boolean(),
+    timestamp: z.number()
+}).nullable();
+
+// Schema principal do sinal
+const StochasticSignalSchema = z.object({
+    symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
+    type: z.enum(['STOCHASTIC_COMPRA', 'STOCHASTIC_VENDA']),
+    stochastic: StochasticSchema,
+    rsi: z.number().min(0).max(100).optional().nullable(),
+    lsr: z.number().optional().nullable(),
+    funding: z.string().optional().nullable(),
+    pivotData: PivotPointSchema.nullable(),
+    currentPrice: z.number().positive(),
+    entryPrice: z.number().positive(),
+    entryRetraction: z.object({
+        entryPrice: z.number(),
+        retractionRange: z.object({
+            min: z.number(),
+            max: z.number(),
+            amount: z.number(),
+            percent: z.number()
+        }).nullable()
+    }),
+    time: z.object({
+        date: z.string(),
+        time: z.string(),
+        full: z.string()
+    }),
+    isFreshCross: z.boolean(),
+    atrTargets: ATRTargetsSchema,
+    srLevels: z.any().nullable(),
+    emaCheck: EMACheckSchema,
+    volumeData: VolumeAnalysisSchema,
+    retestData: RetestDataSchema
+});
+
+// Schema para o ErrorHandler
+const ErrorResponseSchema = z.object({
+    type: z.string(),
+    retryable: z.boolean(),
+    message: z.string(),
+    context: z.string(),
+    timestamp: z.number()
+});
 
 // =====================================================================
 // === CONFIGURAÇÕES DE RSI 1H PARA ALERTAS - FÁCIL AJUSTE ===
@@ -23,8 +188,8 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oA',
-        CHAT_ID: '-100199'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -94,7 +259,7 @@ const stochCrossState = {};
 const candleCache = {};
 
 // =====================================================================
-// === ERROR HANDLER GRANULAR ===
+// === ERROR HANDLER GRANULAR COM ZOD ===
 // =====================================================================
 class ErrorHandler {
     static NETWORK_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EPIPE', 'EAI_AGAIN'];
@@ -125,7 +290,13 @@ class ErrorHandler {
             errorResponse.retryable = true;
             errorResponse.message = `Falha de rede: ${error.code}`;
             console.log(`🌐 Erro de rede [${context}]: ${error.code} - ${error.message}`);
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                console.log(`🔧 Erro no schema do ErrorHandler: ${validationError.message}`);
+                return errorResponse;
+            }
         }
 
         if (error.name === 'AbortError' || error.code === 'TIMEOUT') {
@@ -133,7 +304,12 @@ class ErrorHandler {
             errorResponse.retryable = true;
             errorResponse.message = 'Timeout da requisição';
             console.log(`⏰ Timeout [${context}]: ${error.message}`);
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
         }
 
         if (error.response?.status) {
@@ -148,7 +324,12 @@ class ErrorHandler {
             } else {
                 console.log(`⚠️ Erro HTTP ${status} [${context}]: ${error.response.statusText}`);
             }
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
         }
 
         if (error instanceof SyntaxError && error.message.includes('JSON')) {
@@ -156,25 +337,59 @@ class ErrorHandler {
             errorResponse.retryable = false;
             errorResponse.message = 'Erro ao processar resposta';
             console.log(`🔧 Erro de parsing [${context}]: ${error.message}`);
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
         }
 
         if (error.message.includes('invalid') || error.message.includes('Invalid')) {
             errorResponse.type = 'VALIDATION_ERROR';
             errorResponse.retryable = false;
             console.log(`⚠️ Erro de validação [${context}]: ${error.message}`);
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
         }
 
         if (error.message.includes('cache') || error.code === 'CACHE_ERROR') {
             errorResponse.type = 'CACHE_ERROR';
             errorResponse.retryable = true;
             console.log(`💾 Erro de cache [${context}]: ${error.message}`);
-            return errorResponse;
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
+        }
+
+        // Erro Zod específico
+        if (error instanceof z.ZodError) {
+            errorResponse.type = 'ZOD_VALIDATION_ERROR';
+            errorResponse.retryable = false;
+            errorResponse.message = `Erro de validação Zod: ${error.errors.map(e => e.message).join(', ')}`;
+            console.log(`🔧 Erro Zod [${context}]:`, error.errors);
+            
+            try {
+                return ErrorResponseSchema.parse(errorResponse);
+            } catch (validationError) {
+                return errorResponse;
+            }
         }
 
         console.log(`❌ Erro não classificado [${context}]: ${error.message}`);
-        return errorResponse;
+        
+        try {
+            return ErrorResponseSchema.parse(errorResponse);
+        } catch (validationError) {
+            return errorResponse;
+        }
     }
 
     static async retry(fn, context, maxRetries = 3, baseDelay = 1000) {
@@ -480,7 +695,7 @@ async function sendInitializationMessage() {
 }
 
 // =====================================================================
-// === FUNÇÕES DE ANÁLISE TÉCNICA ===
+// === FUNÇÕES DE ANÁLISE TÉCNICA COM VALIDAÇÃO ZOD ===
 // =====================================================================
 async function getCandles(symbol, timeframe, limit = 80) {
     try {
@@ -502,7 +717,11 @@ async function getCandles(symbol, timeframe, limit = 80) {
             3,
             1000
         );
-        const candles = data.map(candle => ({
+        
+        // Valida a resposta da Binance
+        const validatedData = KlineResponseSchema.parse(data);
+        
+        const candles = validatedData.map(candle => ({
             open: parseFloat(candle[1]),
             high: parseFloat(candle[2]),
             low: parseFloat(candle[3]),
@@ -511,9 +730,17 @@ async function getCandles(symbol, timeframe, limit = 80) {
             time: candle[0],
             isClosed: candle[0] + candle[6] < Date.now()
         }));
-        candleCache[cacheKey] = { data: candles, timestamp: now };
-        return candles;
+        
+        // Valida cada candle
+        const validatedCandles = candles.map(candle => CandleSchema.parse(candle));
+        
+        candleCache[cacheKey] = { data: validatedCandles, timestamp: now };
+        return validatedCandles;
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em getCandles [${symbol}]:`, error.errors);
+            throw new Error(`Dados de candle inválidos: ${error.errors.map(e => e.message).join(', ')}`);
+        }
         const errorInfo = ErrorHandler.handle(error, `GetCandles-${symbol}-${timeframe}`);
         throw new Error(`Falha ao buscar candles: ${errorInfo.message}`);
     }
@@ -602,8 +829,8 @@ async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
         } else if (latestK > CONFIG.STOCHASTIC.OVERBOUGHT && latestD > CONFIG.STOCHASTIC.OVERBOUGHT) {
             status = 'OVERBOUGHT';
         }
-       
-        return {
+        
+        const stochasticResult = {
             k: latestK,
             d: latestD,
             previousK: previousK,
@@ -616,15 +843,22 @@ async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
             timeframe: timeframe,
             config: `${kPeriod}.${dPeriod}.${slowing}`
         };
+        
+        // Valida com Zod
+        return StochasticSchema.parse(stochasticResult);
        
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em getStochastic [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `GetStochastic-${symbol}`);
         return null;
     }
 }
 
 // =====================================================================
-// === FUNÇÃO: VERIFICAÇÃO EMA 3 MINUTOS ===
+// === FUNÇÃO: VERIFICAÇÃO EMA 3 MINUTOS COM ZOD ===
 // =====================================================================
 async function checkEMA3m(symbol, signalType) {
     try {
@@ -668,8 +902,8 @@ async function checkEMA3m(symbol, signalType) {
             console.log(` • EMA 13/34: ${emaCrossDown ? 'Cruzou para BAIXO' : 'Sem cruzamento'}`);
             console.log(` • EMA 55: ${priceBelowEma55 ? 'Preço ABAIXO' : 'Preço ACIMA'}`);
         }
-       
-        return {
+        
+        const emaResult = {
             isValid,
             analysis,
             ema13,
@@ -677,8 +911,15 @@ async function checkEMA3m(symbol, signalType) {
             ema55,
             lastPrice: lastCandle.close
         };
+        
+        // Valida com Zod (passthrough permite campos extras)
+        return EMACheckSchema.parse(emaResult);
        
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em checkEMA3m [${symbol}]:`, error.errors);
+            return { isValid: false, error: 'Erro de validação' };
+        }
         ErrorHandler.handle(error, `CheckEMA3m-${symbol}`);
         return { isValid: false, error: error.message };
     }
@@ -718,12 +959,19 @@ async function getRSI1h(symbol) {
         const avgLoss = losses / 14;
         const rs = avgGain / (avgLoss || 0.001);
         const rsi = 100 - (100 / (1 + rs));
-       
-        return {
+        
+        const rsiResult = {
             value: rsi,
             status: rsi < 25 ? 'OVERSOLD' : rsi > 75 ? 'OVERBOUGHT' : 'NEUTRAL'
         };
+        
+        // Valida com Zod
+        return RSISchema.parse(rsiResult);
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em getRSI1h [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `GetRSI1h-${symbol}`);
         return null;
     }
@@ -738,12 +986,15 @@ async function getLSR(symbol) {
             2,
             500
         );
+        
+        // Valida a resposta da Binance
+        const validatedResponse = LSRResponseSchema.parse(response);
        
-        if (!response || !Array.isArray(response) || response.length === 0) {
+        if (!validatedResponse || validatedResponse.length === 0) {
             return null;
         }
        
-        const data = response[0];
+        const data = validatedResponse[0];
         const lsrValue = parseFloat(data.longShortRatio);
        
         return {
@@ -752,6 +1003,10 @@ async function getLSR(symbol) {
             shortAccount: parseFloat(data.shortAccount)
         };
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em getLSR [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `GetLSR-${symbol}`);
         return null;
     }
@@ -766,16 +1021,25 @@ async function getFundingRate(symbol) {
             2,
             500
         );
-        if (!data || data.length === 0) {
+        
+        // Valida a resposta da Binance
+        const validatedData = FundingRateSchema.parse(data);
+        
+        if (!validatedData || validatedData.length === 0) {
             return null;
         }
-        const fundingRate = parseFloat(data[0].fundingRate);
+        
+        const fundingRate = parseFloat(validatedData[0].fundingRate);
        
         return {
             rate: fundingRate,
             ratePercent: (fundingRate * 100).toFixed(5)
         };
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em getFundingRate [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `GetFundingRate-${symbol}`);
         return null;
     }
@@ -815,8 +1079,8 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
        
         const nearestResistance = resistances.length > 0 ? resistances[0] : null;
         const nearestSupport = supports.length > 0 ? supports[0] : null;
-       
-        return {
+        
+        const pivotResult = {
             pivot: pivot,
             resistances: resistances,
             supports: supports,
@@ -824,7 +1088,14 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
             nearestSupport: nearestSupport,
             nearestPivot: isBullish ? nearestResistance : nearestSupport
         };
+        
+        // Valida com Zod (passthrough permite campos extras)
+        return PivotPointSchema.parse(pivotResult);
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em analyzePivotPoints [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `AnalyzePivot-${symbol}`);
         return null;
     }
@@ -930,13 +1201,20 @@ async function calculateATRTargets(symbol, entryPrice, isBullish) {
             targets.t3 = entryPrice - atr * multipliers[2];
             targets.t4 = entryPrice - atr * multipliers[3];
         }
-       
-        return {
+        
+        const atrResult = {
             atr,
             targets,
             multipliers
         };
+        
+        // Valida com Zod (nullable)
+        return ATRTargetsSchema.parse(atrResult);
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em calculateATRTargets [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `CalculateATRTargets-${symbol}`);
         return null;
     }
@@ -979,7 +1257,7 @@ async function calculateSupportResistance15m(symbol, currentPrice) {
 }
 
 // =====================================================================
-// === FUNÇÃO: ANALISAR VOLUME 1H COM EMA 9 ===
+// === FUNÇÃO: ANALISAR VOLUME 1H COM EMA 9 COM ZOD ===
 // =====================================================================
 async function analyzeVolume1hWithEMA9(symbol) {
     try {
@@ -1026,14 +1304,21 @@ async function analyzeVolume1hWithEMA9(symbol) {
             direction = 'Neutro';
             emoji = '⚪';
         }
-       
-        return {
+        
+        const volumeResult = {
             direction,
             percentage: Math.round(buyerPercentage),
             sellerPercentage: Math.round(100 - buyerPercentage),
             emoji
         };
+        
+        // Valida com Zod
+        return VolumeAnalysisSchema.parse(volumeResult);
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em analyzeVolume1hWithEMA9 [${symbol}]:`, error.errors);
+            return { direction: 'Erro', percentage: 0, emoji: '❌' };
+        }
         ErrorHandler.handle(error, `AnalyzeVolume1h-${symbol}`);
         return { direction: 'Erro', percentage: 0, emoji: '❌' };
     }
@@ -1067,7 +1352,7 @@ function findSignificantLevels(values, tolerancePercent) {
 }
 
 // =====================================================================
-// === FUNÇÃO: ANALISAR RETESTE DE SUPORTE/RESISTÊNCIA ===
+// === FUNÇÃO: ANALISAR RETESTE DE SUPORTE/RESISTÊNCIA COM ZOD ===
 // =====================================================================
 async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) {
     if (!CONFIG.RETEST.ENABLED) return null;
@@ -1163,7 +1448,7 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
         const volumeRatio = volumeAtTest / avgVolume;
         const successRate = totalTests > 0 ? (successfulTests / totalTests) * 100 : 0;
         
-        return {
+        const retestResult = {
             level: nearestLevel,
             type: levelType,
             distance: distanceToLevel,
@@ -1175,14 +1460,21 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
             timestamp: Date.now()
         };
         
+        // Valida com Zod
+        return RetestDataSchema.parse(retestResult);
+        
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em analyzeSupportResistanceRetest [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `AnalyzeRetest-${symbol}`);
         return null;
     }
 }
 
 // =====================================================================
-// === SINAIS DE ESTOCÁSTICO COM FILTROS ===
+// === SINAIS DE ESTOCÁSTICO COM FILTROS E VALIDAÇÃO ZOD ===
 // =====================================================================
 async function checkStochasticSignal(symbol) {
     if (!CONFIG.STOCHASTIC.ENABLED) {
@@ -1295,7 +1587,8 @@ async function checkStochasticSignal(symbol) {
         const atrTargets = await calculateATRTargets(symbol, entryPrice, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         
-        return {
+        // Monta o objeto do sinal
+        const signal = {
             symbol: symbol,
             type: signalType,
             stochastic: stochastic,
@@ -1314,7 +1607,29 @@ async function checkStochasticSignal(symbol) {
             volumeData: volumeData,
             retestData: retestData
         };
+        
+        // VALIDAÇÃO FINAL COM ZOD - GARANTE QUE O SINAL É 100% VÁLIDO
+        try {
+            const validatedSignal = StochasticSignalSchema.parse(signal);
+            return validatedSignal;
+        } catch (validationError) {
+            if (validationError instanceof z.ZodError) {
+                console.log(`🔧 ERRO CRÍTICO: Sinal inválido para ${symbol}:`, validationError.errors);
+                
+                // Log detalhado para debug
+                console.log('📦 Dados que causaram o erro:');
+                validationError.errors.forEach(err => {
+                    console.log(`   - ${err.path.join('.')}: ${err.message}`);
+                });
+            }
+            return null;
+        }
+        
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em checkStochasticSignal [${symbol}]:`, error.errors);
+            return null;
+        }
         ErrorHandler.handle(error, `CheckStochasticSignal-${symbol}`);
         return null;
     }
@@ -1811,9 +2126,9 @@ Preço: $${currentPrice.toFixed(6)}
 ${volumeText}
 ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
-Stoch ${stochText} | RSI 1H ${rsiText}
+🔘Stoch 4h ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
-${entryRetractionText}
+🔘${entryRetractionText}
 ${atrTargetsText}
 🛑 ${stopCompact}
 ✨Níveis Importantes:
@@ -1855,12 +2170,19 @@ async function fetchAllFuturesSymbols() {
             3,
             1000
         );
-        const symbols = data.symbols
+        
+        // Valida a resposta da Binance
+        const validatedData = ExchangeInfoSchema.parse(data);
+        
+        const symbols = validatedData.symbols
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
         console.log(`✅ ${symbols.length} pares USDT encontrados`);
         return symbols;
     } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em fetchAllFuturesSymbols:`, error.errors);
+        }
         ErrorHandler.handle(error, 'FetchAllSymbols');
         console.log('❌ Erro ao buscar símbolos, usando lista básica');
         return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
