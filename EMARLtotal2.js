@@ -38,8 +38,8 @@ const rsi1hMonitorCache = {};
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVdg',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -47,8 +47,8 @@ const CONFIG = {
         D_PERIOD: 3,            // Mantido 3
         SLOWING: 3,             // Mantido 3
         TIMEFRAME: '12h',       // ALTERADO: de 4h para 12h
-        OVERBOUGHT: 80,         // Mantido (ajuste se necessário)
-        OVERSOLD: 20            // Mantido (ajuste se necessário)
+        OVERBOUGHT: 70,         // Mantido (ajuste se necessário)
+        OVERSOLD: 40            // Mantido (ajuste se necessário)
     },
     PRIORITY: {
         ENABLED: true,
