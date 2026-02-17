@@ -9,7 +9,6 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // === SCHEMAS DE VALIDAÇÃO ZOD ===
 // =====================================================================
 
-// ... (Schemas existentes - permanecem iguais) ...
 // Schemas para dados da Binance
 const CandleSchema = z.object({
     open: z.number().positive(),
@@ -101,13 +100,13 @@ const VolumeAnalysisSchema = z.object({
     emoji: z.string()
 });
 
-// Schema para Volume 3m (ATUALIZADO)
+// Schema para Volume 3m
 const Volume3mSchema = z.object({
-    direction: z.enum(['Comprador Forte', 'Comprador', 'Levemente Comprador', 'Neutro', 'Levemente Vendedor', 'Vendedor', 'Vendedor Forte', 'Desconhecido', 'Erro']),
+    direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
     percentage: z.number().min(0).max(100),
     sellerPercentage: z.number().min(0).max(100).optional(),
     emoji: z.string(),
-    score: z.number().min(-30).max(30)
+    score: z.number().min(-30).max(30).optional()
 });
 
 const PivotPointSchema = z.object({
@@ -137,7 +136,7 @@ const RetestDataSchema = z.object({
     timestamp: z.number()
 }).nullable();
 
-// Schema principal do sinal
+// Schema principal do sinal (ATUALIZADO para incluir volume3mData)
 const StochasticSignalSchema = z.object({
     symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
     type: z.enum(['STOCHASTIC_COMPRA', 'STOCHASTIC_VENDA']),
@@ -167,7 +166,7 @@ const StochasticSignalSchema = z.object({
     srLevels: z.any().nullable(),
     emaCheck: EMACheckSchema,
     volumeData: VolumeAnalysisSchema,
-    volume3mData: Volume3mSchema,
+    volume3mData: Volume3mSchema, // NOVO CAMPO
     retestData: RetestDataSchema
 });
 
@@ -179,7 +178,6 @@ const ErrorResponseSchema = z.object({
     context: z.string(),
     timestamp: z.number()
 });
-
 
 // =====================================================================
 // === CONFIGURAÇÕES DE RSI 1H PARA ALERTAS - FÁCIL AJUSTE ===
@@ -200,15 +198,15 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D0A',
-        CHAT_ID: '--1001997'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 14,
+        K_PERIOD: 5,
         D_PERIOD: 3,
         SLOWING: 3,
-        TIMEFRAME: '4h',
+        TIMEFRAME: '12h',
         OVERBOUGHT: 70,
         OVERSOLD: 67
     },
@@ -250,19 +248,6 @@ const EMA_CONFIG = {
     EMA55: 55,
     ENTRY_RETRACTION_FACTOR: 0.9,
     MAX_RETRACTION_PERCENT: 2.0
-};
-
-// =====================================================================
-// === NOVOS PESOS AJUSTADOS ===
-// =====================================================================
-const FACTOR_WEIGHTS = {
-    FUNDING: 20,
-    LSR: 30,
-    RSI: 20,
-    PIVOT_DISTANCE: 25,
-    VOLUME_3M: 30,      // NOVO: Volume 3m com EMA 13
-    SUPPORT_PROXIMITY: 15, // NOVO: Proximidade do suporte (positivo para compra)
-    RESISTANCE_PROXIMITY: 15 // NOVO: Proximidade da resistência (positivo para venda)
 };
 
 // =====================================================================
@@ -703,7 +688,10 @@ async function sendInitializationMessage() {
        
         const message = `
 <i>🚀 TITANIUM INICIADO ✅</i>
-
+<i>📅 ${now.full}</i>
+<i>✅ ALERTAS ATIVOS</i>
+<i>📊 Estocástico 12h 5.3.3</i>
+<i>📊 Volume 3m com EMA 13 ativado</i>
 `;
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
         const success = await sendTelegramAlert(message);
@@ -773,17 +761,16 @@ async function getCandles(symbol, timeframe, limit = 80) {
     }
 }
 
-// Função calculateEMA corrigida para garantir que recebe a lista na ordem correta (mais antigo primeiro)
 function calculateEMA(values, period) {
     try {
-        if (!values || values.length < period) {
-            return values && values.length > 0 ? values[values.length - 1] : 0; // Retorna o último valor ou 0 se vazio
+        if (values.length < period) {
+            return values.reduce((a, b) => a + b, 0) / values.length;
         }
        
         const multiplier = 2 / (period + 1);
-        let ema = values[0]; // Começa com o primeiro valor
+        let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
        
-        for (let i = 1; i < values.length; i++) {
+        for (let i = period; i < values.length; i++) {
             ema = (values[i] - ema) * multiplier + ema;
         }
        
@@ -1130,106 +1117,6 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === FUNÇÃO CORRIGIDA: ANALISAR VOLUME 3M COM EMA 13 ===
-// =====================================================================
-async function analyzeVolume3mWithEMA13(symbol) {
-    try {
-        const candles = await getCandles(symbol, '3m', 50);
-        if (candles.length < 20) {
-            return { direction: 'Desconhecido', percentage: 0, emoji: '❓', score: 0 };
-        }
-        
-        const closes = candles.map(c => c.close);
-        const ema13Values = [];
-        
-        // Calcular EMA13 para cada candle
-        for (let i = 0; i < closes.length; i++) {
-            const closesUpToI = closes.slice(0, i + 1);
-            ema13Values.push(calculateEMA(closesUpToI, 13));
-        }
-
-        let buyerVolume = 0;
-        let sellerVolume = 0;
-        let totalVolume = 0;
-        
-        // Últimas 2 horas (40 candles de 3min) para análise mais precisa
-        const recentCandles = candles.slice(-40);
-        const recentEma13Values = ema13Values.slice(-40);
-        
-        for (let i = 0; i < recentCandles.length; i++) {
-            const candle = recentCandles[i];
-            const volume = candle.volume;
-            totalVolume += volume;
-            
-            // Comparação CORRETA: close do candle com a EMA13 do MESMO candle
-            if (candle.close > recentEma13Values[i]) {
-                buyerVolume += volume;
-            } else if (candle.close < recentEma13Values[i]) {
-                sellerVolume += volume;
-            } else {
-                buyerVolume += volume / 2;
-                sellerVolume += volume / 2;
-            }
-        }
-        
-        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
-        
-        let direction = '';
-        let emoji = '';
-        let score = 0;
-        
-        // Pontuação baseada na força do volume (ajustada para ser simétrica)
-        if (buyerPercentage > 65) {
-            direction = 'Comprador Forte';
-            emoji = '🟢🟢';
-            score = 30;
-        } else if (buyerPercentage > 58) {
-            direction = 'Comprador';
-            emoji = '🟢';
-            score = 20;
-        } else if (buyerPercentage > 52) {
-            direction = 'Levemente Comprador';
-            emoji = '🟡';
-            score = 10;
-        } else if (buyerPercentage < 35) {
-            direction = 'Vendedor Forte';
-            emoji = '🔴🔴';
-            score = -30;
-        } else if (buyerPercentage < 42) {
-            direction = 'Vendedor';
-            emoji = '🔴';
-            score = -20;
-        } else if (buyerPercentage < 48) {
-            direction = 'Levemente Vendedor';
-            emoji = '🟡';
-            score = -10;
-        } else {
-            direction = 'Neutro';
-            emoji = '⚪';
-            score = 0;
-        }
-        
-        const volumeResult = {
-            direction,
-            percentage: Math.round(buyerPercentage),
-            sellerPercentage: Math.round(100 - buyerPercentage),
-            emoji,
-            score
-        };
-        
-        // Valida com Zod
-        return Volume3mSchema.parse(volumeResult);
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            console.log(`🔧 Erro de validação Zod em analyzeVolume3mWithEMA13 [${symbol}]:`, error.errors);
-            return { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
-        }
-        ErrorHandler.handle(error, `AnalyzeVolume3m-${symbol}`);
-        return { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
-    }
-}
-
-// =====================================================================
 // === FUNÇÃO: CALCULAR ATR 4H ===
 // =====================================================================
 async function calculateATR4h(symbol, period = 14) {
@@ -1449,6 +1336,97 @@ async function analyzeVolume1hWithEMA9(symbol) {
         }
         ErrorHandler.handle(error, `AnalyzeVolume1h-${symbol}`);
         return { direction: 'Erro', percentage: 0, emoji: '❌' };
+    }
+}
+
+// =====================================================================
+// === NOVA FUNÇÃO: ANALISAR VOLUME 3M COM EMA 13 ===
+// =====================================================================
+async function analyzeVolume3mWithEMA13(symbol) {
+    try {
+        const candles = await getCandles(symbol, '3m', 50);
+        if (candles.length < 20) {
+            return { direction: 'Desconhecido', percentage: 0, emoji: '❓', score: 0 };
+        }
+        
+        const closes = candles.map(c => c.close);
+        const ema13 = calculateEMA(closes, 13);
+        
+        let buyerVolume = 0;
+        let sellerVolume = 0;
+        let totalVolume = 0;
+        
+        // Últimas 2 horas (40 candles de 3min) para análise mais precisa
+        const recentCandles = candles.slice(-40);
+        
+        recentCandles.forEach((candle) => {
+            const volume = candle.volume;
+            totalVolume += volume;
+            
+            if (candle.close > ema13) {
+                buyerVolume += volume;
+            } else if (candle.close < ema13) {
+                sellerVolume += volume;
+            } else {
+                buyerVolume += volume / 2;
+                sellerVolume += volume / 2;
+            }
+        });
+        
+        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
+        
+        let direction = '';
+        let emoji = '';
+        let score = 0;
+        
+        // Pontuação baseada na força do volume
+        if (buyerPercentage > 60) {
+            direction = 'Comprador';
+            emoji = '🟢🟢';
+            score = 30;
+        } else if (buyerPercentage > 55) {
+            direction = 'Comprador';
+            emoji = '🟢';
+            score = 20;
+        } else if (buyerPercentage > 52) {
+            direction = 'Comprador';
+            emoji = '🟡';
+            score = 10;
+        } else if (buyerPercentage < 40) {
+            direction = 'Vendedor';
+            emoji = '🔴🔴';
+            score = -30;
+        } else if (buyerPercentage < 45) {
+            direction = 'Vendedor';
+            emoji = '🔴';
+            score = -20;
+        } else if (buyerPercentage < 48) {
+            direction = 'Vendedor';
+            emoji = '🟡';
+            score = -10;
+        } else {
+            direction = 'Neutro';
+            emoji = '⚪';
+            score = 0;
+        }
+        
+        const volumeResult = {
+            direction,
+            percentage: Math.round(buyerPercentage),
+            sellerPercentage: Math.round(100 - buyerPercentage),
+            emoji,
+            score
+        };
+        
+        // Valida com Zod
+        return Volume3mSchema.parse(volumeResult);
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            console.log(`🔧 Erro de validação Zod em analyzeVolume3mWithEMA13 [${symbol}]:`, error.errors);
+            return { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
+        }
+        ErrorHandler.handle(error, `AnalyzeVolume3m-${symbol}`);
+        return { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
     }
 }
 
@@ -1683,6 +1661,7 @@ async function checkStochasticSignal(symbol) {
        
         console.log(`✅ ${symbol}: EMA 3m confirmou o sinal`);
         
+        // ADICIONADO volume3mData aqui
         const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData, volume3mData, retestData] = await Promise.all([
             getRSI1h(symbol),
             getLSR(symbol),
@@ -1690,7 +1669,7 @@ async function checkStochasticSignal(symbol) {
             analyzePivotPoints(symbol, await getCurrentPrice(symbol), signalType === 'STOCHASTIC_COMPRA'),
             getCurrentPrice(symbol),
             analyzeVolume1hWithEMA9(symbol),
-            analyzeVolume3mWithEMA13(symbol),
+            analyzeVolume3mWithEMA13(symbol), // NOVA FUNÇÃO ADICIONADA
             analyzeSupportResistanceRetest(symbol, await getCurrentPrice(symbol), signalType)
         ]);
         
@@ -1716,7 +1695,7 @@ async function checkStochasticSignal(symbol) {
         const atrTargets = await calculateATRTargets(symbol, entryPrice, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         
-        // Monta o objeto do sinal
+        // Monta o objeto do sinal (INCLUINDO volume3mData)
         const signal = {
             symbol: symbol,
             type: signalType,
@@ -1734,7 +1713,7 @@ async function checkStochasticSignal(symbol) {
             srLevels: srLevels,
             emaCheck: emaCheck,
             volumeData: volumeData,
-            volume3mData: volume3mData,
+            volume3mData: volume3mData, // NOVO CAMPO
             retestData: retestData
         };
         
@@ -1766,7 +1745,7 @@ async function checkStochasticSignal(symbol) {
 }
 
 // =====================================================================
-// === ANÁLISE DE FATORES POSITIVOS E NEGATIVOS (ATUALIZADO) ===
+// === ANÁLISE DE FATORES POSITIVOS E NEGATIVOS (CORRIGIDO VOLUME 3M) ===
 // =====================================================================
 async function analyzeTradeFactors(symbol, signalType, indicators) {
     const factors = {
@@ -1779,27 +1758,33 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         resumoInteligente: ''
     };
 
-    // Calcular maxScore total com novos pesos
-    factors.maxScore = Object.values(FACTOR_WEIGHTS).reduce((a, b) => a + b, 0);
+    const weights = {
+        FUNDING: 20,
+        LSR: 30,
+        RSI: 20,
+        STRUCTURE: 25,
+        PIVOT_DISTANCE: 25
+    };
+
+    factors.maxScore = Object.values(weights).reduce((a, b) => a + b, 0);
     let totalScore = 0;
 
-    // ===== FUNDING =====
     if (indicators.funding) {
         const fundingValue = parseFloat(indicators.funding) / 100;
 
         if (signalType === 'STOCHASTIC_COMPRA') {
             if (fundingValue <= -0.001) {
                 factors.positive.push(`🟢🟢 FUNDING: ${(fundingValue * 100).toFixed(4)}% (negativo forte)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING;
+                totalScore += weights.FUNDING;
             } else if (fundingValue <= -0.0003) {
                 factors.positive.push(`🟢 FUNDING: ${(fundingValue * 100).toFixed(4)}% (negativo moderado)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.7;
+                totalScore += weights.FUNDING * 0.7;
             } else if (fundingValue <= 0) {
                 factors.positive.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}% (levemente negativo)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.4;
+                totalScore += weights.FUNDING * 0.4;
             } else if (fundingValue <= 0.0003) {
                 factors.negative.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}% (positivo baixo)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.2;
+                totalScore += weights.FUNDING * 0.2;
             } else if (fundingValue <= 0.001) {
                 factors.negative.push(`🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}% (positivo moderado)`);
             } else {
@@ -1808,16 +1793,16 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         } else {
             if (fundingValue >= 0.001) {
                 factors.positive.push(`🔴🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}% (positivo forte)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING;
+                totalScore += weights.FUNDING;
             } else if (fundingValue >= 0.0003) {
                 factors.positive.push(`🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}% (positivo moderado)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.7;
+                totalScore += weights.FUNDING * 0.7;
             } else if (fundingValue > 0) {
                 factors.positive.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}% (levemente positivo)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.4;
+                totalScore += weights.FUNDING * 0.4;
             } else if (fundingValue >= -0.0003) {
                 factors.negative.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}% (negativo baixo)`);
-                totalScore += FACTOR_WEIGHTS.FUNDING * 0.2;
+                totalScore += weights.FUNDING * 0.2;
             } else if (fundingValue >= -0.001) {
                 factors.negative.push(`🔵 FUNDING: ${(fundingValue * 100).toFixed(4)}% (negativo moderado)`);
             } else {
@@ -1828,39 +1813,38 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         factors.neutral.push(`⚪ FUNDING: Indisponível`);
     }
 
-    // ===== LSR =====
     if (indicators.lsr) {
         const lsrValue = indicators.lsr;
 
         if (signalType === 'STOCHASTIC_COMPRA') {
             if (lsrValue < 1.5) {
                 factors.positive.push(`🟢🟢 LSR: ${lsrValue.toFixed(3)} (shorts dominam)`);
-                totalScore += FACTOR_WEIGHTS.LSR;
+                totalScore += weights.LSR;
             } else if (lsrValue < 2.5) {
                 factors.positive.push(`🟢 LSR: ${lsrValue.toFixed(3)} (shorts em vantagem)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.8;
+                totalScore += weights.LSR * 0.8;
             } else if (lsrValue < 3.0) {
                 factors.positive.push(`🟡 LSR: ${lsrValue.toFixed(3)} (equilíbrio)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.5;
+                totalScore += weights.LSR * 0.5;
             } else if (lsrValue < 4.0) {
                 factors.negative.push(`🟡 LSR: ${lsrValue.toFixed(3)} (longs em vantagem)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.2;
+                totalScore += weights.LSR * 0.2;
             } else {
                 factors.negative.push(`🔴 LSR: ${lsrValue.toFixed(3)} (longs dominam)`);
             }
         } else {
             if (lsrValue > 4.0) {
                 factors.positive.push(`🔴🔴 LSR: ${lsrValue.toFixed(3)} (longs dominam)`);
-                totalScore += FACTOR_WEIGHTS.LSR;
+                totalScore += weights.LSR;
             } else if (lsrValue > 2.8) {
                 factors.positive.push(`🔴 LSR: ${lsrValue.toFixed(3)} (longs em vantagem)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.8;
+                totalScore += weights.LSR * 0.8;
             } else if (lsrValue > 2.0) {
                 factors.positive.push(`🟡 LSR: ${lsrValue.toFixed(3)} (equilíbrio)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.5;
+                totalScore += weights.LSR * 0.5;
             } else if (lsrValue > 1.5) {
                 factors.negative.push(`🟡 LSR: ${lsrValue.toFixed(3)} (shorts em vantagem)`);
-                totalScore += FACTOR_WEIGHTS.LSR * 0.2;
+                totalScore += weights.LSR * 0.2;
             } else {
                 factors.negative.push(`🔵 LSR: ${lsrValue.toFixed(3)} (shorts dominam)`);
             }
@@ -1869,39 +1853,38 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         factors.neutral.push(`⚪ LSR: Indisponível`);
     }
 
-    // ===== RSI =====
     if (indicators.rsi) {
         const rsiValue = indicators.rsi;
 
         if (signalType === 'STOCHASTIC_COMPRA') {
             if (rsiValue < 25) {
                 factors.positive.push(`🟢🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido forte)`);
-                totalScore += FACTOR_WEIGHTS.RSI;
+                totalScore += weights.RSI;
             } else if (rsiValue < 30) {
                 factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (sobrevendido)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.9;
+                totalScore += weights.RSI * 0.9;
             } else if (rsiValue < 40) {
                 factors.positive.push(`🟢 RSI: ${rsiValue.toFixed(1)} (próx sobrevenda)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.8;
+                totalScore += weights.RSI * 0.8;
             } else if (rsiValue < 50) {
                 factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (neutro)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.5;
+                totalScore += weights.RSI * 0.5;
             } else {
                 factors.negative.push(`🔴 RSI: ${rsiValue.toFixed(1)} (elevado)`);
             }
         } else {
             if (rsiValue > 75) {
                 factors.positive.push(`🔴🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado forte)`);
-                totalScore += FACTOR_WEIGHTS.RSI;
+                totalScore += weights.RSI;
             } else if (rsiValue > 70) {
                 factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (sobrecomprado)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.9;
+                totalScore += weights.RSI * 0.9;
             } else if (rsiValue > 60) {
                 factors.positive.push(`🔴 RSI: ${rsiValue.toFixed(1)} (próx sobrecompra)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.8;
+                totalScore += weights.RSI * 0.8;
             } else if (rsiValue > 50) {
                 factors.positive.push(`🟡 RSI: ${rsiValue.toFixed(1)} (neutro)`);
-                totalScore += FACTOR_WEIGHTS.RSI * 0.5;
+                totalScore += weights.RSI * 0.5;
             } else {
                 factors.negative.push(`🟢 RSI: ${rsiValue.toFixed(1)} (baixo)`);
             }
@@ -1910,157 +1893,98 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         factors.neutral.push(`⚪ RSI: Indisponível`);
     }
 
-    // ===== VOLUME 3M (NOVO) =====
-    if (indicators.volume3mData) {
-        const vol3m = indicators.volume3mData;
-        
-        if (signalType === 'STOCHASTIC_COMPRA') {
-            // Para compra, queremos volume comprador
-            if (vol3m.score > 0) {
-                factors.positive.push(`${vol3m.emoji} VOLUME 3m: ${vol3m.percentage}% ${vol3m.direction}`);
-                totalScore += vol3m.score; // Score já está em pontos (10-30)
-            } else if (vol3m.score < 0) {
-                factors.negative.push(`${vol3m.emoji} VOLUME 3m: ${vol3m.percentage}% ${vol3m.direction}`);
-                // Não adiciona pontos negativos, apenas informa
-            } else {
-                factors.neutral.push(`⚪ VOLUME 3m: ${vol3m.percentage}% Neutro`);
-            }
-        } else {
-            // Para venda, queremos volume vendedor (score negativo vira positivo)
-            if (vol3m.score < 0) {
-                factors.positive.push(`${vol3m.emoji} VOLUME 3m: ${vol3m.percentage}% ${vol3m.direction}`);
-                totalScore += Math.abs(vol3m.score); // Converte negativo para positivo
-            } else if (vol3m.score > 0) {
-                factors.negative.push(`${vol3m.emoji} VOLUME 3m: ${vol3m.percentage}% ${vol3m.direction}`);
-            } else {
-                factors.neutral.push(`⚪ VOLUME 3m: ${vol3m.percentage}% Neutro`);
-            }
-        }
-    }
-
-    // ===== DISTÂNCIA DO PIVÔ =====
     if (indicators.pivotData) {
         const pivot = indicators.pivotData;
         const currentPrice = indicators.currentPrice;
 
         if (signalType === 'STOCHASTIC_COMPRA') {
-            // Para COMPRA, proximidade do SUPORTE é POSITIVO
-            if (pivot.nearestSupport) {
-                const distToSupport = pivot.nearestSupport.distancePercent;
-                
-                if (distToSupport < 1.5) {
-                    factors.positive.push(`🟢🟢 SUPORTE PRÓXIMO: ${distToSupport.toFixed(2)}% (zona de compra)`);
-                    totalScore += FACTOR_WEIGHTS.SUPPORT_PROXIMITY;
-                } else if (distToSupport < 3.0) {
-                    factors.positive.push(`🟢 SUPORTE PRÓXIMO: ${distToSupport.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.SUPPORT_PROXIMITY * 0.7;
-                } else if (distToSupport < 5.0) {
-                    factors.positive.push(`🟡 SUPORTE: ${distToSupport.toFixed(2)}% (distância moderada)`);
-                    totalScore += FACTOR_WEIGHTS.SUPPORT_PROXIMITY * 0.4;
-                }
-            }
-            
-            // Distância da resistência (quanto maior melhor)
             if (pivot.nearestResistance) {
                 const distToResistance = pivot.nearestResistance.distancePercent;
                 
                 if (distToResistance > 8) {
-                    factors.positive.push(`🟢🟢 RESISTÊNCIA DISTANTE: ${distToResistance.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE;
+                    factors.positive.push(`🟢🟢 DISTÂNCIA PIVÔ: Resistência distante ${distToResistance.toFixed(2)}%`);
+                    totalScore += weights.PIVOT_DISTANCE;
                 } else if (distToResistance > 5) {
-                    factors.positive.push(`🟢 RESISTÊNCIA DISTANTE: ${distToResistance.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE * 0.8;
+                    factors.positive.push(`🟢 DISTÂNCIA PIVÔ: Resistência ${distToResistance.toFixed(2)}% distante`);
+                    totalScore += weights.PIVOT_DISTANCE * 0.8;
                 } else if (distToResistance > 3) {
-                    factors.positive.push(`🟡 RESISTÊNCIA: ${distToResistance.toFixed(2)}% (moderada)`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE * 0.5;
+                    factors.positive.push(`🟡 DISTÂNCIA PIVÔ: Resistência próxima ${distToResistance.toFixed(2)}%`);
+                    totalScore += weights.PIVOT_DISTANCE * 0.5;
                 } else {
-                    factors.negative.push(`🔴 RESISTÊNCIA PRÓXIMA: ${distToResistance.toFixed(2)}%`);
+                    factors.negative.push(`🔴 DISTÂNCIA PIVÔ: Resistência muito próxima ${distToResistance.toFixed(2)}%`);
                     totalScore -= 10;
                 }
             }
 
             if (currentPrice > pivot.pivot) {
                 factors.positive.push(`🟢 PREÇO ACIMA DO PIVÔ`);
-                totalScore += FACTOR_WEIGHTS.SUPPORT_PROXIMITY * 0.3;
+                totalScore += weights.STRUCTURE * 0.3;
             }
         } else {
-            // Para VENDA, proximidade da RESISTÊNCIA é POSITIVO
-            if (pivot.nearestResistance) {
-                const distToResistance = pivot.nearestResistance.distancePercent;
-                
-                if (distToResistance < 1.5) {
-                    factors.positive.push(`🔴🔴 RESISTÊNCIA PRÓXIMA: ${distToResistance.toFixed(2)}% (zona de venda)`);
-                    totalScore += FACTOR_WEIGHTS.RESISTANCE_PROXIMITY;
-                } else if (distToResistance < 3.0) {
-                    factors.positive.push(`🔴 RESISTÊNCIA PRÓXIMA: ${distToResistance.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.RESISTANCE_PROXIMITY * 0.7;
-                } else if (distToResistance < 5.0) {
-                    factors.positive.push(`🟡 RESISTÊNCIA: ${distToResistance.toFixed(2)}% (distância moderada)`);
-                    totalScore += FACTOR_WEIGHTS.RESISTANCE_PROXIMITY * 0.4;
-                }
-            }
-            
-            // Distância do suporte (quanto maior melhor)
             if (pivot.nearestSupport) {
                 const distToSupport = pivot.nearestSupport.distancePercent;
                 
                 if (distToSupport > 8) {
-                    factors.positive.push(`🔵🔵 SUPORTE DISTANTE: ${distToSupport.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE;
+                    factors.positive.push(`🔴🔴 DISTÂNCIA PIVÔ: Suporte distante ${distToSupport.toFixed(2)}%`);
+                    totalScore += weights.PIVOT_DISTANCE;
                 } else if (distToSupport > 5) {
-                    factors.positive.push(`🔵 SUPORTE DISTANTE: ${distToSupport.toFixed(2)}%`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE * 0.8;
+                    factors.positive.push(`🔴 DISTÂNCIA PIVÔ: Suporte ${distToSupport.toFixed(2)}% distante`);
+                    totalScore += weights.PIVOT_DISTANCE * 0.8;
                 } else if (distToSupport > 3) {
-                    factors.positive.push(`🟡 SUPORTE: ${distToSupport.toFixed(2)}% (moderado)`);
-                    totalScore += FACTOR_WEIGHTS.PIVOT_DISTANCE * 0.5;
+                    factors.positive.push(`🟡 DISTÂNCIA PIVÔ: Suporte próximo ${distToSupport.toFixed(2)}%`);
+                    totalScore += weights.PIVOT_DISTANCE * 0.5;
                 } else {
-                    factors.negative.push(`🔵 SUPORTE PRÓXIMO: ${distToSupport.toFixed(2)}%`);
+                    factors.negative.push(`🔵 DISTÂNCIA PIVÔ: Suporte muito próximo ${distToSupport.toFixed(2)}%`);
                     totalScore -= 10;
                 }
             }
 
             if (currentPrice < pivot.pivot) {
                 factors.positive.push(`🔵 PREÇO ABAIXO DO PIVÔ`);
-                totalScore += FACTOR_WEIGHTS.RESISTANCE_PROXIMITY * 0.3;
+                totalScore += weights.STRUCTURE * 0.3;
             }
         }
     }
 
-    // ===== EMA 3m CONFIRMADO =====
     if (indicators.emaCheck && indicators.emaCheck.analysis) {
         factors.positive.push(`📊 ${indicators.emaCheck.analysis}`);
         totalScore += 15;
     }
 
-    // ===== Cálculo do score final =====
     factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
 
-    // ===== Resumo inteligente atualizado =====
+    // Resumo inteligente com Volume 3m CORRIGIDO
     const isBadTrade = factors.score < 50;
-    const volume3mPositive = indicators.volume3mData && 
-        ((signalType === 'STOCHASTIC_COMPRA' && indicators.volume3mData.score > 0) ||
-         (signalType === 'STOCHASTIC_VENDA' && indicators.volume3mData.score < 0));
-    const nearSupport = indicators.pivotData?.nearestSupport?.distancePercent < 3.0;
-    const nearResistance = indicators.pivotData?.nearestResistance?.distancePercent < 3.0;
+    const isNearResistance = indicators.pivotData?.nearestResistance?.distancePercent < 3.0;
+    const isNearSupport = indicators.pivotData?.nearestSupport?.distancePercent < 3.0;
+    const volumeData = indicators.volumeData;
+    const volume3mData = indicators.volume3mData;
+    
+    // Para COMPRA, queremos volume COMPRADOR > 52%
+    // Para VENDA, queremos volume VENDEDOR > 52% (ou seja, comprador < 48%)
+    const volume3mFavoravel = volume3mData && 
+        ((signalType === 'STOCHASTIC_COMPRA' && volume3mData.percentage > 52) ||
+         (signalType === 'STOCHASTIC_VENDA' && volume3mData.percentage < 48));
 
     let resumo = '';
 
     if (signalType === 'STOCHASTIC_COMPRA') {
         if (isBadTrade) {
             resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA COMPRA. `;
-            if (nearSupport) {
+            if (isNearSupport) {
                 resumo += `Porém suporte próximo (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%) - possível reação. `;
             }
-            if (!volume3mPositive) {
-                resumo += `Volume 3m desfavorável (${indicators.volume3mData?.percentage || 0}% comprador). `;
+            if (!volume3mFavoravel && volume3mData) {
+                // Quando é desfavorável para COMPRA, mostra a % de COMPRADOR
+                resumo += `Volume 3m desfavorável (${volume3mData.percentage}% comprador). `;
             }
         } else {
             resumo = `✅ OPERAÇÃO FAVORÁVEL PARA COMPRA. `;
-            if (nearSupport) {
+            if (isNearSupport) {
                 resumo += `💰 SUPORTE PRÓXIMO (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%) - ENTRADA ESTRATÉGICA! `;
             }
-            if (volume3mPositive) {
-                resumo += `📈 Volume 3m confirmando (${indicators.volume3mData?.percentage}% comprador). `;
+            if (volume3mFavoravel && volume3mData) {
+                resumo += `📈 Volume 3m confirmando (${volume3mData.percentage}% comprador). `;
             }
             if (indicators.pivotData?.nearestResistance?.distancePercent > 5) {
                 resumo += `📊 Bom espaço até resistência (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%). `;
@@ -2069,19 +1993,20 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     } else {
         if (isBadTrade) {
             resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA CORREÇÃO. `;
-            if (nearResistance) {
+            if (isNearResistance) {
                 resumo += `Porém resistência próxima (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%) - possível rejeição. `;
             }
-            if (!volume3mPositive) {
-                resumo += `Volume 3m desfavorável (${indicators.volume3mData?.sellerPercentage || 0}% vendedor). `;
+            if (!volume3mFavoravel && volume3mData) {
+                // Quando é desfavorável para CORREÇÃO, mostra a % de VENDEDOR
+                resumo += `Volume 3m desfavorável (${volume3mData.sellerPercentage || (100 - volume3mData.percentage)}% vendedor). `;
             }
         } else {
             resumo = `✅ OPERAÇÃO FAVORÁVEL PARA CORREÇÃO. `;
-            if (nearResistance) {
+            if (isNearResistance) {
                 resumo += `💰 RESISTÊNCIA PRÓXIMA (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%) - ENTRADA ESTRATÉGICA! `;
             }
-            if (volume3mPositive) {
-                resumo += `📈 Volume 3m confirmando (${indicators.volume3mData?.sellerPercentage || 0}% vendedor). `;
+            if (volume3mFavoravel && volume3mData) {
+                resumo += `📈 Volume 3m confirmando (${volume3mData.sellerPercentage || (100 - volume3mData.percentage)}% vendedor). `;
             }
             if (indicators.pivotData?.nearestSupport?.distancePercent > 5) {
                 resumo += `📊 Bom espaço até suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%). `;
@@ -2091,7 +2016,6 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 
     factors.resumoInteligente = resumo;
 
-    // ===== Classificação do score =====
     if (signalType === 'STOCHASTIC_COMPRA') {
         if (factors.score >= 80) {
             factors.summary = '🏆 Excelente PARA COMPRA';
@@ -2122,7 +2046,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (ATUALIZADO COM ITÁLICO) ===
+// === ALERTA PRINCIPAL (ATUALIZADO COM ITÁLICO E VOLUME 3M) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
@@ -2139,7 +2063,7 @@ async function sendStochasticAlertEnhanced(signal) {
         currentPrice: currentPrice,
         emaCheck: signal.emaCheck,
         volumeData: signal.volumeData,
-        volume3mData: signal.volume3mData
+        volume3mData: signal.volume3mData // NOVO: passando volume3mData
     });
    
     let srInfo = null;
@@ -2219,20 +2143,20 @@ async function sendStochasticAlertEnhanced(signal) {
         const pivot = signal.pivotData;
         
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            if (pivot.nearestSupport) {
-                const distToSupport = pivot.nearestSupport.distancePercent;
-                const emoji = distToSupport < 3 ? '💰' : distToSupport < 5 ? '🟡' : '⚪';
-                pivotDistanceText = `📊 SUPORTE: $${pivot.nearestSupport.price.toFixed(6)} (${distToSupport.toFixed(2)}% ${emoji})`;
-            } else {
-                pivotDistanceText = `📊 SUPORTE: N/A`;
-            }
-        } else {
             if (pivot.nearestResistance) {
                 const distToResistance = pivot.nearestResistance.distancePercent;
-                const emoji = distToResistance < 3 ? '💰' : distToResistance < 5 ? '🟡' : '⚪';
-                pivotDistanceText = `📊 RESISTÊNCIA: $${pivot.nearestResistance.price.toFixed(6)} (${distToResistance.toFixed(2)}% ${emoji})`;
+                const emoji = distToResistance > 5 ? '🟢' : distToResistance > 3 ? '🟡' : '🔴';
+                pivotDistanceText = `📊 Pivô: Resistência em $${pivot.nearestResistance.price.toFixed(6)} (${distToResistance.toFixed(2)}% ${emoji})`;
             } else {
-                pivotDistanceText = `📊 RESISTÊNCIA: N/A`;
+                pivotDistanceText = `📊 Pivô: N/A`;
+            }
+        } else {
+            if (pivot.nearestSupport) {
+                const distToSupport = pivot.nearestSupport.distancePercent;
+                const emoji = distToSupport > 5 ? '🔴' : distToSupport > 3 ? '🟡' : '🔵';
+                pivotDistanceText = `📊 Pivô: Suporte em $${pivot.nearestSupport.price.toFixed(6)} (${distToSupport.toFixed(2)}% ${emoji})`;
+            } else {
+                pivotDistanceText = `📊 Pivô: N/A`;
             }
         }
     } else {
@@ -2302,6 +2226,7 @@ async function sendStochasticAlertEnhanced(signal) {
         }
     }
    
+    // LINHA PARA VOLUME 3M
     let volume3mText = '';
     if (signal.volume3mData) {
         const vol3m = signal.volume3mData;
@@ -2319,14 +2244,14 @@ async function sendStochasticAlertEnhanced(signal) {
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
    
-    // Mensagem TODA em itálico
+    // MENSAGEM COMPLETA EM ITÁLICO COM VOLUME 3M
     let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
-🔘Stoch 4h ${stochText} | RSI 1H ${rsiText}
+🔘Stoch 12h ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2415,16 +2340,15 @@ async function mainBotLoop() {
        
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + ATR 4h + EMA 3m');
+        console.log('📊 Estratégia: Estocástico 12h 5.3.3 + ATR 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
-        console.log(`📊 Volume 3m: Análise com EMA 13 (NOVO FATOR DE PESO)`);
+        console.log(`📊 Volume 3m: Análise comprador/vendedor com EMA 13`);
         console.log(`📊 ATR 4h: Calculando 4 alvos (0.5x, 1.0x, 1.5x, 2.0x ATR)`);
         console.log(`📊 Retração de Entrada: ${EMA_CONFIG.ENTRY_RETRACTION_FACTOR * 100}% do ATR (máx ${EMA_CONFIG.MAX_RETRACTION_PERCENT}%)`);
         console.log(`📊 Stop curto baseado na estrutura 15m`);
         console.log(`🔄 Análise de Reteste: Ativada`);
-        console.log(`💰 Proximidade de Suporte/Resistência: PESO POSITIVO`);
         console.log(`🕘 Contador de alertas zera todo dia às 21h BR`);
         console.log('='.repeat(80) + '\n');
        
@@ -2562,10 +2486,9 @@ async function startBot() {
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 EMA 3m: Ativado (13/34/55)`);
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
-        console.log(`📊 Volume 3m: Análise com EMA 13 (NOVO FATOR DE PESO)`);
+        console.log(`📊 Volume 3m: Análise comprador/vendedor com EMA 13`);
         console.log(`📊 ATR 4h: Calculando 4 alvos`);
         console.log(`📊 Retração de Entrada: ${EMA_CONFIG.ENTRY_RETRACTION_FACTOR * 100}% do ATR (máx ${EMA_CONFIG.MAX_RETRACTION_PERCENT}%)`);
-        console.log(`💰 Proximidade de Suporte/Resistência: PESO POSITIVO`);
         console.log(`🔄 Análise de Reteste: Ativada`);
         console.log(`🕘 Contador zera às 21h BR`);
         console.log('='.repeat(80) + '\n');
