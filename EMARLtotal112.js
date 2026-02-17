@@ -9,6 +9,7 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // === SCHEMAS DE VALIDAÇÃO ZOD ===
 // =====================================================================
 
+// ... (Schemas existentes - permanecem iguais) ...
 // Schemas para dados da Binance
 const CandleSchema = z.object({
     open: z.number().positive(),
@@ -100,8 +101,9 @@ const VolumeAnalysisSchema = z.object({
     emoji: z.string()
 });
 
+// Schema para Volume 3m (ATUALIZADO)
 const Volume3mSchema = z.object({
-    direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
+    direction: z.enum(['Comprador Forte', 'Comprador', 'Levemente Comprador', 'Neutro', 'Levemente Vendedor', 'Vendedor', 'Vendedor Forte', 'Desconhecido', 'Erro']),
     percentage: z.number().min(0).max(100),
     sellerPercentage: z.number().min(0).max(100).optional(),
     emoji: z.string(),
@@ -178,6 +180,7 @@ const ErrorResponseSchema = z.object({
     timestamp: z.number()
 });
 
+
 // =====================================================================
 // === CONFIGURAÇÕES DE RSI 1H PARA ALERTAS - FÁCIL AJUSTE ===
 // =====================================================================
@@ -197,8 +200,8 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZA',
-        CHAT_ID: '-1001997'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '--1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -700,10 +703,7 @@ async function sendInitializationMessage() {
        
         const message = `
 <i>🚀 TITANIUM INICIADO ✅</i>
-<i>📅 ${now.full}</i>
-<i>✅ ALERTAS ATIVOS</i>
-<i>📊 Estocástico 4h 14.3.3</i>
-<i>📊 Volume 3m com EMA 13 ativado</i>
+
 `;
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
         const success = await sendTelegramAlert(message);
@@ -773,16 +773,17 @@ async function getCandles(symbol, timeframe, limit = 80) {
     }
 }
 
+// Função calculateEMA corrigida para garantir que recebe a lista na ordem correta (mais antigo primeiro)
 function calculateEMA(values, period) {
     try {
-        if (values.length < period) {
-            return values.reduce((a, b) => a + b, 0) / values.length;
+        if (!values || values.length < period) {
+            return values && values.length > 0 ? values[values.length - 1] : 0; // Retorna o último valor ou 0 se vazio
         }
        
         const multiplier = 2 / (period + 1);
-        let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+        let ema = values[0]; // Começa com o primeiro valor
        
-        for (let i = period; i < values.length; i++) {
+        for (let i = 1; i < values.length; i++) {
             ema = (values[i] - ema) * multiplier + ema;
         }
        
@@ -1129,7 +1130,7 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
 }
 
 // =====================================================================
-// === NOVA FUNÇÃO: ANALISAR VOLUME 3M COM EMA 13 ===
+// === FUNÇÃO CORRIGIDA: ANALISAR VOLUME 3M COM EMA 13 ===
 // =====================================================================
 async function analyzeVolume3mWithEMA13(symbol) {
     try {
@@ -1139,41 +1140,50 @@ async function analyzeVolume3mWithEMA13(symbol) {
         }
         
         const closes = candles.map(c => c.close);
-        const ema13 = calculateEMA(closes, 13);
+        const ema13Values = [];
         
+        // Calcular EMA13 para cada candle
+        for (let i = 0; i < closes.length; i++) {
+            const closesUpToI = closes.slice(0, i + 1);
+            ema13Values.push(calculateEMA(closesUpToI, 13));
+        }
+
         let buyerVolume = 0;
         let sellerVolume = 0;
         let totalVolume = 0;
         
         // Últimas 2 horas (40 candles de 3min) para análise mais precisa
         const recentCandles = candles.slice(-40);
+        const recentEma13Values = ema13Values.slice(-40);
         
-        recentCandles.forEach((candle) => {
+        for (let i = 0; i < recentCandles.length; i++) {
+            const candle = recentCandles[i];
             const volume = candle.volume;
             totalVolume += volume;
             
-            if (candle.close > ema13) {
-                buyerVolume += volume; // Volume comprador (preço acima EMA13)
-            } else if (candle.close < ema13) {
-                sellerVolume += volume; // Volume vendedor (preço abaixo EMA13)
+            // Comparação CORRETA: close do candle com a EMA13 do MESMO candle
+            if (candle.close > recentEma13Values[i]) {
+                buyerVolume += volume;
+            } else if (candle.close < recentEma13Values[i]) {
+                sellerVolume += volume;
             } else {
                 buyerVolume += volume / 2;
                 sellerVolume += volume / 2;
             }
-        });
+        }
         
-        const buyerPercentage = (buyerVolume / totalVolume) * 100;
+        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         
         let direction = '';
         let emoji = '';
         let score = 0;
         
-        // Pontuação baseada na força do volume
-        if (buyerPercentage > 60) {
+        // Pontuação baseada na força do volume (ajustada para ser simétrica)
+        if (buyerPercentage > 65) {
             direction = 'Comprador Forte';
             emoji = '🟢🟢';
-            score = 30; // Pontuação máxima
-        } else if (buyerPercentage > 55) {
+            score = 30;
+        } else if (buyerPercentage > 58) {
             direction = 'Comprador';
             emoji = '🟢';
             score = 20;
@@ -1181,11 +1191,11 @@ async function analyzeVolume3mWithEMA13(symbol) {
             direction = 'Levemente Comprador';
             emoji = '🟡';
             score = 10;
-        } else if (buyerPercentage < 40) {
+        } else if (buyerPercentage < 35) {
             direction = 'Vendedor Forte';
             emoji = '🔴🔴';
             score = -30;
-        } else if (buyerPercentage < 45) {
+        } else if (buyerPercentage < 42) {
             direction = 'Vendedor';
             emoji = '🔴';
             score = -20;
