@@ -198,15 +198,15 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7',
-        CHAT_ID: '-100279'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 5,
+        K_PERIOD: 14,
         D_PERIOD: 3,
         SLOWING: 3,
-        TIMEFRAME: '12h',
+        TIMEFRAME: '4h',
         OVERBOUGHT: 70,
         OVERSOLD: 67
     },
@@ -690,7 +690,7 @@ async function sendInitializationMessage() {
 <i>🚀 TITANIUM INICIADO ✅</i>
 <i>📅 ${now.full}</i>
 <i>✅ ALERTAS ATIVOS</i>
-<i>📊 Estocástico 12h 5.3.3</i>
+<i>📊 Estocástico 4h 14.3.3</i>
 <i>📊 Volume 3m com EMA 13 ativado</i>
 `;
         console.log('📤 Enviando mensagem de inicialização para Telegram...');
@@ -1745,7 +1745,7 @@ async function checkStochasticSignal(symbol) {
 }
 
 // =====================================================================
-// === ANÁLISE DE FATORES POSITIVOS E NEGATIVOS (ATUALIZADO COM VOLUME 3M) ===
+// === ANÁLISE DE FATORES POSITIVOS E NEGATIVOS (CORRIGIDO VOLUME 3M) ===
 // =====================================================================
 async function analyzeTradeFactors(symbol, signalType, indicators) {
     const factors = {
@@ -1953,14 +1953,15 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 
     factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
 
-    // Resumo inteligente com Volume 3m
+    // Resumo inteligente com Volume 3m CORRIGIDO
     const isBadTrade = factors.score < 50;
     const isNearResistance = indicators.pivotData?.nearestResistance?.distancePercent < 3.0;
     const isNearSupport = indicators.pivotData?.nearestSupport?.distancePercent < 3.0;
     const volumeData = indicators.volumeData;
     const volume3mData = indicators.volume3mData;
     
-    // Verifica se volume 3m é favorável (comprador > 52% para compra, vendedor > 52% para venda)
+    // Para COMPRA, queremos volume COMPRADOR > 52%
+    // Para VENDA, queremos volume VENDEDOR > 52% (ou seja, comprador < 48%)
     const volume3mFavoravel = volume3mData && 
         ((signalType === 'STOCHASTIC_COMPRA' && volume3mData.percentage > 52) ||
          (signalType === 'STOCHASTIC_VENDA' && volume3mData.percentage < 48));
@@ -1972,10 +1973,9 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
             resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA COMPRA. `;
             if (isNearSupport) {
                 resumo += `Porém suporte próximo (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%) - possível reação. `;
-            } else if (isNearResistance) {
-                resumo += `Preço próximo da resistência (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%). Pouco espaço para alta. `;
             }
             if (!volume3mFavoravel && volume3mData) {
+                // Quando é desfavorável para COMPRA, mostra a % de COMPRADOR
                 resumo += `Volume 3m desfavorável (${volume3mData.percentage}% comprador). `;
             }
         } else {
@@ -1995,11 +1995,10 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
             resumo = `⚠️ OPERAÇÃO DESFAVORÁVEL PARA CORREÇÃO. `;
             if (isNearResistance) {
                 resumo += `Porém resistência próxima (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%) - possível rejeição. `;
-            } else if (isNearSupport) {
-                resumo += `Preço próximo do suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%). Pouco espaço para queda. `;
             }
             if (!volume3mFavoravel && volume3mData) {
-                resumo += `Volume 3m desfavorável (${100 - volume3mData.percentage}% vendedor). `;
+                // Quando é desfavorável para CORREÇÃO, mostra a % de VENDEDOR
+                resumo += `Volume 3m desfavorável (${volume3mData.sellerPercentage || (100 - volume3mData.percentage)}% vendedor). `;
             }
         } else {
             resumo = `✅ OPERAÇÃO FAVORÁVEL PARA CORREÇÃO. `;
@@ -2007,7 +2006,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
                 resumo += `💰 RESISTÊNCIA PRÓXIMA (${indicators.pivotData?.nearestResistance?.distancePercent.toFixed(1)}%) - ENTRADA ESTRATÉGICA! `;
             }
             if (volume3mFavoravel && volume3mData) {
-                resumo += `📈 Volume 3m confirmando (${100 - volume3mData.percentage}% vendedor). `;
+                resumo += `📈 Volume 3m confirmando (${volume3mData.sellerPercentage || (100 - volume3mData.percentage)}% vendedor). `;
             }
             if (indicators.pivotData?.nearestSupport?.distancePercent > 5) {
                 resumo += `📊 Bom espaço até suporte (${indicators.pivotData?.nearestSupport?.distancePercent.toFixed(1)}%). `;
@@ -2252,7 +2251,7 @@ ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
-🔘Stoch 12h ${stochText} | RSI 1H ${rsiText}
+🔘Stoch 4h ${stochText} | RSI 1H ${rsiText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2341,7 +2340,7 @@ async function mainBotLoop() {
        
         console.log('\n' + '='.repeat(80));
         console.log('🚀 TITANIUM - BOT DE TRADING');
-        console.log('📊 Estratégia: Estocástico 12h 5.3.3 + ATR 4h + EMA 3m');
+        console.log('📊 Estratégia: Estocástico 4h 14.3.3 + ATR 4h + EMA 3m');
         console.log(`📈 Filtro RSI 1h: COMPRA < ${RSI_1H_CONFIG.COMPRA.MAX_RSI} | VENDA > ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
         console.log(`📊 Estocástico: COMPRA < ${CONFIG.STOCHASTIC.OVERSOLD} | VENDA > ${CONFIG.STOCHASTIC.OVERBOUGHT}`);
         console.log(`📊 Volume 1h: Análise comprador/vendedor com EMA 9`);
