@@ -207,8 +207,8 @@ const CONFIG = {
         D_PERIOD: 3,            // Mantido 3
         SLOWING: 3,             // Mantido 3
         TIMEFRAME: '12h',       // ALTERADO: 4h -> 12h
-        OVERBOUGHT: 80,         // Ajustado para 5-period (mais sensível)
-        OVERSOLD: 20            // Ajustado para 5-period (mais sensível)
+        OVERBOUGHT: 70,         // Ajustado para 5-period (mais sensível)
+        OVERSOLD: 67            // Ajustado para 5-period (mais sensível)
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
