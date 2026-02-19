@@ -212,11 +212,11 @@ const RSI_15M_CONFIG = {
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 55, // Mínimo de 55% volume comprador
+        MIN_BUYER_PERCENTAGE: 52, // Mínimo de 55% volume comprador
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 55, // Mínimo de 55% volume vendedor
+        MIN_SELLER_PERCENTAGE: 52, // Mínimo de 55% volume vendedor
         ENABLED: true
     }
 };
@@ -226,8 +226,8 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZf',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     CCI: {
         ENABLED: true,
@@ -2184,7 +2184,7 @@ ${volumeText}
 ${volume3mText}
 Alertas: ${alertCounterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘CCI  ${cciText} | RSI 1H ${rsiText}${rsi15mText}
+🔘CCI2  ${cciText} | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
