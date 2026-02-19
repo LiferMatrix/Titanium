@@ -228,8 +228,8 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D0A',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -1972,7 +1972,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL ===
+// === ALERTA PRINCIPAL (VERSÃO SIMPLIFICADA) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
@@ -2087,29 +2087,6 @@ async function sendStochasticAlertEnhanced(signal) {
         pivotDistanceText = `📊 Pivô: Indisponível`;
     }
    
-    let retestText = '';
-    if (signal.retestData) {
-        const rt = signal.retestData;
-        
-        retestText = `\n🤖 #IA 🔍 Análise`;
-        retestText += `\n📊 Nível de ${rt.type}: $${rt.level.toFixed(6)} (distância ${rt.distance.toFixed(2)}%)`;
-        
-        if (rt.totalTests > 0) {
-            retestText += `\n📈 Histórico: ${rt.totalTests} testes, ${rt.successRate.toFixed(0)}% aprovação`;
-            if (rt.volumeRatio > CONFIG.RETEST.VOLUME_THRESHOLD) {
-                retestText += `\n📊 Volume no teste: ${(rt.volumeRatio * 100).toFixed(0)}% acima da média ✅`;
-            }
-        }
-        
-        if (rt.falseBreakout) {
-            retestText += `\n⚠️ FALSA RUPTURA detectada!`;
-        }
-        
-        if (rt.isHistoric) {
-            retestText += `\n🏆 Nível HISTÓRICO (${rt.totalTests} testes)`;
-        }
-    }
-   
     let lsrText = 'N/A';
     let lsrEmoji = '';
     if (signal.lsr) {
@@ -2173,6 +2150,7 @@ async function sendStochasticAlertEnhanced(signal) {
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
    
+    // MENSAGEM SIMPLIFICADA - REMOVIDAS AS INFORMAÇÕES DETALHADAS DA ANÁLISE
     let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 ${volumeText}
@@ -2187,8 +2165,8 @@ ${atrTargetsText}
 ✨Níveis Importantes:
 ${srCompact}
 ${pivotDistanceText}
-${retestText}
-💡 ${factors.resumoInteligente}
+✨ Titanium IA 🔍 Analisando Score...
+SCORE: ${factors.score}
 ✨ Titanium by @J4Rviz ✨`);
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
