@@ -142,6 +142,8 @@ const StochasticSignalSchema = z.object({
     type: z.enum(['STOCHASTIC_COMPRA', 'STOCHASTIC_VENDA']),
     stochastic: StochasticSchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
+    rsi15m: z.number().min(0).max(100).optional().nullable(),
+    rsi15mDirection: z.enum(['subindo', 'descendo', 'estável']).optional().nullable(),
     lsr: z.number().optional().nullable(),
     funding: z.string().optional().nullable(),
     pivotData: PivotPointSchema.nullable(),
@@ -194,12 +196,40 @@ const RSI_1H_CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÕES DE RSI 15M PARA ALERTAS ===
+// =====================================================================
+const RSI_15M_CONFIG = {
+    COMPRA: {
+        DIRECTION: 'subindo', // RSI precisa estar subindo
+        ENABLED: true
+    },
+    VENDA: {
+        DIRECTION: 'descendo', // RSI precisa estar descendo
+        ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE VOLUME 1H OBRIGATÓRIO ===
+// =====================================================================
+const VOLUME_1H_CONFIG = {
+    COMPRA: {
+        MIN_BUYER_PERCENTAGE: 55, // Mínimo de 55% volume comprador
+        ENABLED: true
+    },
+    VENDA: {
+        MIN_SELLER_PERCENTAGE: 55, // Mínimo de 55% volume vendedor
+        ENABLED: true
+    }
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oN0A',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     STOCHASTIC: {
         ENABLED: true,
@@ -207,8 +237,8 @@ const CONFIG = {
         D_PERIOD: 3,            // Mantido 3
         SLOWING: 3,             // Mantido 3
         TIMEFRAME: '12h',       // ALTERADO: 4h -> 12h
-        OVERBOUGHT: 70,         // Ajustado para 5-period (mais sensível)
-        OVERSOLD: 67            // Ajustado para 5-period (mais sensível)
+        OVERBOUGHT: 77,         // Mantido 80
+        OVERSOLD: 67            // Mantido 20
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -658,10 +688,12 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
        
         const message = `
-<i>🚀 TITANIUM 12h INICIADO ✅</i>
+<i>🚀 TITANIUM 12H INICIADO ✅</i>
 <i>📅 ${now.full}</i>
 <i>✅ ALERTAS ATIVOS</i>
-<i>📊 Estocástico 12h 5.3.3 (OVERSOLD 20 | OVERBOUGHT 80)</i>
+<i>📊 Estocástico 12H 5.3.3 (OVERSOLD 20 | OVERBOUGHT 80)</i>
+<i>📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor</i>
+<i>📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO</i>
 <i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
 `;
         console.log('📤 Enviando mensagem de inicialização...');
@@ -689,7 +721,7 @@ async function getCandles(symbol, timeframe, limit = 80) {
             '12h': '12h', '1d': '1d'
         };
         
-        const interval = intervalMap[timeframe] || '4h';
+        const interval = intervalMap[timeframe] || '12h';
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
         const data = await ErrorHandler.retry(
@@ -742,7 +774,7 @@ function calculateEMA(values, period) {
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
         const candles = await getCandles(symbol, timeframe, 50);
-        if (candles.length < 14) {  // Precisa de pelo menos 14 para o período 5
+        if (candles.length < 14) {
             return null;
         }
         
@@ -910,6 +942,70 @@ async function getRSI1h(symbol) {
         return {
             value: rsi,
             status: rsi < 25 ? 'OVERSOLD' : rsi > 75 ? 'OVERBOUGHT' : 'NEUTRAL'
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function getRSI15m(symbol) {
+    try {
+        const candles = await getCandles(symbol, '15m', 30);
+        if (candles.length < 15) {
+            return null;
+        }
+        
+        const closes = candles.map(c => c.close);
+        
+        // Calcular RSI atual
+        let gains = 0;
+        let losses = 0;
+        
+        for (let i = 1; i < closes.length; i++) {
+            const difference = closes[i] - closes[i - 1];
+            if (difference > 0) {
+                gains += difference;
+            } else {
+                losses += Math.abs(difference);
+            }
+        }
+        
+        const avgGain = gains / 14;
+        const avgLoss = losses / 14 || 0.001;
+        const rs = avgGain / avgLoss;
+        const currentRSI = 100 - (100 / (1 + rs));
+        
+        // Calcular RSI anterior (para ver direção)
+        const prevCloses = closes.slice(0, -1);
+        let prevGains = 0;
+        let prevLosses = 0;
+        
+        for (let i = 1; i < prevCloses.length; i++) {
+            const difference = prevCloses[i] - prevCloses[i - 1];
+            if (difference > 0) {
+                prevGains += difference;
+            } else {
+                prevLosses += Math.abs(difference);
+            }
+        }
+        
+        const prevAvgGain = prevGains / 14;
+        const prevAvgLoss = prevLosses / 14 || 0.001;
+        const prevRs = prevAvgGain / prevAvgLoss;
+        const prevRSI = 100 - (100 / (1 + prevRs));
+        
+        // Determinar direção
+        let direction = 'estável';
+        if (currentRSI > prevRSI + 0.5) {
+            direction = 'subindo';
+        } else if (currentRSI < prevRSI - 0.5) {
+            direction = 'descendo';
+        }
+        
+        return {
+            value: currentRSI,
+            previousValue: prevRSI,
+            direction: direction
         };
     } catch (error) {
         return null;
@@ -1490,19 +1586,44 @@ async function checkStochasticSignal(symbol) {
             return null;
         }
         
-        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData, volume3mData, retestData] = await Promise.all([
+        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.all([
             getRSI1h(symbol),
+            getRSI15m(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
-            analyzePivotPoints(symbol, 0, signalType === 'STOCHASTIC_COMPRA'),
-            getCurrentPrice(symbol),
             analyzeVolume1hWithEMA9(symbol),
-            analyzeVolume3mWithEMA13(symbol),
-            analyzeSupportResistanceRetest(symbol, 0, signalType)
+            analyzeVolume3mWithEMA13(symbol)
         ]);
         
-        const finalPivotData = pivotData ? await analyzePivotPoints(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA') : null;
-        const finalRetestData = retestData ? await analyzeSupportResistanceRetest(symbol, currentPrice, signalType) : null;
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME 1H =====
+        if (VOLUME_1H_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!volumeData || volumeData.direction !== 'Comprador' || volumeData.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                console.log(`📊 Volume 1h rejeitado para COMPRA ${symbol}: ${volumeData?.percentage}% ${volumeData?.direction}`);
+                return null;
+            }
+        }
+        
+        if (VOLUME_1H_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
+            if (!volumeData || volumeData.direction !== 'Vendedor' || (100 - volumeData.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                console.log(`📊 Volume 1h rejeitado para VENDA ${symbol}: ${100 - volumeData?.percentage}% vendedor`);
+                return null;
+            }
+        }
+        
+        // ===== NOVO FILTRO OBRIGATÓRIO DE RSI 15M =====
+        if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!rsi15mData || rsi15mData.direction !== 'subindo') {
+                console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+                return null;
+            }
+        }
+        
+        if (RSI_15M_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
+            if (!rsi15mData || rsi15mData.direction !== 'descendo') {
+                console.log(`📊 RSI 15m rejeitado para VENDA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+                return null;
+            }
+        }
         
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
@@ -1516,20 +1637,29 @@ async function checkStochasticSignal(symbol) {
             }
         }
         
+        const currentPrice = await getCurrentPrice(symbol);
+        if (currentPrice === 0) {
+            return null;
+        }
+        
+        const pivotData = await analyzePivotPoints(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA');
         const entryRetraction = await calculateEntryRetraction(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA');
         const entryPrice = entryRetraction.entryPrice;
         
         const atrTargets = await calculateATRTargets(symbol, entryPrice, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
+        const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
         const signal = {
             symbol: symbol,
             type: signalType,
             stochastic: stochastic,
             rsi: rsiData?.value,
+            rsi15m: rsi15mData?.value,
+            rsi15mDirection: rsi15mData?.direction,
             lsr: lsrData?.lsrValue,
             funding: fundingData?.ratePercent,
-            pivotData: finalPivotData,
+            pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
             entryRetraction: entryRetraction,
@@ -1540,7 +1670,7 @@ async function checkStochasticSignal(symbol) {
             emaCheck: emaCheck,
             volumeData: volumeData,
             volume3mData: volume3mData,
-            retestData: finalRetestData
+            retestData: retestData
         };
         
         return StochasticSignalSchema.parse(signal);
@@ -2010,6 +2140,12 @@ async function sendStochasticAlertEnhanced(signal) {
     if (signal.rsi) {
         rsiText = signal.rsi.toFixed(0);
     }
+
+    let rsi15mText = '';
+    if (signal.rsi15m) {
+        const arrow = signal.rsi15mDirection === 'subindo' ? '⬆️' : signal.rsi15mDirection === 'descendo' ? '⬇️' : '➡️';
+        rsi15mText = ` | RSI 15m ${signal.rsi15m.toFixed(0)}${arrow}`;
+    }
    
     let volumeText = 'Volume 1h: Desconhecido';
     if (signal.volumeData) {
@@ -2043,7 +2179,7 @@ ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘#Stoch #12H ${stochText} | RSI 1H ${rsiText}
+🔘#Stoch #12H ${stochText} | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2053,13 +2189,13 @@ ${srCompact}
 ${pivotDistanceText}
 ${retestText}
 💡 ${factors.resumoInteligente}
-✨ Titanium 12H  by @J4Rviz ✨`);
+✨ Titanium by @J4Rviz ✨`);
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}%`);
+    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection}`);
 }
 
 // =====================================================================
@@ -2116,8 +2252,10 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM 12h OTIMIZADO');
-        console.log(`📊 Estocástico: 5.3.3 (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log('🚀 TITANIUM 12H OTIMIZADO');
+        console.log(`📊 Estocástico: 5.3.3 12H (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
+        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
         console.log(`📊 Cache: ${CacheManager.getStats().hitRate}`);
         console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
@@ -2185,8 +2323,10 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM - MODO 12h OTIMIZADO');
-        console.log(`📊 Estocástico: 5.3.3 (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log('🚀 TITANIUM - MODO 12H OTIMIZADO');
+        console.log(`📊 Estocástico: 5.3.3 12H (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
+        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
         console.log(`📊 Batch Size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
         console.log(`📊 Cache TTL: ${CONFIG.PERFORMANCE.CANDLE_CACHE_TTL/1000}s`);
         console.log('='.repeat(60) + '\n');
