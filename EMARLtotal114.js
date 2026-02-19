@@ -228,17 +228,17 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_o',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 14,           // ALTERADO: 5 -> 14
-        D_PERIOD: 3,            // Mantido 3
-        SLOWING: 3,             // Mantido 3
-        TIMEFRAME: '4h',        // ALTERADO: 1d -> 4h
-        OVERBOUGHT: 77,         // Mantido 80
-        OVERSOLD: 67            // Mantido 20
+        K_PERIOD: 14,
+        D_PERIOD: 3,
+        SLOWING: 3,
+        TIMEFRAME: '4h',
+        OVERBOUGHT: 77,
+        OVERSOLD: 67
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -773,8 +773,8 @@ function calculateEMA(values, period) {
 
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 80); // Aumentado para 80 velas
-        if (candles.length < CONFIG.STOCHASTIC.K_PERIOD + 20) { // Ajustado para 14 + 20 = 34 mínimo
+        const candles = await getCandles(symbol, timeframe, 80);
+        if (candles.length < CONFIG.STOCHASTIC.K_PERIOD + 20) {
             return null;
         }
         
@@ -1972,7 +1972,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL ===
+// === ALERTA PRINCIPAL (VERSÃO SIMPLIFICADA) ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
@@ -1997,7 +1997,7 @@ async function sendStochasticAlertEnhanced(signal) {
         srInfo = await calculateSupportResistance15m(signal.symbol, currentPrice);
     } catch (error) {}
    
-    let atrTargetsText = 'Alvos ATR: N/A';
+    let atrTargetsText = 'Alvos: N/A';
     let atrValue = 0;
     if (signal.atrTargets) {
         const atr = signal.atrTargets.atr;
@@ -2087,29 +2087,6 @@ async function sendStochasticAlertEnhanced(signal) {
         pivotDistanceText = `📊 Pivô: Indisponível`;
     }
    
-    let retestText = '';
-    if (signal.retestData) {
-        const rt = signal.retestData;
-        
-        retestText = `\n🤖 #IA 🔍 Análise`;
-        retestText += `\n📊 Nível de ${rt.type}: $${rt.level.toFixed(6)} (distância ${rt.distance.toFixed(2)}%)`;
-        
-        if (rt.totalTests > 0) {
-            retestText += `\n📈 Histórico: ${rt.totalTests} testes, ${rt.successRate.toFixed(0)}% aprovação`;
-            if (rt.volumeRatio > CONFIG.RETEST.VOLUME_THRESHOLD) {
-                retestText += `\n📊 Volume no teste: ${(rt.volumeRatio * 100).toFixed(0)}% acima da média ✅`;
-            }
-        }
-        
-        if (rt.falseBreakout) {
-            retestText += `\n⚠️ FALSA RUPTURA detectada!`;
-        }
-        
-        if (rt.isHistoric) {
-            retestText += `\n🏆 Nível HISTÓRICO (${rt.totalTests} testes)`;
-        }
-    }
-   
     let lsrText = 'N/A';
     let lsrEmoji = '';
     if (signal.lsr) {
@@ -2173,6 +2150,7 @@ async function sendStochasticAlertEnhanced(signal) {
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
    
+    // MENSAGEM SIMPLIFICADA - REMOVIDAS AS INFORMAÇÕES DETALHADAS DA ANÁLISE
     let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 ${volumeText}
@@ -2187,8 +2165,8 @@ ${atrTargetsText}
 ✨Níveis Importantes:
 ${srCompact}
 ${pivotDistanceText}
-${retestText}
-💡 ${factors.resumoInteligente}
+✨ Titanium IA 🔍 Analisando Score...
+SCORE: ${factors.score}
 ✨ Titanium by @J4Rviz ✨`);
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
@@ -2252,11 +2230,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM 4H OTIMIZADO');
-        console.log(`📊 Estocástico: 14.3.3 4H (OVERSOLD 20 | OVERBOUGHT 80)`);
-        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
-        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
-        console.log(`📊 Cache: ${CacheManager.getStats().hitRate}`);
+        console.log('🚀 TITANIUM 4H ');
         console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
