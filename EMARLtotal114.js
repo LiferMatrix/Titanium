@@ -142,6 +142,8 @@ const StochasticSignalSchema = z.object({
     type: z.enum(['STOCHASTIC_COMPRA', 'STOCHASTIC_VENDA']),
     stochastic: StochasticSchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
+    rsi15m: z.number().min(0).max(100).optional().nullable(),
+    rsi15mDirection: z.enum(['subindo', 'descendo', 'estável']).optional().nullable(),
     lsr: z.number().optional().nullable(),
     funding: z.string().optional().nullable(),
     pivotData: PivotPointSchema.nullable(),
@@ -194,34 +196,62 @@ const RSI_1H_CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÕES DE RSI 15M PARA ALERTAS ===
+// =====================================================================
+const RSI_15M_CONFIG = {
+    COMPRA: {
+        DIRECTION: 'subindo', // RSI precisa estar subindo
+        ENABLED: true
+    },
+    VENDA: {
+        DIRECTION: 'descendo', // RSI precisa estar descendo
+        ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE VOLUME 1H OBRIGATÓRIO ===
+// =====================================================================
+const VOLUME_1H_CONFIG = {
+    COMPRA: {
+        MIN_BUYER_PERCENTAGE: 55, // Mínimo de 55% volume comprador
+        ENABLED: true
+    },
+    VENDA: {
+        MIN_SELLER_PERCENTAGE: 55, // Mínimo de 55% volume vendedor
+        ENABLED: true
+    }
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZA',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 14,
-        D_PERIOD: 3,
-        SLOWING: 3,
-        TIMEFRAME: '4h',
-        OVERBOUGHT: 70,
-        OVERSOLD: 67
+        K_PERIOD: 14,           // ALTERADO: 5 -> 14
+        D_PERIOD: 3,            // Mantido 3
+        SLOWING: 3,             // Mantido 3
+        TIMEFRAME: '4h',        // ALTERADO: 1d -> 4h
+        OVERBOUGHT: 77,         // Mantido 80
+        OVERSOLD: 67            // Mantido 20
     },
     PERFORMANCE: {
-        SYMBOL_DELAY_MS: 100, // Reduzido de 200ms para 100ms
-        CYCLE_DELAY_MS: 15000, // Reduzido de 30s para 15s
-        MAX_SYMBOLS_PER_CYCLE: 0, // 0 = todos os símbolos
+        SYMBOL_DELAY_MS: 100,
+        CYCLE_DELAY_MS: 15000,
+        MAX_SYMBOLS_PER_CYCLE: 0,
         COOLDOWN_MINUTES: 5,
-        CANDLE_CACHE_TTL: 120000, // Aumentado de 90s para 120s
-        MAX_CACHE_AGE: 15 * 60 * 1000, // Aumentado para 15 minutos
-        BATCH_SIZE: 10, // Processar 10 símbolos em paralelo
-        REQUEST_TIMEOUT: 10000 // Timeout de 10s para requisições
+        CANDLE_CACHE_TTL: 120000,
+        MAX_CACHE_AGE: 15 * 60 * 1000,
+        BATCH_SIZE: 10,
+        REQUEST_TIMEOUT: 10000
     },
     CLEANUP: {
-        INTERVAL: 10 * 60 * 1000, // A cada 10 minutos
+        INTERVAL: 10 * 60 * 1000,
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
         MEMORY_THRESHOLD: 500 * 1024 * 1024
@@ -274,7 +304,7 @@ const stochasticCooldown = {};
 const stochCrossState = {};
 
 // === CACHE DE CANDLES OTIMIZADO ===
-const candleCache = new Map(); // Usando Map em vez de objeto para melhor performance
+const candleCache = new Map();
 const cacheStats = {
     hits: 0,
     misses: 0,
@@ -300,7 +330,6 @@ class OptimizedRateLimiter {
         this.pendingRequests++;
         this.requestCount++;
         
-        // Controle de taxa baseado no tempo
         const now = Date.now();
         const timeSinceLastRequest = now - this.lastRequestTime;
         if (timeSinceLastRequest < this.currentDelay) {
@@ -330,14 +359,12 @@ class OptimizedRateLimiter {
 
             const data = await response.json();
 
-            // Sucesso - reduz gradualmente o delay
             this.consecutiveErrors = 0;
             this.currentDelay = Math.max(
                 CONFIG.RATE_LIMITER.INITIAL_DELAY,
                 this.currentDelay * 0.95
             );
 
-            // Reset contador de erros para este endpoint
             this.errorsByEndpoint.set(type, 0);
             
             this.pendingRequests--;
@@ -346,19 +373,16 @@ class OptimizedRateLimiter {
         } catch (error) {
             this.consecutiveErrors++;
             
-            // Incrementa contador de erros para este endpoint
             const endpointErrors = (this.errorsByEndpoint.get(type) || 0) + 1;
             this.errorsByEndpoint.set(type, endpointErrors);
 
-            // Backoff exponencial
             this.currentDelay = Math.min(
                 this.maxDelay,
                 this.currentDelay * this.backoffFactor
             );
 
-            // Log apenas se for um erro significativo
             if (this.consecutiveErrors % 3 === 0) {
-                console.warn(`⚠️ RateLimiter [${type}]: ${this.consecutiveErrors} erros consecutivos, delay=${Math.round(this.currentDelay)}ms`);
+                console.warn(`⚠️ RateLimiter [${type}]: ${this.consecutiveErrors} erros, delay=${Math.round(this.currentDelay)}ms`);
             }
 
             this.pendingRequests--;
@@ -396,9 +420,8 @@ class CacheManager {
     static set(symbol, timeframe, limit, data) {
         const key = `${symbol}_${timeframe}_${limit}`;
         
-        // Limpeza se o cache estiver muito grande
         if (candleCache.size > 5000) {
-            this.cleanup(0.3); // Remove 30% das entradas mais antigas
+            this.cleanup(0.3);
         }
         
         candleCache.set(key, {
@@ -413,7 +436,6 @@ class CacheManager {
         const now = Date.now();
         const entries = Array.from(candleCache.entries());
         
-        // Calcula score para cada entrada (quanto mais antigo e menos acessado, maior o score para remoção)
         const entriesWithScore = entries.map(([key, value]) => {
             const age = now - value.timestamp;
             const accessScore = 1 / (value.accessCount || 1);
@@ -423,16 +445,12 @@ class CacheManager {
             return { key, value, removeScore };
         });
         
-        // Ordena por score de remoção (maior primeiro)
         entriesWithScore.sort((a, b) => b.removeScore - a.removeScore);
         
-        // Remove os X% com maior score
         const removeCount = Math.floor(entries.length * percentToRemove);
         const removed = entriesWithScore.slice(0, removeCount);
         
         removed.forEach(item => candleCache.delete(item.key));
-        
-        console.log(`🗑️ Cache: ${removed.length} entradas removidas (${candleCache.size} restantes)`);
         
         cacheStats.lastCleanup = now;
         return removed.length;
@@ -505,7 +523,7 @@ class ErrorHandler {
             errorResponse.retryable = [429, 500, 502, 503, 504].includes(status);
             errorResponse.message = `HTTP ${status}`;
             
-            if (status !== 429) { // Não logar rate limit excessivamente
+            if (status !== 429) {
                 console.log(`⚠️ HTTP ${status} [${context}]`);
             }
             
@@ -525,11 +543,9 @@ class ErrorHandler {
             errorResponse.type = 'ZOD_VALIDATION_ERROR';
             errorResponse.retryable = false;
             errorResponse.message = 'Erro de validação';
-            // Não logar erros Zod detalhados para não poluir o console
             return errorResponse;
         }
 
-        // Log apenas erros não classificados
         if (!errorResponse.type.includes('ZOD')) {
             console.log(`❌ Erro [${context}]: ${error.message.substring(0, 50)}`);
         }
@@ -594,7 +610,7 @@ async function sendTelegramAlert(message) {
     try {
         const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
         const response = await fetch(url, {
             method: 'POST',
@@ -672,10 +688,12 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
        
         const message = `
-<i>🚀 TITANIUM OTIMIZADO INICIADO ✅</i>
+<i>🚀 TITANIUM 4H INICIADO ✅</i>
 <i>📅 ${now.full}</i>
 <i>✅ ALERTAS ATIVOS</i>
-<i>📊 Modo: ALTA PERFORMANCE</i>
+<i>📊 Estocástico 4H 14.3.3 (OVERSOLD 20 | OVERBOUGHT 80)</i>
+<i>📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor</i>
+<i>📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO</i>
 <i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
 `;
         console.log('📤 Enviando mensagem de inicialização...');
@@ -691,7 +709,6 @@ async function sendInitializationMessage() {
 // === FUNÇÕES DE ANÁLISE TÉCNICA OTIMIZADAS ===
 // =====================================================================
 async function getCandles(symbol, timeframe, limit = 80) {
-    // Tentar obter do cache primeiro
     const cached = CacheManager.get(symbol, timeframe, limit);
     if (cached) {
         return cached;
@@ -704,7 +721,7 @@ async function getCandles(symbol, timeframe, limit = 80) {
             '12h': '12h', '1d': '1d'
         };
         
-        const interval = intervalMap[timeframe] || '3m';
+        const interval = intervalMap[timeframe] || '4h';
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
         const data = await ErrorHandler.retry(
@@ -728,7 +745,6 @@ async function getCandles(symbol, timeframe, limit = 80) {
         
         const validatedCandles = candles.map(candle => CandleSchema.parse(candle));
         
-        // Salvar no cache
         CacheManager.set(symbol, timeframe, limit, validatedCandles);
         
         return validatedCandles;
@@ -757,8 +773,8 @@ function calculateEMA(values, period) {
 
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 50);
-        if (candles.length < 14) {
+        const candles = await getCandles(symbol, timeframe, 80); // Aumentado para 80 velas
+        if (candles.length < CONFIG.STOCHASTIC.K_PERIOD + 20) { // Ajustado para 14 + 20 = 34 mínimo
             return null;
         }
         
@@ -926,6 +942,70 @@ async function getRSI1h(symbol) {
         return {
             value: rsi,
             status: rsi < 25 ? 'OVERSOLD' : rsi > 75 ? 'OVERBOUGHT' : 'NEUTRAL'
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function getRSI15m(symbol) {
+    try {
+        const candles = await getCandles(symbol, '15m', 30);
+        if (candles.length < 15) {
+            return null;
+        }
+        
+        const closes = candles.map(c => c.close);
+        
+        // Calcular RSI atual
+        let gains = 0;
+        let losses = 0;
+        
+        for (let i = 1; i < closes.length; i++) {
+            const difference = closes[i] - closes[i - 1];
+            if (difference > 0) {
+                gains += difference;
+            } else {
+                losses += Math.abs(difference);
+            }
+        }
+        
+        const avgGain = gains / 14;
+        const avgLoss = losses / 14 || 0.001;
+        const rs = avgGain / avgLoss;
+        const currentRSI = 100 - (100 / (1 + rs));
+        
+        // Calcular RSI anterior (para ver direção)
+        const prevCloses = closes.slice(0, -1);
+        let prevGains = 0;
+        let prevLosses = 0;
+        
+        for (let i = 1; i < prevCloses.length; i++) {
+            const difference = prevCloses[i] - prevCloses[i - 1];
+            if (difference > 0) {
+                prevGains += difference;
+            } else {
+                prevLosses += Math.abs(difference);
+            }
+        }
+        
+        const prevAvgGain = prevGains / 14;
+        const prevAvgLoss = prevLosses / 14 || 0.001;
+        const prevRs = prevAvgGain / prevAvgLoss;
+        const prevRSI = 100 - (100 / (1 + prevRs));
+        
+        // Determinar direção
+        let direction = 'estável';
+        if (currentRSI > prevRSI + 0.5) {
+            direction = 'subindo';
+        } else if (currentRSI < prevRSI - 0.5) {
+            direction = 'descendo';
+        }
+        
+        return {
+            value: currentRSI,
+            previousValue: prevRSI,
+            direction: direction
         };
     } catch (error) {
         return null;
@@ -1506,20 +1586,44 @@ async function checkStochasticSignal(symbol) {
             return null;
         }
         
-        const [rsiData, lsrData, fundingData, pivotData, currentPrice, volumeData, volume3mData, retestData] = await Promise.all([
+        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.all([
             getRSI1h(symbol),
+            getRSI15m(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
-            analyzePivotPoints(symbol, 0, signalType === 'STOCHASTIC_COMPRA'),
-            getCurrentPrice(symbol),
             analyzeVolume1hWithEMA9(symbol),
-            analyzeVolume3mWithEMA13(symbol),
-            analyzeSupportResistanceRetest(symbol, 0, signalType)
+            analyzeVolume3mWithEMA13(symbol)
         ]);
         
-        // Recalcular pivotData com o preço atual
-        const finalPivotData = pivotData ? await analyzePivotPoints(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA') : null;
-        const finalRetestData = retestData ? await analyzeSupportResistanceRetest(symbol, currentPrice, signalType) : null;
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME 1H =====
+        if (VOLUME_1H_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!volumeData || volumeData.direction !== 'Comprador' || volumeData.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                console.log(`📊 Volume 1h rejeitado para COMPRA ${symbol}: ${volumeData?.percentage}% ${volumeData?.direction}`);
+                return null;
+            }
+        }
+        
+        if (VOLUME_1H_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
+            if (!volumeData || volumeData.direction !== 'Vendedor' || (100 - volumeData.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                console.log(`📊 Volume 1h rejeitado para VENDA ${symbol}: ${100 - volumeData?.percentage}% vendedor`);
+                return null;
+            }
+        }
+        
+        // ===== NOVO FILTRO OBRIGATÓRIO DE RSI 15M =====
+        if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!rsi15mData || rsi15mData.direction !== 'subindo') {
+                console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+                return null;
+            }
+        }
+        
+        if (RSI_15M_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
+            if (!rsi15mData || rsi15mData.direction !== 'descendo') {
+                console.log(`📊 RSI 15m rejeitado para VENDA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+                return null;
+            }
+        }
         
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
@@ -1533,20 +1637,29 @@ async function checkStochasticSignal(symbol) {
             }
         }
         
+        const currentPrice = await getCurrentPrice(symbol);
+        if (currentPrice === 0) {
+            return null;
+        }
+        
+        const pivotData = await analyzePivotPoints(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA');
         const entryRetraction = await calculateEntryRetraction(symbol, currentPrice, signalType === 'STOCHASTIC_COMPRA');
         const entryPrice = entryRetraction.entryPrice;
         
         const atrTargets = await calculateATRTargets(symbol, entryPrice, signalType === 'STOCHASTIC_COMPRA');
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
+        const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
         const signal = {
             symbol: symbol,
             type: signalType,
             stochastic: stochastic,
             rsi: rsiData?.value,
+            rsi15m: rsi15mData?.value,
+            rsi15mDirection: rsi15mData?.direction,
             lsr: lsrData?.lsrValue,
             funding: fundingData?.ratePercent,
-            pivotData: finalPivotData,
+            pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
             entryRetraction: entryRetraction,
@@ -1557,7 +1670,7 @@ async function checkStochasticSignal(symbol) {
             emaCheck: emaCheck,
             volumeData: volumeData,
             volume3mData: volume3mData,
-            retestData: finalRetestData
+            retestData: retestData
         };
         
         return StochasticSignalSchema.parse(signal);
@@ -2027,6 +2140,12 @@ async function sendStochasticAlertEnhanced(signal) {
     if (signal.rsi) {
         rsiText = signal.rsi.toFixed(0);
     }
+
+    let rsi15mText = '';
+    if (signal.rsi15m) {
+        const arrow = signal.rsi15mDirection === 'subindo' ? '⬆️' : signal.rsi15mDirection === 'descendo' ? '⬇️' : '➡️';
+        rsi15mText = ` | RSI 15m ${signal.rsi15m.toFixed(0)}${arrow}`;
+    }
    
     let volumeText = 'Volume 1h: Desconhecido';
     if (signal.volumeData) {
@@ -2060,7 +2179,7 @@ ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘Stoch 4h ${stochText} | RSI 1H ${rsiText}
+🔘#Stoch #4H ${stochText} | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2076,7 +2195,7 @@ ${retestText}
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}%`);
+    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection}`);
 }
 
 // =====================================================================
@@ -2133,7 +2252,10 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM OTIMIZADO');
+        console.log('🚀 TITANIUM 4H OTIMIZADO');
+        console.log(`📊 Estocástico: 14.3.3 4H (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
+        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
         console.log(`📊 Cache: ${CacheManager.getStats().hitRate}`);
         console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
@@ -2158,13 +2280,11 @@ async function mainBotLoop() {
             
             let signalsFound = 0;
             
-            // Processar em batches
             for (let i = 0; i < symbolsToMonitor.length; i += batchSize) {
                 const batch = symbolsToMonitor.slice(i, i + batchSize);
                 const batchSignals = await monitorBatch(batch);
                 signalsFound += batchSignals;
                 
-                // Pequena pausa entre batches
                 if (i + batchSize < symbolsToMonitor.length) {
                     await new Promise(r => setTimeout(r, 200));
                 }
@@ -2177,7 +2297,6 @@ async function mainBotLoop() {
             console.log(`📊 Sinais: ${signalsFound} | Cache: ${cacheStats.hitRate}`);
             console.log(`📈 Total: ${globalAlerts} | Diário: ${dailyAlerts}`);
             
-            // Limpeza periódica
             if (cycle % 10 === 0) {
                 CacheManager.cleanup(0.2);
             }
@@ -2204,10 +2323,12 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM - MODO OTIMIZADO');
+        console.log('🚀 TITANIUM - MODO 4H OTIMIZADO');
+        console.log(`📊 Estocástico: 14.3.3 4H (OVERSOLD 20 | OVERBOUGHT 80)`);
+        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
+        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
         console.log(`📊 Batch Size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
         console.log(`📊 Cache TTL: ${CONFIG.PERFORMANCE.CANDLE_CACHE_TTL/1000}s`);
-        console.log(`📊 Timeout: ${CONFIG.PERFORMANCE.REQUEST_TIMEOUT/1000}s`);
         console.log('='.repeat(60) + '\n');
 
         lastResetDate = getBrazilianDateString();
@@ -2240,7 +2361,6 @@ process.on('unhandledRejection', (reason) => {
     console.error('Unhandled Rejection:', reason);
 });
 
-// Iniciar o bot
 startBot();
 
 if (global.gc) {
