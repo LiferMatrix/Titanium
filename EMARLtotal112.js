@@ -2219,7 +2219,7 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium 12H by @J4Rviz ✨`);
+✨ Titanium by @J4Rviz ✨`);
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
