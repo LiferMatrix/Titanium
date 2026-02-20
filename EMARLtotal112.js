@@ -255,8 +255,8 @@ const VOLUME_3M_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
-        CHAT_ID: '-1001990889297'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfs',
+        CHAT_ID: '-10019'
     },
     STOCHASTIC: {
         ENABLED: true,
