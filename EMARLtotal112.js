@@ -210,15 +210,42 @@ const RSI_15M_CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÕES DE LSR 15M PARA ALERTAS ===
+// =====================================================================
+const LSR_15M_CONFIG = {
+    COMPRA: {
+        MAX_LSR: 2.7, // LSR deve ser menor que 2.7 para compra
+        ENABLED: true
+    },
+    VENDA: {
+        ENABLED: false // Venda não tem critério de LSR
+    }
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES DE VOLUME 1H OBRIGATÓRIO ===
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 55, // Mínimo de 55% volume comprador
+        MIN_BUYER_PERCENTAGE: 52, // Mínimo de 52% volume comprador
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 55, // Mínimo de 55% volume vendedor
+        MIN_SELLER_PERCENTAGE: 52, // Mínimo de 52% volume vendedor
+        ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE VOLUME 3M OBRIGATÓRIO ===
+// =====================================================================
+const VOLUME_3M_CONFIG = {
+    COMPRA: {
+        MIN_BUYER_PERCENTAGE: 52, // Volume anormal comprador no 3 minutos (mínimo 52%)
+        ENABLED: true
+    },
+    VENDA: {
+        MIN_SELLER_PERCENTAGE: 52, // Volume anormal vendedor no 3 minutos (mínimo 52%)
         ENABLED: true
     }
 };
@@ -228,17 +255,17 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswA',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     STOCHASTIC: {
         ENABLED: true,
-        K_PERIOD: 5,           // ALTERADO: 14 -> 5
-        D_PERIOD: 3,            // Mantido 3
-        SLOWING: 3,             // Mantido 3
-        TIMEFRAME: '12h',       // ALTERADO: 4h -> 12h
-        OVERBOUGHT: 77,         // Mantido 80
-        OVERSOLD: 67            // Mantido 20
+        K_PERIOD: 5,
+        D_PERIOD: 3,
+        SLOWING: 3,
+        TIMEFRAME: '12h', // Alterado para 12h
+        OVERBOUGHT: 70,
+        OVERSOLD: 67
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -688,13 +715,12 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
        
         const message = `
-<i>🚀 TITANIUM 12H INICIADO ✅</i>
+<i>🚀 TITANIUM 12H ✅</i>
 <i>📅 ${now.full}</i>
 <i>✅ ALERTAS ATIVOS</i>
-<i>📊 Estocástico 12H 5.3.3 (OVERSOLD 20 | OVERBOUGHT 80)</i>
-<i>📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor</i>
-<i>📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO</i>
 <i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
+<i>⚙️ Estocástico 5.3.3</i>
+<i>⚙️ Volume 3m obrigatório (52%)</i>
 `;
         console.log('📤 Enviando mensagem de inicialização...');
         await sendTelegramAlert(message);
@@ -773,8 +799,8 @@ function calculateEMA(values, period) {
 
 async function getStochastic(symbol, timeframe = CONFIG.STOCHASTIC.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 50);
-        if (candles.length < 14) {
+        const candles = await getCandles(symbol, timeframe, 80);
+        if (candles.length < CONFIG.STOCHASTIC.K_PERIOD + 20) {
             return null;
         }
         
@@ -1573,11 +1599,11 @@ async function checkStochasticSignal(symbol) {
             return null;
         }
         
-        if (signalType === 'STOCHASTIC_COMPRA' && stochastic.k >= CONFIG.STOCHASTIC.OVERSOLD) {
+        if (signalType === 'STOCHASTIC_COMPRA' && stochastic.k >= CONFIG.STOCHASTIC.OVERSOLD + 10) {
             return null;
         }
        
-        if (signalType === 'STOCHASTIC_VENDA' && stochastic.k <= CONFIG.STOCHASTIC.OVERBOUGHT) {
+        if (signalType === 'STOCHASTIC_VENDA' && stochastic.k <= CONFIG.STOCHASTIC.OVERBOUGHT - 10) {
             return null;
         }
         
@@ -1610,7 +1636,23 @@ async function checkStochasticSignal(symbol) {
             }
         }
         
-        // ===== NOVO FILTRO OBRIGATÓRIO DE RSI 15M =====
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME 3M (ANORMAL) =====
+        if (VOLUME_3M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!volume3mData || volume3mData.percentage < VOLUME_3M_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                console.log(`📊 Volume 3m rejeitado para COMPRA ${symbol}: ${volume3mData?.percentage}% comprador (mínimo ${VOLUME_3M_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE}%)`);
+                return null;
+            }
+        }
+        
+        if (VOLUME_3M_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
+            if (!volume3mData || volume3mData.sellerPercentage < VOLUME_3M_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                const sellerPct = volume3mData?.sellerPercentage || (100 - (volume3mData?.percentage || 0));
+                console.log(`📊 Volume 3m rejeitado para VENDA ${symbol}: ${sellerPct}% vendedor (mínimo ${VOLUME_3M_CONFIG.VENDA.MIN_SELLER_PERCENTAGE}%)`);
+                return null;
+            }
+        }
+        
+        // ===== FILTRO OBRIGATÓRIO DE RSI 15M =====
         if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
             if (!rsi15mData || rsi15mData.direction !== 'subindo') {
                 console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
@@ -1624,6 +1666,16 @@ async function checkStochasticSignal(symbol) {
                 return null;
             }
         }
+        
+        // ===== FILTRO OBRIGATÓRIO DE LSR 15M =====
+        if (LSR_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!lsrData || lsrData.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
+                console.log(`📊 LSR 15m rejeitado para COMPRA ${symbol}: ${lsrData?.lsrValue?.toFixed(2) || 'indisponível'} (máx ${LSR_15M_CONFIG.COMPRA.MAX_LSR})`);
+                return null;
+            }
+        }
+        
+        // VENDA não tem filtro de LSR (configurado como false)
         
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
@@ -1997,7 +2049,7 @@ async function sendStochasticAlertEnhanced(signal) {
         srInfo = await calculateSupportResistance15m(signal.symbol, currentPrice);
     } catch (error) {}
    
-    let atrTargetsText = 'Alvos ATR: N/A';
+    let atrTargetsText = 'Alvos: N/A';
     let atrValue = 0;
     if (signal.atrTargets) {
         const atr = signal.atrTargets.atr;
@@ -2092,7 +2144,7 @@ async function sendStochasticAlertEnhanced(signal) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            lsrEmoji = signal.lsr < 2.5 ? '✅' : '⚠️';
+            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️';
         } else {
             lsrEmoji = signal.lsr > 2.8 ? '✅' : '⚠️';
         }
@@ -2148,11 +2200,12 @@ async function sendStochasticAlertEnhanced(signal) {
     const alertCounterText = `Alerta #${globalAlerts}`;
    
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'STOCHASTIC_COMPRA' ? 'COMPRA' : 'CORREÇÃO';
+    const actionText = signal.type === 'STOCHASTIC_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    // MENSAGEM SIMPLIFICADA - REMOVIDAS AS INFORMAÇÕES DETALHADAS DA ANÁLISE
+    // MENSAGEM SIMPLIFICADA
     let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
+📍SCORE: ${factors.score}
 ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}
@@ -2165,15 +2218,14 @@ ${atrTargetsText}
 ✨Níveis Importantes:
 ${srCompact}
 ${pivotDistanceText}
-✨ Titanium IA 🔍 Analisando Score...
-SCORE: ${factors.score}
-✨ Titanium by @J4Rviz ✨`);
+Alerta Educativo, não é recomendação de investimento
+✨ Titanium 12H by @J4Rviz ✨`);
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection}`);
+    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% ${signal.volume3mData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | LSR: ${signal.lsr?.toFixed(2)}`);
 }
 
 // =====================================================================
@@ -2230,11 +2282,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM 12H OTIMIZADO');
-        console.log(`📊 Estocástico: 5.3.3 12H (OVERSOLD 20 | OVERBOUGHT 80)`);
-        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
-        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
-        console.log(`📊 Cache: ${CacheManager.getStats().hitRate}`);
+        console.log('🚀 TITANIUM 12H ');
         console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
@@ -2301,12 +2349,7 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM - MODO 12H OTIMIZADO');
-        console.log(`📊 Estocástico: 5.3.3 12H (OVERSOLD 20 | OVERBOUGHT 80)`);
-        console.log(`📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor`);
-        console.log(`📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO`);
-        console.log(`📊 Batch Size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
-        console.log(`📊 Cache TTL: ${CONFIG.PERFORMANCE.CANDLE_CACHE_TTL/1000}s`);
+        console.log('🚀 TITANIUM 12H');
         console.log('='.repeat(60) + '\n');
 
         lastResetDate = getBrazilianDateString();
