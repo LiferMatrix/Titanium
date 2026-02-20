@@ -224,11 +224,27 @@ const LSR_15M_CONFIG = {
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 30, // Mínimo de 52% volume comprador
+        MIN_BUYER_PERCENTAGE: 40, // Mínimo de 52% volume comprador
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 30, // Mínimo de 52% volume vendedor
+        MIN_SELLER_PERCENTAGE: 40, // Mínimo de 52% volume vendedor
+        ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE VOLUME 3M OBRIGATÓRIO ===
+// =====================================================================
+const VOLUME_3M_CONFIG = {
+    COMPRA: {
+        REQUIRED_DIRECTION: 'Comprador', // Volume 3m deve ser comprador
+        MIN_PERCENTAGE: 52, // Mínimo de 52% volume comprador
+        ENABLED: true
+    },
+    VENDA: {
+        REQUIRED_DIRECTION: 'Vendedor', // Volume 3m deve ser vendedor
+        MIN_PERCENTAGE: 52, // Mínimo de 52% volume vendedor
         ENABLED: true
     }
 };
@@ -238,8 +254,8 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSg',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     CCI: {
         ENABLED: true,
@@ -674,7 +690,8 @@ function getAlertCountForSymbol(symbol, type) {
     globalAlerts++;
    
     return {
-        symbolDailyCCI: alertCounter[symbol].dailyCCI
+        symbolDailyCCI: alertCounter[symbol].dailyCCI,
+        symbolTotal: alertCounter[symbol].total
     };
 }
 
@@ -696,10 +713,10 @@ async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
        
-        const message = `
-<i>🚀 TITANIUM CCI 1H INICIADO ✅</i>
-<i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
-`;
+        const message = formatItalic(`
+🚀 TITANIUM CCI 1H INICIADO ✅
+📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
+`);
         console.log('📤 Enviando mensagem de inicialização...');
         await sendTelegramAlert(message);
         return true;
@@ -1616,7 +1633,20 @@ async function checkCCISignal(symbol) {
             }
         }
         
-        // Restante do código continua igual...
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME 3M =====
+        if (VOLUME_3M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
+            if (!volume3mData || volume3mData.direction !== VOLUME_3M_CONFIG.COMPRA.REQUIRED_DIRECTION || volume3mData.percentage < VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE) {
+                console.log(`📊 Volume 3m rejeitado para COMPRA ${symbol}: ${volume3mData?.percentage}% ${volume3mData?.direction} (mín ${VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE}% Comprador)`);
+                return null;
+            }
+        }
+        
+        if (VOLUME_3M_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
+            if (!volume3mData || volume3mData.direction !== VOLUME_3M_CONFIG.VENDA.REQUIRED_DIRECTION || (100 - volume3mData.percentage) < VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE) {
+                console.log(`📊 Volume 3m rejeitado para VENDA ${symbol}: ${100 - volume3mData?.percentage}% vendedor (mín ${VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE}% Vendedor)`);
+                return null;
+            }
+        }
         
         // ===== FILTRO OBRIGATÓRIO DE RSI 15M =====
         if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
@@ -1990,13 +2020,13 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (VERSÃO SIMPLIFICADA) ===
+// === ALERTA PRINCIPAL ===
 // =====================================================================
 async function sendCCIAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
     const currentPrice = signal.currentPrice;
    
-    getAlertCountForSymbol(signal.symbol, 'cci');
+    const counts = getAlertCountForSymbol(signal.symbol, 'cci');
     cciCooldown[signal.symbol] = Date.now();
    
     const factors = await analyzeTradeFactors(signal.symbol, signal.type, {
@@ -2110,7 +2140,7 @@ async function sendCCIAlertEnhanced(signal) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'CCI_COMPRA') {
-            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️'; // Atualizado para refletir o novo filtro
+            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️';
         } else {
             lsrEmoji = signal.lsr > 2.8 ? '✅' : '⚠️';
         }
@@ -2163,12 +2193,12 @@ async function sendCCIAlertEnhanced(signal) {
         entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
-    const alertCounterText = `Alerta #${globalAlerts}`;
+    const alertCounterText = `Alerta #${counts.symbolTotal} ${signal.symbol}`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    // MENSAGEM SIMPLIFICADA
+    // MENSAGEM COMPLETA EM ITÁLICO
     let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
@@ -2176,7 +2206,7 @@ ${volumeText}
 ${volume3mText}
 ${alertCounterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘#CCI #1H ${cciText} | RSI 1H ${rsiText}${rsi15mText}
+🔘#CCI #1H | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2191,9 +2221,8 @@ Alerta Educativo, não é recomendação de investimento
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | LSR: ${signal.lsr?.toFixed(2)}`);
+    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% ${signal.volume3mData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | LSR: ${signal.lsr?.toFixed(2)}`);
 }
-
 
 // =====================================================================
 // === FUNÇÕES AUXILIARES OTIMIZADAS ===
@@ -2231,7 +2260,7 @@ async function sendTelegramAlert(message) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        console.log('📤 Enviando para Telegram:', message);
+        console.log('📤 Enviando para Telegram:', message.substring(0, 100) + '...');
         
         const response = await fetch(url, {
             method: 'POST',
@@ -2239,8 +2268,8 @@ async function sendTelegramAlert(message) {
             body: JSON.stringify({
                 chat_id: CONFIG.TELEGRAM.CHAT_ID,
                 text: message,
+                parse_mode: 'HTML',
                 disable_web_page_preview: true
-                // parse_mode removido COMPLETAMENTE para evitar erros
             }),
             signal: controller.signal
         });
@@ -2248,7 +2277,6 @@ async function sendTelegramAlert(message) {
         clearTimeout(timeoutId);
         
         const responseText = await response.text();
-        console.log('📥 Resposta Telegram:', responseText.substring(0, 100));
         
         if (!response.ok) {
             console.error('❌ Erro Telegram detalhado:', responseText);
@@ -2292,7 +2320,8 @@ function getAlertCountForSymbol(symbol, type) {
     globalAlerts++;
    
     return {
-        symbolDailyCCI: alertCounter[symbol].dailyCCI
+        symbolDailyCCI: alertCounter[symbol].dailyCCI,
+        symbolTotal: alertCounter[symbol].total
     };
 }
 
@@ -2311,22 +2340,17 @@ function resetDailyCounters() {
 }
 
 // =====================================================================
-// === MENSAGEM DE INICIALIZAÇÃO SUPER SIMPLES (SEM EMOJIS) ===
+// === MENSAGEM DE INICIALIZAÇÃO ===
 // =====================================================================
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
         
-        // Mensagem SEM EMOJIS e SEM ACENTOS - apenas texto puro
-        const message = `TITANIUM ATIVADO
-Data: ${now.full}
-CCI 1H (EMA5/13)
-Volume 1h >52%
-RSI 15m direcao
-LSR 15m <2.7`;
+        const message = formatItalic(`
+🚀 TITANIUM CCI 1H INICIADO ✅
+`);
 
         console.log('📤 Enviando mensagem de inicialização...');
-        console.log('Mensagem:', message);
         
         const result = await sendTelegramAlert(message);
         
@@ -2479,7 +2503,7 @@ async function startBot() {
                 await mainBotLoop();
             } catch (fatalError) {
                 console.error("❌ Erro fatal no loop principal:", fatalError.message);
-                await sendTelegramAlert(`⚠️ Bot reiniciando apos erro...`).catch(() => {});
+                await sendTelegramAlert(formatItalic(`⚠️ Bot reiniciando apos erro...`)).catch(() => {});
                 await new Promise(r => setTimeout(r, 30000));
             }
         }
