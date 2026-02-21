@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const z = require('zod');
 require('dotenv').config();
-if (!globalThis.fetch) globalThis.fetch = fetch;
+if (!globalThis.fetch && !globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
 // === SCHEMAS DE VALIDAÇÃO ZOD ===
@@ -100,13 +100,18 @@ const VolumeAnalysisSchema = z.object({
     emoji: z.string()
 });
 
-// Schema para Volume 3m
+// Schema para Volume 3m com detecção de volume anormal
 const Volume3mSchema = z.object({
     direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
     percentage: z.number().min(0).max(100),
     sellerPercentage: z.number().min(0).max(100).optional(),
     emoji: z.string(),
-    score: z.number().min(-30).max(30).optional()
+    score: z.number().min(-30).max(30).optional(),
+    isAbnormal: z.boolean(),
+    abnormalType: z.enum(['Comprador', 'Vendedor', 'Nenhum']),
+    volumeRatio: z.number().optional(),
+    avgVolume: z.number().optional(),
+    currentVolume: z.number().optional()
 });
 
 const PivotPointSchema = z.object({
@@ -169,7 +174,8 @@ const StochasticSignalSchema = z.object({
     emaCheck: EMACheckSchema,
     volumeData: VolumeAnalysisSchema,
     volume3mData: Volume3mSchema,
-    retestData: RetestDataSchema
+    retestData: RetestDataSchema,
+    alertNumber: z.number().int()
 });
 
 // Schema para o ErrorHandler
@@ -186,11 +192,11 @@ const ErrorResponseSchema = z.object({
 // =====================================================================
 const RSI_1H_CONFIG = {
     COMPRA: {
-        MAX_RSI: 64,
+        MAX_RSI: 62,
         ENABLED: true
     },
     VENDA: {
-        MIN_RSI: 40,
+        MIN_RSI: 50,
         ENABLED: true
     }
 };
@@ -214,7 +220,7 @@ const RSI_15M_CONFIG = {
 // =====================================================================
 const LSR_15M_CONFIG = {
     COMPRA: {
-        MAX_LSR: 2.7, // LSR deve ser menor que 2.7 para compra
+        MAX_LSR: 2.6, // LSR deve ser menor que 2.7 para compra
         ENABLED: true
     },
     VENDA: {
@@ -227,23 +233,39 @@ const LSR_15M_CONFIG = {
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 52, // Mínimo de 55% volume comprador
+        MIN_BUYER_PERCENTAGE: 35, // Mínimo de 52% volume comprador
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 52, // Mínimo de 55% volume vendedor
+        MIN_SELLER_PERCENTAGE: 52, // Mínimo de 52% volume vendedor
         ENABLED: true
     }
 };
 
 // =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS ===
+// === CONFIGURAÇÕES DE VOLUME ANORMAL 3M ===
+// =====================================================================
+const VOLUME_3M_ABNORMAL_CONFIG = {
+    ENABLED: true,
+    THRESHOLD: 1.4,
+    MIN_VOLUME_RATIO: 1.2,
+    LOOKBACK_CANDLES: 20,
+    REQUIRED_FOR_COMPRA: true,
+    REQUIRED_FOR_VENDA: true
+};
+
+
+// =====================================================================
+// === CONFIGURAÇÕES CENTRALIZADAS (MELHORADO) ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs0A',
-        CHAT_ID: '-1001997'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
+
+
+
     STOCHASTIC: {
         ENABLED: true,
         K_PERIOD: 14,
@@ -251,7 +273,9 @@ const CONFIG = {
         SLOWING: 3,
         TIMEFRAME: '4h',
         OVERBOUGHT: 77,
-        OVERSOLD: 67
+        OVERSOLD: 67,
+        COOLDOWN_MS: 20 * 60 * 1000, // 20 minutos (movido do hardcoded)
+        FRESH_CROSS_ONLY: true
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -267,7 +291,9 @@ const CONFIG = {
         INTERVAL: 10 * 60 * 1000,
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
-        MEMORY_THRESHOLD: 500 * 1024 * 1024
+        MEMORY_THRESHOLD: 500 * 1024 * 1024,
+        INACTIVE_SYMBOL_CLEANUP_HOURS: 24, // NOVO: Limpeza de símbolos inativos
+        CLEANUP_CHECK_INTERVAL: 60 * 60 * 1000 // 1 hora
     },
     RETEST: {
         ENABLED: true,
@@ -286,6 +312,10 @@ const CONFIG = {
         MAX_DELAY: 2000,
         BACKOFF_FACTOR: 1.5,
         CONSECUTIVE_ERRORS_LIMIT: 5
+    },
+    DEBUG: {
+        LOG_REJECTION_REASONS: true, // NOVO: Ativar logs detalhados de rejeição
+        VERBOSE: false
     }
 };
 
@@ -307,14 +337,15 @@ const EMA_CONFIG = {
 const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
-let alertCounter = {};
-let dailyAlerts = 0;
+// Gerenciamento de Estado Melhorado
+let alertCounter = new Map(); // Usando Map em vez de objeto para melhor performance
 let globalAlerts = 0;
 let lastResetDate = null;
 
-const symbolCooldown = {};
-const stochasticCooldown = {};
-const stochCrossState = {};
+const symbolCooldown = new Map();
+const stochasticCooldown = new Map();
+const stochCrossState = new Map(); // Agora é Map
+const symbolLastActivity = new Map(); // NOVO: Rastrear última atividade dos símbolos
 
 // === CACHE DE CANDLES OTIMIZADO ===
 const candleCache = new Map();
@@ -485,6 +516,81 @@ class CacheManager {
 }
 
 // =====================================================================
+// === STATE MANAGER - NOVO: Gerenciamento de Estado para evitar Memory Leaks ===
+// =====================================================================
+class StateManager {
+    static init() {
+        // Iniciar limpeza periódica
+        setInterval(() => this.cleanupInactiveSymbols(), CONFIG.CLEANUP.CLEANUP_CHECK_INTERVAL);
+        console.log('🗑️ State Manager inicializado - Limpeza automática ativada');
+    }
+
+    static cleanupInactiveSymbols() {
+        const now = Date.now();
+        const inactiveThreshold = CONFIG.CLEANUP.INACTIVE_SYMBOL_CLEANUP_HOURS * 60 * 60 * 1000;
+        let removedCount = 0;
+
+        // Limpar symbolCooldown
+        for (const [symbol, timestamp] of symbolCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        // Limpar stochasticCooldown
+        for (const [symbol, timestamp] of stochasticCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                stochasticCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        // Limpar stochCrossState
+        for (const [symbol, state] of stochCrossState.entries()) {
+            if (now - state.lastCheck > inactiveThreshold) {
+                stochCrossState.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        // Limpar alertCounter (mantém contadores históricos, mas remove se inativo por muito tempo)
+        for (const [symbol, data] of alertCounter.entries()) {
+            if (data.lastAlert && (now - data.lastAlert) > inactiveThreshold * 2) {
+                alertCounter.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        // Limpar symbolLastActivity
+        for (const [symbol, timestamp] of symbolLastActivity.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolLastActivity.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        if (removedCount > 0 && CONFIG.DEBUG.VERBOSE) {
+            console.log(`🧹 Limpeza de estado: ${removedCount} entradas removidas`);
+        }
+    }
+
+    static updateActivity(symbol) {
+        symbolLastActivity.set(symbol, Date.now());
+    }
+
+    static getStats() {
+        return {
+            symbolCooldown: symbolCooldown.size,
+            stochasticCooldown: stochasticCooldown.size,
+            stochCrossState: stochCrossState.size,
+            alertCounter: alertCounter.size,
+            symbolLastActivity: symbolLastActivity.size
+        };
+    }
+}
+
+// =====================================================================
 // === ERROR HANDLER OTIMIZADO ===
 // =====================================================================
 class ErrorHandler {
@@ -616,22 +722,42 @@ function getBrazilianDateString() {
 }
 
 function formatItalic(text) {
-    return `<i>${text}</i>`;
+    return text; // Removendo formatação HTML
 }
 
+// =====================================================================
+// === FUNÇÃO CORRIGIDA DE ENVIO DO TELEGRAM ===
+// =====================================================================
 async function sendTelegramAlert(message) {
     try {
+        // Validar token e chat ID usando as configurações centralizadas
+        if (!CONFIG.TELEGRAM.BOT_TOKEN) {
+            console.log('⚠️ Token do Telegram não configurado');
+            return false;
+        }
+        
+        if (!CONFIG.TELEGRAM.CHAT_ID) {
+            console.log('⚠️ Chat ID do Telegram não configurado');
+            return false;
+        }
+
         const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+        
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+        // Remover tags HTML que podem causar problemas
+        const cleanMessage = message.replace(/<[^>]*>/g, '');
+        
+        console.log('📤 Enviando mensagem para o Telegram...');
+        
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                text: message,
-                parse_mode: 'HTML',
+                text: cleanMessage,
+                parse_mode: undefined,
                 disable_web_page_preview: true
             }),
             signal: controller.signal
@@ -640,17 +766,43 @@ async function sendTelegramAlert(message) {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            const errorText = await response.text();
+            console.log(`❌ Erro Telegram ${response.status}: ${errorText}`);
+            
+            if (response.status === 400 && errorText.includes('chat not found')) {
+                console.log('❌ Chat ID inválido ou o bot não foi adicionado ao grupo');
+                console.log('📝 Certifique-se que:');
+                console.log('   1. O chat ID está correto');
+                console.log('   2. O bot foi adicionado ao grupo');
+                console.log('   3. O bot tem permissão para enviar mensagens');
+            }
+            return false;
         }
         
+        console.log('✅ Mensagem enviada com sucesso!');
         return true;
     } catch (error) {
-        ErrorHandler.handle(error, 'SendTelegram');
+        console.log(`❌ Erro ao enviar Telegram: ${error.message}`);
+        if (error.name === 'AbortError') {
+            console.log('⏰ Timeout na requisição do Telegram');
+        }
         return false;
     }
 }
 
-function getAlertCountForSymbol(symbol, type) {
+// Função para log de rejeição (melhorado)
+function logRejection(symbol, filter, reason, data = null) {
+    if (CONFIG.DEBUG.LOG_REJECTION_REASONS) {
+        let logMessage = `📊 ${symbol} rejeitado - ${filter}: ${reason}`;
+        if (data) {
+            logMessage += ` | Dados: ${JSON.stringify(data)}`;
+        }
+        console.log(logMessage);
+    }
+}
+
+// Função para obter número do alerta por símbolo (usando Map)
+function getAlertNumberForSymbol(symbol) {
     const currentDate = getBrazilianDateString();
    
     const currentHour = getBrazilianHour();
@@ -658,28 +810,57 @@ function getAlertCountForSymbol(symbol, type) {
         resetDailyCounters();
     }
    
-    if (!alertCounter[symbol]) {
-        alertCounter[symbol] = {
-            stochastic: 0,
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
             total: 0,
             lastAlert: null,
-            dailyStochastic: 0,
+            dailyCompra: 0,
+            dailyVenda: 0,
             dailyTotal: 0
-        };
+        });
     }
    
-    alertCounter[symbol][type.toLowerCase()]++;
-    alertCounter[symbol].total++;
-    alertCounter[symbol][`daily${type.charAt(0).toUpperCase() + type.slice(1).toLowerCase()}`]++;
-    alertCounter[symbol].dailyTotal++;
-    alertCounter[symbol].lastAlert = Date.now();
+    const data = alertCounter.get(symbol);
+    return data.total + 1;
+}
+
+// Função para incrementar contador por símbolo (usando Map)
+function incrementAlertCounter(symbol, type) {
+    const currentDate = getBrazilianDateString();
    
-    dailyAlerts++;
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
+            total: 0,
+            lastAlert: null,
+            dailyCompra: 0,
+            dailyVenda: 0,
+            dailyTotal: 0
+        });
+    }
+   
+    const data = alertCounter.get(symbol);
+   
+    if (type === 'STOCHASTIC_COMPRA') {
+        data.compra++;
+        data.dailyCompra++;
+    } else if (type === 'STOCHASTIC_VENDA') {
+        data.venda++;
+        data.dailyVenda++;
+    }
+   
+    data.total++;
+    data.dailyTotal++;
+    data.lastAlert = Date.now();
+   
+    alertCounter.set(symbol, data);
+   
     globalAlerts++;
    
-    return {
-        symbolDailyStochastic: alertCounter[symbol].dailyStochastic
-    };
+    return data.total;
 }
 
 function resetDailyCounters() {
@@ -687,34 +868,41 @@ function resetDailyCounters() {
    
     console.log(`\n🕘 ${getBrazilianDateTime().full} - Resetando contadores diários`);
    
-    Object.keys(alertCounter).forEach(symbol => {
-        alertCounter[symbol].dailyStochastic = 0;
-        alertCounter[symbol].dailyTotal = 0;
-    });
+    for (const [symbol, data] of alertCounter.entries()) {
+        data.dailyCompra = 0;
+        data.dailyVenda = 0;
+        data.dailyTotal = 0;
+        alertCounter.set(symbol, data);
+    }
    
-    dailyAlerts = 0;
+    globalAlerts = 0;
     lastResetDate = currentDate;
 }
 
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
-       
+        const stateStats = StateManager.getStats();
+        
+        // Mensagem sem formatação HTML
         const message = `
-<i>🚀 TITANIUM 4H INICIADO ✅</i>
-<i>📅 ${now.full}</i>
-<i>✅ ALERTAS ATIVOS</i>
-<i>📊 Estocástico 4H 14.3.3 (OVERSOLD 20 | OVERBOUGHT 80)</i>
-<i>📊 Volume 1h OBRIGATÓRIO: Compra >55% comprador | Venda >55% vendedor</i>
-<i>📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO</i>
-<i>📊 LSR 15m OBRIGATÓRIO: Compra < 2.7</i>
-<i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
+🚀 TITANIUM 4H INICIADO ✅
+📅 ${now.full}
+✅ ALERTAS ATIVOS
+📊 Estocástico 4H 14.3.3 (OVERSOLD ${CONFIG.STOCHASTIC.OVERSOLD} | OVERBOUGHT ${CONFIG.STOCHASTIC.OVERBOUGHT})
+📊 Volume 1h OBRIGATÓRIO: Compra >${VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE}% comprador | Venda >${VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE}% vendedor
+📊 Volume 3m Anormal OBRIGATÓRIO: Mínimo ${VOLUME_3M_ABNORMAL_CONFIG.MIN_VOLUME_RATIO}x
+📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO
+📊 LSR 15m OBRIGATÓRIO: Compra < ${LSR_15M_CONFIG.COMPRA.MAX_LSR}
+📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
+🗑️ State: ${stateStats.alertCounter} símbolos ativos
 `;
+        
         console.log('📤 Enviando mensagem de inicialização...');
-        await sendTelegramAlert(message);
-        return true;
+        return await sendTelegramAlert(message);
+        
     } catch (error) {
-        ErrorHandler.handle(error, 'SendInitMessage');
+        console.log(`❌ Erro na mensagem de inicialização: ${error.message}`);
         return false;
     }
 }
@@ -1317,16 +1505,35 @@ async function analyzeVolume1hWithEMA9(symbol) {
     }
 }
 
-async function analyzeVolume3mWithEMA13(symbol) {
+// Função de análise de volume 3m com detecção de anormalidade
+async function analyzeVolume3mWithAbnormalDetection(symbol) {
     try {
         const candles = await getCandles(symbol, '3m', 50);
-        if (candles.length < 20) {
-            return { direction: 'Desconhecido', percentage: 0, emoji: '❓', score: 0 };
+        if (candles.length < VOLUME_3M_ABNORMAL_CONFIG.LOOKBACK_CANDLES) {
+            return { 
+                direction: 'Desconhecido', 
+                percentage: 0, 
+                emoji: '❓', 
+                score: 0,
+                isAbnormal: false,
+                abnormalType: 'Nenhum'
+            };
         }
         
         const closes = candles.map(c => c.close);
+        const volumes = candles.map(c => c.volume);
         const ema13 = calculateEMA(closes, 13);
         
+        // Calcular volume médio das últimas N velas
+        const lookback = VOLUME_3M_ABNORMAL_CONFIG.LOOKBACK_CANDLES;
+        const recentVolumes = volumes.slice(-lookback, -1); // Exclui a vela atual
+        const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
+        
+        // Volume da vela atual (última vela)
+        const currentVolume = volumes[volumes.length - 1];
+        const volumeRatio = currentVolume / avgVolume;
+        
+        // Análise de direção do volume
         let buyerVolume = 0;
         let sellerVolume = 0;
         let totalVolume = 0;
@@ -1349,6 +1556,7 @@ async function analyzeVolume3mWithEMA13(symbol) {
         
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         
+        // Determinar direção e emoji
         let direction = '';
         let emoji = '';
         let score = 0;
@@ -1383,15 +1591,39 @@ async function analyzeVolume3mWithEMA13(symbol) {
             score = 0;
         }
         
+        // Detectar volume anormal
+        const isAbnormal = volumeRatio >= VOLUME_3M_ABNORMAL_CONFIG.MIN_VOLUME_RATIO;
+        let abnormalType = 'Nenhum';
+        
+        if (isAbnormal) {
+            if (direction === 'Comprador') {
+                abnormalType = 'Comprador';
+            } else if (direction === 'Vendedor') {
+                abnormalType = 'Vendedor';
+            }
+        }
+        
         return {
             direction,
             percentage: Math.round(buyerPercentage),
             sellerPercentage: Math.round(100 - buyerPercentage),
             emoji,
-            score
+            score,
+            isAbnormal,
+            abnormalType,
+            volumeRatio,
+            avgVolume,
+            currentVolume
         };
     } catch (error) {
-        return { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
+        return { 
+            direction: 'Erro', 
+            percentage: 0, 
+            emoji: '❌', 
+            score: 0,
+            isAbnormal: false,
+            abnormalType: 'Nenhum'
+        };
     }
 }
 
@@ -1529,24 +1761,29 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
 }
 
 // =====================================================================
-// === SINAIS DE ESTOCÁSTICO OTIMIZADOS ===
+// === SINAIS DE ESTOCÁSTICO MELHORADOS ===
 // =====================================================================
 async function checkStochasticSignal(symbol) {
     if (!CONFIG.STOCHASTIC.ENABLED) {
         return null;
     }
     
-    if (stochasticCooldown[symbol] && (Date.now() - stochasticCooldown[symbol]) < 20 * 60 * 1000) {
+    // Usar CONFIG.STOCHASTIC.COOLDOWN_MS em vez de hardcoded
+    if (stochasticCooldown.has(symbol) && (Date.now() - stochasticCooldown.get(symbol)) < CONFIG.STOCHASTIC.COOLDOWN_MS) {
         return null;
     }
+    
+    // Atualizar atividade do símbolo
+    StateManager.updateActivity(symbol);
     
     try {
         const stochastic = await getStochastic(symbol);
         if (!stochastic) {
+            logRejection(symbol, 'Estocástico', 'Não foi possível obter dados');
             return null;
         }
         
-        const previousState = stochCrossState[symbol] || {
+        const previousState = stochCrossState.get(symbol) || {
             wasCrossingUp: false,
             wasCrossingDown: false,
             lastCheck: 0
@@ -1560,109 +1797,159 @@ async function checkStochasticSignal(symbol) {
                 signalType = 'STOCHASTIC_COMPRA';
                 isFreshCross = true;
             }
-            stochCrossState[symbol] = {
+            stochCrossState.set(symbol, {
                 wasCrossingUp: true,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         } else if (stochastic.isCrossingDown) {
             if (!previousState.wasCrossingDown) {
                 signalType = 'STOCHASTIC_VENDA';
                 isFreshCross = true;
             }
-            stochCrossState[symbol] = {
+            stochCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: true,
                 lastCheck: Date.now()
-            };
+            });
         } else {
-            stochCrossState[symbol] = {
+            stochCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         }
         
         if (!isFreshCross || !signalType) {
+            logRejection(symbol, 'Cruzamento', 'Cruzamento não é fresco ou ausente');
             return null;
         }
         
+        // Verificar zona do estocástico
         if (signalType === 'STOCHASTIC_COMPRA' && stochastic.k >= CONFIG.STOCHASTIC.OVERSOLD) {
+            logRejection(symbol, 'Zona Estocástico', `K=${stochastic.k.toFixed(1)} > ${CONFIG.STOCHASTIC.OVERSOLD} (oversold)`);
             return null;
         }
        
         if (signalType === 'STOCHASTIC_VENDA' && stochastic.k <= CONFIG.STOCHASTIC.OVERBOUGHT) {
+            logRejection(symbol, 'Zona Estocástico', `K=${stochastic.k.toFixed(1)} < ${CONFIG.STOCHASTIC.OVERBOUGHT} (overbought)`);
             return null;
         }
         
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
+            logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
             return null;
         }
         
-        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.all([
+        // Executar chamadas em paralelo com tratamento individual
+        const [
+            rsiData, 
+            rsi15mData, 
+            lsrData, 
+            fundingData, 
+            volumeData, 
+            volume3mData
+        ] = await Promise.allSettled([
             getRSI1h(symbol),
             getRSI15m(symbol),
             getLSR(symbol),
             getFundingRate(symbol),
             analyzeVolume1hWithEMA9(symbol),
-            analyzeVolume3mWithEMA13(symbol)
+            analyzeVolume3mWithAbnormalDetection(symbol)
         ]);
+        
+        // Extrair valores com fallback
+        const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
+        const rsi15mValue = rsi15mData.status === 'fulfilled' ? rsi15mData.value : null;
+        const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
+        const fundingValue = fundingData.status === 'fulfilled' ? fundingData.value : null;
+        const volumeValue = volumeData.status === 'fulfilled' ? volumeData.value : { direction: 'Erro', percentage: 0, emoji: '❌' };
+        const volume3mValue = volume3mData.status === 'fulfilled' ? volume3mData.value : { 
+            direction: 'Erro', 
+            percentage: 0, 
+            emoji: '❌', 
+            isAbnormal: false, 
+            abnormalType: 'Nenhum' 
+        };
         
         // ===== FILTRO OBRIGATÓRIO DE VOLUME 1H =====
         if (VOLUME_1H_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
-            if (!volumeData || volumeData.direction !== 'Comprador' || volumeData.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para COMPRA ${symbol}: ${volumeData?.percentage}% ${volumeData?.direction}`);
+            if (!volumeValue || volumeValue.direction !== 'Comprador' || volumeValue.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, %: ${volumeValue?.percentage}%`);
                 return null;
             }
         }
         
         if (VOLUME_1H_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
-            if (!volumeData || volumeData.direction !== 'Vendedor' || (100 - volumeData.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para VENDA ${symbol}: ${100 - volumeData?.percentage}% vendedor`);
+            if (!volumeValue || volumeValue.direction !== 'Vendedor' || (100 - volumeValue.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, % vendedor: ${100 - volumeValue?.percentage}%`);
                 return null;
+            }
+        }
+        
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME ANORMAL 3M =====
+        if (VOLUME_3M_ABNORMAL_CONFIG.ENABLED) {
+            if (VOLUME_3M_ABNORMAL_CONFIG.REQUIRED_FOR_COMPRA && signalType === 'STOCHASTIC_COMPRA') {
+                if (!volume3mValue || !volume3mValue.isAbnormal || volume3mValue.abnormalType !== 'Comprador') {
+                    logRejection(symbol, 'Volume 3m anormal', 
+                        `isAbnormal: ${volume3mValue?.isAbnormal}, type: ${volume3mValue?.abnormalType}, ratio: ${volume3mValue?.volumeRatio?.toFixed(2)}x`);
+                    return null;
+                }
+            }
+            
+            if (VOLUME_3M_ABNORMAL_CONFIG.REQUIRED_FOR_VENDA && signalType === 'STOCHASTIC_VENDA') {
+                if (!volume3mValue || !volume3mValue.isAbnormal || volume3mValue.abnormalType !== 'Vendedor') {
+                    logRejection(symbol, 'Volume 3m anormal', 
+                        `isAbnormal: ${volume3mValue?.isAbnormal}, type: ${volume3mValue?.abnormalType}, ratio: ${volume3mValue?.volumeRatio?.toFixed(2)}x`);
+                    return null;
+                }
             }
         }
         
         // ===== FILTRO OBRIGATÓRIO DE RSI 15M =====
         if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
-            if (!rsi15mData || rsi15mData.direction !== 'subindo') {
-                console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'subindo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
         if (RSI_15M_CONFIG.VENDA.ENABLED && signalType === 'STOCHASTIC_VENDA') {
-            if (!rsi15mData || rsi15mData.direction !== 'descendo') {
-                console.log(`📊 RSI 15m rejeitado para VENDA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'descendo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
-        // ===== NOVO FILTRO OBRIGATÓRIO DE LSR 15M =====
+        // ===== FILTRO OBRIGATÓRIO DE LSR 15M =====
         if (LSR_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
-            if (!lsrData || lsrData.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
-                console.log(`📊 LSR 15m rejeitado para COMPRA ${symbol}: ${lsrData?.lsrValue?.toFixed(2) || 'indisponível'} (máx ${LSR_15M_CONFIG.COMPRA.MAX_LSR})`);
+            if (!lsrValue || lsrValue.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
+                logRejection(symbol, 'LSR 15m', `LSR: ${lsrValue?.lsrValue?.toFixed(2) || 'N/A'}, max: ${LSR_15M_CONFIG.COMPRA.MAX_LSR}`);
                 return null;
             }
         }
         
         // VENDA não tem filtro de LSR (configurado como false)
         
+        // ===== FILTRO OPCIONAL DE RSI 1H =====
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
-            if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+            if (!rsiValue || rsiValue.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, max: ${RSI_1H_CONFIG.COMPRA.MAX_RSI}`);
                 return null;
             }
         }
        
         if (signalType === 'STOCHASTIC_VENDA' && RSI_1H_CONFIG.VENDA.ENABLED) {
-            if (!rsiData || rsiData.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+            if (!rsiValue || rsiValue.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, min: ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
                 return null;
             }
         }
         
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === 0) {
+            logRejection(symbol, 'Preço', 'Não foi possível obter preço atual');
             return null;
         }
         
@@ -1674,15 +1961,18 @@ async function checkStochasticSignal(symbol) {
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
+        // Obter número do alerta para este símbolo
+        const alertNumber = getAlertNumberForSymbol(symbol);
+        
         const signal = {
             symbol: symbol,
             type: signalType,
             stochastic: stochastic,
-            rsi: rsiData?.value,
-            rsi15m: rsi15mData?.value,
-            rsi15mDirection: rsi15mData?.direction,
-            lsr: lsrData?.lsrValue,
-            funding: fundingData?.ratePercent,
+            rsi: rsiValue?.value,
+            rsi15m: rsi15mValue?.value,
+            rsi15mDirection: rsi15mValue?.direction,
+            lsr: lsrValue?.lsrValue,
+            funding: fundingValue?.ratePercent,
             pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
@@ -1692,14 +1982,16 @@ async function checkStochasticSignal(symbol) {
             atrTargets: atrTargets,
             srLevels: srLevels,
             emaCheck: emaCheck,
-            volumeData: volumeData,
-            volume3mData: volume3mData,
-            retestData: retestData
+            volumeData: volumeValue,
+            volume3mData: volume3mValue,
+            retestData: retestData,
+            alertNumber: alertNumber
         };
         
         return StochasticSignalSchema.parse(signal);
         
     } catch (error) {
+        logRejection(symbol, 'Erro', error.message);
         return null;
     }
 }
@@ -1996,14 +2288,15 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (VERSÃO SIMPLIFICADA) ===
+// === ALERTA PRINCIPAL ===
 // =====================================================================
 async function sendStochasticAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
     const currentPrice = signal.currentPrice;
    
-    getAlertCountForSymbol(signal.symbol, 'stochastic');
-    stochasticCooldown[signal.symbol] = Date.now();
+    // Incrementar contador por símbolo
+    const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
+    stochasticCooldown.set(signal.symbol, Date.now());
    
     const factors = await analyzeTradeFactors(signal.symbol, signal.type, {
         funding: signal.funding,
@@ -2116,7 +2409,7 @@ async function sendStochasticAlertEnhanced(signal) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️'; // Atualizado para refletir o novo filtro
+            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️';
         } else {
             lsrEmoji = signal.lsr > 2.8 ? '✅' : '⚠️';
         }
@@ -2157,10 +2450,12 @@ async function sendStochasticAlertEnhanced(signal) {
         }
     }
    
+    // Texto de volume 3m com informação de anormalidade
     let volume3mText = '';
     if (signal.volume3mData) {
         const vol3m = signal.volume3mData;
-        volume3mText = `Volume 3m: ${vol3m.percentage}% ${vol3m.direction} ${vol3m.emoji}`;
+        const abnormalText = vol3m.isAbnormal ? ` (ANORMAL ${vol3m.volumeRatio?.toFixed(2)}x)` : '';
+        volume3mText = `Volume 3m: ${vol3m.percentage}% ${vol3m.direction} ${vol3m.emoji}${abnormalText}`;
     }
    
     let entryRetractionText = '';
@@ -2169,18 +2464,20 @@ async function sendStochasticAlertEnhanced(signal) {
         entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
-    const alertCounterText = `Alerta #${globalAlerts}`;
+    // Texto do contador por símbolo
+    const symbolData = alertCounter.get(signal.symbol);
+    const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    // MENSAGEM SIMPLIFICADA
-    let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
+    // Mensagem com formatação itálica
+    let message = `_${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
 ${volumeText}
 ${volume3mText}
-${alertCounterText} - ${signal.time.full}
+${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
 🔘#Stoch #4H ${stochText} | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
@@ -2191,13 +2488,13 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium by @J4Rviz ✨`);
+✨ Titanium by @J4Rviz ✨_`;
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | LSR: ${signal.lsr?.toFixed(2)}`);
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 3m anormal: ${signal.volume3mData?.isAbnormal ? '✅' : '❌'} (${signal.volume3mData?.volumeRatio?.toFixed(2) || 'N/A'}x)`);
 }
 
 // =====================================================================
@@ -2254,7 +2551,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM 4H ');
+        console.log('🚀 TITANIUM 4H');
         console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
@@ -2290,10 +2587,11 @@ async function mainBotLoop() {
             
             const cycleTime = ((Date.now() - startTime) / 1000).toFixed(1);
             const cacheStats = CacheManager.getStats();
+            const stateStats = StateManager.getStats();
             
             console.log(`\n✅ Ciclo ${cycle} completo em ${cycleTime}s`);
             console.log(`📊 Sinais: ${signalsFound} | Cache: ${cacheStats.hitRate}`);
-            console.log(`📈 Total: ${globalAlerts} | Diário: ${dailyAlerts}`);
+            console.log(`📈 Total Global: ${globalAlerts} | Símbolos ativos: ${stateStats.alertCounter}`);
             
             if (cycle % 10 === 0) {
                 CacheManager.cleanup(0.2);
@@ -2321,40 +2619,74 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM ');
+        console.log('🚀 TITANIUM 4H');
         console.log('='.repeat(60) + '\n');
 
+        console.log('📅 Inicializando...');
+        console.log('⏳ Buscando configurações...');
+        
+        // Verificar configurações do Telegram
+        console.log('\n📱 Verificando configurações do Telegram:');
+        console.log(`Bot Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        console.log(`Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        
         lastResetDate = getBrazilianDateString();
-        await sendInitializationMessage();
+        
+        // Inicializar State Manager
+        StateManager.init();
+        
+        console.log('📤 Testando conexão com Telegram...');
+        const testMessage = `🤖 Bot Titanium iniciando em ${getBrazilianDateTime().full}`;
+        const testResult = await sendTelegramAlert(testMessage);
 
-        console.log('✅ Bot inicializado! Iniciando loop principal...\n');
+        if (testResult) {
+            console.log('✅ Conexão com Telegram OK!');
+        } else {
+            console.log('⚠️ Falha na conexão com Telegram. Verificando configurações...');
+            console.log('📝 Certifique-se que:');
+            console.log('   1. O token do bot está correto');
+            console.log('   2. O chat ID está correto');
+            console.log('   3. O bot foi adicionado ao grupo');
+            console.log('   4. O bot tem permissão para enviar mensagens');
+        }
+
+        console.log('\n✅ Bot inicializado! Iniciando loop principal...\n');
         
         while (true) {
             try {
                 await mainBotLoop();
             } catch (fatalError) {
                 console.error("❌ Erro fatal no loop principal:", fatalError.message);
-                await sendTelegramAlert(`⚠️ Bot reiniciando após erro...`).catch(() => {});
+                console.log('🔄 Reiniciando em 30s...');
                 await new Promise(r => setTimeout(r, 30000));
             }
         }
 
     } catch (initError) {
         console.error('🚨 Erro na inicialização:', initError.message);
+        console.log('🔧 Verifique sua conexão e as configurações');
         process.exit(1);
     }
 }
 
 process.on('uncaughtException', (err) => {
-    console.error('!!! UNCAUGHT EXCEPTION !!!', err.message);
+    console.error('\n!!! UNCAUGHT EXCEPTION !!!');
+    console.error('Erro:', err.message);
+    console.error('Stack:', err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('\n!!! UNHANDLED REJECTION !!!');
+    console.error('Reason:', reason);
+});
+
+// Iniciar o bot
+console.log('🚀 Iniciando Titanium 4H Bot...');
+
+startBot().catch(error => {
+    console.error('❌ Erro fatal:', error);
     process.exit(1);
 });
-
-process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled Rejection:', reason);
-});
-
-startBot();
 
 if (global.gc) {
     console.log('🗑️ GC disponível');
