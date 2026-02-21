@@ -97,7 +97,6 @@ const VolumeAnalysisSchema = z.object({
     emoji: z.string()
 });
 
-// Schema para Volume 3m
 const Volume3mSchema = z.object({
     direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
     percentage: z.number().min(0).max(100),
@@ -166,7 +165,8 @@ const CCISignalSchema = z.object({
     emaCheck: EMACheckSchema,
     volumeData: VolumeAnalysisSchema,
     volume3mData: Volume3mSchema,
-    retestData: RetestDataSchema
+    retestData: RetestDataSchema,
+    alertNumber: z.number().int()
 });
 
 // Schema para o ErrorHandler
@@ -187,7 +187,7 @@ const RSI_1H_CONFIG = {
         ENABLED: true
     },
     VENDA: {
-        MIN_RSI: 40,
+        MIN_RSI: 50,
         ENABLED: true
     }
 };
@@ -197,11 +197,11 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const RSI_15M_CONFIG = {
     COMPRA: {
-        DIRECTION: 'subindo', // RSI precisa estar subindo
+        DIRECTION: 'subindo',
         ENABLED: true
     },
     VENDA: {
-        DIRECTION: 'descendo', // RSI precisa estar descendo
+        DIRECTION: 'descendo',
         ENABLED: true
     }
 };
@@ -211,11 +211,11 @@ const RSI_15M_CONFIG = {
 // =====================================================================
 const LSR_15M_CONFIG = {
     COMPRA: {
-        MAX_LSR: 2.7, // LSR deve ser menor que 2.7 para compra
+        MAX_LSR: 2.6,
         ENABLED: true
     },
     VENDA: {
-        ENABLED: false // Venda não tem critério de LSR
+        ENABLED: false
     }
 };
 
@@ -224,11 +224,11 @@ const LSR_15M_CONFIG = {
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 40, // Mínimo de 52% volume comprador
+        MIN_BUYER_PERCENTAGE: 35,
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 40, // Mínimo de 52% volume vendedor
+        MIN_SELLER_PERCENTAGE: 35,
         ENABLED: true
     }
 };
@@ -238,13 +238,13 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const VOLUME_3M_CONFIG = {
     COMPRA: {
-        REQUIRED_DIRECTION: 'Comprador', // Volume 3m deve ser comprador
-        MIN_PERCENTAGE: 52, // Mínimo de 52% volume comprador
+        REQUIRED_DIRECTION: 'Comprador',
+        MIN_PERCENTAGE: 52,
         ENABLED: true
     },
     VENDA: {
-        REQUIRED_DIRECTION: 'Vendedor', // Volume 3m deve ser vendedor
-        MIN_PERCENTAGE: 52, // Mínimo de 52% volume vendedor
+        REQUIRED_DIRECTION: 'Vendedor',
+        MIN_PERCENTAGE: 52,
         ENABLED: true
     }
 };
@@ -254,16 +254,19 @@ const VOLUME_3M_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6A',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
+
     CCI: {
         ENABLED: true,
-        TIMEFRAME: '1h',           // CCI no timeframe de 1h
-        LENGTH: 20,                 // Período do CCI
-        EMA_SHORT: 5,               // EMA Curta sobre o CCI
-        EMA_LONG: 13,                // EMA Longa sobre o CCI
-        SOURCE: 'hlc3'               // Fonte: high+low+close/3
+        TIMEFRAME: '1h',
+        LENGTH: 20,
+        EMA_SHORT: 5,
+        EMA_LONG: 13,
+        SOURCE: 'hlc3',
+        COOLDOWN_MS: 20 * 60 * 1000,
+        FRESH_CROSS_ONLY: true
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -279,7 +282,9 @@ const CONFIG = {
         INTERVAL: 10 * 60 * 1000,
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
-        MEMORY_THRESHOLD: 500 * 1024 * 1024
+        MEMORY_THRESHOLD: 500 * 1024 * 1024,
+        INACTIVE_SYMBOL_CLEANUP_HOURS: 24,
+        CLEANUP_CHECK_INTERVAL: 60 * 60 * 1000
     },
     RETEST: {
         ENABLED: true,
@@ -298,6 +303,10 @@ const CONFIG = {
         MAX_DELAY: 2000,
         BACKOFF_FACTOR: 1.5,
         CONSECUTIVE_ERRORS_LIMIT: 5
+    },
+    DEBUG: {
+        LOG_REJECTION_REASONS: true,
+        VERBOSE: false
     }
 };
 
@@ -319,14 +328,14 @@ const EMA_CONFIG = {
 const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
-let alertCounter = {};
-let dailyAlerts = 0;
+let alertCounter = new Map();
 let globalAlerts = 0;
 let lastResetDate = null;
 
-const symbolCooldown = {};
-const cciCooldown = {};
-const cciCrossState = {};
+const symbolCooldown = new Map();
+const cciCooldown = new Map();
+const cciCrossState = new Map();
+const symbolLastActivity = new Map();
 
 // === CACHE DE CANDLES OTIMIZADO ===
 const candleCache = new Map();
@@ -497,6 +506,75 @@ class CacheManager {
 }
 
 // =====================================================================
+// === STATE MANAGER ===
+// =====================================================================
+class StateManager {
+    static init() {
+        setInterval(() => this.cleanupInactiveSymbols(), CONFIG.CLEANUP.CLEANUP_CHECK_INTERVAL);
+        console.log('🗑️ State Manager inicializado');
+    }
+
+    static cleanupInactiveSymbols() {
+        const now = Date.now();
+        const inactiveThreshold = CONFIG.CLEANUP.INACTIVE_SYMBOL_CLEANUP_HOURS * 60 * 60 * 1000;
+        let removedCount = 0;
+
+        for (const [symbol, timestamp] of symbolCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, timestamp] of cciCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                cciCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, state] of cciCrossState.entries()) {
+            if (now - state.lastCheck > inactiveThreshold) {
+                cciCrossState.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, data] of alertCounter.entries()) {
+            if (data.lastAlert && (now - data.lastAlert) > inactiveThreshold * 2) {
+                alertCounter.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, timestamp] of symbolLastActivity.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolLastActivity.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        if (removedCount > 0 && CONFIG.DEBUG.VERBOSE) {
+            console.log(`🧹 Limpeza de estado: ${removedCount} entradas removidas`);
+        }
+    }
+
+    static updateActivity(symbol) {
+        symbolLastActivity.set(symbol, Date.now());
+    }
+
+    static getStats() {
+        return {
+            symbolCooldown: symbolCooldown.size,
+            cciCooldown: cciCooldown.size,
+            cciCrossState: cciCrossState.size,
+            alertCounter: alertCounter.size,
+            symbolLastActivity: symbolLastActivity.size
+        };
+    }
+}
+
+// =====================================================================
 // === ERROR HANDLER OTIMIZADO ===
 // =====================================================================
 class ErrorHandler {
@@ -627,22 +705,48 @@ function getBrazilianDateString() {
     return brazilTime.toISOString().split('T')[0];
 }
 
+// =====================================================================
+// === FUNÇÕES CORRIGIDAS DE TELEGRAM ===
+// =====================================================================
+function cleanTelegramText(text) {
+    // Remove qualquer tag HTML existente
+    let cleanText = text.replace(/<[^>]*>/g, '');
+    // Escapa caracteres especiais do HTML
+    cleanText = cleanText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return cleanText;
+}
+
 function formatItalic(text) {
-    return `<i>${text}</i>`;
+    const cleanText = cleanTelegramText(text);
+    return `<i>${cleanText}</i>`;
 }
 
 async function sendTelegramAlert(message) {
     try {
+        if (!CONFIG.TELEGRAM.BOT_TOKEN || !CONFIG.TELEGRAM.CHAT_ID) {
+            console.log('⚠️ Telegram não configurado');
+            return false;
+        }
+
         const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+        
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-
+        
+        // Prepara a mensagem com formatação segura
+        const formattedMessage = formatItalic(message);
+        
+        console.log('📤 Enviando para Telegram...');
+        
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                text: message,
+                text: formattedMessage,
                 parse_mode: 'HTML',
                 disable_web_page_preview: true
             }),
@@ -652,17 +756,55 @@ async function sendTelegramAlert(message) {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            const errorText = await response.text();
+            console.log(`❌ Erro Telegram ${response.status}: ${errorText}`);
+            
+            // Se falhar com HTML, tenta sem formatação
+            if (response.status === 400) {
+                console.log('🔄 Tentando enviar sem formatação HTML...');
+                
+                const cleanMessage = cleanTelegramText(message);
+                
+                const fallbackResponse = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: CONFIG.TELEGRAM.CHAT_ID,
+                        text: cleanMessage,
+                        parse_mode: undefined,
+                        disable_web_page_preview: true
+                    }),
+                    signal: controller.signal
+                });
+                
+                if (fallbackResponse.ok) {
+                    console.log('✅ Mensagem enviada sem formatação');
+                    return true;
+                }
+            }
+            
+            return false;
         }
         
+        console.log(`✅ Telegram OK`);
         return true;
     } catch (error) {
-        ErrorHandler.handle(error, 'SendTelegram');
+        console.log(`❌ Erro ao enviar Telegram: ${error.message}`);
         return false;
     }
 }
 
-function getAlertCountForSymbol(symbol, type) {
+function logRejection(symbol, filter, reason, data = null) {
+    if (CONFIG.DEBUG.LOG_REJECTION_REASONS) {
+        let logMessage = `📊 ${symbol} rejeitado - ${filter}: ${reason}`;
+        if (data) {
+            logMessage += ` | Dados: ${JSON.stringify(data)}`;
+        }
+        console.log(logMessage);
+    }
+}
+
+function getAlertNumberForSymbol(symbol) {
     const currentDate = getBrazilianDateString();
    
     const currentHour = getBrazilianHour();
@@ -670,29 +812,56 @@ function getAlertCountForSymbol(symbol, type) {
         resetDailyCounters();
     }
    
-    if (!alertCounter[symbol]) {
-        alertCounter[symbol] = {
-            cci: 0,
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
             total: 0,
             lastAlert: null,
-            dailyCCI: 0,
+            dailyCompra: 0,
+            dailyVenda: 0,
             dailyTotal: 0
-        };
+        });
     }
    
-    alertCounter[symbol][type.toLowerCase()]++;
-    alertCounter[symbol].total++;
-    alertCounter[symbol][`daily${type.charAt(0).toUpperCase() + type.slice(1).toLowerCase()}`]++;
-    alertCounter[symbol].dailyTotal++;
-    alertCounter[symbol].lastAlert = Date.now();
+    const data = alertCounter.get(symbol);
+    return data.total + 1;
+}
+
+function incrementAlertCounter(symbol, type) {
+    const currentDate = getBrazilianDateString();
    
-    dailyAlerts++;
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
+            total: 0,
+            lastAlert: null,
+            dailyCompra: 0,
+            dailyVenda: 0,
+            dailyTotal: 0
+        });
+    }
+   
+    const data = alertCounter.get(symbol);
+   
+    if (type === 'CCI_COMPRA') {
+        data.compra++;
+        data.dailyCompra++;
+    } else if (type === 'CCI_VENDA') {
+        data.venda++;
+        data.dailyVenda++;
+    }
+   
+    data.total++;
+    data.dailyTotal++;
+    data.lastAlert = Date.now();
+   
+    alertCounter.set(symbol, data);
+   
     globalAlerts++;
    
-    return {
-        symbolDailyCCI: alertCounter[symbol].dailyCCI,
-        symbolTotal: alertCounter[symbol].total
-    };
+    return data.total;
 }
 
 function resetDailyCounters() {
@@ -700,28 +869,39 @@ function resetDailyCounters() {
    
     console.log(`\n🕘 ${getBrazilianDateTime().full} - Resetando contadores diários`);
    
-    Object.keys(alertCounter).forEach(symbol => {
-        alertCounter[symbol].dailyCCI = 0;
-        alertCounter[symbol].dailyTotal = 0;
-    });
+    for (const [symbol, data] of alertCounter.entries()) {
+        data.dailyCompra = 0;
+        data.dailyVenda = 0;
+        data.dailyTotal = 0;
+        alertCounter.set(symbol, data);
+    }
    
-    dailyAlerts = 0;
+    globalAlerts = 0;
     lastResetDate = currentDate;
 }
 
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
-       
-        const message = formatItalic(`
+        const stateStats = StateManager.getStats();
+        
+        const message = `
 🚀 TITANIUM CCI 1H INICIADO ✅
+📅 ${now.full}
+✅ ALERTAS ATIVOS
+📊 CCI 1H (${CONFIG.CCI.LENGTH}) com EMAs ${CONFIG.CCI.EMA_SHORT}/${CONFIG.CCI.EMA_LONG}
+📊 Volume 1h OBRIGATÓRIO: Compra >${VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE}% | Venda >${VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE}%
+📊 Volume 3m OBRIGATÓRIO: ${VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE}% na direção
+📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO
+📊 LSR 15m OBRIGATÓRIO: Compra < ${LSR_15M_CONFIG.COMPRA.MAX_LSR}
 📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
-`);
-        console.log('📤 Enviando mensagem de inicialização...');
-        await sendTelegramAlert(message);
-        return true;
+🗑️ State: ${stateStats.alertCounter} símbolos ativos
+`;
+        
+        return await sendTelegramAlert(message);
+        
     } catch (error) {
-        ErrorHandler.handle(error, 'SendInitMessage');
+        console.log(`❌ Erro na mensagem de inicialização: ${error.message}`);
         return false;
     }
 }
@@ -796,14 +976,6 @@ function calculateSMA(values, period) {
     if (values.length < period) return values[values.length - 1];
     const slice = values.slice(-period);
     return slice.reduce((a, b) => a + b, 0) / period;
-}
-
-function calculateDeviation(values, period, mean) {
-    if (values.length < period) return 0;
-    const slice = values.slice(-period);
-    const squaredDiffs = slice.map(v => Math.pow(v - mean, 2));
-    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / period;
-    return Math.sqrt(variance);
 }
 
 async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
@@ -1143,9 +1315,9 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     }
 }
 
-async function calculateATR4h(symbol, period = 14) {
+async function calculateATR(symbol, period = 14, timeframe = '4h') {
     try {
-        const candles = await getCandles(symbol, '4h', period + 1);
+        const candles = await getCandles(symbol, timeframe, period + 1);
         if (candles.length < period + 1) {
             return null;
         }
@@ -1175,7 +1347,7 @@ async function calculateATR4h(symbol, period = 14) {
 
 async function calculateEntryRetraction(symbol, currentPrice, isBullish) {
     try {
-        const atr = await calculateATR4h(symbol, 14);
+        const atr = await calculateATR(symbol, 14, '4h');
         if (!atr) {
             return { entryPrice: currentPrice, retractionRange: null };
         }
@@ -1211,7 +1383,7 @@ async function calculateEntryRetraction(symbol, currentPrice, isBullish) {
 
 async function calculateATRTargets(symbol, entryPrice, isBullish) {
     try {
-        const atr = await calculateATR4h(symbol, 14);
+        const atr = await calculateATR(symbol, 14, '4h');
         if (!atr) {
             return null;
         }
@@ -1553,17 +1725,20 @@ async function checkCCISignal(symbol) {
         return null;
     }
     
-    if (cciCooldown[symbol] && (Date.now() - cciCooldown[symbol]) < 20 * 60 * 1000) {
+    if (cciCooldown.has(symbol) && (Date.now() - cciCooldown.get(symbol)) < CONFIG.CCI.COOLDOWN_MS) {
         return null;
     }
+    
+    StateManager.updateActivity(symbol);
     
     try {
         const cci = await getCCI(symbol);
         if (!cci) {
+            logRejection(symbol, 'CCI', 'Não foi possível obter dados');
             return null;
         }
         
-        const previousState = cciCrossState[symbol] || {
+        const previousState = cciCrossState.get(symbol) || {
             wasCrossingUp: false,
             wasCrossingDown: false,
             lastCheck: 0
@@ -1577,39 +1752,41 @@ async function checkCCISignal(symbol) {
                 signalType = 'CCI_COMPRA';
                 isFreshCross = true;
             }
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: true,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         } else if (cci.isCrossingDown) {
             if (!previousState.wasCrossingDown) {
                 signalType = 'CCI_VENDA';
                 isFreshCross = true;
             }
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: true,
                 lastCheck: Date.now()
-            };
+            });
         } else {
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         }
         
         if (!isFreshCross || !signalType) {
+            logRejection(symbol, 'Cruzamento', 'Cruzamento não é fresco ou ausente');
             return null;
         }
         
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
+            logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
             return null;
         }
         
-        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.all([
+        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.allSettled([
             getRSI1h(symbol),
             getRSI15m(symbol),
             getLSR(symbol),
@@ -1618,75 +1795,84 @@ async function checkCCISignal(symbol) {
             analyzeVolume3mWithEMA13(symbol)
         ]);
         
+        const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
+        const rsi15mValue = rsi15mData.status === 'fulfilled' ? rsi15mData.value : null;
+        const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
+        const fundingValue = fundingData.status === 'fulfilled' ? fundingData.value : null;
+        const volumeValue = volumeData.status === 'fulfilled' ? volumeData.value : { direction: 'Erro', percentage: 0, emoji: '❌' };
+        const volume3mValue = volume3mData.status === 'fulfilled' ? volume3mData.value : { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
+        
         // ===== FILTRO OBRIGATÓRIO DE VOLUME 1H =====
         if (VOLUME_1H_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!volumeData || volumeData.direction !== 'Comprador' || volumeData.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para COMPRA ${symbol}: ${volumeData?.percentage}% ${volumeData?.direction}`);
+            if (!volumeValue || volumeValue.direction !== 'Comprador' || volumeValue.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, %: ${volumeValue?.percentage}%`);
                 return null;
             }
         }
         
         if (VOLUME_1H_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
-            if (!volumeData || volumeData.direction !== 'Vendedor' || (100 - volumeData.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para VENDA ${symbol}: ${100 - volumeData?.percentage}% vendedor`);
+            if (!volumeValue || volumeValue.direction !== 'Vendedor' || (100 - volumeValue.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, % vendedor: ${100 - volumeValue?.percentage}%`);
                 return null;
             }
         }
         
         // ===== FILTRO OBRIGATÓRIO DE VOLUME 3M =====
         if (VOLUME_3M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!volume3mData || volume3mData.direction !== VOLUME_3M_CONFIG.COMPRA.REQUIRED_DIRECTION || volume3mData.percentage < VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE) {
-                console.log(`📊 Volume 3m rejeitado para COMPRA ${symbol}: ${volume3mData?.percentage}% ${volume3mData?.direction} (mín ${VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE}% Comprador)`);
+            if (!volume3mValue || volume3mValue.direction !== VOLUME_3M_CONFIG.COMPRA.REQUIRED_DIRECTION || volume3mValue.percentage < VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE) {
+                logRejection(symbol, 'Volume 3m', `Direção: ${volume3mValue?.direction}, %: ${volume3mValue?.percentage}%`);
                 return null;
             }
         }
         
         if (VOLUME_3M_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
-            if (!volume3mData || volume3mData.direction !== VOLUME_3M_CONFIG.VENDA.REQUIRED_DIRECTION || (100 - volume3mData.percentage) < VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE) {
-                console.log(`📊 Volume 3m rejeitado para VENDA ${symbol}: ${100 - volume3mData?.percentage}% vendedor (mín ${VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE}% Vendedor)`);
+            if (!volume3mValue || volume3mValue.direction !== VOLUME_3M_CONFIG.VENDA.REQUIRED_DIRECTION || (100 - volume3mValue.percentage) < VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE) {
+                logRejection(symbol, 'Volume 3m', `Direção: ${volume3mValue?.direction}, % vendedor: ${100 - volume3mValue?.percentage}%`);
                 return null;
             }
         }
         
         // ===== FILTRO OBRIGATÓRIO DE RSI 15M =====
         if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!rsi15mData || rsi15mData.direction !== 'subindo') {
-                console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'subindo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
         if (RSI_15M_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
-            if (!rsi15mData || rsi15mData.direction !== 'descendo') {
-                console.log(`📊 RSI 15m rejeitado para VENDA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'descendo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
         // ===== FILTRO OBRIGATÓRIO DE LSR 15M =====
         if (LSR_15M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!lsrData || lsrData.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
-                console.log(`📊 LSR 15m rejeitado para COMPRA ${symbol}: ${lsrData?.lsrValue?.toFixed(2) || 'indisponível'} (máx ${LSR_15M_CONFIG.COMPRA.MAX_LSR})`);
+            if (!lsrValue || lsrValue.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
+                logRejection(symbol, 'LSR 15m', `LSR: ${lsrValue?.lsrValue?.toFixed(2) || 'N/A'}, max: ${LSR_15M_CONFIG.COMPRA.MAX_LSR}`);
                 return null;
             }
         }
         
-        // VENDA não tem filtro de LSR (configurado como false)
-        
+        // ===== FILTRO OPCIONAL DE RSI 1H =====
         if (signalType === 'CCI_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
-            if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+            if (!rsiValue || rsiValue.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, max: ${RSI_1H_CONFIG.COMPRA.MAX_RSI}`);
                 return null;
             }
         }
        
         if (signalType === 'CCI_VENDA' && RSI_1H_CONFIG.VENDA.ENABLED) {
-            if (!rsiData || rsiData.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+            if (!rsiValue || rsiValue.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, min: ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
                 return null;
             }
         }
         
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === 0) {
+            logRejection(symbol, 'Preço', 'Não foi possível obter preço atual');
             return null;
         }
         
@@ -1698,15 +1884,17 @@ async function checkCCISignal(symbol) {
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
+        const alertNumber = getAlertNumberForSymbol(symbol);
+        
         const signal = {
             symbol: symbol,
             type: signalType,
             cci: cci,
-            rsi: rsiData?.value,
-            rsi15m: rsi15mData?.value,
-            rsi15mDirection: rsi15mData?.direction,
-            lsr: lsrData?.lsrValue,
-            funding: fundingData?.ratePercent,
+            rsi: rsiValue?.value,
+            rsi15m: rsi15mValue?.value,
+            rsi15mDirection: rsi15mValue?.direction,
+            lsr: lsrValue?.lsrValue,
+            funding: fundingValue?.ratePercent,
             pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
@@ -1716,14 +1904,16 @@ async function checkCCISignal(symbol) {
             atrTargets: atrTargets,
             srLevels: srLevels,
             emaCheck: emaCheck,
-            volumeData: volumeData,
-            volume3mData: volume3mData,
-            retestData: retestData
+            volumeData: volumeValue,
+            volume3mData: volume3mValue,
+            retestData: retestData,
+            alertNumber: alertNumber
         };
         
         return CCISignalSchema.parse(signal);
         
     } catch (error) {
+        logRejection(symbol, 'Erro', error.message);
         return null;
     }
 }
@@ -2026,8 +2216,8 @@ async function sendCCIAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
     const currentPrice = signal.currentPrice;
    
-    const counts = getAlertCountForSymbol(signal.symbol, 'cci');
-    cciCooldown[signal.symbol] = Date.now();
+    const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
+    cciCooldown.set(signal.symbol, Date.now());
    
     const factors = await analyzeTradeFactors(signal.symbol, signal.type, {
         funding: signal.funding,
@@ -2193,20 +2383,21 @@ async function sendCCIAlertEnhanced(signal) {
         entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
-    const alertCounterText = `Alerta #${counts.symbolTotal} ${signal.symbol}`;
+    const symbolData = alertCounter.get(signal.symbol);
+    const counterText = `📊 ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    // MENSAGEM COMPLETA EM ITÁLICO
-    let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
+    // Constrói a mensagem sem formatação HTML
+    const messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
 ${volumeText}
 ${volume3mText}
-${alertCounterText} - ${signal.time.full}
+${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘#CCI #1H | RSI 1H ${rsiText}${rsi15mText}
+🔘#CCI #1H ${cciText} | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2215,156 +2406,12 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium by @J4Rviz ✨`);
-   
-    message = message.replace(/\n\s*\n/g, '\n').trim();
-   
-    await sendTelegramAlert(message);
-   
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% ${signal.volume3mData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | LSR: ${signal.lsr?.toFixed(2)}`);
-}
+✨ Titanium by @J4Rviz ✨`;
 
-// =====================================================================
-// === FUNÇÕES AUXILIARES OTIMIZADAS ===
-// =====================================================================
-function getBrazilianDateTime() {
-    const now = new Date();
-    const offset = -3;
-    const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
-    const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
-    const time = brazilTime.toISOString().split('T')[1].split('.')[0].substring(0, 5);
-    return { date, time, full: `${date} ${time}` };
-}
-
-function getBrazilianHour() {
-    const now = new Date();
-    const offset = -3;
-    const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
-    return brazilTime.getHours();
-}
-
-function getBrazilianDateString() {
-    const now = new Date();
-    const offset = -3;
-    const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
-    return brazilTime.toISOString().split('T')[0];
-}
-
-function formatItalic(text) {
-    return `<i>${text}</i>`;
-}
-
-async function sendTelegramAlert(message) {
-    try {
-        const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        console.log('📤 Enviando para Telegram:', message.substring(0, 100) + '...');
-        
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                text: message,
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-            }),
-            signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        
-        const responseText = await response.text();
-        
-        if (!response.ok) {
-            console.error('❌ Erro Telegram detalhado:', responseText);
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        console.log(`✅ Telegram OK`);
-        return true;
-    } catch (error) {
-        console.error(`❌ Erro Telegram: ${error.message}`);
-        ErrorHandler.handle(error, 'SendTelegram');
-        return false;
-    }
-}
-
-function getAlertCountForSymbol(symbol, type) {
-    const currentDate = getBrazilianDateString();
+    // Aplica formatação segura
+    await sendTelegramAlert(messageText);
    
-    const currentHour = getBrazilianHour();
-    if (currentHour >= 21 && lastResetDate !== currentDate) {
-        resetDailyCounters();
-    }
-   
-    if (!alertCounter[symbol]) {
-        alertCounter[symbol] = {
-            cci: 0,
-            total: 0,
-            lastAlert: null,
-            dailyCCI: 0,
-            dailyTotal: 0
-        };
-    }
-   
-    alertCounter[symbol][type.toLowerCase()]++;
-    alertCounter[symbol].total++;
-    alertCounter[symbol][`daily${type.charAt(0).toUpperCase() + type.slice(1).toLowerCase()}`]++;
-    alertCounter[symbol].dailyTotal++;
-    alertCounter[symbol].lastAlert = Date.now();
-   
-    dailyAlerts++;
-    globalAlerts++;
-   
-    return {
-        symbolDailyCCI: alertCounter[symbol].dailyCCI,
-        symbolTotal: alertCounter[symbol].total
-    };
-}
-
-function resetDailyCounters() {
-    const currentDate = getBrazilianDateString();
-   
-    console.log(`\n🕘 ${getBrazilianDateTime().full} - Resetando contadores diários`);
-   
-    Object.keys(alertCounter).forEach(symbol => {
-        alertCounter[symbol].dailyCCI = 0;
-        alertCounter[symbol].dailyTotal = 0;
-    });
-   
-    dailyAlerts = 0;
-    lastResetDate = currentDate;
-}
-
-// =====================================================================
-// === MENSAGEM DE INICIALIZAÇÃO ===
-// =====================================================================
-async function sendInitializationMessage() {
-    try {
-        const now = getBrazilianDateTime();
-        
-        const message = formatItalic(`
-🚀 TITANIUM CCI 1H INICIADO ✅
-`);
-
-        console.log('📤 Enviando mensagem de inicialização...');
-        
-        const result = await sendTelegramAlert(message);
-        
-        if (result) {
-            console.log('✅ Mensagem de inicialização enviada!');
-        } else {
-            console.log('❌ Falha ao enviar inicialização');
-        }
-        
-        return result;
-    } catch (error) {
-        console.error('❌ Erro init:', error.message);
-        return false;
-    }
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% ${signal.volume3mData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection}`);
 }
 
 // =====================================================================
@@ -2457,10 +2504,11 @@ async function mainBotLoop() {
             
             const cycleTime = ((Date.now() - startTime) / 1000).toFixed(1);
             const cacheStats = CacheManager.getStats();
+            const stateStats = StateManager.getStats();
             
             console.log(`\n✅ Ciclo ${cycle} completo em ${cycleTime}s`);
             console.log(`📊 Sinais: ${signalsFound} | Cache: ${cacheStats.hitRate}`);
-            console.log(`📈 Total: ${globalAlerts} | Diário: ${dailyAlerts}`);
+            console.log(`📈 Total Global: ${globalAlerts} | Símbolos ativos: ${stateStats.alertCounter}`);
             
             if (cycle % 10 === 0) {
                 CacheManager.cleanup(0.2);
@@ -2491,39 +2539,65 @@ async function startBot() {
         console.log('🚀 TITANIUM CCI 1H');
         console.log('='.repeat(60) + '\n');
 
+        console.log('📅 Inicializando...');
+        console.log('⏳ Buscando configurações...');
+        
+        console.log('\n📱 Verificando configurações do Telegram:');
+        console.log(`Bot Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        console.log(`Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        
         lastResetDate = getBrazilianDateString();
         
-        // Envia mensagem de inicialização
+        StateManager.init();
+        
+        console.log('📤 Testando conexão com Telegram...');
+        const testMessage = `🤖 Bot Titanium CCI iniciando em ${getBrazilianDateTime().full}`;
+        const testResult = await sendTelegramAlert(testMessage);
+
+        if (testResult) {
+            console.log('✅ Conexão com Telegram OK!');
+        } else {
+            console.log('⚠️ Falha na conexão com Telegram.');
+        }
+
         await sendInitializationMessage();
 
-        console.log('✅ Bot inicializado! Iniciando loop principal...\n');
+        console.log('\n✅ Bot inicializado! Iniciando loop principal...\n');
         
         while (true) {
             try {
                 await mainBotLoop();
             } catch (fatalError) {
                 console.error("❌ Erro fatal no loop principal:", fatalError.message);
-                await sendTelegramAlert(formatItalic(`⚠️ Bot reiniciando apos erro...`)).catch(() => {});
+                console.log('🔄 Reiniciando em 30s...');
                 await new Promise(r => setTimeout(r, 30000));
             }
         }
 
     } catch (initError) {
         console.error('🚨 Erro na inicialização:', initError.message);
+        console.log('🔧 Verifique sua conexão e as configurações');
         process.exit(1);
     }
 }
 
 process.on('uncaughtException', (err) => {
-    console.error('!!! UNCAUGHT EXCEPTION !!!', err.message);
+    console.error('\n!!! UNCAUGHT EXCEPTION !!!');
+    console.error('Erro:', err.message);
+    console.error('Stack:', err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('\n!!! UNHANDLED REJECTION !!!');
+    console.error('Reason:', reason);
+});
+
+console.log('🚀 Iniciando Titanium CCI 1H Bot...');
+
+startBot().catch(error => {
+    console.error('❌ Erro fatal:', error);
     process.exit(1);
 });
-
-process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled Rejection:', reason);
-});
-
-startBot();
 
 if (global.gc) {
     console.log('🗑️ GC disponível');
