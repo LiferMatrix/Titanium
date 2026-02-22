@@ -67,13 +67,12 @@ const ExchangeInfoSchema = z.object({
 const CCISchema = z.object({
     value: z.number(),
     ema5: z.number(),
-    previousValue: z.number(),
+    ema13: z.number(),
     previousEma5: z.number(),
+    previousEma13: z.number(),
     isCrossingUp: z.boolean(),
     isCrossingDown: z.boolean(),
-    status: z.enum(['OVERSOLD', 'OVERBOUGHT', 'NEUTRAL']),
-    timeframe: z.string(),
-    config: z.string()
+    timeframe: z.string()
 });
 
 const RSISchema = z.object({
@@ -98,7 +97,6 @@ const VolumeAnalysisSchema = z.object({
     emoji: z.string()
 });
 
-// Schema para Volume 3m
 const Volume3mSchema = z.object({
     direction: z.enum(['Comprador', 'Vendedor', 'Neutro', 'Desconhecido', 'Erro']),
     percentage: z.number().min(0).max(100),
@@ -167,7 +165,8 @@ const CCISignalSchema = z.object({
     emaCheck: EMACheckSchema,
     volumeData: VolumeAnalysisSchema,
     volume3mData: Volume3mSchema,
-    retestData: RetestDataSchema
+    retestData: RetestDataSchema,
+    alertNumber: z.number().int()
 });
 
 // Schema para o ErrorHandler
@@ -184,11 +183,11 @@ const ErrorResponseSchema = z.object({
 // =====================================================================
 const RSI_1H_CONFIG = {
     COMPRA: {
-        MAX_RSI: 64,
+        MAX_RSI: 62,
         ENABLED: true
     },
     VENDA: {
-        MIN_RSI: 40,
+        MIN_RSI: 50,
         ENABLED: true
     }
 };
@@ -198,12 +197,25 @@ const RSI_1H_CONFIG = {
 // =====================================================================
 const RSI_15M_CONFIG = {
     COMPRA: {
-        DIRECTION: 'subindo', // RSI precisa estar subindo
+        DIRECTION: 'subindo',
         ENABLED: true
     },
     VENDA: {
-        DIRECTION: 'descendo', // RSI precisa estar descendo
+        DIRECTION: 'descendo',
         ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE LSR 15M PARA ALERTAS ===
+// =====================================================================
+const LSR_15M_CONFIG = {
+    COMPRA: {
+        MAX_LSR: 2.6,
+        ENABLED: true
+    },
+    VENDA: {
+        ENABLED: false
     }
 };
 
@@ -212,11 +224,27 @@ const RSI_15M_CONFIG = {
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 55, // Mínimo de 55% volume comprador
+        MIN_BUYER_PERCENTAGE: 35,
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 55, // Mínimo de 55% volume vendedor
+        MIN_SELLER_PERCENTAGE: 35,
+        ENABLED: true
+    }
+};
+
+// =====================================================================
+// === CONFIGURAÇÕES DE VOLUME 3M OBRIGATÓRIO ===
+// =====================================================================
+const VOLUME_3M_CONFIG = {
+    COMPRA: {
+        REQUIRED_DIRECTION: 'Comprador',
+        MIN_PERCENTAGE: 45,
+        ENABLED: true
+    },
+    VENDA: {
+        REQUIRED_DIRECTION: 'Vendedor',
+        MIN_PERCENTAGE: 55,
         ENABLED: true
     }
 };
@@ -226,32 +254,37 @@ const VOLUME_1H_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
+
     CCI: {
         ENABLED: true,
-        PERIOD: 20,
-        EMA_PERIOD: 5,
-        TIMEFRAME: '12h', // ALTERADO DE '1d' PARA '12h'
-        OVERSOLD: -100,
-        OVERBOUGHT: 100
+        TIMEFRAME: '30m',
+        LENGTH: 20,
+        EMA_SHORT: 5,
+        EMA_LONG: 13,
+        SOURCE: 'hlc3',
+        COOLDOWN_MS: 10 * 60 * 1000,
+        FRESH_CROSS_ONLY: true
     },
     PERFORMANCE: {
-        SYMBOL_DELAY_MS: 300, // AUMENTADO de 100 para 300ms
-        CYCLE_DELAY_MS: 30000, // AUMENTADO de 15 para 30 segundos
-        MAX_SYMBOLS_PER_CYCLE: 20, // REDUZIDO para 20 símbolos por ciclo
+        SYMBOL_DELAY_MS: 100,
+        CYCLE_DELAY_MS: 15000,
+        MAX_SYMBOLS_PER_CYCLE: 0,
         COOLDOWN_MINUTES: 5,
-        CANDLE_CACHE_TTL: 300000, // AUMENTADO de 2 para 5 minutos
-        MAX_CACHE_AGE: 30 * 60 * 1000, // AUMENTADO de 15 para 30 minutos
-        BATCH_SIZE: 5, // REDUZIDO de 10 para 5
-        REQUEST_TIMEOUT: 30000 // AUMENTADO de 10 para 30 segundos
+        CANDLE_CACHE_TTL: 120000,
+        MAX_CACHE_AGE: 15 * 60 * 1000,
+        BATCH_SIZE: 10,
+        REQUEST_TIMEOUT: 10000
     },
     CLEANUP: {
         INTERVAL: 10 * 60 * 1000,
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
-        MEMORY_THRESHOLD: 500 * 1024 * 1024
+        MEMORY_THRESHOLD: 500 * 1024 * 1024,
+        INACTIVE_SYMBOL_CLEANUP_HOURS: 24,
+        CLEANUP_CHECK_INTERVAL: 60 * 60 * 1000
     },
     RETEST: {
         ENABLED: true,
@@ -266,11 +299,14 @@ const CONFIG = {
         }
     },
     RATE_LIMITER: {
-        INITIAL_DELAY: 300, // AUMENTADO de 100 para 500ms
-        MAX_DELAY: 3000, // AUMENTADO de 2000 para 5000ms
-        BACKOFF_FACTOR: 1.2, // REDUZIDO de 1.5 para 1.2 (crescimento mais lento)
-        CONSECUTIVE_ERRORS_LIMIT: 10, // AUMENTADO de 5 para 10
-        SUCCESS_RESET_FACTOR: 0.8 // NOVO: reduz delay mais rápido em sucesso
+        INITIAL_DELAY: 100,
+        MAX_DELAY: 2000,
+        BACKOFF_FACTOR: 1.5,
+        CONSECUTIVE_ERRORS_LIMIT: 5
+    },
+    DEBUG: {
+        LOG_REJECTION_REASONS: true,
+        VERBOSE: false
     }
 };
 
@@ -292,14 +328,14 @@ const EMA_CONFIG = {
 const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
-let alertCounter = {};
-let dailyAlerts = 0;
+let alertCounter = new Map();
 let globalAlerts = 0;
 let lastResetDate = null;
 
-const symbolCooldown = {};
-const cciCooldown = {};
-const cciCrossState = {};
+const symbolCooldown = new Map();
+const cciCooldown = new Map();
+const cciCrossState = new Map();
+const symbolLastActivity = new Map();
 
 // === CACHE DE CANDLES OTIMIZADO ===
 const candleCache = new Map();
@@ -310,7 +346,7 @@ const cacheStats = {
 };
 
 // =====================================================================
-// === RATE LIMITER OTIMIZADO - CORRIGIDO ===
+// === RATE LIMITER OTIMIZADO ===
 // =====================================================================
 class OptimizedRateLimiter {
     constructor() {
@@ -318,12 +354,10 @@ class OptimizedRateLimiter {
         this.consecutiveErrors = 0;
         this.maxDelay = CONFIG.RATE_LIMITER.MAX_DELAY;
         this.backoffFactor = CONFIG.RATE_LIMITER.BACKOFF_FACTOR;
-        this.successResetFactor = CONFIG.RATE_LIMITER.SUCCESS_RESET_FACTOR;
         this.errorsByEndpoint = new Map();
         this.requestCount = 0;
         this.lastRequestTime = Date.now();
         this.pendingRequests = 0;
-        this.consecutiveSuccesses = 0; // NOVO
     }
 
     async makeRequest(url, options = {}, type = 'klines') {
@@ -336,88 +370,64 @@ class OptimizedRateLimiter {
             await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
         }
 
-        // NOVO: Tentativa com retry interno para timeouts
-        let lastError;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(
-                    () => controller.abort(), 
-                    CONFIG.PERFORMANCE.REQUEST_TIMEOUT
-                );
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(
+                () => controller.abort(), 
+                CONFIG.PERFORMANCE.REQUEST_TIMEOUT
+            );
 
-                const response = await fetch(url, {
-                    ...options,
-                    signal: controller.signal
-                });
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
 
-                clearTimeout(timeoutId);
-                this.lastRequestTime = Date.now();
+            clearTimeout(timeoutId);
+            this.lastRequestTime = Date.now();
 
-                if (!response.ok) {
-                    const error = new Error(`HTTP ${response.status}`);
-                    error.response = { status: response.status };
-                    throw error;
-                }
-
-                const data = await response.json();
-
-                // Sucesso - reduz delay gradualmente
-                this.consecutiveErrors = 0;
-                this.consecutiveSuccesses++;
-                
-                if (this.consecutiveSuccesses > 3) {
-                    this.currentDelay = Math.max(
-                        CONFIG.RATE_LIMITER.INITIAL_DELAY,
-                        this.currentDelay * this.successResetFactor
-                    );
-                }
-
-                this.errorsByEndpoint.set(type, 0);
-                
-                this.pendingRequests--;
-                return data;
-
-            } catch (error) {
-                lastError = error;
-                
-                // Se for timeout, tenta novamente uma vez
-                if (error.name === 'AbortError' || error.code === 'TIMEOUT' || error.message.includes('timeout')) {
-                    console.log(`⏰ Timeout [${type}] tentativa ${attempt}/2 - retentando...`);
-                    await new Promise(r => setTimeout(r, 1000 * attempt)); // Espera 1s, depois 2s
-                    continue;
-                }
-                
-                // Se não for timeout, não tenta novamente
-                break;
+            if (!response.ok) {
+                const error = new Error(`HTTP ${response.status}`);
+                error.response = { status: response.status };
+                throw error;
             }
+
+            const data = await response.json();
+
+            this.consecutiveErrors = 0;
+            this.currentDelay = Math.max(
+                CONFIG.RATE_LIMITER.INITIAL_DELAY,
+                this.currentDelay * 0.95
+            );
+
+            this.errorsByEndpoint.set(type, 0);
+            
+            this.pendingRequests--;
+            return data;
+
+        } catch (error) {
+            this.consecutiveErrors++;
+            
+            const endpointErrors = (this.errorsByEndpoint.get(type) || 0) + 1;
+            this.errorsByEndpoint.set(type, endpointErrors);
+
+            this.currentDelay = Math.min(
+                this.maxDelay,
+                this.currentDelay * this.backoffFactor
+            );
+
+            if (this.consecutiveErrors % 3 === 0) {
+                console.warn(`⚠️ RateLimiter [${type}]: ${this.consecutiveErrors} erros, delay=${Math.round(this.currentDelay)}ms`);
+            }
+
+            this.pendingRequests--;
+            throw error;
         }
-
-        // Se chegou aqui, todas as tentativas falharam
-        this.consecutiveErrors++;
-        this.consecutiveSuccesses = 0;
-        
-        const endpointErrors = (this.errorsByEndpoint.get(type) || 0) + 1;
-        this.errorsByEndpoint.set(type, endpointErrors);
-
-        this.currentDelay = Math.min(
-            this.maxDelay,
-            this.currentDelay * this.backoffFactor
-        );
-
-        if (this.consecutiveErrors % 3 === 0) {
-            console.warn(`⚠️ RateLimiter [${type}]: ${this.consecutiveErrors} erros consecutivos, delay=${Math.round(this.currentDelay)}ms`);
-        }
-
-        this.pendingRequests--;
-        throw lastError;
     }
 
     getStats() {
         return {
             currentDelay: this.currentDelay,
             consecutiveErrors: this.consecutiveErrors,
-            consecutiveSuccesses: this.consecutiveSuccesses,
             pendingRequests: this.pendingRequests,
             totalRequests: this.requestCount
         };
@@ -491,6 +501,75 @@ class CacheManager {
             misses: cacheStats.misses,
             hitRate: `${hitRate}%`,
             lastCleanup: new Date(cacheStats.lastCleanup).toLocaleTimeString()
+        };
+    }
+}
+
+// =====================================================================
+// === STATE MANAGER ===
+// =====================================================================
+class StateManager {
+    static init() {
+        setInterval(() => this.cleanupInactiveSymbols(), CONFIG.CLEANUP.CLEANUP_CHECK_INTERVAL);
+        console.log('🗑️ State Manager inicializado');
+    }
+
+    static cleanupInactiveSymbols() {
+        const now = Date.now();
+        const inactiveThreshold = CONFIG.CLEANUP.INACTIVE_SYMBOL_CLEANUP_HOURS * 60 * 60 * 1000;
+        let removedCount = 0;
+
+        for (const [symbol, timestamp] of symbolCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, timestamp] of cciCooldown.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                cciCooldown.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, state] of cciCrossState.entries()) {
+            if (now - state.lastCheck > inactiveThreshold) {
+                cciCrossState.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, data] of alertCounter.entries()) {
+            if (data.lastAlert && (now - data.lastAlert) > inactiveThreshold * 2) {
+                alertCounter.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        for (const [symbol, timestamp] of symbolLastActivity.entries()) {
+            if (now - timestamp > inactiveThreshold) {
+                symbolLastActivity.delete(symbol);
+                removedCount++;
+            }
+        }
+
+        if (removedCount > 0 && CONFIG.DEBUG.VERBOSE) {
+            console.log(`🧹 Limpeza de estado: ${removedCount} entradas removidas`);
+        }
+    }
+
+    static updateActivity(symbol) {
+        symbolLastActivity.set(symbol, Date.now());
+    }
+
+    static getStats() {
+        return {
+            symbolCooldown: symbolCooldown.size,
+            cciCooldown: cciCooldown.size,
+            cciCrossState: cciCrossState.size,
+            alertCounter: alertCounter.size,
+            symbolLastActivity: symbolLastActivity.size
         };
     }
 }
@@ -626,22 +705,48 @@ function getBrazilianDateString() {
     return brazilTime.toISOString().split('T')[0];
 }
 
+// =====================================================================
+// === FUNÇÕES CORRIGIDAS DE TELEGRAM ===
+// =====================================================================
+function cleanTelegramText(text) {
+    // Remove qualquer tag HTML existente
+    let cleanText = text.replace(/<[^>]*>/g, '');
+    // Escapa caracteres especiais do HTML
+    cleanText = cleanText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return cleanText;
+}
+
 function formatItalic(text) {
-    return `<i>${text}</i>`;
+    const cleanText = cleanTelegramText(text);
+    return `<i>${cleanText}</i>`;
 }
 
 async function sendTelegramAlert(message) {
     try {
-        const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // AUMENTADO para 15s
+        if (!CONFIG.TELEGRAM.BOT_TOKEN || !CONFIG.TELEGRAM.CHAT_ID) {
+            console.log('⚠️ Telegram não configurado');
+            return false;
+        }
 
+        const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        // Prepara a mensagem com formatação segura
+        const formattedMessage = formatItalic(message);
+        
+        console.log('📤 Enviando para Telegram...');
+        
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                text: message,
+                text: formattedMessage,
                 parse_mode: 'HTML',
                 disable_web_page_preview: true
             }),
@@ -651,17 +756,55 @@ async function sendTelegramAlert(message) {
         clearTimeout(timeoutId);
         
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            const errorText = await response.text();
+            console.log(`❌ Erro Telegram ${response.status}: ${errorText}`);
+            
+            // Se falhar com HTML, tenta sem formatação
+            if (response.status === 400) {
+                console.log('🔄 Tentando enviar sem formatação HTML...');
+                
+                const cleanMessage = cleanTelegramText(message);
+                
+                const fallbackResponse = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: CONFIG.TELEGRAM.CHAT_ID,
+                        text: cleanMessage,
+                        parse_mode: undefined,
+                        disable_web_page_preview: true
+                    }),
+                    signal: controller.signal
+                });
+                
+                if (fallbackResponse.ok) {
+                    console.log('✅ Mensagem enviada sem formatação');
+                    return true;
+                }
+            }
+            
+            return false;
         }
         
+        console.log(`✅ Telegram OK`);
         return true;
     } catch (error) {
-        ErrorHandler.handle(error, 'SendTelegram');
+        console.log(`❌ Erro ao enviar Telegram: ${error.message}`);
         return false;
     }
 }
 
-function getAlertCountForSymbol(symbol, type) {
+function logRejection(symbol, filter, reason, data = null) {
+    if (CONFIG.DEBUG.LOG_REJECTION_REASONS) {
+        let logMessage = `📊 ${symbol} rejeitado - ${filter}: ${reason}`;
+        if (data) {
+            logMessage += ` | Dados: ${JSON.stringify(data)}`;
+        }
+        console.log(logMessage);
+    }
+}
+
+function getAlertNumberForSymbol(symbol) {
     const currentDate = getBrazilianDateString();
    
     const currentHour = getBrazilianHour();
@@ -669,31 +812,56 @@ function getAlertCountForSymbol(symbol, type) {
         resetDailyCounters();
     }
    
-    // Inicializa contador por moeda se não existir
-    if (!alertCounter[symbol]) {
-        alertCounter[symbol] = {
-            cci: 0,
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
             total: 0,
             lastAlert: null,
-            dailyCCI: 0,
+            dailyCompra: 0,
+            dailyVenda: 0,
             dailyTotal: 0
-        };
+        });
     }
    
-    // Incrementa contadores específicos por moeda
-    alertCounter[symbol][type.toLowerCase()]++;
-    alertCounter[symbol].total++;
-    alertCounter[symbol][`daily${type.charAt(0).toUpperCase() + type.slice(1).toLowerCase()}`]++;
-    alertCounter[symbol].dailyTotal++;
-    alertCounter[symbol].lastAlert = Date.now();
+    const data = alertCounter.get(symbol);
+    return data.total + 1;
+}
+
+function incrementAlertCounter(symbol, type) {
+    const currentDate = getBrazilianDateString();
    
-    dailyAlerts++;
+    if (!alertCounter.has(symbol)) {
+        alertCounter.set(symbol, {
+            compra: 0,
+            venda: 0,
+            total: 0,
+            lastAlert: null,
+            dailyCompra: 0,
+            dailyVenda: 0,
+            dailyTotal: 0
+        });
+    }
+   
+    const data = alertCounter.get(symbol);
+   
+    if (type === 'CCI_COMPRA') {
+        data.compra++;
+        data.dailyCompra++;
+    } else if (type === 'CCI_VENDA') {
+        data.venda++;
+        data.dailyVenda++;
+    }
+   
+    data.total++;
+    data.dailyTotal++;
+    data.lastAlert = Date.now();
+   
+    alertCounter.set(symbol, data);
+   
     globalAlerts++;
    
-    return {
-        symbolDailyCCI: alertCounter[symbol].dailyCCI,
-        symbolTotal: alertCounter[symbol].total
-    };
+    return data.total;
 }
 
 function resetDailyCounters() {
@@ -701,29 +869,39 @@ function resetDailyCounters() {
    
     console.log(`\n🕘 ${getBrazilianDateTime().full} - Resetando contadores diários`);
    
-    // Reset contadores diários por moeda
-    Object.keys(alertCounter).forEach(symbol => {
-        alertCounter[symbol].dailyCCI = 0;
-        alertCounter[symbol].dailyTotal = 0;
-    });
+    for (const [symbol, data] of alertCounter.entries()) {
+        data.dailyCompra = 0;
+        data.dailyVenda = 0;
+        data.dailyTotal = 0;
+        alertCounter.set(symbol, data);
+    }
    
-    dailyAlerts = 0;
+    globalAlerts = 0;
     lastResetDate = currentDate;
 }
 
 async function sendInitializationMessage() {
     try {
         const now = getBrazilianDateTime();
-       
+        const stateStats = StateManager.getStats();
+        
         const message = `
-<i>🚀 TITANIUM  ✅</i>
-<i>📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}</i>
+🚀 TITANIUM CCI 1H INICIADO ✅
+📅 ${now.full}
+✅ ALERTAS ATIVOS
+📊 CCI 1H (${CONFIG.CCI.LENGTH}) com EMAs ${CONFIG.CCI.EMA_SHORT}/${CONFIG.CCI.EMA_LONG}
+📊 Volume 1h OBRIGATÓRIO: Compra >${VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE}% | Venda >${VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE}%
+📊 Volume 3m OBRIGATÓRIO: ${VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE}% na direção
+📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO
+📊 LSR 15m OBRIGATÓRIO: Compra < ${LSR_15M_CONFIG.COMPRA.MAX_LSR}
+📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
+🗑️ State: ${stateStats.alertCounter} símbolos ativos
 `;
-        console.log('📤 Enviando mensagem de inicialização...');
-        await sendTelegramAlert(message);
-        return true;
+        
+        return await sendTelegramAlert(message);
+        
     } catch (error) {
-        ErrorHandler.handle(error, 'SendInitMessage');
+        console.log(`❌ Erro na mensagem de inicialização: ${error.message}`);
         return false;
     }
 }
@@ -744,14 +922,14 @@ async function getCandles(symbol, timeframe, limit = 80) {
             '12h': '12h', '1d': '1d'
         };
         
-        const interval = intervalMap[timeframe] || '4h';
+        const interval = intervalMap[timeframe] || '1h';
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
         const data = await ErrorHandler.retry(
             () => rateLimiter.makeRequest(url, {}, 'klines'),
             `Candles-${symbol}`,
             2,
-            1000 // AUMENTADO baseDelay para 1000ms
+            500
         );
         
         const validatedData = KlineResponseSchema.parse(data);
@@ -794,82 +972,85 @@ function calculateEMA(values, period) {
     return ema;
 }
 
-// ===== FUNÇÃO CCI COM TIMEFRAME 12h =====
+function calculateSMA(values, period) {
+    if (values.length < period) return values[values.length - 1];
+    const slice = values.slice(-period);
+    return slice.reduce((a, b) => a + b, 0) / period;
+}
+
 async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
     try {
-        const candles = await getCandles(symbol, timeframe, 50);
-        if (candles.length < CONFIG.CCI.PERIOD + 10) {
+        const candles = await getCandles(symbol, timeframe, 80);
+        if (candles.length < CONFIG.CCI.LENGTH + 20) {
             return null;
         }
         
-        const period = CONFIG.CCI.PERIOD; // 20
-        const emaPeriod = CONFIG.CCI.EMA_PERIOD; // 5
+        const length = CONFIG.CCI.LENGTH;
         
-        // Calcular Typical Price para cada candle
+        // Calcular valores típicos (HLC3)
         const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
         
-        // Calcular valores CCI
+        // Calcular SMA dos preços típicos
+        const smaValues = [];
+        for (let i = length - 1; i < typicalPrices.length; i++) {
+            const slice = typicalPrices.slice(i - length + 1, i + 1);
+            const sma = slice.reduce((a, b) => a + b, 0) / length;
+            smaValues.push(sma);
+        }
+        
+        // Calcular desvio médio
+        const meanDeviations = [];
+        for (let i = length - 1; i < typicalPrices.length; i++) {
+            const slice = typicalPrices.slice(i - length + 1, i + 1);
+            const sma = smaValues[i - (length - 1)];
+            const meanDev = slice.reduce((sum, price) => sum + Math.abs(price - sma), 0) / length;
+            meanDeviations.push(meanDev);
+        }
+        
+        // Calcular CCI
         const cciValues = [];
-        
-        for (let i = period - 1; i < typicalPrices.length; i++) {
-            const tpSlice = typicalPrices.slice(i - period + 1, i + 1);
-            const sma = tpSlice.reduce((a, b) => a + b, 0) / period;
+        for (let i = 0; i < smaValues.length; i++) {
+            const tp = typicalPrices[i + (length - 1)];
+            const sma = smaValues[i];
+            const meanDev = meanDeviations[i];
             
-            // Calcular desvio médio
-            let meanDeviation = 0;
-            for (let j = 0; j < tpSlice.length; j++) {
-                meanDeviation += Math.abs(tpSlice[j] - sma);
+            if (meanDev === 0) {
+                cciValues.push(0);
+            } else {
+                const cci = (tp - sma) / (0.015 * meanDev);
+                cciValues.push(cci);
             }
-            meanDeviation = meanDeviation / period;
-            
-            // CCI = (Typical Price - SMA) / (0.015 * Mean Deviation)
-            const cci = meanDeviation !== 0 
-                ? (typicalPrices[i] - sma) / (0.015 * meanDeviation)
-                : 0;
-            
-            cciValues.push(cci);
         }
         
-        // Calcular EMA5 do CCI
-        const ema5Values = [];
-        for (let i = emaPeriod - 1; i < cciValues.length; i++) {
-            const emaSlice = cciValues.slice(i - emaPeriod + 1, i + 1);
-            const ema5 = calculateEMA(emaSlice, emaPeriod);
-            ema5Values.push(ema5);
-        }
-        
-        if (cciValues.length < 2 || ema5Values.length < 2) {
+        if (cciValues.length < Math.max(CONFIG.CCI.EMA_LONG, CONFIG.CCI.EMA_SHORT) + 2) {
             return null;
         }
         
-        // Últimos valores
-        const latestCCI = cciValues[cciValues.length - 1];
-        const latestEMA5 = ema5Values[ema5Values.length - 1];
-        const previousCCI = cciValues[cciValues.length - 2];
-        const previousEMA5 = ema5Values[ema5Values.length - 2];
+        // Calcular EMAs sobre o CCI
+        const emaShort = calculateEMA(cciValues, CONFIG.CCI.EMA_SHORT);
+        const emaLong = calculateEMA(cciValues, CONFIG.CCI.EMA_LONG);
         
-        // Verificar cruzamentos
-        const isCrossingUp = previousCCI <= previousEMA5 && latestCCI > latestEMA5;
-        const isCrossingDown = previousCCI >= previousEMA5 && latestCCI < latestEMA5;
+        // Calcular valores anteriores para detectar cruzamento
+        const prevCciValues = cciValues.slice(0, -1);
+        const prevEmaShort = prevCciValues.length >= CONFIG.CCI.EMA_SHORT 
+            ? calculateEMA(prevCciValues, CONFIG.CCI.EMA_SHORT) 
+            : emaShort;
+        const prevEmaLong = prevCciValues.length >= CONFIG.CCI.EMA_LONG 
+            ? calculateEMA(prevCciValues, CONFIG.CCI.EMA_LONG) 
+            : emaLong;
         
-        // Determinar status
-        let status = 'NEUTRAL';
-        if (latestCCI < CONFIG.CCI.OVERSOLD) {
-            status = 'OVERSOLD';
-        } else if (latestCCI > CONFIG.CCI.OVERBOUGHT) {
-            status = 'OVERBOUGHT';
-        }
+        const isCrossingUp = prevEmaShort <= prevEmaLong && emaShort > emaLong;
+        const isCrossingDown = prevEmaShort >= prevEmaLong && emaShort < emaLong;
         
         const cciResult = {
-            value: latestCCI,
-            ema5: latestEMA5,
-            previousValue: previousCCI,
-            previousEma5: previousEMA5,
+            value: cciValues[cciValues.length - 1],
+            ema5: emaShort,
+            ema13: emaLong,
+            previousEma5: prevEmaShort,
+            previousEma13: prevEmaLong,
             isCrossingUp: isCrossingUp,
             isCrossingDown: isCrossingDown,
-            status: status,
-            timeframe: timeframe,
-            config: `${period}.${emaPeriod}`
+            timeframe: timeframe
         };
         
         return CCISchema.parse(cciResult);
@@ -1041,7 +1222,7 @@ async function getLSR(symbol) {
             () => rateLimiter.makeRequest(url, {}, 'lsr'),
             `LSR-${symbol}`,
             1,
-            500 // AUMENTADO para 500ms
+            300
         );
         
         const validatedResponse = LSRResponseSchema.parse(response);
@@ -1068,7 +1249,7 @@ async function getFundingRate(symbol) {
             () => rateLimiter.makeRequest(url, {}, 'fundingRate'),
             `Funding-${symbol}`,
             1,
-            500 // AUMENTADO para 500ms
+            300
         );
         
         const validatedData = FundingRateSchema.parse(data);
@@ -1134,9 +1315,9 @@ async function analyzePivotPoints(symbol, currentPrice, isBullish) {
     }
 }
 
-async function calculateATR4h(symbol, period = 14) {
+async function calculateATR(symbol, period = 14, timeframe = '4h') {
     try {
-        const candles = await getCandles(symbol, '4h', period + 1);
+        const candles = await getCandles(symbol, timeframe, period + 1);
         if (candles.length < period + 1) {
             return null;
         }
@@ -1166,7 +1347,7 @@ async function calculateATR4h(symbol, period = 14) {
 
 async function calculateEntryRetraction(symbol, currentPrice, isBullish) {
     try {
-        const atr = await calculateATR4h(symbol, 14);
+        const atr = await calculateATR(symbol, 14, '4h');
         if (!atr) {
             return { entryPrice: currentPrice, retractionRange: null };
         }
@@ -1202,7 +1383,7 @@ async function calculateEntryRetraction(symbol, currentPrice, isBullish) {
 
 async function calculateATRTargets(symbol, entryPrice, isBullish) {
     try {
-        const atr = await calculateATR4h(symbol, 14);
+        const atr = await calculateATR(symbol, 14, '4h');
         if (!atr) {
             return null;
         }
@@ -1537,24 +1718,27 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
 }
 
 // =====================================================================
-// === SINAIS DE CCI (TIMEFRAME 12h) ===
+// === SINAIS DE CCI ===
 // =====================================================================
 async function checkCCISignal(symbol) {
     if (!CONFIG.CCI.ENABLED) {
         return null;
     }
     
-    if (cciCooldown[symbol] && (Date.now() - cciCooldown[symbol]) < 20 * 60 * 1000) {
+    if (cciCooldown.has(symbol) && (Date.now() - cciCooldown.get(symbol)) < CONFIG.CCI.COOLDOWN_MS) {
         return null;
     }
+    
+    StateManager.updateActivity(symbol);
     
     try {
         const cci = await getCCI(symbol);
         if (!cci) {
+            logRejection(symbol, 'CCI', 'Não foi possível obter dados');
             return null;
         }
         
-        const previousState = cciCrossState[symbol] || {
+        const previousState = cciCrossState.get(symbol) || {
             wasCrossingUp: false,
             wasCrossingDown: false,
             lastCheck: 0
@@ -1563,45 +1747,46 @@ async function checkCCISignal(symbol) {
         let signalType = null;
         let isFreshCross = false;
         
-        // Critério: CCI cruzando para cima ou para baixo da EMA5
         if (cci.isCrossingUp) {
             if (!previousState.wasCrossingUp) {
                 signalType = 'CCI_COMPRA';
                 isFreshCross = true;
             }
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: true,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         } else if (cci.isCrossingDown) {
             if (!previousState.wasCrossingDown) {
                 signalType = 'CCI_VENDA';
                 isFreshCross = true;
             }
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: true,
                 lastCheck: Date.now()
-            };
+            });
         } else {
-            cciCrossState[symbol] = {
+            cciCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
-            };
+            });
         }
         
         if (!isFreshCross || !signalType) {
+            logRejection(symbol, 'Cruzamento', 'Cruzamento não é fresco ou ausente');
             return null;
         }
         
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
+            logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
             return null;
         }
         
-        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.all([
+        const [rsiData, rsi15mData, lsrData, fundingData, volumeData, volume3mData] = await Promise.allSettled([
             getRSI1h(symbol),
             getRSI15m(symbol),
             getLSR(symbol),
@@ -1610,50 +1795,84 @@ async function checkCCISignal(symbol) {
             analyzeVolume3mWithEMA13(symbol)
         ]);
         
+        const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
+        const rsi15mValue = rsi15mData.status === 'fulfilled' ? rsi15mData.value : null;
+        const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
+        const fundingValue = fundingData.status === 'fulfilled' ? fundingData.value : null;
+        const volumeValue = volumeData.status === 'fulfilled' ? volumeData.value : { direction: 'Erro', percentage: 0, emoji: '❌' };
+        const volume3mValue = volume3mData.status === 'fulfilled' ? volume3mData.value : { direction: 'Erro', percentage: 0, emoji: '❌', score: 0 };
+        
         // ===== FILTRO OBRIGATÓRIO DE VOLUME 1H =====
         if (VOLUME_1H_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!volumeData || volumeData.direction !== 'Comprador' || volumeData.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para COMPRA ${symbol}: ${volumeData?.percentage}% ${volumeData?.direction}`);
+            if (!volumeValue || volumeValue.direction !== 'Comprador' || volumeValue.percentage < VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, %: ${volumeValue?.percentage}%`);
                 return null;
             }
         }
         
         if (VOLUME_1H_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
-            if (!volumeData || volumeData.direction !== 'Vendedor' || (100 - volumeData.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
-                console.log(`📊 Volume 1h rejeitado para VENDA ${symbol}: ${100 - volumeData?.percentage}% vendedor`);
+            if (!volumeValue || volumeValue.direction !== 'Vendedor' || (100 - volumeValue.percentage) < VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE) {
+                logRejection(symbol, 'Volume 1h', `Direção: ${volumeValue?.direction}, % vendedor: ${100 - volumeValue?.percentage}%`);
+                return null;
+            }
+        }
+        
+        // ===== FILTRO OBRIGATÓRIO DE VOLUME 3M =====
+        if (VOLUME_3M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
+            if (!volume3mValue || volume3mValue.direction !== VOLUME_3M_CONFIG.COMPRA.REQUIRED_DIRECTION || volume3mValue.percentage < VOLUME_3M_CONFIG.COMPRA.MIN_PERCENTAGE) {
+                logRejection(symbol, 'Volume 3m', `Direção: ${volume3mValue?.direction}, %: ${volume3mValue?.percentage}%`);
+                return null;
+            }
+        }
+        
+        if (VOLUME_3M_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
+            if (!volume3mValue || volume3mValue.direction !== VOLUME_3M_CONFIG.VENDA.REQUIRED_DIRECTION || (100 - volume3mValue.percentage) < VOLUME_3M_CONFIG.VENDA.MIN_PERCENTAGE) {
+                logRejection(symbol, 'Volume 3m', `Direção: ${volume3mValue?.direction}, % vendedor: ${100 - volume3mValue?.percentage}%`);
                 return null;
             }
         }
         
         // ===== FILTRO OBRIGATÓRIO DE RSI 15M =====
         if (RSI_15M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
-            if (!rsi15mData || rsi15mData.direction !== 'subindo') {
-                console.log(`📊 RSI 15m rejeitado para COMPRA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'subindo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
         if (RSI_15M_CONFIG.VENDA.ENABLED && signalType === 'CCI_VENDA') {
-            if (!rsi15mData || rsi15mData.direction !== 'descendo') {
-                console.log(`📊 RSI 15m rejeitado para VENDA ${symbol}: direção ${rsi15mData?.direction || 'indisponível'}`);
+            if (!rsi15mValue || rsi15mValue.direction !== 'descendo') {
+                logRejection(symbol, 'RSI 15m', `Direção: ${rsi15mValue?.direction || 'indisponível'}`);
                 return null;
             }
         }
         
+        // ===== FILTRO OBRIGATÓRIO DE LSR 15M =====
+        if (LSR_15M_CONFIG.COMPRA.ENABLED && signalType === 'CCI_COMPRA') {
+            if (!lsrValue || lsrValue.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
+                logRejection(symbol, 'LSR 15m', `LSR: ${lsrValue?.lsrValue?.toFixed(2) || 'N/A'}, max: ${LSR_15M_CONFIG.COMPRA.MAX_LSR}`);
+                return null;
+            }
+        }
+        
+        // ===== FILTRO OPCIONAL DE RSI 1H =====
         if (signalType === 'CCI_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
-            if (!rsiData || rsiData.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+            if (!rsiValue || rsiValue.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, max: ${RSI_1H_CONFIG.COMPRA.MAX_RSI}`);
                 return null;
             }
         }
        
         if (signalType === 'CCI_VENDA' && RSI_1H_CONFIG.VENDA.ENABLED) {
-            if (!rsiData || rsiData.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+            if (!rsiValue || rsiValue.value <= RSI_1H_CONFIG.VENDA.MIN_RSI) {
+                logRejection(symbol, 'RSI 1h', `RSI: ${rsiValue?.value?.toFixed(1) || 'N/A'}, min: ${RSI_1H_CONFIG.VENDA.MIN_RSI}`);
                 return null;
             }
         }
         
         const currentPrice = await getCurrentPrice(symbol);
         if (currentPrice === 0) {
+            logRejection(symbol, 'Preço', 'Não foi possível obter preço atual');
             return null;
         }
         
@@ -1665,15 +1884,17 @@ async function checkCCISignal(symbol) {
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
+        const alertNumber = getAlertNumberForSymbol(symbol);
+        
         const signal = {
             symbol: symbol,
             type: signalType,
             cci: cci,
-            rsi: rsiData?.value,
-            rsi15m: rsi15mData?.value,
-            rsi15mDirection: rsi15mData?.direction,
-            lsr: lsrData?.lsrValue,
-            funding: fundingData?.ratePercent,
+            rsi: rsiValue?.value,
+            rsi15m: rsi15mValue?.value,
+            rsi15mDirection: rsi15mValue?.direction,
+            lsr: lsrValue?.lsrValue,
+            funding: fundingValue?.ratePercent,
             pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
@@ -1683,14 +1904,16 @@ async function checkCCISignal(symbol) {
             atrTargets: atrTargets,
             srLevels: srLevels,
             emaCheck: emaCheck,
-            volumeData: volumeData,
-            volume3mData: volume3mData,
-            retestData: retestData
+            volumeData: volumeValue,
+            volume3mData: volume3mValue,
+            retestData: retestData,
+            alertNumber: alertNumber
         };
         
         return CCISignalSchema.parse(signal);
         
     } catch (error) {
+        logRejection(symbol, 'Erro', error.message);
         return null;
     }
 }
@@ -1902,17 +2125,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         totalScore += 15;
     }
 
-    // Adicionar pontuação do Volume 3m
-    if (indicators.volume3mData && indicators.volume3mData.score) {
-        totalScore += indicators.volume3mData.score;
-        if (indicators.volume3mData.score > 0) {
-            factors.positive.push(`📈 Volume 3m: +${indicators.volume3mData.score} pontos (${indicators.volume3mData.percentage}% comprador)`);
-        } else if (indicators.volume3mData.score < 0) {
-            factors.positive.push(`📉 Volume 3m: ${indicators.volume3mData.score} pontos (${indicators.volume3mData.percentage}% comprador)`);
-        }
-    }
-
-    factors.score = Math.min(100, Math.max(0, Math.round((totalScore / factors.maxScore) * 100)));
+    factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
 
     const isBadTrade = factors.score < 50;
     const isNearResistance = indicators.pivotData?.nearestResistance?.distancePercent < 3.0;
@@ -2003,8 +2216,8 @@ async function sendCCIAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
     const currentPrice = signal.currentPrice;
    
-    getAlertCountForSymbol(signal.symbol, 'cci');
-    cciCooldown[signal.symbol] = Date.now();
+    const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
+    cciCooldown.set(signal.symbol, Date.now());
    
     const factors = await analyzeTradeFactors(signal.symbol, signal.type, {
         funding: signal.funding,
@@ -2117,7 +2330,7 @@ async function sendCCIAlertEnhanced(signal) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         if (signal.type === 'CCI_COMPRA') {
-            lsrEmoji = signal.lsr < 2.5 ? '✅' : '⚠️';
+            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️';
         } else {
             lsrEmoji = signal.lsr > 2.8 ? '✅' : '⚠️';
         }
@@ -2136,7 +2349,7 @@ async function sendCCIAlertEnhanced(signal) {
         }
     }
    
-    const cciText = `CCI ${signal.cci.value.toFixed(0)}/EMA${signal.cci.ema5.toFixed(0)}`;
+    const cciText = `CCI ${signal.cci.value.toFixed(1)} | EMA5 ${signal.cci.ema5.toFixed(1)} | EMA13 ${signal.cci.ema13.toFixed(1)}`;
    
     let rsiText = 'N/A';
     if (signal.rsi) {
@@ -2161,7 +2374,7 @@ async function sendCCIAlertEnhanced(signal) {
     let volume3mText = '';
     if (signal.volume3mData) {
         const vol3m = signal.volume3mData;
-        volume3mText = `Volume 3m: ${vol3m.percentage}% ${vol3m.direction} ${vol3m.emoji} (${vol3m.score > 0 ? '+' : ''}${vol3m.score} pts)`;
+        volume3mText = `Volume 3m: ${vol3m.percentage}% ${vol3m.direction} ${vol3m.emoji}`;
     }
    
     let entryRetractionText = '';
@@ -2170,21 +2383,21 @@ async function sendCCIAlertEnhanced(signal) {
         entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
-    // Contador por moeda - mostra total por símbolo
-    const symbolAlerts = alertCounter[signal.symbol] || { total: 0, dailyTotal: 0 };
-    const alertCounterText = `#${symbolAlerts.total} | Hoje: ${symbolAlerts.dailyTotal}`;
+    const symbolData = alertCounter.get(signal.symbol);
+    const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar...COMPRA' : '🔍Analisar...CORREÇÃO';
+    const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    let message = formatItalic(`${actionEmoji} ${actionText} • ${signal.symbol}
+    // Constrói a mensagem sem formatação HTML
+    const messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
 ${volumeText}
 ${volume3mText}
-Alertas: ${alertCounterText} - ${signal.time.full}
+${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘CCI  ${cciText} | RSI 1H ${rsiText}${rsi15mText}
+🔘#Momentum | RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
@@ -2193,13 +2406,12 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium by @J4Rviz ✨`);
+✨ Titanium by @J4Rviz ✨`;
+
+    // Aplica formatação segura
+    await sendTelegramAlert(messageText);
    
-    message = message.replace(/\n\s*\n/g, '\n').trim();
-   
-    await sendTelegramAlert(message);
-   
-    console.log(`✅ Alerta enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% (${signal.volume3mData?.score} pts) | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection} | Total ${signal.symbol}: ${symbolAlerts.total}`);
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 1h: ${signal.volumeData?.percentage}% ${signal.volumeData?.direction} | Volume 3m: ${signal.volume3mData?.percentage}% ${signal.volume3mData?.direction} | RSI 15m: ${signal.rsi15m?.toFixed(0)} ${signal.rsi15mDirection}`);
 }
 
 // =====================================================================
@@ -2207,7 +2419,6 @@ Alerta Educativo, não é recomendação de investimento
 // =====================================================================
 async function fetchAllFuturesSymbols() {
     try {
-        console.log('🔍 Buscando símbolos da Binance...');
         const data = await ErrorHandler.retry(
             () => rateLimiter.makeRequest(
                 'https://fapi.binance.com/fapi/v1/exchangeInfo',
@@ -2215,25 +2426,18 @@ async function fetchAllFuturesSymbols() {
                 'exchangeInfo'
             ),
             'FetchSymbols',
-            3, // AUMENTADO para 3 tentativas
-            2000 // AUMENTADO baseDelay para 2000ms
+            2,
+            500
         );
         
         const validatedData = ExchangeInfoSchema.parse(data);
         
-        const symbols = validatedData.symbols
+        return validatedData.symbols
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
-        
-        console.log(`✅ Encontrados ${symbols.length} símbolos`);
-        return symbols;
     } catch (error) {
-        console.log('❌ Erro ao buscar símbolos, usando lista reduzida de 10 pares principais');
-        // Lista maior de fallback
-        return [
-            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
-            'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT'
-        ];
+        console.log('❌ Erro ao buscar símbolos, usando lista básica');
+        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
     }
 }
 
@@ -2264,8 +2468,8 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM CCI 12h');
-        console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
+        console.log(' TITANIUM ');
+        console.log(` ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
         let cycle = 0;
@@ -2273,7 +2477,7 @@ async function mainBotLoop() {
             cycle++;
             const startTime = Date.now();
             
-            console.log(`\n🔄 Ciclo ${cycle} iniciado... (${getBrazilianDateTime().time})`);
+            console.log(`\n🔄 Ciclo ${cycle} iniciado...`);
            
             const currentHour = getBrazilianHour();
             if (currentHour >= 21 && lastResetDate !== getBrazilianDateString()) {
@@ -2290,49 +2494,33 @@ async function mainBotLoop() {
             
             for (let i = 0; i < symbolsToMonitor.length; i += batchSize) {
                 const batch = symbolsToMonitor.slice(i, i + batchSize);
-                console.log(`📊 Processando lote ${Math.floor(i/batchSize) + 1}/${Math.ceil(symbolsToMonitor.length/batchSize)}...`);
-                
                 const batchSignals = await monitorBatch(batch);
                 signalsFound += batchSignals;
                 
                 if (i + batchSize < symbolsToMonitor.length) {
-                    const delay = CONFIG.PERFORMANCE.SYMBOL_DELAY_MS;
-                    await new Promise(r => setTimeout(r, delay));
+                    await new Promise(r => setTimeout(r, 200));
                 }
             }
             
             const cycleTime = ((Date.now() - startTime) / 1000).toFixed(1);
             const cacheStats = CacheManager.getStats();
+            const stateStats = StateManager.getStats();
             
             console.log(`\n✅ Ciclo ${cycle} completo em ${cycleTime}s`);
-            console.log(`📊 Sinais: ${signalsFound} | Cache: ${cacheStats.hitRate} (${cacheStats.size} itens)`);
-            console.log(`📈 Total Global: ${globalAlerts} | Diário: ${dailyAlerts}`);
-            console.log(`⚙️ RateLimiter: delay ${rateLimiter.currentDelay.toFixed(0)}ms | erros ${rateLimiter.consecutiveErrors}`);
-            
-            // Mostrar contadores por moeda
-            const activeSymbols = Object.entries(alertCounter)
-                .sort((a, b) => b[1].total - a[1].total)
-                .slice(0, 5);
-            
-            if (activeSymbols.length > 0) {
-                console.log(`📊 Alertas por moeda:`);
-                activeSymbols.forEach(([symbol, data]) => {
-                    console.log(`   ${symbol}: Total ${data.total} | Hoje ${data.dailyTotal}`);
-                });
-            }
+            console.log(`📊 Sinais: ${signalsFound} | Cache: ${cacheStats.hitRate}`);
+            console.log(`📈 Total Global: ${globalAlerts} | Símbolos ativos: ${stateStats.alertCounter}`);
             
             if (cycle % 10 === 0) {
-                const removed = CacheManager.cleanup(0.2);
-                console.log(`🧹 Cache limpo: ${removed} itens removidos`);
+                CacheManager.cleanup(0.2);
             }
             
-            console.log(`\n⏳ Próximo ciclo em ${CONFIG.PERFORMANCE.CYCLE_DELAY_MS/1000}s... (${getBrazilianDateTime().time})`);
+            console.log(`\n⏳ Próximo ciclo em ${CONFIG.PERFORMANCE.CYCLE_DELAY_MS/1000}s...`);
             await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.CYCLE_DELAY_MS));
         }
     } catch (error) {
         ErrorHandler.handle(error, 'MainLoop');
-        console.log('🔄 Reiniciando em 60s...');
-        await new Promise(r => setTimeout(r, 60000));
+        console.log('🔄 Reiniciando em 30s...');
+        await new Promise(r => setTimeout(r, 30000));
         await mainBotLoop();
     }
 }
@@ -2348,53 +2536,68 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM ');
-        console.log(`📊 12h com EMA5`);
-        console.log(`📊 Batch Size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
-        console.log(`📊 Max Symbols/Cycle: ${CONFIG.PERFORMANCE.MAX_SYMBOLS_PER_CYCLE}`);
-        console.log(`📊 Cache TTL: ${CONFIG.PERFORMANCE.CANDLE_CACHE_TTL/1000}s`);
-        console.log(`📊 Request Timeout: ${CONFIG.PERFORMANCE.REQUEST_TIMEOUT/1000}s`);
+        console.log(' TITANIUM ');
         console.log('='.repeat(60) + '\n');
 
+        console.log('📅 Inicializando...');
+        console.log('⏳ Buscando configurações...');
+        
+        console.log('\n📱 Verificando configurações do Telegram:');
+        console.log(`Bot Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        console.log(`Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
+        
         lastResetDate = getBrazilianDateString();
         
-        // Aguarda um pouco antes de enviar mensagem inicial
-        await new Promise(r => setTimeout(r, 2000));
+        StateManager.init();
+        
+        console.log('📤 Testando conexão com Telegram...');
+        const testMessage = `🤖 Bot Titanium CCI iniciando em ${getBrazilianDateTime().full}`;
+        const testResult = await sendTelegramAlert(testMessage);
+
+        if (testResult) {
+            console.log('✅ Conexão com Telegram OK!');
+        } else {
+            console.log('⚠️ Falha na conexão com Telegram.');
+        }
+
         await sendInitializationMessage();
 
-        console.log('✅ Bot inicializado! Iniciando loop principal...\n');
-        
-        // Aguarda mais um pouco antes do primeiro ciclo
-        await new Promise(r => setTimeout(r, 3000));
+        console.log('\n✅ Bot inicializado! Iniciando loop principal...\n');
         
         while (true) {
             try {
                 await mainBotLoop();
             } catch (fatalError) {
                 console.error("❌ Erro fatal no loop principal:", fatalError.message);
-                await sendTelegramAlert(`⚠️ Bot reiniciando após erro: ${fatalError.message.substring(0, 100)}`).catch(() => {});
-                await new Promise(r => setTimeout(r, 60000));
+                console.log('🔄 Reiniciando em 30s...');
+                await new Promise(r => setTimeout(r, 30000));
             }
         }
 
     } catch (initError) {
         console.error('🚨 Erro na inicialização:', initError.message);
+        console.log('🔧 Verifique sua conexão e as configurações');
         process.exit(1);
     }
 }
 
 process.on('uncaughtException', (err) => {
-    console.error('!!! UNCAUGHT EXCEPTION !!!', err.message);
-    console.error(err.stack);
+    console.error('\n!!! UNCAUGHT EXCEPTION !!!');
+    console.error('Erro:', err.message);
+    console.error('Stack:', err.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('\n!!! UNHANDLED REJECTION !!!');
+    console.error('Reason:', reason);
+});
+
+console.log('🚀 Iniciando Titanium CCI 1H Bot...');
+
+startBot().catch(error => {
+    console.error('❌ Erro fatal:', error);
     process.exit(1);
 });
-
-process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled Rejection:', reason);
-});
-
-// Inicia o bot
-startBot();
 
 if (global.gc) {
     console.log('🗑️ GC disponível');
