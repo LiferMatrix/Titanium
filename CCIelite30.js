@@ -2397,7 +2397,7 @@ ${volumeText}
 ${volume3mText}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘#Momentum | RSI 1H ${rsiText}${rsi15mText}
+🔘Force30 -RSI 1H ${rsiText}${rsi15mText}
 LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
