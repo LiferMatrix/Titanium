@@ -260,7 +260,7 @@ const CONFIG = {
 
     CCI: {
         ENABLED: true,
-        TIMEFRAME: '1h',
+        TIMEFRAME: '15m',
         LENGTH: 20,
         EMA_SHORT: 5,
         EMA_LONG: 13,
