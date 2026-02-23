@@ -168,7 +168,6 @@ const StochasticSignalSchema = z.object({
         time: z.string(),
         full: z.string()
     }),
-    isFreshCross: z.boolean(),
     atrTargets: ATRTargetsSchema,
     srLevels: z.any().nullable(),
     emaCheck: EMACheckSchema,
@@ -254,14 +253,13 @@ const VOLUME_3M_ABNORMAL_CONFIG = {
     REQUIRED_FOR_VENDA: true
 };
 
-
 // =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS (MELHORADO) ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     STOCHASTIC: {
@@ -272,8 +270,8 @@ const CONFIG = {
         TIMEFRAME: '4h',
         OVERBOUGHT: 77,
         OVERSOLD: 67,
-        COOLDOWN_MS: 20 * 60 * 1000, // 20 minutos (movido do hardcoded)
-        FRESH_CROSS_ONLY: true
+        COOLDOWN_MS: 20 * 60 * 1000, // 20 minutos
+        FRESH_CROSS_ONLY: false // AGORA: false para não exigir cruzamento fresco
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 100,
@@ -290,7 +288,7 @@ const CONFIG = {
         MAX_LOG_DAYS: 7,
         MAX_CACHE_DAYS: 1,
         MEMORY_THRESHOLD: 500 * 1024 * 1024,
-        INACTIVE_SYMBOL_CLEANUP_HOURS: 24, // NOVO: Limpeza de símbolos inativos
+        INACTIVE_SYMBOL_CLEANUP_HOURS: 24,
         CLEANUP_CHECK_INTERVAL: 60 * 60 * 1000 // 1 hora
     },
     RETEST: {
@@ -312,7 +310,7 @@ const CONFIG = {
         CONSECUTIVE_ERRORS_LIMIT: 5
     },
     DEBUG: {
-        LOG_REJECTION_REASONS: true, // NOVO: Ativar logs detalhados de rejeição
+        LOG_REJECTION_REASONS: true,
         VERBOSE: false
     }
 };
@@ -336,14 +334,14 @@ const LOG_DIR = './logs';
 const CACHE_DIR = './cache';
 
 // Gerenciamento de Estado Melhorado
-let alertCounter = new Map(); // Usando Map em vez de objeto para melhor performance
+let alertCounter = new Map();
 let globalAlerts = 0;
 let lastResetDate = null;
 
 const symbolCooldown = new Map();
 const stochasticCooldown = new Map();
-const stochCrossState = new Map(); // Agora é Map
-const symbolLastActivity = new Map(); // NOVO: Rastrear última atividade dos símbolos
+const stochCrossState = new Map();
+const symbolLastActivity = new Map();
 
 // === CACHE DE CANDLES OTIMIZADO ===
 const candleCache = new Map();
@@ -514,11 +512,10 @@ class CacheManager {
 }
 
 // =====================================================================
-// === STATE MANAGER - NOVO: Gerenciamento de Estado para evitar Memory Leaks ===
+// === STATE MANAGER ===
 // =====================================================================
 class StateManager {
     static init() {
-        // Iniciar limpeza periódica
         setInterval(() => this.cleanupInactiveSymbols(), CONFIG.CLEANUP.CLEANUP_CHECK_INTERVAL);
         console.log('🗑️ State Manager inicializado - Limpeza automática ativada');
     }
@@ -528,7 +525,6 @@ class StateManager {
         const inactiveThreshold = CONFIG.CLEANUP.INACTIVE_SYMBOL_CLEANUP_HOURS * 60 * 60 * 1000;
         let removedCount = 0;
 
-        // Limpar symbolCooldown
         for (const [symbol, timestamp] of symbolCooldown.entries()) {
             if (now - timestamp > inactiveThreshold) {
                 symbolCooldown.delete(symbol);
@@ -536,7 +532,6 @@ class StateManager {
             }
         }
 
-        // Limpar stochasticCooldown
         for (const [symbol, timestamp] of stochasticCooldown.entries()) {
             if (now - timestamp > inactiveThreshold) {
                 stochasticCooldown.delete(symbol);
@@ -544,7 +539,6 @@ class StateManager {
             }
         }
 
-        // Limpar stochCrossState
         for (const [symbol, state] of stochCrossState.entries()) {
             if (now - state.lastCheck > inactiveThreshold) {
                 stochCrossState.delete(symbol);
@@ -552,7 +546,6 @@ class StateManager {
             }
         }
 
-        // Limpar alertCounter (mantém contadores históricos, mas remove se inativo por muito tempo)
         for (const [symbol, data] of alertCounter.entries()) {
             if (data.lastAlert && (now - data.lastAlert) > inactiveThreshold * 2) {
                 alertCounter.delete(symbol);
@@ -560,7 +553,6 @@ class StateManager {
             }
         }
 
-        // Limpar symbolLastActivity
         for (const [symbol, timestamp] of symbolLastActivity.entries()) {
             if (now - timestamp > inactiveThreshold) {
                 symbolLastActivity.delete(symbol);
@@ -719,16 +711,11 @@ function getBrazilianDateString() {
     return brazilTime.toISOString().split('T')[0];
 }
 
-function formatItalic(text) {
-    return text; // Removendo formatação HTML
-}
-
 // =====================================================================
 // === FUNÇÃO CORRIGIDA DE ENVIO DO TELEGRAM ===
 // =====================================================================
 async function sendTelegramAlert(message) {
     try {
-        // Validar token e chat ID usando as configurações centralizadas
         if (!CONFIG.TELEGRAM.BOT_TOKEN) {
             console.log('⚠️ Token do Telegram não configurado');
             return false;
@@ -744,7 +731,6 @@ async function sendTelegramAlert(message) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        // Remover tags HTML que podem causar problemas
         const cleanMessage = message.replace(/<[^>]*>/g, '');
         
         console.log('📤 Enviando mensagem para o Telegram...');
@@ -769,10 +755,6 @@ async function sendTelegramAlert(message) {
             
             if (response.status === 400 && errorText.includes('chat not found')) {
                 console.log('❌ Chat ID inválido ou o bot não foi adicionado ao grupo');
-                console.log('📝 Certifique-se que:');
-                console.log('   1. O chat ID está correto');
-                console.log('   2. O bot foi adicionado ao grupo');
-                console.log('   3. O bot tem permissão para enviar mensagens');
             }
             return false;
         }
@@ -781,14 +763,10 @@ async function sendTelegramAlert(message) {
         return true;
     } catch (error) {
         console.log(`❌ Erro ao enviar Telegram: ${error.message}`);
-        if (error.name === 'AbortError') {
-            console.log('⏰ Timeout na requisição do Telegram');
-        }
         return false;
     }
 }
 
-// Função para log de rejeição (melhorado)
 function logRejection(symbol, filter, reason, data = null) {
     if (CONFIG.DEBUG.LOG_REJECTION_REASONS) {
         let logMessage = `📊 ${symbol} rejeitado - ${filter}: ${reason}`;
@@ -799,7 +777,6 @@ function logRejection(symbol, filter, reason, data = null) {
     }
 }
 
-// Função para obter número do alerta por símbolo (usando Map)
 function getAlertNumberForSymbol(symbol) {
     const currentDate = getBrazilianDateString();
    
@@ -824,7 +801,6 @@ function getAlertNumberForSymbol(symbol) {
     return data.total + 1;
 }
 
-// Função para incrementar contador por símbolo (usando Map)
 function incrementAlertCounter(symbol, type) {
     const currentDate = getBrazilianDateString();
    
@@ -882,7 +858,6 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         const stateStats = StateManager.getStats();
         
-        // Mensagem sem formatação HTML
         const message = `
 🚀 TITANIUM 4H INICIADO ✅
 📅 ${now.full}
@@ -1157,7 +1132,6 @@ async function getRSI15m(symbol) {
         
         const closes = candles.map(c => c.close);
         
-        // Calcular RSI atual
         let gains = 0;
         let losses = 0;
         
@@ -1175,7 +1149,6 @@ async function getRSI15m(symbol) {
         const rs = avgGain / avgLoss;
         const currentRSI = 100 - (100 / (1 + rs));
         
-        // Calcular RSI anterior (para ver direção)
         const prevCloses = closes.slice(0, -1);
         let prevGains = 0;
         let prevLosses = 0;
@@ -1194,7 +1167,6 @@ async function getRSI15m(symbol) {
         const prevRs = prevAvgGain / prevAvgLoss;
         const prevRSI = 100 - (100 / (1 + prevRs));
         
-        // Determinar direção
         let direction = 'estável';
         if (currentRSI > prevRSI + 0.5) {
             direction = 'subindo';
@@ -1503,7 +1475,6 @@ async function analyzeVolume1hWithEMA9(symbol) {
     }
 }
 
-// Função de análise de volume 3m com detecção de anormalidade
 async function analyzeVolume3mWithAbnormalDetection(symbol) {
     try {
         const candles = await getCandles(symbol, '3m', 50);
@@ -1522,16 +1493,13 @@ async function analyzeVolume3mWithAbnormalDetection(symbol) {
         const volumes = candles.map(c => c.volume);
         const ema13 = calculateEMA(closes, 13);
         
-        // Calcular volume médio das últimas N velas
         const lookback = VOLUME_3M_ABNORMAL_CONFIG.LOOKBACK_CANDLES;
-        const recentVolumes = volumes.slice(-lookback, -1); // Exclui a vela atual
+        const recentVolumes = volumes.slice(-lookback, -1);
         const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length;
         
-        // Volume da vela atual (última vela)
         const currentVolume = volumes[volumes.length - 1];
         const volumeRatio = currentVolume / avgVolume;
         
-        // Análise de direção do volume
         let buyerVolume = 0;
         let sellerVolume = 0;
         let totalVolume = 0;
@@ -1554,7 +1522,6 @@ async function analyzeVolume3mWithAbnormalDetection(symbol) {
         
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         
-        // Determinar direção e emoji
         let direction = '';
         let emoji = '';
         let score = 0;
@@ -1589,7 +1556,6 @@ async function analyzeVolume3mWithAbnormalDetection(symbol) {
             score = 0;
         }
         
-        // Detectar volume anormal
         const isAbnormal = volumeRatio >= VOLUME_3M_ABNORMAL_CONFIG.MIN_VOLUME_RATIO;
         let abnormalType = 'Nenhum';
         
@@ -1766,12 +1732,10 @@ async function checkStochasticSignal(symbol) {
         return null;
     }
     
-    // Usar CONFIG.STOCHASTIC.COOLDOWN_MS em vez de hardcoded
     if (stochasticCooldown.has(symbol) && (Date.now() - stochasticCooldown.get(symbol)) < CONFIG.STOCHASTIC.COOLDOWN_MS) {
         return null;
     }
     
-    // Atualizar atividade do símbolo
     StateManager.updateActivity(symbol);
     
     try {
@@ -1788,23 +1752,18 @@ async function checkStochasticSignal(symbol) {
         };
         
         let signalType = null;
-        let isFreshCross = false;
         
+        // REMOVIDO: Filtro de cruzamento fresco
+        // Agora aceita qualquer cruzamento, não apenas o primeiro
         if (stochastic.isCrossingUp) {
-            if (!previousState.wasCrossingUp) {
-                signalType = 'STOCHASTIC_COMPRA';
-                isFreshCross = true;
-            }
+            signalType = 'STOCHASTIC_COMPRA';
             stochCrossState.set(symbol, {
                 wasCrossingUp: true,
                 wasCrossingDown: false,
                 lastCheck: Date.now()
             });
         } else if (stochastic.isCrossingDown) {
-            if (!previousState.wasCrossingDown) {
-                signalType = 'STOCHASTIC_VENDA';
-                isFreshCross = true;
-            }
+            signalType = 'STOCHASTIC_VENDA';
             stochCrossState.set(symbol, {
                 wasCrossingUp: false,
                 wasCrossingDown: true,
@@ -1816,10 +1775,10 @@ async function checkStochasticSignal(symbol) {
                 wasCrossingDown: false,
                 lastCheck: Date.now()
             });
+            return null;
         }
         
-        if (!isFreshCross || !signalType) {
-            logRejection(symbol, 'Cruzamento', 'Cruzamento não é fresco ou ausente');
+        if (!signalType) {
             return null;
         }
         
@@ -1840,7 +1799,6 @@ async function checkStochasticSignal(symbol) {
             return null;
         }
         
-        // Executar chamadas em paralelo com tratamento individual
         const [
             rsiData, 
             rsi15mData, 
@@ -1857,7 +1815,6 @@ async function checkStochasticSignal(symbol) {
             analyzeVolume3mWithAbnormalDetection(symbol)
         ]);
         
-        // Extrair valores com fallback
         const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
         const rsi15mValue = rsi15mData.status === 'fulfilled' ? rsi15mData.value : null;
         const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
@@ -1928,8 +1885,6 @@ async function checkStochasticSignal(symbol) {
             }
         }
         
-        // VENDA não tem filtro de LSR (configurado como false)
-        
         // ===== FILTRO OPCIONAL DE RSI 1H =====
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiValue || rsiValue.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
@@ -1959,7 +1914,6 @@ async function checkStochasticSignal(symbol) {
         const srLevels = await calculateSupportResistance15m(symbol, currentPrice);
         const retestData = await analyzeSupportResistanceRetest(symbol, currentPrice, signalType);
         
-        // Obter número do alerta para este símbolo
         const alertNumber = getAlertNumberForSymbol(symbol);
         
         const signal = {
@@ -1976,7 +1930,6 @@ async function checkStochasticSignal(symbol) {
             entryPrice: entryPrice,
             entryRetraction: entryRetraction,
             time: getBrazilianDateTime(),
-            isFreshCross: isFreshCross,
             atrTargets: atrTargets,
             srLevels: srLevels,
             emaCheck: emaCheck,
@@ -2292,7 +2245,6 @@ async function sendStochasticAlertEnhanced(signal) {
     const entryPrice = signal.entryPrice;
     const currentPrice = signal.currentPrice;
    
-    // Incrementar contador por símbolo
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     stochasticCooldown.set(signal.symbol, Date.now());
    
@@ -2336,7 +2288,6 @@ async function sendStochasticAlertEnhanced(signal) {
             stopPrice = srInfo.nearestSupport * 0.995;
            
             if (signal.atrTargets) {
-                // MODIFICADO: Aumentado de 0.4 para 1.2
                 const atrStop = price - (signal.atrTargets.atr * 1.2);
                 stopPrice = Math.min(stopPrice, atrStop);
             }
@@ -2348,7 +2299,6 @@ async function sendStochasticAlertEnhanced(signal) {
             stopPrice = srInfo.nearestResistance * 1.005;
            
             if (signal.atrTargets) {
-                // MODIFICADO: Aumentado de 0.4 para 1.2
                 const atrStop = price + (signal.atrTargets.atr * 1.2);
                 stopPrice = Math.max(stopPrice, atrStop);
             }
@@ -2360,11 +2310,9 @@ async function sendStochasticAlertEnhanced(signal) {
         const atr = signal.atrTargets.atr;
        
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            // MODIFICADO: Aumentado de 0.4 para 1.2
             stopPrice = entryPrice - (atr * 1.2);
             stopPercent = ((entryPrice - stopPrice) / entryPrice * 100);
         } else {
-            // MODIFICADO: Aumentado de 0.4 para 1.2
             stopPrice = entryPrice + (atr * 1.2);
             stopPercent = ((stopPrice - entryPrice) / entryPrice * 100);
         }
@@ -2452,7 +2400,6 @@ async function sendStochasticAlertEnhanced(signal) {
         }
     }
    
-    // Texto de volume 3m com informação de anormalidade
     let volume3mText = '';
     if (signal.volume3mData) {
         const vol3m = signal.volume3mData;
@@ -2466,14 +2413,12 @@ async function sendStochasticAlertEnhanced(signal) {
         entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
-    // Texto do contador por símbolo
     const symbolData = alertCounter.get(signal.symbol);
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
     const actionText = signal.type === 'STOCHASTIC_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
-    // Mensagem com formatação itálica
     let message = `_${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
@@ -2490,7 +2435,7 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium by @J4Rviz ✨`;
+✨ Titanium by @J4Rviz ✨_`;
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
@@ -2627,14 +2572,12 @@ async function startBot() {
         console.log('📅 Inicializando...');
         console.log('⏳ Buscando configurações...');
         
-        // Verificar configurações do Telegram
         console.log('\n📱 Verificando configurações do Telegram:');
         console.log(`Bot Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
         console.log(`Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? 'Configurado' : '❌ NÃO CONFIGURADO'}`);
         
         lastResetDate = getBrazilianDateString();
         
-        // Inicializar State Manager
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
@@ -2645,11 +2588,6 @@ async function startBot() {
             console.log('✅ Conexão com Telegram OK!');
         } else {
             console.log('⚠️ Falha na conexão com Telegram. Verificando configurações...');
-            console.log('📝 Certifique-se que:');
-            console.log('   1. O token do bot está correto');
-            console.log('   2. O chat ID está correto');
-            console.log('   3. O bot foi adicionado ao grupo');
-            console.log('   4. O bot tem permissão para enviar mensagens');
         }
 
         console.log('\n✅ Bot inicializado! Iniciando loop principal...\n');
