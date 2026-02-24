@@ -258,8 +258,8 @@ const VOLUME_3M_ABNORMAL_CONFIG = {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
 
     STOCHASTIC: {
@@ -730,8 +730,6 @@ async function sendTelegramAlert(message) {
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const cleanMessage = message.replace(/<[^>]*>/g, '');
         
         console.log('📤 Enviando mensagem para o Telegram...');
         
@@ -740,8 +738,8 @@ async function sendTelegramAlert(message) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                text: cleanMessage,
-                parse_mode: undefined,
+                text: message,
+                parse_mode: 'Markdown',
                 disable_web_page_preview: true
             }),
             signal: controller.signal
@@ -858,8 +856,7 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         const stateStats = StateManager.getStats();
         
-        const message = `
-🚀 TITANIUM 4H INICIADO ✅
+        const message = `_🚀 TITANIUM 4H INICIADO ✅
 📅 ${now.full}
 ✅ ALERTAS ATIVOS
 📊 Estocástico 4H 14.3.3 (OVERSOLD ${CONFIG.STOCHASTIC.OVERSOLD} | OVERBOUGHT ${CONFIG.STOCHASTIC.OVERBOUGHT})
@@ -868,8 +865,7 @@ async function sendInitializationMessage() {
 📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO
 📊 LSR 15m OBRIGATÓRIO: Compra < ${LSR_15M_CONFIG.COMPRA.MAX_LSR}
 📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
-🗑️ State: ${stateStats.alertCounter} símbolos ativos
-`;
+🗑️ State: ${stateStats.alertCounter} símbolos ativos_`;
         
         console.log('📤 Enviando mensagem de inicialização...');
         return await sendTelegramAlert(message);
@@ -2581,7 +2577,7 @@ async function startBot() {
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
-        const testMessage = `🤖 Bot Titanium iniciando em ${getBrazilianDateTime().full}`;
+        const testMessage = `_🤖 Bot Titanium iniciando em ${getBrazilianDateTime().full}_`;
         const testResult = await sendTelegramAlert(testMessage);
 
         if (testResult) {
