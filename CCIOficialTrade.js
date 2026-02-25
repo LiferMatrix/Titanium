@@ -87,6 +87,8 @@ const EMACheckSchema = z.object({
     ema34: z.number(),
     ema55: z.number(),
     lastPrice: z.number(),
+    volumeAnalysis: z.string().optional(),
+    volumeValid: z.boolean().optional(),
     error: z.string().optional()
 }).passthrough();
 
@@ -123,7 +125,21 @@ const SupportResistanceSchema = z.object({
     pivot: z.number()
 });
 
-// Schema principal do sinal
+// NOVO: Schema para análise de proximidade
+const ProximityAnalysisSchema = z.object({
+    isNearResistance: z.boolean(),
+    isNearSupport: z.boolean(),
+    distanceToResistance1: z.number(),
+    distanceToResistance2: z.number(),
+    distanceToSupport1: z.number(),
+    distanceToSupport2: z.number(),
+    distanceToPivot: z.number(),
+    warningMessage: z.string().optional(),
+    proximityType: z.enum(['RESISTENCE_PROXIMITY', 'SUPPORT_PROXIMITY', 'PIVOT_PROXIMITY', 'NONE']),
+    riskLevel: z.enum(['ALTO', 'MEDIO', 'BAIXO'])
+});
+
+// Schema principal do sinal (ATUALIZADO)
 const CCISignalSchema = z.object({
     symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
     type: z.enum(['CCI_COMPRA', 'CCI_VENDA']),
@@ -137,11 +153,11 @@ const CCISignalSchema = z.object({
         time: z.string(),
         full: z.string()
     }),
-    isFreshCross: z.boolean(),
     emaCheck: EMACheckSchema,
     atrTargets: ATRTargetsSchema,
     supportResistance: SupportResistanceSchema,
-    alertNumber: z.number().int()
+    alertNumber: z.number().int(),
+    proximityAnalysis: ProximityAnalysisSchema // NOVO: Análise de proximidade
 });
 
 // =====================================================================
@@ -149,8 +165,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -160,8 +176,7 @@ const CONFIG = {
         EMA_SHORT: 5,
         EMA_LONG: 13,
         SOURCE: 'hlc3',
-        COOLDOWN_MS: 10 * 60 * 1000,
-        FRESH_CROSS_ONLY: true
+        COOLDOWN_MS: 10 * 60 * 1000
     },
     
     ATR: {
@@ -174,6 +189,27 @@ const CONFIG = {
             TARGET4: 5.0   // 5.0x ATR
         },
         STOP_MULTIPLIER: 1.2  // Stop em 1.2x ATR
+    },
+
+    VOLUME: {
+        TIMEFRAME: '3m',
+        PERIOD: 20,           // Período para média de volume
+        THRESHOLD: 1.5        // Volume 50% acima da média = anormal
+    },
+
+    RSI: {
+        TIMEFRAME: '1h',
+        BUY_MAX: 60,          // RSI máximo para compra (deve ser < 60)
+        SELL_MIN: 65          // RSI mínimo para venda (deve ser > 65)
+    },
+
+    PROXIMITY: { // NOVO: Configurações de proximidade
+        THRESHOLD_PERCENT: 0.5, // 0.5% de distância para considerar "próximo"
+        WARNING_LEVELS: {
+            ALTO: 0.3,     // Menos de 0.3% = risco ALTO
+            MEDIO: 0.8,    // Entre 0.3% e 0.8% = risco MÉDIO
+            BAIXO: 999     // Acima de 0.8% = risco BAIXO
+        }
     },
 
     PERFORMANCE: {
@@ -230,7 +266,6 @@ let lastResetDate = null;
 
 const symbolCooldown = new Map();
 const cciCooldown = new Map();
-const cciCrossState = new Map();
 const symbolLastActivity = new Map();
 
 // === CACHE DE CANDLES OTIMIZADO ===
@@ -429,13 +464,6 @@ class StateManager {
             }
         }
 
-        for (const [symbol, state] of cciCrossState.entries()) {
-            if (now - state.lastCheck > inactiveThreshold) {
-                cciCrossState.delete(symbol);
-                removedCount++;
-            }
-        }
-
         for (const [symbol, data] of alertCounter.entries()) {
             if (data.lastAlert && (now - data.lastAlert) > inactiveThreshold * 2) {
                 alertCounter.delete(symbol);
@@ -463,7 +491,6 @@ class StateManager {
         return {
             symbolCooldown: symbolCooldown.size,
             cciCooldown: cciCooldown.size,
-            cciCrossState: cciCrossState.size,
             alertCounter: alertCounter.size,
             symbolLastActivity: symbolLastActivity.size
         };
@@ -782,15 +809,8 @@ async function sendInitializationMessage() {
         const stateStats = StateManager.getStats();
         
         const message = `
-🚀 TITANIUM CCI 30m INICIADO ✅
-📅 ${now.full}
-✅ ALERTAS ATIVOS - CCI + EMA 3m + ATR 15m
-📊 CCI ${CONFIG.CCI.LENGTH} com EMAs ${CONFIG.CCI.EMA_SHORT}/${CONFIG.CCI.EMA_LONG} (${CONFIG.CCI.TIMEFRAME})
-📊 EMA 13/34/55 3m OBRIGATÓRIO
-📊 ATR 14 (15m) com 4 ALVOS
-📊 LSR, RSI 1h e Funding Rate informativos
-📊 Pivot e níveis S/R incluídos
-🗑️ State: ${stateStats.alertCounter} símbolos ativos
+🚀 TITANIUM 
+ State: ${stateStats.alertCounter} símbolos ativos
 `;
         
         return await sendTelegramAlert(message);
@@ -953,6 +973,111 @@ function calculateSupportResistance(candles, currentPrice) {
     }
 }
 
+// NOVA FUNÇÃO: Analisar proximidade com níveis importantes
+function analyzeProximity(currentPrice, supportResistance, signalType) {
+    try {
+        const threshold = CONFIG.PROXIMITY.THRESHOLD_PERCENT / 100; // Converter para decimal
+        
+        // Calcular distâncias percentuais
+        const distToR1 = Math.abs((currentPrice - supportResistance.resistance1) / currentPrice) * 100;
+        const distToR2 = Math.abs((currentPrice - supportResistance.resistance2) / currentPrice) * 100;
+        const distToS1 = Math.abs((currentPrice - supportResistance.support1) / currentPrice) * 100;
+        const distToS2 = Math.abs((currentPrice - supportResistance.support2) / currentPrice) * 100;
+        const distToPivot = Math.abs((currentPrice - supportResistance.pivot) / currentPrice) * 100;
+        
+        let isNearResistance = false;
+        let isNearSupport = false;
+        let warningMessage = '';
+        let proximityType = 'NONE';
+        let riskLevel = 'BAIXO';
+        
+        // Determinar nível de risco baseado na menor distância
+        const minDistance = Math.min(distToR1, distToR2, distToS1, distToS2, distToPivot);
+        
+        if (minDistance <= CONFIG.PROXIMITY.WARNING_LEVELS.ALTO) {
+            riskLevel = 'ALTO';
+        } else if (minDistance <= CONFIG.PROXIMITY.WARNING_LEVELS.MEDIO) {
+            riskLevel = 'MEDIO';
+        }
+        
+        // Análise específica para COMPRA
+        if (signalType === 'CCI_COMPRA') {
+            // Verificar proximidade com resistências
+            if (distToR1 <= threshold) {
+                isNearResistance = true;
+                proximityType = 'RESISTENCE_PROXIMITY';
+                warningMessage = `⚠️ ATENÇÃO: Preço muito próximo da RESISTÊNCIA R1 (${distToR1.toFixed(2)}% de distância)! Possível rejeição.`;
+            } else if (distToR2 <= threshold) {
+                isNearResistance = true;
+                proximityType = 'RESISTENCE_PROXIMITY';
+                warningMessage = `⚠️ CUIDADO: Preço próximo da RESISTÊNCIA R2 (${distToR2.toFixed(2)}% de distância)! Área de sobrecompra.`;
+            } 
+            // Verificar proximidade com pivot (pode ser resistência)
+            else if (currentPrice > supportResistance.pivot && distToPivot <= threshold) {
+                isNearResistance = true;
+                proximityType = 'PIVOT_PROXIMITY';
+                warningMessage = `⚠️ Preço testando PIVOT como resistência (${distToPivot.toFixed(2)}% de distância)! Atenção.`;
+            }
+        } 
+        // Análise específica para VENDA
+        else if (signalType === 'CCI_VENDA') {
+            // Verificar proximidade com suportes
+            if (distToS1 <= threshold) {
+                isNearSupport = true;
+                proximityType = 'SUPPORT_PROXIMITY';
+                warningMessage = `⚠️ ATENÇÃO: Preço muito próximo do SUPORTE S1 (${distToS1.toFixed(2)}% de distância)! Possível bounce.`;
+            } else if (distToS2 <= threshold) {
+                isNearSupport = true;
+                proximityType = 'SUPPORT_PROXIMITY';
+                warningMessage = `⚠️ CUIDADO: Preço próximo do SUPORTE S2 (${distToS2.toFixed(2)}% de distância)! Área de sobrevenda.`;
+            }
+            // Verificar proximidade com pivot (pode ser suporte)
+            else if (currentPrice < supportResistance.pivot && distToPivot <= threshold) {
+                isNearSupport = true;
+                proximityType = 'PIVOT_PROXIMITY';
+                warningMessage = `⚠️ Preço testando PIVOT como suporte (${distToPivot.toFixed(2)}% de distância)! Possível reversão.`;
+            }
+        }
+        
+        // Se não detectou proximidade com níveis principais, verificar distância geral
+        if (!warningMessage && minDistance <= threshold * 2) {
+            if (signalType === 'CCI_COMPRA' && currentPrice > supportResistance.pivot) {
+                warningMessage = `ℹ️ Preço ${minDistance.toFixed(2)}% acima do pivot. Zona de resistência potencial.`;
+            } else if (signalType === 'CCI_VENDA' && currentPrice < supportResistance.pivot) {
+                warningMessage = `ℹ️ Preço ${minDistance.toFixed(2)}% abaixo do pivot. Zona de suporte potencial.`;
+            }
+        }
+        
+        return {
+            isNearResistance,
+            isNearSupport,
+            distanceToResistance1: distToR1,
+            distanceToResistance2: distToR2,
+            distanceToSupport1: distToS1,
+            distanceToSupport2: distToS2,
+            distanceToPivot: distToPivot,
+            warningMessage,
+            proximityType,
+            riskLevel
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro na análise de proximidade: ${error.message}`);
+        return {
+            isNearResistance: false,
+            isNearSupport: false,
+            distanceToResistance1: 999,
+            distanceToResistance2: 999,
+            distanceToSupport1: 999,
+            distanceToSupport2: 999,
+            distanceToPivot: 999,
+            warningMessage: '',
+            proximityType: 'NONE',
+            riskLevel: 'BAIXO'
+        };
+    }
+}
+
 async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
     try {
         const candles = await getCandles(symbol, timeframe, 80);
@@ -1035,6 +1160,59 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
     }
 }
 
+// Função para verificar volume anormal (sem mínimo de USDT)
+async function checkAbnormalVolume(symbol, signalType) {
+    try {
+        const candles = await getCandles(symbol, CONFIG.VOLUME.TIMEFRAME, CONFIG.VOLUME.PERIOD + 10);
+        if (candles.length < CONFIG.VOLUME.PERIOD + 5) {
+            return { isValid: false, analysis: 'Dados insuficientes', volumeRatio: 0 };
+        }
+        
+        // Pegar os volumes dos últimos candles
+        const volumes = candles.map(c => c.volume);
+        const lastVolume = volumes[volumes.length - 1];
+        const prevVolumes = volumes.slice(-CONFIG.VOLUME.PERIOD - 1, -1); // Exclui o último
+        
+        // Calcular média dos volumes anteriores
+        const avgVolume = prevVolumes.reduce((a, b) => a + b, 0) / prevVolumes.length;
+        
+        // Calcular relação volume atual / média
+        const volumeRatio = lastVolume / avgVolume;
+        
+        // Verificar direção do candle atual (se é de compra ou venda)
+        const lastCandle = candles[candles.length - 1];
+        const isGreenCandle = lastCandle.close > lastCandle.open;
+        
+        let isValid = false;
+        let analysis = '';
+        
+        // Para COMPRA: queremos candle verde com volume anormal
+        if (signalType === 'CCI_COMPRA') {
+            isValid = isGreenCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
+            analysis = ` Vol: ${isGreenCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
+        } 
+        // Para VENDA: queremos candle vermelho com volume anormal
+        else {
+            const isRedCandle = lastCandle.close < lastCandle.open;
+            isValid = isRedCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
+            analysis = ` Volume: ${isRedCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
+        }
+        
+        return {
+            isValid,
+            analysis,
+            volumeRatio,
+            currentVolume: lastVolume,
+            avgVolume,
+            isGreenCandle,
+            lastCandle
+        };
+        
+    } catch (error) {
+        return { isValid: false, analysis: `Erro: ${error.message}`, volumeRatio: 0 };
+    }
+}
+
 async function checkEMA3m(symbol, signalType) {
     try {
         const candles = await getCandles(symbol, EMA_CONFIG.TIMEFRAME, 100);
@@ -1060,12 +1238,12 @@ async function checkEMA3m(symbol, signalType) {
             const emaCrossUp = prevEma13 <= prevEma34 && ema13 > ema34;
             const priceAboveEma55 = lastCandle.close > ema55;
             isValid = emaCrossUp && priceAboveEma55;
-            analysis = `📊 EMA: ${emaCrossUp ? '✅' : '❌'} Cruz 13/34 | ${priceAboveEma55 ? '✅' : '❌'} Preço > EMA55`;
+            analysis = ` Force: ${emaCrossUp ? '✅' : '❌'}  | ${priceAboveEma55 ? '✅' : '❌'} Tendência`;
         } else {
             const emaCrossDown = prevEma13 >= prevEma34 && ema13 < ema34;
             const priceBelowEma55 = lastCandle.close < ema55;
             isValid = emaCrossDown && priceBelowEma55;
-            analysis = `📊 EMA: ${emaCrossDown ? '✅' : '❌'} Cruz 13/34 | ${priceBelowEma55 ? '✅' : '❌'} Preço < EMA55`;
+            analysis = `Force: ${emaCrossDown ? '✅' : '❌'}  | ${priceBelowEma55 ? '✅' : '❌'} Tedência`;
         }
         
         return {
@@ -1262,45 +1440,14 @@ async function checkCCISignal(symbol) {
             return null;
         }
         
-        const previousState = cciCrossState.get(symbol) || {
-            wasCrossingUp: false,
-            wasCrossingDown: false,
-            lastCheck: 0
-        };
-        
         let signalType = null;
-        let isFreshCross = false;
         
         if (cci.isCrossingUp) {
-            if (!previousState.wasCrossingUp) {
-                signalType = 'CCI_COMPRA';
-                isFreshCross = true;
-            }
-            cciCrossState.set(symbol, {
-                wasCrossingUp: true,
-                wasCrossingDown: false,
-                lastCheck: Date.now()
-            });
+            signalType = 'CCI_COMPRA';
         } else if (cci.isCrossingDown) {
-            if (!previousState.wasCrossingDown) {
-                signalType = 'CCI_VENDA';
-                isFreshCross = true;
-            }
-            cciCrossState.set(symbol, {
-                wasCrossingUp: false,
-                wasCrossingDown: true,
-                lastCheck: Date.now()
-            });
+            signalType = 'CCI_VENDA';
         } else {
-            cciCrossState.set(symbol, {
-                wasCrossingUp: false,
-                wasCrossingDown: false,
-                lastCheck: Date.now()
-            });
-        }
-        
-        if (!isFreshCross || !signalType) {
-            logRejection(symbol, 'Cruzamento', 'Cruzamento não é fresco ou ausente');
+            logRejection(symbol, 'Cruzamento', 'Sem cruzamento detectado');
             return null;
         }
         
@@ -1308,6 +1455,34 @@ async function checkCCISignal(symbol) {
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
             logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
+            return null;
+        }
+        
+        // FILTRO DE VOLUME ANORMAL
+        const volumeCheck = await checkAbnormalVolume(symbol, signalType);
+        if (!volumeCheck.isValid) {
+            logRejection(symbol, 'Volume Anormal', 'Volume não atende aos critérios', { 
+                analysis: volumeCheck.analysis,
+                ratio: volumeCheck.volumeRatio?.toFixed(2)
+            });
+            return null;
+        }
+        
+        // FILTRO DE RSI 1h OBRIGATÓRIO
+        const rsiData = await getRSI1h(symbol);
+        if (!rsiData) {
+            logRejection(symbol, 'RSI 1h', 'Não foi possível obter RSI');
+            return null;
+        }
+        
+        // Aplicar filtro de RSI baseado no tipo de sinal
+        if (signalType === 'CCI_COMPRA' && rsiData.value >= CONFIG.RSI.BUY_MAX) {
+            logRejection(symbol, 'RSI 1h', `RSI muito alto para compra: ${rsiData.value.toFixed(1)} >= ${CONFIG.RSI.BUY_MAX}`);
+            return null;
+        }
+        
+        if (signalType === 'CCI_VENDA' && rsiData.value <= CONFIG.RSI.SELL_MIN) {
+            logRejection(symbol, 'RSI 1h', `RSI muito baixo para venda: ${rsiData.value.toFixed(1)} <= ${CONFIG.RSI.SELL_MIN}`);
             return null;
         }
         
@@ -1328,32 +1503,41 @@ async function checkCCISignal(symbol) {
         const candles15m = await getCandles(symbol, '15m', 50);
         const supportResistance = calculateSupportResistance(candles15m, currentPrice);
         
-        const [rsiData, lsrData, fundingData] = await Promise.allSettled([
-            getRSI1h(symbol),
+        // NOVO: Analisar proximidade com níveis importantes
+        const proximityAnalysis = analyzeProximity(currentPrice, supportResistance, signalType);
+        
+        const [lsrData, fundingData] = await Promise.allSettled([
             getLSR(symbol),
             getFundingRate(symbol)
         ]);
         
-        const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
         const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
         const fundingValue = fundingData.status === 'fulfilled' ? fundingData.value : null;
         
         const alertNumber = getAlertNumberForSymbol(symbol);
         
+        // Adicionar análise de volume ao emaCheck para incluir no alerta
+        const enhancedEmaCheck = {
+            ...emaCheck,
+            volumeAnalysis: volumeCheck.analysis,
+            volumeValid: volumeCheck.isValid,
+            volumeRatio: volumeCheck.volumeRatio
+        };
+        
         const signal = {
             symbol: symbol,
             type: signalType,
             cci: cci,
-            rsi: rsiValue?.value,
+            rsi: rsiData.value,
             lsr: lsrValue?.lsrValue,
             funding: fundingValue?.ratePercent,
             currentPrice: currentPrice,
             time: getBrazilianDateTime(),
-            isFreshCross: isFreshCross,
-            emaCheck: emaCheck,
+            emaCheck: enhancedEmaCheck,
             atrTargets: atrTargets,
             supportResistance: supportResistance,
-            alertNumber: alertNumber
+            alertNumber: alertNumber,
+            proximityAnalysis: proximityAnalysis // NOVO
         };
         
         return CCISignalSchema.parse(signal);
@@ -1365,12 +1549,13 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL ===
+// === ALERTA PRINCIPAL (ATUALIZADO) ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
     const atr = signal.atrTargets;
     const sr = signal.supportResistance;
+    const proximity = signal.proximityAnalysis; // NOVO
    
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     cciCooldown.set(signal.symbol, Date.now());
@@ -1403,8 +1588,11 @@ async function sendCCIAlert(signal) {
     const cciText = `CCI ${signal.cci.value.toFixed(1)} | EMA5 ${signal.cci.ema5.toFixed(1)} | EMA13 ${signal.cci.ema13.toFixed(1)}`;
    
     let rsiText = 'N/A';
+    let rsiStatus = '';
     if (signal.rsi) {
         rsiText = signal.rsi.toFixed(0);
+        if (signal.rsi < 30) rsiStatus = ' (🟢 Sobrevendido)';
+        else if (signal.rsi > 70) rsiStatus = ' (🔴 Sobrecomprado)';
     }
    
     const symbolData = alertCounter.get(signal.symbol);
@@ -1414,37 +1602,75 @@ async function sendCCIAlert(signal) {
     const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar COMPRA' : '🔍 Analisar CORREÇÃO';
     
     const emaAnalysis = signal.emaCheck?.analysis || 'EMA: OK';
+    const volumeAnalysis = signal.emaCheck?.volumeAnalysis || 'Volume: OK';
+    const volumeRatio = signal.emaCheck?.volumeRatio ? signal.emaCheck.volumeRatio.toFixed(2) : 'N/A';
     
     // Formatar alvos
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '🔴' : '🟢';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
-   
+    
+    // NOVO: Emoji para nível de risco
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
+    
     // Constrói a mensagem sem formatação HTML
-    const messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
+    let messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-RSI 1h: ${rsiText}
+${emaAnalysis}
+${volumeAnalysis} (${volumeRatio}x)
+RSI 1h: ${rsiText}${rsiStatus}
 LSR: ${lsrText}
 Funding: ${fundingText}
 Pivot: $${sr.pivot.toFixed(6)}
 Suporte/Resistência: 
 R1: $${sr.resistance1.toFixed(6)} | R2: $${sr.resistance2.toFixed(6)}
 S1: $${sr.support1.toFixed(6)} | S2: $${sr.support2.toFixed(6)}
- Alvos:
- Alvo 1: $${atr.targets.target1.toFixed(6)} 
- Alvo 2: $${atr.targets.target2.toFixed(6)} 
- Alvo 3: $${atr.targets.target3.toFixed(6)} 
- Alvo 4: $${atr.targets.target4.toFixed(6)} 
+Alvos:
+Alvo 1: $${atr.targets.target1.toFixed(6)} 
+Alvo 2: $${atr.targets.target2.toFixed(6)} 
+Alvo 3: $${atr.targets.target3.toFixed(6)} 
+Alvo 4: $${atr.targets.target4.toFixed(6)} 
 ${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)} 
 
+`;
+
+    // NOVO: Adicionar análise de proximidade após o stop
+    if (proximity.warningMessage) {
+        messageText += `⚠️ Análise Rápida ${riskEmoji}:
+${proximity.warningMessage}
+`;
+        
+        // Adicionar detalhes das distâncias
+        if (signal.type === 'CCI_COMPRA' && proximity.isNearResistance) {
+            messageText += ` Distância das resistências:
+R1: ${proximity.distanceToResistance1.toFixed(2)}% | R2: ${proximity.distanceToResistance2.toFixed(2)}%
+Pivot: ${proximity.distanceToPivot.toFixed(2)}%
+`;
+        } else if (signal.type === 'CCI_VENDA' && proximity.isNearSupport) {
+            messageText += ` Distância dos suportes:
+S1: ${proximity.distanceToSupport1.toFixed(2)}% | S2: ${proximity.distanceToSupport2.toFixed(2)}%
+Pivot: ${proximity.distanceToPivot.toFixed(2)}%
+`;
+        }
+    } else {
+        // Mensagem genérica de análise
+        messageText += ` Análise Rápida ${riskEmoji}:
+Preço ${signal.type === 'CCI_COMPRA' ? 
+    `${currentPrice > sr.pivot ? 'acima' : 'abaixo'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)` : 
+    `${currentPrice < sr.pivot ? 'abaixo' : 'acima'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)`}
+Risco de entrada: ${proximity.riskLevel}
+`;
+    }
+    
+    messageText += `
 Alerta Educativo, não é recomendação de investimento
 ✨ Titanium by @J4Rviz ✨`;
 
     // Aplica formatação segura
     await sendTelegramAlert(messageText);
    
-    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | CCI: ${signal.cci.value.toFixed(1)} | ATR: $${atr.atr14.toFixed(6)} | R:R 4: ${atr.riskReward.rr4.toFixed(2)} | LSR: ${signal.lsr ? signal.lsr.toFixed(2) : 'N/A'} ${lsrEmoji}`);
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | CCI: ${signal.cci.value.toFixed(1)} | RSI: ${signal.rsi?.toFixed(1)} | Volume: ${signal.emaCheck.volumeRatio?.toFixed(2)}x | ATR: $${atr.atr14.toFixed(6)} | Risco: ${proximity.riskLevel} | ${proximity.warningMessage || 'Sem avisos'}`);
 }
 
 // =====================================================================
@@ -1501,7 +1727,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log(' TITANIUM - CCI + EMA 3m + ATR 15m + S/R ');
+        console.log(' TITANIUM  ');
         console.log(` ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
@@ -1569,7 +1795,7 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log(' TITANIUM - CCI + EMA 3m + ATR 15m + S/R ');
+        console.log(' TITANIUM  ');
         console.log('='.repeat(60) + '\n');
 
         console.log('📅 Inicializando...');
@@ -1584,7 +1810,7 @@ async function startBot() {
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
-        const testMessage = `🤖 Bot Titanium CCI + EMA 3m + ATR 15m + S/R iniciando em ${getBrazilianDateTime().full}`;
+        const testMessage = `🤖 Bot Titanium  iniciando em ${getBrazilianDateTime().full}`;
         const testResult = await sendTelegramAlert(testMessage);
 
         if (testResult) {
@@ -1625,7 +1851,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('Reason:', reason);
 });
 
-console.log('🚀 Iniciando Titanium CCI + EMA 3m + ATR 15m Bot...');
+console.log('🚀 Iniciando Titanium Bot...');
 
 startBot().catch(error => {
     console.error('❌ Erro fatal:', error);
