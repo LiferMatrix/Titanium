@@ -217,8 +217,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -1493,11 +1493,11 @@ async function checkAbnormalVolume(symbol, signalType) {
         
         if (signalType === 'CCI_COMPRA') {
             isValid = isGreenCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
-            analysis = ` Vol: ${isGreenCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
+            analysis = ` Vol: ${isGreenCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média `;
         } else {
             const isRedCandle = lastCandle.close < lastCandle.open;
             isValid = isRedCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
-            analysis = ` Volume: ${isRedCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
+            analysis = ` Vol: ${isRedCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média `;
         }
         
         return {
