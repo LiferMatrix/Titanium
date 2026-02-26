@@ -92,6 +92,15 @@ const EMACheckSchema = z.object({
     error: z.string().optional()
 }).passthrough();
 
+// Schema para StochRSI
+const StochRSISchema = z.object({
+    k: z.number(),
+    d: z.number(),
+    isCrossingUp: z.boolean(),
+    isCrossingDown: z.boolean(),
+    timeframe: z.string()
+});
+
 // Schema para alvos de ATR
 const ATRTargetsSchema = z.object({
     atr14: z.number(),
@@ -179,6 +188,7 @@ const CCISignalSchema = z.object({
     type: z.enum(['CCI_COMPRA', 'CCI_VENDA']),
     cci: CCISchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
+    stoch4h: StochRSISchema.optional().nullable(),
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     currentPrice: z.number().positive(),
@@ -207,8 +217,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSg',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -219,6 +229,13 @@ const CONFIG = {
         EMA_LONG: 13,
         SOURCE: 'hlc3',
         COOLDOWN_MS: 10 * 60 * 1000
+    },
+    
+    STOCH: {
+        TIMEFRAME: '4h',
+        K_PERIOD: 14,
+        D_PERIOD: 3,
+        SLOWING: 3
     },
     
     ATR: {
@@ -956,6 +973,79 @@ function calculateEMA(values, period) {
     }
    
     return ema;
+}
+
+function calculateSMA(values, period) {
+    if (values.length < period) return values.reduce((a, b) => a + b, 0) / values.length;
+    return values.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateStochRSI(symbol, candles) {
+    try {
+        if (candles.length < 50) return null;
+        
+        const period = CONFIG.STOCH.K_PERIOD;
+        const smoothK = CONFIG.STOCH.D_PERIOD;
+        const smoothD = CONFIG.STOCH.SLOWING;
+        
+        // Calcular %K do Estocástico
+        const closes = candles.map(c => c.close);
+        const kValues = [];
+        
+        for (let i = period - 1; i < closes.length; i++) {
+            const periodCloses = closes.slice(i - period + 1, i + 1);
+            const lowest = Math.min(...periodCloses);
+            const highest = Math.max(...periodCloses);
+            const currentClose = closes[i];
+            
+            let k = 0;
+            if (highest - lowest !== 0) {
+                k = ((currentClose - lowest) / (highest - lowest)) * 100;
+            }
+            kValues.push(k);
+        }
+        
+        if (kValues.length < smoothK + smoothD) return null;
+        
+        // Suavizar %K
+        const kSmooth = [];
+        for (let i = smoothK - 1; i < kValues.length; i++) {
+            const periodK = kValues.slice(i - smoothK + 1, i + 1);
+            const kSma = calculateSMA(periodK, smoothK);
+            kSmooth.push(kSma);
+        }
+        
+        if (kSmooth.length < smoothD + 1) return null;
+        
+        // Calcular %D (média de %K)
+        const currentK = kSmooth[kSmooth.length - 1];
+        const dValues = [];
+        
+        for (let i = smoothD - 1; i < kSmooth.length; i++) {
+            const periodK = kSmooth.slice(i - smoothD + 1, i + 1);
+            const dSma = calculateSMA(periodK, smoothD);
+            dValues.push(dSma);
+        }
+        
+        const currentD = dValues[dValues.length - 1];
+        const previousD = dValues.length > 1 ? dValues[dValues.length - 2] : currentD;
+        const previousK = kSmooth.length > 1 ? kSmooth[kSmooth.length - 2] : currentK;
+        
+        const isCrossingUp = previousK <= previousD && currentK > currentD;
+        const isCrossingDown = previousK >= previousD && currentK < currentD;
+        
+        return {
+            k: Number(currentK.toFixed(2)),
+            d: Number(currentD.toFixed(2)),
+            isCrossingUp,
+            isCrossingDown,
+            timeframe: CONFIG.STOCH.TIMEFRAME
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular StochRSI: ${error.message}`);
+        return null;
+    }
 }
 
 function calculateATR(candles, period = 14) {
@@ -1701,14 +1791,18 @@ async function checkCCISignal(symbol) {
             return null;
         }
 
-        const candles15m = await getCandles(symbol, '15m', 50);
-        const supportResistance = calculateSupportResistance(candles15m, currentPrice);
+        // Buscar candles para S/R 4h
+        const candles4h = await getCandles(symbol, '4h', 50);
+        const supportResistance4h = calculateSupportResistance(candles4h, currentPrice);
         
-        const proximityAnalysis = analyzeProximity(currentPrice, supportResistance, signalType);
+        // Calcular StochRSI 4h
+        const stoch4h = calculateStochRSI(symbol, candles4h);
+        
+        const proximityAnalysis = analyzeProximity(currentPrice, supportResistance4h, signalType);
         
         const volumeEma1h = await analyzeVolumeEMA1h(symbol);
         
-        // NOVA ANÁLISE: Pivot Multi-timeframe
+        // Análise do Pivot Multi-timeframe
         const pivotAnalysis = await analyzePivotMultiTimeframe(symbol, currentPrice, signalType, volumeEma1h);
         
         const [lsrData, fundingData] = await Promise.allSettled([
@@ -1733,13 +1827,14 @@ async function checkCCISignal(symbol) {
             type: signalType,
             cci: cci,
             rsi: rsiData.value,
+            stoch4h: stoch4h,
             lsr: lsrValue?.lsrValue,
             funding: fundingValue,
             currentPrice: currentPrice,
             time: getBrazilianDateTime(),
             emaCheck: enhancedEmaCheck,
             atrTargets: atrTargets,
-            supportResistance: supportResistance,
+            supportResistance: supportResistance4h,
             alertNumber: alertNumber,
             proximityAnalysis: proximityAnalysis,
             volumeEma1h: volumeEma1h,
@@ -1755,7 +1850,7 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL - VERSÃO COM PIVOT MULTI-TIMEFRAME ===
+// === ALERTA PRINCIPAL - VERSÃO SIMPLIFICADA COM S/R 4H E STOCH ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
@@ -1764,6 +1859,7 @@ async function sendCCIAlert(signal) {
     const proximity = signal.proximityAnalysis;
     const volumeEma = signal.volumeEma1h;
     const pivotAnalysis = signal.pivotAnalysis;
+    const stoch4h = signal.stoch4h;
    
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     cciCooldown.set(signal.symbol, Date.now());
@@ -1809,6 +1905,23 @@ async function sendCCIAlert(signal) {
         if (signal.rsi < 30) rsiStatus = ' (🟢 Sobrevendido)';
         else if (signal.rsi > 70) rsiStatus = ' (🔴 Sobrecomprado)';
     }
+    
+    // Formatação do StochRSI 4h
+    let stochText = 'Stoch 4h: N/A';
+    let stochEmoji = '';
+    if (stoch4h) {
+        const kValue = stoch4h.k.toFixed(0);
+        const dValue = stoch4h.d.toFixed(0);
+        const crossEmoji = stoch4h.isCrossingUp ? '⤴️' : (stoch4h.isCrossingDown ? '⤵️' : '➡️');
+        stochText = `Stoch 4h: k ${kValue} ${crossEmoji} D ${dValue}`;
+        
+        // Determinar condição do estocástico
+        if (stoch4h.k < 20 && stoch4h.d < 20) {
+            stochEmoji = '🟢 (Sobrevendido)';
+        } else if (stoch4h.k > 80 && stoch4h.d > 80) {
+            stochEmoji = '🔴 (Sobrecomprado)';
+        }
+    }
    
     const symbolData = alertCounter.get(signal.symbol);
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
@@ -1839,14 +1952,28 @@ async function sendCCIAlert(signal) {
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
     
-    // NOVA FORMATAÇÃO: Pivot Multi-timeframe
+    // NOVA FORMATAÇÃO: Pivot Multi-timeframe SIMPLIFICADA
+    const pivotEmoji = pivotAnalysis.confluenceEmoji;
+    
+    // Formato compacto: 15m:🟢 1h:🟡 4h:🟢
+    const pivotCompact = `15m:${pivotAnalysis.pivot15m.strengthEmoji} 1h:${pivotAnalysis.pivot1h.strengthEmoji} 4h:${pivotAnalysis.pivot4h.strengthEmoji}`;
+    
+    // Distâncias formatadas
+    const pivotDistances = `15m ${pivotAnalysis.pivot15m.distancePercent.toFixed(2)}% | 1h ${pivotAnalysis.pivot1h.distancePercent.toFixed(2)}% | 4h ${pivotAnalysis.pivot4h.distancePercent.toFixed(2)}%`;
+    
+    // Determinar confluência de forma simples
+    const allSameType = (pivotAnalysis.pivot15m.type === pivotAnalysis.pivot1h.type && 
+                         pivotAnalysis.pivot1h.type === pivotAnalysis.pivot4h.type);
+    const confluenceText = allSameType ? `✅ Confluência de ${pivotAnalysis.pivot15m.type} - tendência forte` : `🔄 Timeframes divergentes`;
+    
+    // Formatação do breakout (se houver)
     let breakoutText = '';
     if (pivotAnalysis.possibleBreakout) {
         const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
         const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
-                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
+                               pivotAnalysis.breakoutConfidence === 'MEDIA' ? '🟡' : '🟢';
         breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
     }
     
@@ -1854,21 +1981,20 @@ async function sendCCIAlert(signal) {
 Preço: $${currentPrice.toFixed(6)}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-PIVOT: ${pivotAnalysis.confluenceEmoji}:
-15m: ${pivotAnalysis.pivot15m.strengthEmoji} ${pivotAnalysis.pivot15m.type} (${pivotAnalysis.pivot15m.strength}) - ${pivotAnalysis.pivot15m.distancePercent.toFixed(2)}%
-1h:  ${pivotAnalysis.pivot1h.strengthEmoji} ${pivotAnalysis.pivot1h.type} (${pivotAnalysis.pivot1h.strength}) - ${pivotAnalysis.pivot1h.distancePercent.toFixed(2)}%
-4h:  ${pivotAnalysis.pivot4h.strengthEmoji} ${pivotAnalysis.pivot4h.type} (${pivotAnalysis.pivot4h.strength}) - ${pivotAnalysis.pivot4h.distancePercent.toFixed(2)}%
-${pivotAnalysis.analysis}${breakoutText}
+PIVOT: ${pivotEmoji} TODOS ${pivotAnalysis.pivot15m.type} (${pivotCompact})
+Distância: ${pivotDistances}
+${confluenceText}${breakoutText}
+${stochText} ${stochEmoji}
 ${emaAnalysis}
 ${volumeAnalysis} (${volumeRatio}x)
 Vol 1h: ${volumeEmaText}
 RSI 1h: ${rsiText}${rsiStatus}
 LSR: ${lsrText}
 Funding: ${fundingText}
-Suporte/Resistência (15m): 
+Suporte/Resistência (4h): 
 R1: $${sr.resistance1.toFixed(6)} | R2: $${sr.resistance2.toFixed(6)}
 S1: $${sr.support1.toFixed(6)} | S2: $${sr.support2.toFixed(6)}
-Alvos:
+🎯 ALVOS:
 Alvo 1: $${atr.targets.target1.toFixed(6)} 
 Alvo 2: $${atr.targets.target2.toFixed(6)} 
 Alvo 3: $${atr.targets.target3.toFixed(6)} 
@@ -1877,7 +2003,7 @@ ${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)}
 `;
 
     if (proximity.warningMessage) {
-        messageText += `⚠️ Análise Rápida ${riskEmoji}:
+        messageText += `📈 Análise Rápida ${riskEmoji}:
 ${proximity.warningMessage}
 `;
         
@@ -1893,10 +2019,9 @@ Pivot: ${proximity.distanceToPivot.toFixed(2)}%
 `;
         }
     } else {
+        const pricePosition = currentPrice > sr.pivot ? 'acima' : 'abaixo';
         messageText += `📈 Análise Rápida ${riskEmoji}:
-Preço ${signal.type === 'CCI_COMPRA' ? 
-    `${currentPrice > sr.pivot ? 'acima' : 'abaixo'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)` : 
-    `${currentPrice < sr.pivot ? 'abaixo' : 'acima'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)`}
+Preço ${pricePosition} do pivot (${proximity.distanceToPivot.toFixed(2)}%)
 Risco de entrada: ${proximity.riskLevel}
 `;
     }
@@ -1908,7 +2033,8 @@ Alerta Educativo, não é recomendação de investimento
     await sendTelegramAlert(messageText);
    
     console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText})`);
-    console.log(`📊 Pivot: 15m:${pivotAnalysis.pivot15m.type}(${pivotAnalysis.pivot15m.strength}) 1h:${pivotAnalysis.pivot1h.type}(${pivotAnalysis.pivot1h.strength}) 4h:${pivotAnalysis.pivot4h.type}(${pivotAnalysis.pivot4h.strength}) | Confluência: ${pivotAnalysis.confluence}`);
+    console.log(`📊 Pivot: ${pivotCompact} | Distâncias: ${pivotDistances}`);
+    console.log(`📊 ${stochText}`);
     if (pivotAnalysis.possibleBreakout) {
         console.log(`🚀 POSSÍVEL ROMPIMENTO ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence})`);
     }
