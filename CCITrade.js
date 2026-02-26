@@ -217,8 +217,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -1952,7 +1952,7 @@ async function sendCCIAlert(signal) {
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
     
     // NOVA FORMATAÇÃO: Pivot Multi-timeframe SIMPLIFICADA
     const pivotEmoji = pivotAnalysis.confluenceEmoji;
@@ -1973,13 +1973,13 @@ async function sendCCIAlert(signal) {
     if (pivotAnalysis.possibleBreakout) {
         const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
         const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
-                               pivotAnalysis.breakoutConfidence === 'MEDIA' ? '🟡' : '🟢';
+                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
         breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
     }
     
     let messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
-${counterText} - ${signal.time.full}
+${counterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
 PIVOT: ${pivotEmoji} TODOS ${pivotAnalysis.pivot15m.type} (${pivotCompact})
 Distância: ${pivotDistances}
@@ -2003,7 +2003,7 @@ ${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)}
 `;
 
     if (proximity.warningMessage) {
-        messageText += `📈 Análise Rápida ${riskEmoji}:
+        messageText += `🤖IA Análise... ${riskEmoji}:
 ${proximity.warningMessage}
 `;
         
