@@ -217,8 +217,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -708,16 +708,16 @@ function getBrazilianDateString() {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA EMOJIS DO FUNDING RATE ===
+// === FUNÇÃO CORRIGIDA PARA EMOJIS DO FUNDING RATE ===
 // =====================================================================
-function getFundingRateEmoji(fundingRate) {
-    if (fundingRate <= -0.002) return '🟢🟢🟢';
-    else if (fundingRate <= -0.001) return '🟢🟢';
-    else if (fundingRate <= -0.0005) return '🟢';
-    else if (fundingRate >= 0.001) return '🔴🔴🔴';
-    else if (fundingRate >= 0.0003) return '🔴🔴';
-    else if (fundingRate >= 0.0002) return '🔴';
-    else return '🟢';
+function getFundingRateEmoji(fundingRatePercent) {
+    if (fundingRatePercent <= -0.2) return '🟢🟢🟢';
+    else if (fundingRatePercent <= -0.1) return '🟢🟢';
+    else if (fundingRatePercent <= -0.05) return '🟢';
+    else if (fundingRatePercent >= 0.1) return '🔴🔴🔴';
+    else if (fundingRatePercent >= 0.05) return '🔴🔴';
+    else if (fundingRatePercent >= 0.02) return '🔴';
+    else return '⚪';
 }
 
 // =====================================================================
@@ -1649,9 +1649,12 @@ async function getFundingRate(symbol) {
             return null;
         }
         
-        const fundingRate = parseFloat(validatedData[0].fundingRate);
+        // CORREÇÃO: Converter para percentual e manter 4 casas decimais
+        // O funding rate da Binance já vem em decimal (ex: -0.001063 = -0.1063%)
+        const fundingRateDecimal = parseFloat(validatedData[0].fundingRate);
+        const fundingRatePercent = fundingRateDecimal * 100;
        
-        return fundingRate;
+        return fundingRatePercent;
     } catch (error) {
         return null;
     }
@@ -1850,7 +1853,7 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL - VERSÃO SIMPLIFICADA COM S/R 4H E STOCH ===
+// === ALERTA PRINCIPAL - VERSÃO CORRIGIDA COM FUNDING RATE PERCENTUAL ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
@@ -1882,11 +1885,12 @@ async function sendCCIAlert(signal) {
         lsrText = `${lsrText} ${lsrEmoji}`;
     }
    
-    let fundingText = '0.0000';
+    // CORREÇÃO: Funding rate agora em percentual com 4 casas decimais
+    let fundingText = '0.0000%';
     let fundingEmoji = '';
     
     if (signal.funding !== null && signal.funding !== undefined) {
-        fundingText = signal.funding.toFixed(4);
+        fundingText = signal.funding.toFixed(4) + '%';
         
         if (signal.funding > 0) {
             fundingText = '+' + fundingText;
@@ -1952,7 +1956,7 @@ async function sendCCIAlert(signal) {
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
     
     // NOVA FORMATAÇÃO: Pivot Multi-timeframe SIMPLIFICADA
     const pivotEmoji = pivotAnalysis.confluenceEmoji;
@@ -1973,7 +1977,7 @@ async function sendCCIAlert(signal) {
     if (pivotAnalysis.possibleBreakout) {
         const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
         const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
-                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
+                               pivotAnalysis.breakoutConfidence === 'MEDIA' ? '🟡' : '🟢';
         breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
     }
     
@@ -2035,6 +2039,7 @@ Alerta Educativo, não é recomendação de investimento
     console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText})`);
     console.log(`📊 Pivot: ${pivotCompact} | Distâncias: ${pivotDistances}`);
     console.log(`📊 ${stochText}`);
+    console.log(`💰 Funding: ${fundingText}`);
     if (pivotAnalysis.possibleBreakout) {
         console.log(`🚀 POSSÍVEL ROMPIMENTO ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence})`);
     }
