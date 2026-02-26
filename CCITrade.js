@@ -217,8 +217,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Adg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -708,15 +708,15 @@ function getBrazilianDateString() {
 }
 
 // =====================================================================
-// === FUNÇÃO CORRIGIDA PARA EMOJIS DO FUNDING RATE ===
+// === FUNÇÃO CORRIGIDA PARA EMOJIS DO FUNDING RATE (VALORES DECIMAIS) ===
 // =====================================================================
-function getFundingRateEmoji(fundingRatePercent) {
-    if (fundingRatePercent <= -0.2) return '🟢🟢🟢';
-    else if (fundingRatePercent <= -0.1) return '🟢🟢';
-    else if (fundingRatePercent <= -0.05) return '🟢';
-    else if (fundingRatePercent >= 0.1) return '🔴🔴🔴';
-    else if (fundingRatePercent >= 0.05) return '🔴🔴';
-    else if (fundingRatePercent >= 0.02) return '🔴';
+function getFundingRateEmoji(fundingRate) {
+    if (fundingRate <= -0.002) return '🟢🟢🟢';
+    else if (fundingRate <= -0.001) return '🟢🟢';
+    else if (fundingRate <= -0.0005) return '🟢';
+    else if (fundingRate >= 0.001) return '🔴🔴🔴';
+    else if (fundingRate >= 0.0005) return '🔴🔴';
+    else if (fundingRate >= 0.0002) return '🔴';
     else return '⚪';
 }
 
@@ -1633,6 +1633,9 @@ async function getLSR(symbol) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO CORRIGIDA - RETORNA O VALOR EXATO DA BINANCE (SEM MULTIPLICAR) ===
+// =====================================================================
 async function getFundingRate(symbol) {
     try {
         const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
@@ -1649,12 +1652,12 @@ async function getFundingRate(symbol) {
             return null;
         }
         
-        // CORREÇÃO: Converter para percentual e manter 4 casas decimais
-        // O funding rate da Binance já vem em decimal (ex: -0.001063 = -0.1063%)
-        const fundingRateDecimal = parseFloat(validatedData[0].fundingRate);
-        const fundingRatePercent = fundingRateDecimal * 100;
+        // CORREÇÃO: Retorna o valor EXATO como vem da Binance (sem multiplicar)
+        // Exemplo: -0.01885 permanece -0.01885
+        const fundingRate = parseFloat(validatedData[0].fundingRate);
        
-        return fundingRatePercent;
+        return fundingRate;
+        
     } catch (error) {
         return null;
     }
@@ -1853,7 +1856,7 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL - VERSÃO CORRIGIDA COM FUNDING RATE PERCENTUAL ===
+// === ALERTA PRINCIPAL - VERSÃO CORRIGIDA COM FUNDING RATE DECIMAL ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
@@ -1885,12 +1888,14 @@ async function sendCCIAlert(signal) {
         lsrText = `${lsrText} ${lsrEmoji}`;
     }
    
-    // CORREÇÃO: Funding rate agora em percentual com 4 casas decimais
-    let fundingText = '0.0000%';
+    // CORREÇÃO: Funding rate agora em formato decimal (igual à Binance)
+    // Exemplo: -0.01885 (não é multiplicado por 100)
+    let fundingText = '0.0000';
     let fundingEmoji = '';
     
     if (signal.funding !== null && signal.funding !== undefined) {
-        fundingText = signal.funding.toFixed(4) + '%';
+        // Mostra com 6 casas decimais para maior precisão
+        fundingText = signal.funding.toFixed(6);
         
         if (signal.funding > 0) {
             fundingText = '+' + fundingText;
