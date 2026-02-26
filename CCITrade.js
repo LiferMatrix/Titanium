@@ -125,7 +125,7 @@ const SupportResistanceSchema = z.object({
     pivot: z.number()
 });
 
-// NOVO: Schema para análise de proximidade
+// Schema para análise de proximidade
 const ProximityAnalysisSchema = z.object({
     isNearResistance: z.boolean(),
     isNearSupport: z.boolean(),
@@ -139,14 +139,48 @@ const ProximityAnalysisSchema = z.object({
     riskLevel: z.enum(['ALTO', 'MEDIO', 'BAIXO'])
 });
 
-// Schema principal do sinal (ATUALIZADO)
+// Schema para análise do Pivot Multi-timeframe
+const PivotMultiTimeframeSchema = z.object({
+    pivot15m: z.object({
+        value: z.number(),
+        type: z.enum(['ALTA', 'BAIXA']),
+        strength: z.enum(['FRACO', 'MODERADO', 'FORTE']),
+        strengthEmoji: z.string(),
+        distance: z.number(),
+        distancePercent: z.number()
+    }),
+    pivot1h: z.object({
+        value: z.number(),
+        type: z.enum(['ALTA', 'BAIXA']),
+        strength: z.enum(['FRACO', 'MODERADO', 'FORTE']),
+        strengthEmoji: z.string(),
+        distance: z.number(),
+        distancePercent: z.number()
+    }),
+    pivot4h: z.object({
+        value: z.number(),
+        type: z.enum(['ALTA', 'BAIXA']),
+        strength: z.enum(['FRACO', 'MODERADO', 'FORTE']),
+        strengthEmoji: z.string(),
+        distance: z.number(),
+        distancePercent: z.number()
+    }),
+    confluence: z.enum(['ALTA', 'BAIXA', 'DIVERGENTE', 'NEUTRO']),
+    confluenceEmoji: z.string(),
+    possibleBreakout: z.boolean(),
+    breakoutDirection: z.enum(['ALTA', 'BAIXA', 'NONE']).optional(),
+    breakoutConfidence: z.enum(['BAIXA', 'MEDIA', 'ALTA']).optional(),
+    analysis: z.string()
+});
+
+// Schema principal do sinal
 const CCISignalSchema = z.object({
     symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
     type: z.enum(['CCI_COMPRA', 'CCI_VENDA']),
     cci: CCISchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
     lsr: z.number().optional().nullable(),
-    funding: z.string().optional().nullable(),
+    funding: z.number().optional().nullable(),
     currentPrice: z.number().positive(),
     time: z.object({
         date: z.string(),
@@ -157,7 +191,15 @@ const CCISignalSchema = z.object({
     atrTargets: ATRTargetsSchema,
     supportResistance: SupportResistanceSchema,
     alertNumber: z.number().int(),
-    proximityAnalysis: ProximityAnalysisSchema // NOVO: Análise de proximidade
+    proximityAnalysis: ProximityAnalysisSchema,
+    volumeEma1h: z.object({
+        value: z.number(),
+        ema9: z.number(),
+        ratio: z.number(),
+        status: z.enum(['COMPRADOR', 'VENDEDOR', 'NEUTRO']),
+        percentage: z.string()
+    }).optional(),
+    pivotAnalysis: PivotMultiTimeframeSchema
 });
 
 // =====================================================================
@@ -165,8 +207,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8g',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -183,33 +225,53 @@ const CONFIG = {
         TIMEFRAME: '15m',
         LENGTH: 14,
         MULTIPLIERS: {
-            TARGET1: 1.5,  // 1.5x ATR
-            TARGET2: 2.5,  // 2.5x ATR
-            TARGET3: 3.5,  // 3.5x ATR
-            TARGET4: 5.0   // 5.0x ATR
+            TARGET1: 1.5,
+            TARGET2: 2.5,
+            TARGET3: 3.5,
+            TARGET4: 5.0
         },
-        STOP_MULTIPLIER: 1.2  // Stop em 1.2x ATR
+        STOP_MULTIPLIER: 1.2
     },
 
     VOLUME: {
         TIMEFRAME: '3m',
-        PERIOD: 20,           // Período para média de volume
-        THRESHOLD: 1.5        // Volume 50% acima da média = anormal
+        PERIOD: 20,
+        THRESHOLD: 1.5
     },
 
     RSI: {
         TIMEFRAME: '1h',
-        BUY_MAX: 60,          // RSI máximo para compra (deve ser < 60)
-        SELL_MIN: 65          // RSI mínimo para venda (deve ser > 65)
+        BUY_MAX: 60,
+        SELL_MIN: 65
     },
 
-    PROXIMITY: { // NOVO: Configurações de proximidade
-        THRESHOLD_PERCENT: 0.5, // 0.5% de distância para considerar "próximo"
+    PROXIMITY: {
+        THRESHOLD_PERCENT: 0.5,
         WARNING_LEVELS: {
-            ALTO: 0.3,     // Menos de 0.3% = risco ALTO
-            MEDIO: 0.8,    // Entre 0.3% e 0.8% = risco MÉDIO
-            BAIXO: 999     // Acima de 0.8% = risco BAIXO
+            ALTO: 0.3,
+            MEDIO: 0.8,
+            BAIXO: 999
         }
+    },
+
+    VOLUME_EMA: {
+        TIMEFRAME: '1h',
+        EMA_PERIOD: 9,
+        THRESHOLD: 1.2
+    },
+
+    PIVOT: {
+        TIMEFRAMES: {
+            '15m': '15m',
+            '1h': '1h',
+            '4h': '4h'
+        },
+        STRENGTH_THRESHOLDS: {
+            FORTE: 2.0,
+            MODERADO: 1.0,
+            FRACO: 0.5
+        },
+        BREAKOUT_VOLUME_THRESHOLD: 1.5
     },
 
     PERFORMANCE: {
@@ -629,12 +691,23 @@ function getBrazilianDateString() {
 }
 
 // =====================================================================
+// === FUNÇÃO PARA EMOJIS DO FUNDING RATE ===
+// =====================================================================
+function getFundingRateEmoji(fundingRate) {
+    if (fundingRate <= -0.002) return '🟢🟢🟢';
+    else if (fundingRate <= -0.001) return '🟢🟢';
+    else if (fundingRate <= -0.0005) return '🟢';
+    else if (fundingRate >= 0.001) return '🔴🔴🔴';
+    else if (fundingRate >= 0.0003) return '🔴🔴';
+    else if (fundingRate >= 0.0002) return '🔴';
+    else return '🟢';
+}
+
+// =====================================================================
 // === FUNÇÕES CORRIGIDAS DE TELEGRAM ===
 // =====================================================================
 function cleanTelegramText(text) {
-    // Remove qualquer tag HTML existente
     let cleanText = text.replace(/<[^>]*>/g, '');
-    // Escapa caracteres especiais do HTML
     cleanText = cleanText
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -659,7 +732,6 @@ async function sendTelegramAlert(message) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
         
-        // Prepara a mensagem com formatação segura
         const formattedMessage = formatItalic(message);
         
         console.log('📤 Enviando para Telegram...');
@@ -682,7 +754,6 @@ async function sendTelegramAlert(message) {
             const errorText = await response.text();
             console.log(`❌ Erro Telegram ${response.status}: ${errorText}`);
             
-            // Se falhar com HTML, tenta sem formatação
             if (response.status === 400) {
                 console.log('🔄 Tentando enviar sem formatação HTML...');
                 
@@ -907,48 +978,39 @@ function calculateATR(candles, period = 14) {
         trueRanges.push(trueRange);
     }
     
-    // Pegar os últimos 'period' valores
     const recentTR = trueRanges.slice(-period);
-    
-    // Calcular média simples do True Range
     const atr = recentTR.reduce((sum, tr) => sum + tr, 0) / period;
     
     return atr;
 }
 
-// Função para calcular níveis de suporte e resistência baseados no pivot point
 function calculateSupportResistance(candles, currentPrice) {
     try {
-        // Pega o último candle completo para calcular o pivot
-        const lastCandle = candles[candles.length - 2]; // Usa o penúltimo para garantir que está completo
+        const lastCandle = candles[candles.length - 2];
         const prevCandle = candles[candles.length - 3];
         
         if (!lastCandle) {
-            // Fallback: usar o candle atual
             const currentCandle = candles[candles.length - 1];
             const pivot = (currentCandle.high + currentCandle.low + currentCandle.close) / 3;
             
             return {
                 pivot: pivot,
-                resistance1: pivot * 1.01, // Aproximação simples
+                resistance1: pivot * 1.01,
                 resistance2: pivot * 1.02,
                 support1: pivot * 0.99,
                 support2: pivot * 0.98
             };
         }
         
-        // Cálculo clássico do pivot point
         const high = lastCandle.high;
         const low = lastCandle.low;
         const close = lastCandle.close;
         
         const pivot = (high + low + close) / 3;
         
-        // Níveis de resistência
         const r1 = (2 * pivot) - low;
         const r2 = pivot + (high - low);
         
-        // Níveis de suporte
         const s1 = (2 * pivot) - high;
         const s2 = pivot - (high - low);
         
@@ -962,7 +1024,6 @@ function calculateSupportResistance(candles, currentPrice) {
         
     } catch (error) {
         console.log(`⚠️ Erro ao calcular S/R: ${error.message}`);
-        // Fallback seguro
         return {
             pivot: currentPrice,
             resistance1: currentPrice * 1.01,
@@ -973,12 +1034,10 @@ function calculateSupportResistance(candles, currentPrice) {
     }
 }
 
-// NOVA FUNÇÃO: Analisar proximidade com níveis importantes
 function analyzeProximity(currentPrice, supportResistance, signalType) {
     try {
-        const threshold = CONFIG.PROXIMITY.THRESHOLD_PERCENT / 100; // Converter para decimal
+        const threshold = CONFIG.PROXIMITY.THRESHOLD_PERCENT / 100;
         
-        // Calcular distâncias percentuais
         const distToR1 = Math.abs((currentPrice - supportResistance.resistance1) / currentPrice) * 100;
         const distToR2 = Math.abs((currentPrice - supportResistance.resistance2) / currentPrice) * 100;
         const distToS1 = Math.abs((currentPrice - supportResistance.support1) / currentPrice) * 100;
@@ -991,7 +1050,6 @@ function analyzeProximity(currentPrice, supportResistance, signalType) {
         let proximityType = 'NONE';
         let riskLevel = 'BAIXO';
         
-        // Determinar nível de risco baseado na menor distância
         const minDistance = Math.min(distToR1, distToR2, distToS1, distToS2, distToPivot);
         
         if (minDistance <= CONFIG.PROXIMITY.WARNING_LEVELS.ALTO) {
@@ -1000,9 +1058,7 @@ function analyzeProximity(currentPrice, supportResistance, signalType) {
             riskLevel = 'MEDIO';
         }
         
-        // Análise específica para COMPRA
         if (signalType === 'CCI_COMPRA') {
-            // Verificar proximidade com resistências
             if (distToR1 <= threshold) {
                 isNearResistance = true;
                 proximityType = 'RESISTENCE_PROXIMITY';
@@ -1011,17 +1067,12 @@ function analyzeProximity(currentPrice, supportResistance, signalType) {
                 isNearResistance = true;
                 proximityType = 'RESISTENCE_PROXIMITY';
                 warningMessage = `⚠️ CUIDADO: Preço próximo da RESISTÊNCIA R2 (${distToR2.toFixed(2)}% de distância)! Área de sobrecompra.`;
-            } 
-            // Verificar proximidade com pivot (pode ser resistência)
-            else if (currentPrice > supportResistance.pivot && distToPivot <= threshold) {
+            } else if (currentPrice > supportResistance.pivot && distToPivot <= threshold) {
                 isNearResistance = true;
                 proximityType = 'PIVOT_PROXIMITY';
                 warningMessage = `⚠️ Preço testando PIVOT como resistência (${distToPivot.toFixed(2)}% de distância)! Atenção.`;
             }
-        } 
-        // Análise específica para VENDA
-        else if (signalType === 'CCI_VENDA') {
-            // Verificar proximidade com suportes
+        } else if (signalType === 'CCI_VENDA') {
             if (distToS1 <= threshold) {
                 isNearSupport = true;
                 proximityType = 'SUPPORT_PROXIMITY';
@@ -1030,16 +1081,13 @@ function analyzeProximity(currentPrice, supportResistance, signalType) {
                 isNearSupport = true;
                 proximityType = 'SUPPORT_PROXIMITY';
                 warningMessage = `⚠️ CUIDADO: Preço próximo do SUPORTE S2 (${distToS2.toFixed(2)}% de distância)! Área de sobrevenda.`;
-            }
-            // Verificar proximidade com pivot (pode ser suporte)
-            else if (currentPrice < supportResistance.pivot && distToPivot <= threshold) {
+            } else if (currentPrice < supportResistance.pivot && distToPivot <= threshold) {
                 isNearSupport = true;
                 proximityType = 'PIVOT_PROXIMITY';
                 warningMessage = `⚠️ Preço testando PIVOT como suporte (${distToPivot.toFixed(2)}% de distância)! Possível reversão.`;
             }
         }
         
-        // Se não detectou proximidade com níveis principais, verificar distância geral
         if (!warningMessage && minDistance <= threshold * 2) {
             if (signalType === 'CCI_COMPRA' && currentPrice > supportResistance.pivot) {
                 warningMessage = `ℹ️ Preço ${minDistance.toFixed(2)}% acima do pivot. Zona de resistência potencial.`;
@@ -1078,6 +1126,185 @@ function analyzeProximity(currentPrice, supportResistance, signalType) {
     }
 }
 
+// NOVA FUNÇÃO: Análise do Pivot Multi-timeframe
+async function analyzePivotMultiTimeframe(symbol, currentPrice, signalType, volumeEma1h) {
+    try {
+        const timeframes = ['15m', '1h', '4h'];
+        const pivotResults = {};
+        
+        for (const tf of timeframes) {
+            const candles = await getCandles(symbol, tf, 50);
+            const sr = calculateSupportResistance(candles, currentPrice);
+            const pivot = sr.pivot;
+            
+            const distance = currentPrice - pivot;
+            const distancePercent = (Math.abs(distance) / pivot) * 100;
+            
+            // Determinar tipo
+            const type = distance >= 0 ? 'ALTA' : 'BAIXA';
+            
+            // Determinar força
+            let strength = 'FRACO';
+            let strengthEmoji = type === 'ALTA' ? '🟡' : '🟠';
+            
+            if (distancePercent >= CONFIG.PIVOT.STRENGTH_THRESHOLDS.FORTE) {
+                strength = 'FORTE';
+                strengthEmoji = type === 'ALTA' ? '🟢🟢' : '🔴🔴';
+            } else if (distancePercent >= CONFIG.PIVOT.STRENGTH_THRESHOLDS.MODERADO) {
+                strength = 'MODERADO';
+                strengthEmoji = type === 'ALTA' ? '🟢' : '🔴';
+            }
+            
+            pivotResults[`pivot${tf}`] = {
+                value: pivot,
+                type,
+                strength,
+                strengthEmoji,
+                distance,
+                distancePercent
+            };
+        }
+        
+        // Analisar confluência entre timeframes
+        let confluence = 'NEUTRO';
+        let confluenceEmoji = '⚪';
+        
+        const types = [pivotResults.pivot15m.type, pivotResults.pivot1h.type, pivotResults.pivot4h.type];
+        const allSameType = types.every(t => t === types[0]);
+        
+        if (allSameType) {
+            confluence = types[0];
+            confluenceEmoji = types[0] === 'ALTA' ? '🔼' : '🔽';
+        } else {
+            confluence = 'DIVERGENTE';
+            confluenceEmoji = '🔄';
+        }
+        
+        // Análise de possível rompimento
+        let possibleBreakout = false;
+        let breakoutDirection = 'NONE';
+        let breakoutConfidence = 'BAIXA';
+        
+        const isNearPivot = pivotResults.pivot15m.distancePercent < 0.5 || 
+                           pivotResults.pivot1h.distancePercent < 0.5;
+        
+        if (isNearPivot && volumeEma1h) {
+            const volumeStrong = volumeEma1h.ratio > CONFIG.PIVOT.BREAKOUT_VOLUME_THRESHOLD;
+            
+            if (volumeStrong) {
+                possibleBreakout = true;
+                
+                if (volumeEma1h.status === 'COMPRADOR') {
+                    breakoutDirection = 'ALTA';
+                    breakoutConfidence = volumeEma1h.ratio > 2.0 ? 'ALTA' : 'MEDIA';
+                } else if (volumeEma1h.status === 'VENDEDOR') {
+                    breakoutDirection = 'BAIXA';
+                    breakoutConfidence = volumeEma1h.ratio > 2.0 ? 'ALTA' : 'MEDIA';
+                }
+            }
+        }
+        
+        // Análise contextual
+        let analysis = '';
+        if (confluence === 'ALTA') {
+            analysis = `✅ Confluência de ALTA em todos timeframes - tendência forte`;
+        } else if (confluence === 'BAIXA') {
+            analysis = `✅ Confluência de BAIXA em todos timeframes - tendência forte`;
+        } else if (confluence === 'DIVERGENTE') {
+            analysis = `🔄 Timeframes divergentes: 15m ${pivotResults.pivot15m.type} (${pivotResults.pivot15m.strength}), 1h ${pivotResults.pivot1h.type} (${pivotResults.pivot1h.strength}), 4h ${pivotResults.pivot4h.type} (${pivotResults.pivot4h.strength})`;
+        }
+        
+        if (possibleBreakout) {
+            analysis += ` | POSSÍVEL ROMPIMENTO para ${breakoutDirection} (confiança ${breakoutConfidence}) - Volume ${volumeEma1h.ratio.toFixed(2)}x acima da média!`;
+        }
+        
+        return {
+            ...pivotResults,
+            confluence,
+            confluenceEmoji,
+            possibleBreakout,
+            breakoutDirection: breakoutDirection !== 'NONE' ? breakoutDirection : undefined,
+            breakoutConfidence: breakoutConfidence !== 'BAIXA' ? breakoutConfidence : undefined,
+            analysis
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro na análise do pivot multi-timeframe: ${error.message}`);
+        return {
+            pivot15m: { value: currentPrice, type: 'ALTA', strength: 'FRACO', strengthEmoji: '🟡', distance: 0, distancePercent: 0 },
+            pivot1h: { value: currentPrice, type: 'ALTA', strength: 'FRACO', strengthEmoji: '🟡', distance: 0, distancePercent: 0 },
+            pivot4h: { value: currentPrice, type: 'ALTA', strength: 'FRACO', strengthEmoji: '🟡', distance: 0, distancePercent: 0 },
+            confluence: 'NEUTRO',
+            confluenceEmoji: '⚪',
+            possibleBreakout: false,
+            analysis: 'Erro na análise do pivot'
+        };
+    }
+}
+
+// Função de Análise de Volume 1h vs EMA9
+async function analyzeVolumeEMA1h(symbol) {
+    try {
+        const candles = await getCandles(symbol, CONFIG.VOLUME_EMA.TIMEFRAME, CONFIG.VOLUME_EMA.EMA_PERIOD + 10);
+        
+        if (candles.length < CONFIG.VOLUME_EMA.EMA_PERIOD + 5) {
+            return {
+                value: 0,
+                ema9: 0,
+                ratio: 0,
+                status: 'NEUTRO',
+                percentage: '0%'
+            };
+        }
+        
+        const volumes = candles.map(c => c.volume);
+        const lastVolume = volumes[volumes.length - 1];
+        const previousVolumes = volumes.slice(-CONFIG.VOLUME_EMA.EMA_PERIOD - 1, -1);
+        
+        const ema9 = calculateEMA(previousVolumes, CONFIG.VOLUME_EMA.EMA_PERIOD);
+        
+        const ratio = lastVolume / ema9;
+        const percentage = ((ratio - 1) * 100).toFixed(1) + '%';
+        
+        let status = 'NEUTRO';
+        
+        const lastCandle = candles[candles.length - 1];
+        const isGreenCandle = lastCandle.close > lastCandle.open;
+        
+        if (ratio > CONFIG.VOLUME_EMA.THRESHOLD) {
+            if (isGreenCandle) {
+                status = 'COMPRADOR';
+            } else {
+                status = 'VENDEDOR';
+            }
+        } else if (ratio > 1) {
+            if (isGreenCandle) {
+                status = 'COMPRADOR';
+            } else {
+                status = 'VENDEDOR';
+            }
+        }
+        
+        return {
+            value: lastVolume,
+            ema9: ema9,
+            ratio: ratio,
+            status: status,
+            percentage: percentage
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao analisar Volume EMA 1h para ${symbol}: ${error.message}`);
+        return {
+            value: 0,
+            ema9: 0,
+            ratio: 0,
+            status: 'NEUTRO',
+            percentage: '0%'
+        };
+    }
+}
+
 async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
     try {
         const candles = await getCandles(symbol, timeframe, 80);
@@ -1087,10 +1314,8 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
         
         const length = CONFIG.CCI.LENGTH;
         
-        // Calcular valores típicos (HLC3)
         const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
         
-        // Calcular SMA dos preços típicos
         const smaValues = [];
         for (let i = length - 1; i < typicalPrices.length; i++) {
             const slice = typicalPrices.slice(i - length + 1, i + 1);
@@ -1098,7 +1323,6 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
             smaValues.push(sma);
         }
         
-        // Calcular desvio médio
         const meanDeviations = [];
         for (let i = length - 1; i < typicalPrices.length; i++) {
             const slice = typicalPrices.slice(i - length + 1, i + 1);
@@ -1107,7 +1331,6 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
             meanDeviations.push(meanDev);
         }
         
-        // Calcular CCI
         const cciValues = [];
         for (let i = 0; i < smaValues.length; i++) {
             const tp = typicalPrices[i + (length - 1)];
@@ -1126,11 +1349,9 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
             return null;
         }
         
-        // Calcular EMAs sobre o CCI
         const emaShort = calculateEMA(cciValues, CONFIG.CCI.EMA_SHORT);
         const emaLong = calculateEMA(cciValues, CONFIG.CCI.EMA_LONG);
         
-        // Calcular valores anteriores para detectar cruzamento
         const prevCciValues = cciValues.slice(0, -1);
         const prevEmaShort = prevCciValues.length >= CONFIG.CCI.EMA_SHORT 
             ? calculateEMA(prevCciValues, CONFIG.CCI.EMA_SHORT) 
@@ -1160,7 +1381,6 @@ async function getCCI(symbol, timeframe = CONFIG.CCI.TIMEFRAME) {
     }
 }
 
-// Função para verificar volume anormal (sem mínimo de USDT)
 async function checkAbnormalVolume(symbol, signalType) {
     try {
         const candles = await getCandles(symbol, CONFIG.VOLUME.TIMEFRAME, CONFIG.VOLUME.PERIOD + 10);
@@ -1168,31 +1388,23 @@ async function checkAbnormalVolume(symbol, signalType) {
             return { isValid: false, analysis: 'Dados insuficientes', volumeRatio: 0 };
         }
         
-        // Pegar os volumes dos últimos candles
         const volumes = candles.map(c => c.volume);
         const lastVolume = volumes[volumes.length - 1];
-        const prevVolumes = volumes.slice(-CONFIG.VOLUME.PERIOD - 1, -1); // Exclui o último
+        const prevVolumes = volumes.slice(-CONFIG.VOLUME.PERIOD - 1, -1);
         
-        // Calcular média dos volumes anteriores
         const avgVolume = prevVolumes.reduce((a, b) => a + b, 0) / prevVolumes.length;
-        
-        // Calcular relação volume atual / média
         const volumeRatio = lastVolume / avgVolume;
         
-        // Verificar direção do candle atual (se é de compra ou venda)
         const lastCandle = candles[candles.length - 1];
         const isGreenCandle = lastCandle.close > lastCandle.open;
         
         let isValid = false;
         let analysis = '';
         
-        // Para COMPRA: queremos candle verde com volume anormal
         if (signalType === 'CCI_COMPRA') {
             isValid = isGreenCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
             analysis = ` Vol: ${isGreenCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
-        } 
-        // Para VENDA: queremos candle vermelho com volume anormal
-        else {
+        } else {
             const isRedCandle = lastCandle.close < lastCandle.open;
             isValid = isRedCandle && volumeRatio >= CONFIG.VOLUME.THRESHOLD;
             analysis = ` Volume: ${isRedCandle ? '✅' : '❌'}  | ${volumeRatio.toFixed(2)}x média (${CONFIG.VOLUME.THRESHOLD}x mínimo)`;
@@ -1243,7 +1455,7 @@ async function checkEMA3m(symbol, signalType) {
             const emaCrossDown = prevEma13 >= prevEma34 && ema13 < ema34;
             const priceBelowEma55 = lastCandle.close < ema55;
             isValid = emaCrossDown && priceBelowEma55;
-            analysis = `Force: ${emaCrossDown ? '✅' : '❌'}  | ${priceBelowEma55 ? '✅' : '❌'} Tedência`;
+            analysis = `Force: ${emaCrossDown ? '✅' : '❌'}  | ${priceBelowEma55 ? '✅' : '❌'} Tendência`;
         }
         
         return {
@@ -1349,10 +1561,7 @@ async function getFundingRate(symbol) {
         
         const fundingRate = parseFloat(validatedData[0].fundingRate);
        
-        return {
-            rate: fundingRate,
-            ratePercent: (fundingRate * 100).toFixed(5)
-        };
+        return fundingRate;
     } catch (error) {
         return null;
     }
@@ -1367,7 +1576,6 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
         
         const atr = calculateATR(candles, CONFIG.ATR.LENGTH);
         
-        // Calcular alvos baseados no ATR
         let stopLoss, target1, target2, target3, target4;
         
         if (signalType === 'CCI_COMPRA') {
@@ -1384,7 +1592,6 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
             target4 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET4);
         }
         
-        // Calcular relações risco/retorno
         const risk = Math.abs(currentPrice - stopLoss);
         const rr1 = Math.abs(target1 - currentPrice) / risk;
         const rr2 = Math.abs(target2 - currentPrice) / risk;
@@ -1451,14 +1658,12 @@ async function checkCCISignal(symbol) {
             return null;
         }
         
-        // FILTRO OBRIGATÓRIO DE EMA 3m
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
             logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
             return null;
         }
         
-        // FILTRO DE VOLUME ANORMAL
         const volumeCheck = await checkAbnormalVolume(symbol, signalType);
         if (!volumeCheck.isValid) {
             logRejection(symbol, 'Volume Anormal', 'Volume não atende aos critérios', { 
@@ -1468,14 +1673,12 @@ async function checkCCISignal(symbol) {
             return null;
         }
         
-        // FILTRO DE RSI 1h OBRIGATÓRIO
         const rsiData = await getRSI1h(symbol);
         if (!rsiData) {
             logRejection(symbol, 'RSI 1h', 'Não foi possível obter RSI');
             return null;
         }
         
-        // Aplicar filtro de RSI baseado no tipo de sinal
         if (signalType === 'CCI_COMPRA' && rsiData.value >= CONFIG.RSI.BUY_MAX) {
             logRejection(symbol, 'RSI 1h', `RSI muito alto para compra: ${rsiData.value.toFixed(1)} >= ${CONFIG.RSI.BUY_MAX}`);
             return null;
@@ -1492,19 +1695,21 @@ async function checkCCISignal(symbol) {
             return null;
         }
         
-        // Calcular alvos ATR
         const atrTargets = await calculateATRTargets(symbol, currentPrice, signalType);
         if (!atrTargets) {
             logRejection(symbol, 'ATR', 'Não foi possível calcular ATR');
             return null;
         }
 
-        // Buscar candles para calcular suporte/resistência
         const candles15m = await getCandles(symbol, '15m', 50);
         const supportResistance = calculateSupportResistance(candles15m, currentPrice);
         
-        // NOVO: Analisar proximidade com níveis importantes
         const proximityAnalysis = analyzeProximity(currentPrice, supportResistance, signalType);
+        
+        const volumeEma1h = await analyzeVolumeEMA1h(symbol);
+        
+        // NOVA ANÁLISE: Pivot Multi-timeframe
+        const pivotAnalysis = await analyzePivotMultiTimeframe(symbol, currentPrice, signalType, volumeEma1h);
         
         const [lsrData, fundingData] = await Promise.allSettled([
             getLSR(symbol),
@@ -1516,7 +1721,6 @@ async function checkCCISignal(symbol) {
         
         const alertNumber = getAlertNumberForSymbol(symbol);
         
-        // Adicionar análise de volume ao emaCheck para incluir no alerta
         const enhancedEmaCheck = {
             ...emaCheck,
             volumeAnalysis: volumeCheck.analysis,
@@ -1530,14 +1734,16 @@ async function checkCCISignal(symbol) {
             cci: cci,
             rsi: rsiData.value,
             lsr: lsrValue?.lsrValue,
-            funding: fundingValue?.ratePercent,
+            funding: fundingValue,
             currentPrice: currentPrice,
             time: getBrazilianDateTime(),
             emaCheck: enhancedEmaCheck,
             atrTargets: atrTargets,
             supportResistance: supportResistance,
             alertNumber: alertNumber,
-            proximityAnalysis: proximityAnalysis // NOVO
+            proximityAnalysis: proximityAnalysis,
+            volumeEma1h: volumeEma1h,
+            pivotAnalysis: pivotAnalysis
         };
         
         return CCISignalSchema.parse(signal);
@@ -1549,13 +1755,15 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL (ATUALIZADO) ===
+// === ALERTA PRINCIPAL - VERSÃO COM PIVOT MULTI-TIMEFRAME ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
     const atr = signal.atrTargets;
     const sr = signal.supportResistance;
-    const proximity = signal.proximityAnalysis; // NOVO
+    const proximity = signal.proximityAnalysis;
+    const volumeEma = signal.volumeEma1h;
+    const pivotAnalysis = signal.pivotAnalysis;
    
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     cciCooldown.set(signal.symbol, Date.now());
@@ -1566,23 +1774,30 @@ async function sendCCIAlert(signal) {
     if (signal.lsr) {
         lsrText = signal.lsr.toFixed(2);
         
-        // Adiciona emoji baseado no valor do LSR
         if (signal.lsr > 2.8) {
-            lsrEmoji = '🔴'; // Círculo vermelho
+            lsrEmoji = '🔴';
         } else if (signal.lsr < 1.7) {
-            lsrEmoji = '🟢'; // Círculo verde
+            lsrEmoji = '🟢';
         }
         if (signal.lsr < 1) {
-            lsrEmoji = '🔵'; // Círculo azul (sobrescreve o verde se for < 1)
+            lsrEmoji = '🔵';
         }
         
         lsrText = `${lsrText} ${lsrEmoji}`;
     }
    
-    let fundingText = '0.0000%';
-    if (signal.funding) {
-        const fundingValue = parseFloat(signal.funding) / 100;
-        fundingText = `${fundingValue > 0 ? '+' : ''}${(fundingValue * 100).toFixed(4)}%`;
+    let fundingText = '0.0000';
+    let fundingEmoji = '';
+    
+    if (signal.funding !== null && signal.funding !== undefined) {
+        fundingText = signal.funding.toFixed(4);
+        
+        if (signal.funding > 0) {
+            fundingText = '+' + fundingText;
+        }
+        
+        fundingEmoji = getFundingRateEmoji(signal.funding);
+        fundingText = `${fundingText} ${fundingEmoji}`;
     }
    
     const cciText = `CCI ${signal.cci.value.toFixed(1)} | EMA5 ${signal.cci.ema5.toFixed(1)} | EMA13 ${signal.cci.ema13.toFixed(1)}`;
@@ -1599,49 +1814,73 @@ async function sendCCIAlert(signal) {
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'CCI_COMPRA' ? '🔍Analisar COMPRA' : '🔍 Analisar CORREÇÃO';
+    const actionText = signal.type === 'CCI_COMPRA' ? '🔍 Analisar COMPRA' : '🔍 Analisar CORREÇÃO';
     
     const emaAnalysis = signal.emaCheck?.analysis || 'EMA: OK';
     const volumeAnalysis = signal.emaCheck?.volumeAnalysis || 'Volume: OK';
     const volumeRatio = signal.emaCheck?.volumeRatio ? signal.emaCheck.volumeRatio.toFixed(2) : 'N/A';
     
-    // Formatar alvos
-    const stopEmoji = signal.type === 'CCI_COMPRA' ? '🔴' : '🟢';
+    // Formatação do Volume 1h
+    let volumeEmaText = 'N/A';
+    let volumeEmaEmoji = '';
+    
+    if (volumeEma && volumeEma.ratio > 0) {
+        if (volumeEma.status === 'COMPRADOR') {
+            volumeEmaEmoji = '🟢';
+        } else if (volumeEma.status === 'VENDEDOR') {
+            volumeEmaEmoji = '🔴';
+        } else {
+            volumeEmaEmoji = '⚪';
+        }
+        
+        volumeEmaText = `${volumeEmaEmoji} ${volumeEma.status} ${volumeEma.percentage}`;
+    }
+    
+    const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    // NOVO: Emoji para nível de risco
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
     
-    // Constrói a mensagem sem formatação HTML
+    // NOVA FORMATAÇÃO: Pivot Multi-timeframe
+    let breakoutText = '';
+    if (pivotAnalysis.possibleBreakout) {
+        const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
+        const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
+                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
+        breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
+    }
+    
     let messageText = `${actionEmoji} ${actionText} • ${signal.symbol}
 Preço: $${currentPrice.toFixed(6)}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
+PIVOT Info ${pivotAnalysis.confluenceEmoji}:
+15m: ${pivotAnalysis.pivot15m.strengthEmoji} ${pivotAnalysis.pivot15m.type} (${pivotAnalysis.pivot15m.strength}) - ${pivotAnalysis.pivot15m.distancePercent.toFixed(2)}%
+1h:  ${pivotAnalysis.pivot1h.strengthEmoji} ${pivotAnalysis.pivot1h.type} (${pivotAnalysis.pivot1h.strength}) - ${pivotAnalysis.pivot1h.distancePercent.toFixed(2)}%
+4h:  ${pivotAnalysis.pivot4h.strengthEmoji} ${pivotAnalysis.pivot4h.type} (${pivotAnalysis.pivot4h.strength}) - ${pivotAnalysis.pivot4h.distancePercent.toFixed(2)}%
+${pivotAnalysis.analysis}${breakoutText}
 ${emaAnalysis}
 ${volumeAnalysis} (${volumeRatio}x)
+Volume 1h: ${volumeEmaText}
 RSI 1h: ${rsiText}${rsiStatus}
 LSR: ${lsrText}
 Funding: ${fundingText}
-Pivot: $${sr.pivot.toFixed(6)}
-Suporte/Resistência: 
+Suporte/Resistência (15m): 
 R1: $${sr.resistance1.toFixed(6)} | R2: $${sr.resistance2.toFixed(6)}
 S1: $${sr.support1.toFixed(6)} | S2: $${sr.support2.toFixed(6)}
-Alvos:
-Alvo 1: $${atr.targets.target1.toFixed(6)} 
-Alvo 2: $${atr.targets.target2.toFixed(6)} 
-Alvo 3: $${atr.targets.target3.toFixed(6)} 
-Alvo 4: $${atr.targets.target4.toFixed(6)} 
+Alvos (ATR ${atr.atr14.toFixed(6)}):
+Alvo 1: $${atr.targets.target1.toFixed(6)} (RR ${atr.riskReward.rr1.toFixed(1)})
+Alvo 2: $${atr.targets.target2.toFixed(6)} (RR ${atr.riskReward.rr2.toFixed(1)})
+Alvo 3: $${atr.targets.target3.toFixed(6)} (RR ${atr.riskReward.rr3.toFixed(1)})
+Alvo 4: $${atr.targets.target4.toFixed(6)} (RR ${atr.riskReward.rr4.toFixed(1)})
 ${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)} 
-
 `;
 
-    // NOVO: Adicionar análise de proximidade após o stop
     if (proximity.warningMessage) {
         messageText += `⚠️ Análise Rápida ${riskEmoji}:
 ${proximity.warningMessage}
 `;
         
-        // Adicionar detalhes das distâncias
         if (signal.type === 'CCI_COMPRA' && proximity.isNearResistance) {
             messageText += ` Distância das resistências:
 R1: ${proximity.distanceToResistance1.toFixed(2)}% | R2: ${proximity.distanceToResistance2.toFixed(2)}%
@@ -1654,8 +1893,7 @@ Pivot: ${proximity.distanceToPivot.toFixed(2)}%
 `;
         }
     } else {
-        // Mensagem genérica de análise
-        messageText += ` Análise Rápida ${riskEmoji}:
+        messageText += `📈 Análise Rápida ${riskEmoji}:
 Preço ${signal.type === 'CCI_COMPRA' ? 
     `${currentPrice > sr.pivot ? 'acima' : 'abaixo'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)` : 
     `${currentPrice < sr.pivot ? 'abaixo' : 'acima'} do pivot (${proximity.distanceToPivot.toFixed(2)}%)`}
@@ -1667,10 +1905,13 @@ Risco de entrada: ${proximity.riskLevel}
 Alerta Educativo, não é recomendação de investimento
 ✨ Titanium by @J4Rviz ✨`;
 
-    // Aplica formatação segura
     await sendTelegramAlert(messageText);
    
-    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | CCI: ${signal.cci.value.toFixed(1)} | RSI: ${signal.rsi?.toFixed(1)} | Volume: ${signal.emaCheck.volumeRatio?.toFixed(2)}x | ATR: $${atr.atr14.toFixed(6)} | Risco: ${proximity.riskLevel} | ${proximity.warningMessage || 'Sem avisos'}`);
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText})`);
+    console.log(`📊 Pivot: 15m:${pivotAnalysis.pivot15m.type}(${pivotAnalysis.pivot15m.strength}) 1h:${pivotAnalysis.pivot1h.type}(${pivotAnalysis.pivot1h.strength}) 4h:${pivotAnalysis.pivot4h.type}(${pivotAnalysis.pivot4h.strength}) | Confluência: ${pivotAnalysis.confluence}`);
+    if (pivotAnalysis.possibleBreakout) {
+        console.log(`🚀 POSSÍVEL ROMPIMENTO ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence})`);
+    }
 }
 
 // =====================================================================
