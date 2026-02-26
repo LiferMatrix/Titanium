@@ -239,8 +239,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG',
-        CHAT_ID: '-1002554'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -2280,7 +2280,7 @@ Pivot: ${proximity.distanceToPivot.toFixed(2)}%
         }
     } else {
         const pricePosition = currentPrice > sr.pivot ? 'acima' : 'abaixo';
-        messageText += `📈 Análise Rápida ${riskEmoji}:
+        messageText += `🤖IA Análise... ${riskEmoji}:
 Preço ${pricePosition} do pivot (${proximity.distanceToPivot.toFixed(2)}%)
 Risco de entrada: ${proximity.riskLevel}
 `;
@@ -2357,7 +2357,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log(' TITANIUM V2.0 - FVG + STOPS AJUSTADOS');
+        console.log(' TITANIUM ');
         console.log(` ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
