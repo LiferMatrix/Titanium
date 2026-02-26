@@ -101,27 +101,48 @@ const StochRSISchema = z.object({
     timeframe: z.string()
 });
 
-// Schema para alvos de ATR
+// Schema para FVG (Fair Value Gap)
+const FVGSchema = z.object({
+    hasBullishFVG: z.boolean(),
+    hasBearishFVG: z.boolean(),
+    fvgZone: z.object({
+        top: z.number(),
+        bottom: z.number(),
+        isMitigated: z.boolean(),
+        mitigationPrice: z.number().optional(),
+        age: z.number()
+    }).optional(),
+    timeframe: z.string()
+});
+
+// Schema para alvos de ATR (AJUSTADO - Stops e alvos maiores)
 const ATRTargetsSchema = z.object({
     atr14: z.number(),
     atrMultipliers: z.object({
         target1: z.number(),
         target2: z.number(),
         target3: z.number(),
-        target4: z.number()
+        target4: z.number(),
+        target5: z.number(),
+        target6: z.number()
     }),
     stopLoss: z.number(),
+    stopLossWide: z.number(),
     targets: z.object({
         target1: z.number(),
         target2: z.number(),
         target3: z.number(),
-        target4: z.number()
+        target4: z.number(),
+        target5: z.number(),
+        target6: z.number()
     }),
     riskReward: z.object({
         rr1: z.number(),
         rr2: z.number(),
         rr3: z.number(),
-        rr4: z.number()
+        rr4: z.number(),
+        rr5: z.number(),
+        rr6: z.number()
     })
 });
 
@@ -189,6 +210,7 @@ const CCISignalSchema = z.object({
     cci: CCISchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
     stoch4h: StochRSISchema.optional().nullable(),
+    fvg15m: FVGSchema,
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     currentPrice: z.number().positive(),
@@ -217,8 +239,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyg',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -237,17 +259,27 @@ const CONFIG = {
         D_PERIOD: 3,
         SLOWING: 3
     },
+
+    FVG: {
+        TIMEFRAME: '15m',
+        LOOKBACK: 30,
+        REQUIRE_MITIGATION: false,
+        MAX_AGE_CANDLES: 20
+    },
     
     ATR: {
         TIMEFRAME: '15m',
         LENGTH: 14,
         MULTIPLIERS: {
-            TARGET1: 1.5,
-            TARGET2: 2.5,
-            TARGET3: 3.5,
-            TARGET4: 5.0
+            TARGET1: 2.0,
+            TARGET2: 3.5,
+            TARGET3: 5.0,
+            TARGET4: 7.0,
+            TARGET5: 10.0,
+            TARGET6: 15.0
         },
-        STOP_MULTIPLIER: 1.2
+        STOP_MULTIPLIER: 1.5,
+        STOP_WIDE_MULTIPLIER: 2.5
     },
 
     VOLUME: {
@@ -258,8 +290,8 @@ const CONFIG = {
 
     RSI: {
         TIMEFRAME: '1h',
-        BUY_MAX: 60,
-        SELL_MIN: 65
+        BUY_MAX: 65,
+        SELL_MIN: 55
     },
 
     PROXIMITY: {
@@ -897,8 +929,11 @@ async function sendInitializationMessage() {
         const stateStats = StateManager.getStats();
         
         const message = `
-🚀 TITANIUM 
- State: ${stateStats.alertCounter} símbolos ativos
+🚀 TITANIUM V2.0 - FVG + STOPS AJUSTADOS
+🤖 Iniciando em ${now.full}
+📊 State: ${stateStats.alertCounter} símbolos ativos
+📈 Alvos estendidos para 15x ATR
+🛡️ Stops ajustados: 1.5x e 2.5x ATR
 `;
         
         return await sendTelegramAlert(message);
@@ -1045,6 +1080,164 @@ function calculateStochRSI(symbol, candles) {
     } catch (error) {
         console.log(`⚠️ Erro ao calcular StochRSI: ${error.message}`);
         return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO AVANÇADA DE DETECÇÃO DE FVG (Fair Value Gap) ===
+// =====================================================================
+function detectFVG(candles, signalType) {
+    try {
+        if (candles.length < 10) {
+            return {
+                hasBullishFVG: false,
+                hasBearishFVG: false,
+                timeframe: CONFIG.FVG.TIMEFRAME
+            };
+        }
+
+        const lookback = Math.min(CONFIG.FVG.LOOKBACK, candles.length - 3);
+        let bullishFVG = false;
+        let bearishFVG = false;
+        let fvgZone = null;
+        
+        // Método 1: Gap entre corpo do candle anterior e mecha do candle atual
+        for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+            if (i < 1) break;
+            
+            const prevCandle = candles[i - 1];
+            const currentCandle = candles[i];
+            const nextCandle = candles[i + 1];
+            
+            if (!prevCandle || !currentCandle || !nextCandle) continue;
+            
+            // FVG de Alta (Bullish)
+            // Precisa de: low do candle atual > high do candle anterior
+            if (currentCandle.low > prevCandle.high) {
+                const gap = currentCandle.low - prevCandle.high;
+                if (gap > 0) {
+                    bullishFVG = true;
+                    fvgZone = {
+                        top: currentCandle.low,
+                        bottom: prevCandle.high,
+                        isMitigated: false,
+                        age: candles.length - i
+                    };
+                    
+                    // Verificar se o gap já foi preenchido (mitigado)
+                    for (let j = i + 1; j < candles.length; j++) {
+                        if (candles[j].low <= prevCandle.high || candles[j].high >= currentCandle.low) {
+                            fvgZone.isMitigated = true;
+                            fvgZone.mitigationPrice = candles[j].close;
+                            break;
+                        }
+                    }
+                    
+                    if (signalType === 'CCI_COMPRA' && !CONFIG.FVG.REQUIRE_MITIGATION) {
+                        break;
+                    }
+                }
+            }
+            
+            // FVG de Baixa (Bearish)
+            // Precisa de: high do candle atual < low do candle anterior
+            if (currentCandle.high < prevCandle.low) {
+                const gap = prevCandle.low - currentCandle.high;
+                if (gap > 0) {
+                    bearishFVG = true;
+                    fvgZone = {
+                        top: prevCandle.low,
+                        bottom: currentCandle.high,
+                        isMitigated: false,
+                        age: candles.length - i
+                    };
+                    
+                    // Verificar se o gap já foi preenchido (mitigado)
+                    for (let j = i + 1; j < candles.length; j++) {
+                        if (candles[j].high >= prevCandle.low || candles[j].low <= currentCandle.high) {
+                            fvgZone.isMitigated = true;
+                            fvgZone.mitigationPrice = candles[j].close;
+                            break;
+                        }
+                    }
+                    
+                    if (signalType === 'CCI_VENDA' && !CONFIG.FVG.REQUIRE_MITIGATION) {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Método 2: Detecção baseada em sombras (wick-to-wick)
+        if (!bullishFVG && !bearishFVG) {
+            for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+                if (i < 1) break;
+                
+                const prevCandle = candles[i - 1];
+                const currentCandle = candles[i];
+                const nextCandle = candles[i + 1];
+                
+                if (!prevCandle || !currentCandle || !nextCandle) continue;
+                
+                // FVG de Alta baseado em sombras
+                if (currentCandle.low > prevCandle.high && currentCandle.close > prevCandle.high) {
+                    bullishFVG = true;
+                    if (signalType === 'CCI_COMPRA') break;
+                }
+                
+                // FVG de Baixa baseado em sombras
+                if (currentCandle.high < prevCandle.low && currentCandle.close < prevCandle.low) {
+                    bearishFVG = true;
+                    if (signalType === 'CCI_VENDA') break;
+                }
+            }
+        }
+        
+        // Método 3: Detecção de imbalance (3 candle pattern)
+        if (!bullishFVG && !bearishFVG) {
+            for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+                if (i < 2) break;
+                
+                const candle1 = candles[i - 2];
+                const candle2 = candles[i - 1];
+                const candle3 = candles[i];
+                
+                if (!candle1 || !candle2 || !candle3) continue;
+                
+                // Bullish imbalance: candle3 low > candle1 high
+                if (candle3.low > candle1.high) {
+                    bullishFVG = true;
+                    if (signalType === 'CCI_COMPRA') break;
+                }
+                
+                // Bearish imbalance: candle3 high < candle1 low
+                if (candle3.high < candle1.low) {
+                    bearishFVG = true;
+                    if (signalType === 'CCI_VENDA') break;
+                }
+            }
+        }
+        
+        // Verificar idade do FVG (evitar FVGs muito antigos)
+        if (fvgZone && fvgZone.age > CONFIG.FVG.MAX_AGE_CANDLES) {
+            if (bullishFVG) bullishFVG = false;
+            if (bearishFVG) bearishFVG = false;
+        }
+        
+        return {
+            hasBullishFVG: bullishFVG,
+            hasBearishFVG: bearishFVG,
+            fvgZone: fvgZone,
+            timeframe: CONFIG.FVG.TIMEFRAME
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro na detecção de FVG: ${error.message}`);
+        return {
+            hasBullishFVG: false,
+            hasBearishFVG: false,
+            timeframe: CONFIG.FVG.TIMEFRAME
+        };
     }
 }
 
@@ -1663,6 +1856,9 @@ async function getFundingRate(symbol) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO DE CÁLCULO DE ALVOS AJUSTADA (STOPS MAIORES E MAIS ALVOS) ===
+// =====================================================================
 async function calculateATRTargets(symbol, currentPrice, signalType) {
     try {
         const candles = await getCandles(symbol, CONFIG.ATR.TIMEFRAME, 100);
@@ -1672,20 +1868,26 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
         
         const atr = calculateATR(candles, CONFIG.ATR.LENGTH);
         
-        let stopLoss, target1, target2, target3, target4;
+        let stopLoss, stopLossWide, target1, target2, target3, target4, target5, target6;
         
         if (signalType === 'CCI_COMPRA') {
             stopLoss = currentPrice - (atr * CONFIG.ATR.STOP_MULTIPLIER);
+            stopLossWide = currentPrice - (atr * CONFIG.ATR.STOP_WIDE_MULTIPLIER);
             target1 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET1);
             target2 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET2);
             target3 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET3);
             target4 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET4);
+            target5 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET5);
+            target6 = currentPrice + (atr * CONFIG.ATR.MULTIPLIERS.TARGET6);
         } else {
             stopLoss = currentPrice + (atr * CONFIG.ATR.STOP_MULTIPLIER);
+            stopLossWide = currentPrice + (atr * CONFIG.ATR.STOP_WIDE_MULTIPLIER);
             target1 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET1);
             target2 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET2);
             target3 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET3);
             target4 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET4);
+            target5 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET5);
+            target6 = currentPrice - (atr * CONFIG.ATR.MULTIPLIERS.TARGET6);
         }
         
         const risk = Math.abs(currentPrice - stopLoss);
@@ -1693,6 +1895,8 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
         const rr2 = Math.abs(target2 - currentPrice) / risk;
         const rr3 = Math.abs(target3 - currentPrice) / risk;
         const rr4 = Math.abs(target4 - currentPrice) / risk;
+        const rr5 = Math.abs(target5 - currentPrice) / risk;
+        const rr6 = Math.abs(target6 - currentPrice) / risk;
         
         return {
             atr14: atr,
@@ -1700,20 +1904,27 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
                 target1: CONFIG.ATR.MULTIPLIERS.TARGET1,
                 target2: CONFIG.ATR.MULTIPLIERS.TARGET2,
                 target3: CONFIG.ATR.MULTIPLIERS.TARGET3,
-                target4: CONFIG.ATR.MULTIPLIERS.TARGET4
+                target4: CONFIG.ATR.MULTIPLIERS.TARGET4,
+                target5: CONFIG.ATR.MULTIPLIERS.TARGET5,
+                target6: CONFIG.ATR.MULTIPLIERS.TARGET6
             },
             stopLoss,
+            stopLossWide,
             targets: {
                 target1,
                 target2,
                 target3,
-                target4
+                target4,
+                target5,
+                target6
             },
             riskReward: {
                 rr1,
                 rr2,
                 rr3,
-                rr4
+                rr4,
+                rr5,
+                rr6
             }
         };
         
@@ -1723,7 +1934,7 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
 }
 
 // =====================================================================
-// === SINAIS DE CCI ===
+// === SINAIS DE CCI COM FVG DE CONFIRMAÇÃO ===
 // =====================================================================
 async function checkCCISignal(symbol) {
     if (!CONFIG.CCI.ENABLED) {
@@ -1751,6 +1962,21 @@ async function checkCCISignal(symbol) {
             signalType = 'CCI_VENDA';
         } else {
             logRejection(symbol, 'Cruzamento', 'Sem cruzamento detectado');
+            return null;
+        }
+        
+        // Verificar FVG de 15 minutos como confirmação
+        const candles15m = await getCandles(symbol, CONFIG.FVG.TIMEFRAME, 50);
+        const fvgAnalysis = detectFVG(candles15m, signalType);
+        
+        // Validar FVG de acordo com o tipo de sinal
+        if (signalType === 'CCI_COMPRA' && !fvgAnalysis.hasBullishFVG) {
+            logRejection(symbol, 'FVG 15m', 'Sem FVG de alta para confirmar compra');
+            return null;
+        }
+        
+        if (signalType === 'CCI_VENDA' && !fvgAnalysis.hasBearishFVG) {
+            logRejection(symbol, 'FVG 15m', 'Sem FVG de baixa para confirmar venda');
             return null;
         }
         
@@ -1834,6 +2060,7 @@ async function checkCCISignal(symbol) {
             cci: cci,
             rsi: rsiData.value,
             stoch4h: stoch4h,
+            fvg15m: fvgAnalysis,
             lsr: lsrValue?.lsrValue,
             funding: fundingValue,
             currentPrice: currentPrice,
@@ -1856,7 +2083,7 @@ async function checkCCISignal(symbol) {
 }
 
 // =====================================================================
-// === ALERTA PRINCIPAL - VERSÃO CORRIGIDA COM FUNDING RATE DECIMAL ===
+// === ALERTA PRINCIPAL - VERSÃO ATUALIZADA COM FVG E MAIS ALVOS ===
 // =====================================================================
 async function sendCCIAlert(signal) {
     const currentPrice = signal.currentPrice;
@@ -1866,6 +2093,7 @@ async function sendCCIAlert(signal) {
     const volumeEma = signal.volumeEma1h;
     const pivotAnalysis = signal.pivotAnalysis;
     const stoch4h = signal.stoch4h;
+    const fvg15m = signal.fvg15m;
    
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     cciCooldown.set(signal.symbol, Date.now());
@@ -1931,12 +2159,35 @@ async function sendCCIAlert(signal) {
             stochEmoji = '🔴 (Sobrecomprado)';
         }
     }
+    
+    // Formatação do FVG
+    let fvgText = 'FVG 15m: ';
+    let fvgEmoji = '';
+    if (fvg15m) {
+        if (fvg15m.hasBullishFVG) {
+            fvgText += '✅ BULLISH';
+            fvgEmoji = '🟢';
+            if (fvg15m.fvgZone) {
+                fvgText += ` (${fvg15m.fvgZone.bottom.toFixed(6)}-${fvg15m.fvgZone.top.toFixed(6)})`;
+                if (fvg15m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
+            }
+        } else if (fvg15m.hasBearishFVG) {
+            fvgText += '🔴 BEARISH';
+            fvgEmoji = '🔴';
+            if (fvg15m.fvgZone) {
+                fvgText += ` (${fvg15m.fvgZone.bottom.toFixed(6)}-${fvg15m.fvgZone.top.toFixed(6)})`;
+                if (fvg15m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
+            }
+        } else {
+            fvgText += '❌ Nenhum';
+        }
+    }
    
     const symbolData = alertCounter.get(signal.symbol);
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'CCI_COMPRA' ? '🔍 Analisar COMPRA' : '🔍 Analisar CORREÇÃO';
+    const actionText = signal.type === 'CCI_COMPRA' ? '🔍 SINAL DE COMPRA' : '🔍 SINAL DE VENDA';
     
     const emaAnalysis = signal.emaCheck?.analysis || 'EMA: OK';
     const volumeAnalysis = signal.emaCheck?.volumeAnalysis || 'Volume: OK';
@@ -1961,7 +2212,7 @@ async function sendCCIAlert(signal) {
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
     
     // NOVA FORMATAÇÃO: Pivot Multi-timeframe SIMPLIFICADA
     const pivotEmoji = pivotAnalysis.confluenceEmoji;
@@ -1982,7 +2233,7 @@ async function sendCCIAlert(signal) {
     if (pivotAnalysis.possibleBreakout) {
         const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
         const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
-                               pivotAnalysis.breakoutConfidence === 'MEDIA' ? '🟡' : '🟢';
+                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
         breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
     }
     
@@ -1990,7 +2241,7 @@ async function sendCCIAlert(signal) {
 Preço: $${currentPrice.toFixed(6)}
 ${counterText} - ${signal.time.full}hs
 ❅──────✧❅✨❅✧──────❅
-PIVOT: ${pivotEmoji} TODOS ${pivotAnalysis.pivot15m.type} (${pivotCompact})
+PIVOT: ${pivotEmoji} Todos ${pivotAnalysis.pivot15m.type} (${pivotCompact})
 Distância: ${pivotDistances}
 ${confluenceText}${breakoutText}
 ${stochText} ${stochEmoji}
@@ -2003,12 +2254,12 @@ Funding: ${fundingText}
 Suporte/Resistência (4h): 
 R1: $${sr.resistance1.toFixed(6)} | R2: $${sr.resistance2.toFixed(6)}
 S1: $${sr.support1.toFixed(6)} | S2: $${sr.support2.toFixed(6)}
-🎯 ALVOS:
-Alvo 1: $${atr.targets.target1.toFixed(6)} 
-Alvo 2: $${atr.targets.target2.toFixed(6)} 
-Alvo 3: $${atr.targets.target3.toFixed(6)} 
-Alvo 4: $${atr.targets.target4.toFixed(6)} 
-${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)} 
+ Alvos:
+Alvo 1: $${atr.targets.target1.toFixed(6)} , Alvo 2: $${atr.targets.target2.toFixed(6)}
+Alvo 3: $${atr.targets.target3.toFixed(6)} , Alvo 4: $${atr.targets.target4.toFixed(6)}
+Alvo 5: $${atr.targets.target5.toFixed(6)} , Alvo 6: $${atr.targets.target6.toFixed(6)}
+${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)}
+${stopEmoji} Stop longo: $${atr.stopLossWide.toFixed(6)}
 `;
 
     if (proximity.warningMessage) {
@@ -2042,9 +2293,11 @@ Alerta Educativo, não é recomendação de investimento
     await sendTelegramAlert(messageText);
    
     console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText})`);
+    console.log(`📊 FVG: ${fvgText}`);
     console.log(`📊 Pivot: ${pivotCompact} | Distâncias: ${pivotDistances}`);
     console.log(`📊 ${stochText}`);
     console.log(`💰 Funding: ${fundingText}`);
+    console.log(`🎯 Alvos estendidos até 15x ATR`);
     if (pivotAnalysis.possibleBreakout) {
         console.log(`🚀 POSSÍVEL ROMPIMENTO ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence})`);
     }
@@ -2104,7 +2357,7 @@ async function mainBotLoop() {
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log(' TITANIUM  ');
+        console.log(' TITANIUM V2.0 - FVG + STOPS AJUSTADOS');
         console.log(` ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
@@ -2172,7 +2425,7 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log(' TITANIUM  ');
+        console.log(' TITANIUM ');
         console.log('='.repeat(60) + '\n');
 
         console.log('📅 Inicializando...');
@@ -2187,7 +2440,7 @@ async function startBot() {
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
-        const testMessage = `🤖 Bot Titanium  iniciando em ${getBrazilianDateTime().full}`;
+        const testMessage = `🤖 Bot Titanium V2.0 iniciando em ${getBrazilianDateTime().full}\n📈 Alvos estendidos até 15x ATR\n🛡️ Stops ajustados: 1.5x e 2.5x ATR\n✅ FVG 15m como confirmação`;
         const testResult = await sendTelegramAlert(testMessage);
 
         if (testResult) {
@@ -2228,7 +2481,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('Reason:', reason);
 });
 
-console.log('🚀 Iniciando Titanium Bot...');
+console.log('🚀 Iniciando Titanium Bot V2.0...');
 
 startBot().catch(error => {
     console.error('❌ Erro fatal:', error);
