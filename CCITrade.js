@@ -207,8 +207,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8g',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -1854,25 +1854,25 @@ async function sendCCIAlert(signal) {
 Preço: $${currentPrice.toFixed(6)}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-PIVOT Info ${pivotAnalysis.confluenceEmoji}:
+PIVOT: ${pivotAnalysis.confluenceEmoji}:
 15m: ${pivotAnalysis.pivot15m.strengthEmoji} ${pivotAnalysis.pivot15m.type} (${pivotAnalysis.pivot15m.strength}) - ${pivotAnalysis.pivot15m.distancePercent.toFixed(2)}%
 1h:  ${pivotAnalysis.pivot1h.strengthEmoji} ${pivotAnalysis.pivot1h.type} (${pivotAnalysis.pivot1h.strength}) - ${pivotAnalysis.pivot1h.distancePercent.toFixed(2)}%
 4h:  ${pivotAnalysis.pivot4h.strengthEmoji} ${pivotAnalysis.pivot4h.type} (${pivotAnalysis.pivot4h.strength}) - ${pivotAnalysis.pivot4h.distancePercent.toFixed(2)}%
 ${pivotAnalysis.analysis}${breakoutText}
 ${emaAnalysis}
 ${volumeAnalysis} (${volumeRatio}x)
-Volume 1h: ${volumeEmaText}
+Vol 1h: ${volumeEmaText}
 RSI 1h: ${rsiText}${rsiStatus}
 LSR: ${lsrText}
 Funding: ${fundingText}
 Suporte/Resistência (15m): 
 R1: $${sr.resistance1.toFixed(6)} | R2: $${sr.resistance2.toFixed(6)}
 S1: $${sr.support1.toFixed(6)} | S2: $${sr.support2.toFixed(6)}
-Alvos (ATR ${atr.atr14.toFixed(6)}):
-Alvo 1: $${atr.targets.target1.toFixed(6)} (RR ${atr.riskReward.rr1.toFixed(1)})
-Alvo 2: $${atr.targets.target2.toFixed(6)} (RR ${atr.riskReward.rr2.toFixed(1)})
-Alvo 3: $${atr.targets.target3.toFixed(6)} (RR ${atr.riskReward.rr3.toFixed(1)})
-Alvo 4: $${atr.targets.target4.toFixed(6)} (RR ${atr.riskReward.rr4.toFixed(1)})
+Alvos:
+Alvo 1: $${atr.targets.target1.toFixed(6)} 
+Alvo 2: $${atr.targets.target2.toFixed(6)} 
+Alvo 3: $${atr.targets.target3.toFixed(6)} 
+Alvo 4: $${atr.targets.target4.toFixed(6)} 
 ${stopEmoji} Stop: $${atr.stopLoss.toFixed(6)} 
 `;
 
