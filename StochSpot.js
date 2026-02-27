@@ -37,12 +37,28 @@ const KlineResponseSchema = z.array(
     ])
 );
 
+const LSRResponseSchema = z.array(
+    z.object({
+        longShortRatio: z.string(),
+        longAccount: z.string(),
+        shortAccount: z.string(),
+        symbol: z.string().optional()
+    })
+);
+
+const FundingRateSchema = z.array(
+    z.object({
+        symbol: z.string(),
+        fundingRate: z.string(),
+        fundingTime: z.number()
+    })
+);
+
 const ExchangeInfoSchema = z.object({
     symbols: z.array(
         z.object({
             symbol: z.string(),
-            status: z.string(),
-            quoteAsset: z.string()
+            status: z.string()
         })
     )
 });
@@ -98,6 +114,29 @@ const Volume3mSchema = z.object({
     currentVolume: z.number().optional()
 });
 
+// =====================================================================
+// === SCHEMA PARA FVG (Fair Value Gap) - VERSÃO ROBUSTA ===
+// =====================================================================
+const FVGZoneSchema = z.object({
+    top: z.number(),
+    bottom: z.number(),
+    isMitigated: z.boolean(),
+    mitigationPrice: z.number().optional(),
+    age: z.number()
+});
+
+const FVGSchema = z.object({
+    hasBullishFVG: z.boolean(),
+    hasBearishFVG: z.boolean(),
+    fvgZone: z.union([
+        FVGZoneSchema,
+        z.null(),
+        z.undefined()
+    ]).optional(),
+    timeframe: z.string(),
+    error: z.string().optional()
+}).passthrough();
+
 const PivotPointSchema = z.object({
     pivot: z.number(),
     resistances: z.array(z.any()),
@@ -127,12 +166,14 @@ const RetestDataSchema = z.object({
 
 // Schema principal do sinal
 const StochasticSignalSchema = z.object({
-    symbol: z.string(),
+    symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
     type: z.enum(['STOCHASTIC_COMPRA', 'STOCHASTIC_VENDA']),
     stochastic: StochasticSchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
     rsi15m: z.number().min(0).max(100).optional().nullable(),
     rsi15mDirection: z.enum(['subindo', 'descendo', 'estável']).optional().nullable(),
+    lsr: z.number().optional().nullable(),
+    funding: z.string().optional().nullable(),
     pivotData: PivotPointSchema.nullable(),
     currentPrice: z.number().positive(),
     entryPrice: z.number().positive(),
@@ -156,8 +197,10 @@ const StochasticSignalSchema = z.object({
     volumeData: VolumeAnalysisSchema,
     volume3mData: Volume3mSchema,
     retestData: RetestDataSchema,
-    alertNumber: z.number().int()
-});
+    alertNumber: z.number().int(),
+    // NOVO: Adicionar FVG 3m ao schema
+    fvg3m: FVGSchema.optional()
+}).passthrough();
 
 // Schema para o ErrorHandler
 const ErrorResponseSchema = z.object({
@@ -197,15 +240,28 @@ const RSI_15M_CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÕES DE LSR 15M PARA ALERTAS ===
+// =====================================================================
+const LSR_15M_CONFIG = {
+    COMPRA: {
+        MAX_LSR: 2.6, // LSR deve ser menor que 2.7 para compra
+        ENABLED: true
+    },
+    VENDA: {
+        ENABLED: false // Venda não tem critério de LSR
+    }
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES DE VOLUME 1H OBRIGATÓRIO ===
 // =====================================================================
 const VOLUME_1H_CONFIG = {
     COMPRA: {
-        MIN_BUYER_PERCENTAGE: 35, // Mínimo de 35% volume comprador (ajustado para spot)
+        MIN_BUYER_PERCENTAGE: 35, // Mínimo de 52% volume comprador
         ENABLED: true
     },
     VENDA: {
-        MIN_SELLER_PERCENTAGE: 35, // Mínimo de 35% volume vendedor (ajustado para spot)
+        MIN_SELLER_PERCENTAGE: 52, // Mínimo de 52% volume vendedor
         ENABLED: true
     }
 };
@@ -223,12 +279,24 @@ const VOLUME_3M_ABNORMAL_CONFIG = {
 };
 
 // =====================================================================
+// === CONFIGURAÇÕES DE FVG ===
+// =====================================================================
+const FVG_CONFIG = {
+    TIMEFRAME: '3m',
+    LOOKBACK: 30,
+    REQUIRE_MITIGATION: false,
+    MAX_AGE_CANDLES: 20,
+    REQUIRED_FOR_COMPRA: true,  // FVG é obrigatório para compra
+    REQUIRED_FOR_VENDA: true     // FVG é obrigatório para venda
+};
+
+// =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS (MELHORADO) ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AGg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
 
     STOCHASTIC: {
@@ -825,13 +893,15 @@ async function sendInitializationMessage() {
         const now = getBrazilianDateTime();
         const stateStats = StateManager.getStats();
         
-        const message = `_🚀 TITANIUM SPOT 4H INICIADO ✅
+        const message = `_🚀 TITANIUM 4H INICIADO ✅
 📅 ${now.full}
-✅ ALERTAS ATIVOS - SPOT
+✅ ALERTAS ATIVOS
 📊 Estocástico 4H 14.3.3 (OVERSOLD ${CONFIG.STOCHASTIC.OVERSOLD} | OVERBOUGHT ${CONFIG.STOCHASTIC.OVERBOUGHT})
+📊 FVG 3m OBRIGATÓRIO para confirmação
 📊 Volume 1h OBRIGATÓRIO: Compra >${VOLUME_1H_CONFIG.COMPRA.MIN_BUYER_PERCENTAGE}% comprador | Venda >${VOLUME_1H_CONFIG.VENDA.MIN_SELLER_PERCENTAGE}% vendedor
 📊 Volume 3m Anormal OBRIGATÓRIO: Mínimo ${VOLUME_3M_ABNORMAL_CONFIG.MIN_VOLUME_RATIO}x
 📊 RSI 15m OBRIGATÓRIO: Compra SUBINDO | Venda DESCENDO
+📊 LSR 15m OBRIGATÓRIO: Compra < ${LSR_15M_CONFIG.COMPRA.MAX_LSR}
 📈 Cache Hit Rate: ${CacheManager.getStats().hitRate}
 🗑️ State: ${stateStats.alertCounter} símbolos ativos_`;
         
@@ -841,6 +911,169 @@ async function sendInitializationMessage() {
     } catch (error) {
         console.log(`❌ Erro na mensagem de inicialização: ${error.message}`);
         return false;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO AVANÇADA DE DETECÇÃO DE FVG (Fair Value Gap) - VERSÃO 3 MINUTOS ===
+// =====================================================================
+function detectFVG(candles, signalType) {
+    try {
+        if (!candles || candles.length < 10) {
+            return {
+                hasBullishFVG: false,
+                hasBearishFVG: false,
+                fvgZone: null,
+                timeframe: FVG_CONFIG.TIMEFRAME,
+                error: 'Candles insuficientes'
+            };
+        }
+
+        const lookback = Math.min(FVG_CONFIG.LOOKBACK, candles.length - 3);
+        let bullishFVG = false;
+        let bearishFVG = false;
+        let fvgZone = null;
+        
+        // Método 1: Gap entre corpo do candle anterior e mecha do candle atual
+        for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+            if (i < 1) break;
+            
+            const prevCandle = candles[i - 1];
+            const currentCandle = candles[i];
+            const nextCandle = candles[i + 1];
+            
+            if (!prevCandle || !currentCandle || !nextCandle) continue;
+            
+            // FVG de Alta (Bullish)
+            // Precisa de: low do candle atual > high do candle anterior
+            if (currentCandle.low > prevCandle.high) {
+                const gap = currentCandle.low - prevCandle.high;
+                if (gap > 0) {
+                    bullishFVG = true;
+                    fvgZone = {
+                        top: currentCandle.low,
+                        bottom: prevCandle.high,
+                        isMitigated: false,
+                        age: candles.length - i
+                    };
+                    
+                    // Verificar se o gap já foi preenchido (mitigado)
+                    for (let j = i + 1; j < candles.length; j++) {
+                        if (candles[j].low <= prevCandle.high || candles[j].high >= currentCandle.low) {
+                            fvgZone.isMitigated = true;
+                            fvgZone.mitigationPrice = candles[j].close;
+                            break;
+                        }
+                    }
+                    
+                    if (signalType === 'STOCHASTIC_COMPRA' && !FVG_CONFIG.REQUIRE_MITIGATION) {
+                        break;
+                    }
+                }
+            }
+            
+            // FVG de Baixa (Bearish)
+            // Precisa de: high do candle atual < low do candle anterior
+            if (currentCandle.high < prevCandle.low) {
+                const gap = prevCandle.low - currentCandle.high;
+                if (gap > 0) {
+                    bearishFVG = true;
+                    fvgZone = {
+                        top: prevCandle.low,
+                        bottom: currentCandle.high,
+                        isMitigated: false,
+                        age: candles.length - i
+                    };
+                    
+                    // Verificar se o gap já foi preenchido (mitigado)
+                    for (let j = i + 1; j < candles.length; j++) {
+                        if (candles[j].high >= prevCandle.low || candles[j].low <= currentCandle.high) {
+                            fvgZone.isMitigated = true;
+                            fvgZone.mitigationPrice = candles[j].close;
+                            break;
+                        }
+                    }
+                    
+                    if (signalType === 'STOCHASTIC_VENDA' && !FVG_CONFIG.REQUIRE_MITIGATION) {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Método 2: Detecção baseada em sombras (wick-to-wick)
+        if (!bullishFVG && !bearishFVG) {
+            for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+                if (i < 1) break;
+                
+                const prevCandle = candles[i - 1];
+                const currentCandle = candles[i];
+                const nextCandle = candles[i + 1];
+                
+                if (!prevCandle || !currentCandle || !nextCandle) continue;
+                
+                // FVG de Alta baseado em sombras
+                if (currentCandle.low > prevCandle.high && currentCandle.close > prevCandle.high) {
+                    bullishFVG = true;
+                    if (signalType === 'STOCHASTIC_COMPRA') break;
+                }
+                
+                // FVG de Baixa baseado em sombras
+                if (currentCandle.high < prevCandle.low && currentCandle.close < prevCandle.low) {
+                    bearishFVG = true;
+                    if (signalType === 'STOCHASTIC_VENDA') break;
+                }
+            }
+        }
+        
+        // Método 3: Detecção de imbalance (3 candle pattern)
+        if (!bullishFVG && !bearishFVG) {
+            for (let i = candles.length - 3; i >= candles.length - lookback; i--) {
+                if (i < 2) break;
+                
+                const candle1 = candles[i - 2];
+                const candle2 = candles[i - 1];
+                const candle3 = candles[i];
+                
+                if (!candle1 || !candle2 || !candle3) continue;
+                
+                // Bullish imbalance: candle3 low > candle1 high
+                if (candle3.low > candle1.high) {
+                    bullishFVG = true;
+                    if (signalType === 'STOCHASTIC_COMPRA') break;
+                }
+                
+                // Bearish imbalance: candle3 high < candle1 low
+                if (candle3.high < candle1.low) {
+                    bearishFVG = true;
+                    if (signalType === 'STOCHASTIC_VENDA') break;
+                }
+            }
+        }
+        
+        // Verificar idade do FVG (evitar FVGs muito antigos)
+        if (fvgZone && fvgZone.age > FVG_CONFIG.MAX_AGE_CANDLES) {
+            if (bullishFVG) bullishFVG = false;
+            if (bearishFVG) bearishFVG = false;
+            fvgZone = null;
+        }
+        
+        return {
+            hasBullishFVG: bullishFVG,
+            hasBearishFVG: bearishFVG,
+            fvgZone: fvgZone,
+            timeframe: FVG_CONFIG.TIMEFRAME
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro na detecção de FVG: ${error.message}`);
+        return {
+            hasBullishFVG: false,
+            hasBearishFVG: false,
+            fvgZone: null,
+            timeframe: FVG_CONFIG.TIMEFRAME,
+            error: error.message
+        };
     }
 }
 
@@ -861,8 +1094,7 @@ async function getCandles(symbol, timeframe, limit = 80) {
         };
         
         const interval = intervalMap[timeframe] || '4h';
-        // Usando endpoint SPOT da Binance
-        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
         const data = await ErrorHandler.retry(
             () => rateLimiter.makeRequest(url, {}, 'klines'),
@@ -1143,6 +1375,60 @@ async function getRSI15m(symbol) {
             value: currentRSI,
             previousValue: prevRSI,
             direction: direction
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function getLSR(symbol) {
+    try {
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`;
+        const response = await ErrorHandler.retry(
+            () => rateLimiter.makeRequest(url, {}, 'lsr'),
+            `LSR-${symbol}`,
+            1,
+            300
+        );
+        
+        const validatedResponse = LSRResponseSchema.parse(response);
+       
+        if (!validatedResponse || validatedResponse.length === 0) {
+            return null;
+        }
+       
+        const data = validatedResponse[0];
+        return {
+            lsrValue: parseFloat(data.longShortRatio),
+            longAccount: parseFloat(data.longAccount),
+            shortAccount: parseFloat(data.shortAccount)
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+async function getFundingRate(symbol) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
+        const data = await ErrorHandler.retry(
+            () => rateLimiter.makeRequest(url, {}, 'fundingRate'),
+            `Funding-${symbol}`,
+            1,
+            300
+        );
+        
+        const validatedData = FundingRateSchema.parse(data);
+        
+        if (!validatedData || validatedData.length === 0) {
+            return null;
+        }
+        
+        const fundingRate = parseFloat(validatedData[0].fundingRate);
+       
+        return {
+            rate: fundingRate,
+            ratePercent: (fundingRate * 100).toFixed(5)
         };
     } catch (error) {
         return null;
@@ -1636,7 +1922,7 @@ async function analyzeSupportResistanceRetest(symbol, currentPrice, signalType) 
 }
 
 // =====================================================================
-// === SINAIS DE ESTOCÁSTICO MELHORADOS ===
+// === SINAIS DE ESTOCÁSTICO MELHORADOS COM FVG 3m ===
 // =====================================================================
 async function checkStochasticSignal(symbol) {
     if (!CONFIG.STOCHASTIC.ENABLED) {
@@ -1664,6 +1950,8 @@ async function checkStochasticSignal(symbol) {
         
         let signalType = null;
         
+        // REMOVIDO: Filtro de cruzamento fresco
+        // Agora aceita qualquer cruzamento, não apenas o primeiro
         if (stochastic.isCrossingUp) {
             signalType = 'STOCHASTIC_COMPRA';
             stochCrossState.set(symbol, {
@@ -1702,6 +1990,24 @@ async function checkStochasticSignal(symbol) {
             return null;
         }
         
+        // ===== NOVO: FILTRO OBRIGATÓRIO DE FVG 3m =====
+        const candles3m = await getCandles(symbol, FVG_CONFIG.TIMEFRAME, 50);
+        const fvgAnalysis = detectFVG(candles3m, signalType);
+        
+        if (FVG_CONFIG.REQUIRED_FOR_COMPRA && signalType === 'STOCHASTIC_COMPRA') {
+            if (!fvgAnalysis.hasBullishFVG) {
+                logRejection(symbol, 'FVG 3m', 'Sem FVG de alta para confirmar compra');
+                return null;
+            }
+        }
+        
+        if (FVG_CONFIG.REQUIRED_FOR_VENDA && signalType === 'STOCHASTIC_VENDA') {
+            if (!fvgAnalysis.hasBearishFVG) {
+                logRejection(symbol, 'FVG 3m', 'Sem FVG de baixa para confirmar venda');
+                return null;
+            }
+        }
+        
         const emaCheck = await checkEMA3m(symbol, signalType);
         if (!emaCheck.isValid) {
             logRejection(symbol, 'EMA 3m', emaCheck.error || 'Falhou nos critérios', { analysis: emaCheck.analysis });
@@ -1711,17 +2017,23 @@ async function checkStochasticSignal(symbol) {
         const [
             rsiData, 
             rsi15mData, 
+            lsrData, 
+            fundingData, 
             volumeData, 
             volume3mData
         ] = await Promise.allSettled([
             getRSI1h(symbol),
             getRSI15m(symbol),
+            getLSR(symbol),
+            getFundingRate(symbol),
             analyzeVolume1hWithEMA9(symbol),
             analyzeVolume3mWithAbnormalDetection(symbol)
         ]);
         
         const rsiValue = rsiData.status === 'fulfilled' ? rsiData.value : null;
         const rsi15mValue = rsi15mData.status === 'fulfilled' ? rsi15mData.value : null;
+        const lsrValue = lsrData.status === 'fulfilled' ? lsrData.value : null;
+        const fundingValue = fundingData.status === 'fulfilled' ? fundingData.value : null;
         const volumeValue = volumeData.status === 'fulfilled' ? volumeData.value : { direction: 'Erro', percentage: 0, emoji: '❌' };
         const volume3mValue = volume3mData.status === 'fulfilled' ? volume3mData.value : { 
             direction: 'Erro', 
@@ -1780,6 +2092,14 @@ async function checkStochasticSignal(symbol) {
             }
         }
         
+        // ===== FILTRO OBRIGATÓRIO DE LSR 15M =====
+        if (LSR_15M_CONFIG.COMPRA.ENABLED && signalType === 'STOCHASTIC_COMPRA') {
+            if (!lsrValue || lsrValue.lsrValue >= LSR_15M_CONFIG.COMPRA.MAX_LSR) {
+                logRejection(symbol, 'LSR 15m', `LSR: ${lsrValue?.lsrValue?.toFixed(2) || 'N/A'}, max: ${LSR_15M_CONFIG.COMPRA.MAX_LSR}`);
+                return null;
+            }
+        }
+        
         // ===== FILTRO OPCIONAL DE RSI 1H =====
         if (signalType === 'STOCHASTIC_COMPRA' && RSI_1H_CONFIG.COMPRA.ENABLED) {
             if (!rsiValue || rsiValue.value >= RSI_1H_CONFIG.COMPRA.MAX_RSI) {
@@ -1818,6 +2138,8 @@ async function checkStochasticSignal(symbol) {
             rsi: rsiValue?.value,
             rsi15m: rsi15mValue?.value,
             rsi15mDirection: rsi15mValue?.direction,
+            lsr: lsrValue?.lsrValue,
+            funding: fundingValue?.ratePercent,
             pivotData: pivotData,
             currentPrice: currentPrice,
             entryPrice: entryPrice,
@@ -1829,7 +2151,9 @@ async function checkStochasticSignal(symbol) {
             volumeData: volumeValue,
             volume3mData: volume3mValue,
             retestData: retestData,
-            alertNumber: alertNumber
+            alertNumber: alertNumber,
+            // NOVO: Adicionar FVG 3m ao sinal
+            fvg3m: fvgAnalysis
         };
         
         return StochasticSignalSchema.parse(signal);
@@ -1855,13 +2179,99 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
     };
 
     const weights = {
-        RSI: 30,
-        STRUCTURE: 35,
-        PIVOT_DISTANCE: 35
+        FUNDING: 20,
+        LSR: 30,
+        RSI: 20,
+        STRUCTURE: 25,
+        PIVOT_DISTANCE: 25
     };
 
     factors.maxScore = Object.values(weights).reduce((a, b) => a + b, 0);
     let totalScore = 0;
+
+    if (indicators.funding) {
+        const fundingValue = parseFloat(indicators.funding) / 100;
+
+        if (signalType === 'STOCHASTIC_COMPRA') {
+            if (fundingValue <= -0.001) {
+                factors.positive.push(`🟢🟢 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING;
+            } else if (fundingValue <= -0.0003) {
+                factors.positive.push(`🟢 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.7;
+            } else if (fundingValue <= 0) {
+                factors.positive.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.4;
+            } else if (fundingValue <= 0.0003) {
+                factors.negative.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.2;
+            } else if (fundingValue <= 0.001) {
+                factors.negative.push(`🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+            } else {
+                factors.negative.push(`🔴🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+            }
+        } else {
+            if (fundingValue >= 0.001) {
+                factors.positive.push(`🔴🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING;
+            } else if (fundingValue >= 0.0003) {
+                factors.positive.push(`🔴 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.7;
+            } else if (fundingValue > 0) {
+                factors.positive.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.4;
+            } else if (fundingValue >= -0.0003) {
+                factors.negative.push(`🟡 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+                totalScore += weights.FUNDING * 0.2;
+            } else if (fundingValue >= -0.001) {
+                factors.negative.push(`🔵 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+            } else {
+                factors.negative.push(`🔵🔵 FUNDING: ${(fundingValue * 100).toFixed(4)}%`);
+            }
+        }
+    } else {
+        factors.neutral.push(`⚪ FUNDING: Indisponível`);
+    }
+
+    if (indicators.lsr) {
+        const lsrValue = indicators.lsr;
+
+        if (signalType === 'STOCHASTIC_COMPRA') {
+            if (lsrValue < 1.5) {
+                factors.positive.push(`🟢🟢 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR;
+            } else if (lsrValue < 2.5) {
+                factors.positive.push(`🟢 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.8;
+            } else if (lsrValue < 3.0) {
+                factors.positive.push(`🟡 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.5;
+            } else if (lsrValue < 4.0) {
+                factors.negative.push(`🟡 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.2;
+            } else {
+                factors.negative.push(`🔴 LSR: ${lsrValue.toFixed(3)}`);
+            }
+        } else {
+            if (lsrValue > 4.0) {
+                factors.positive.push(`🔴🔴 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR;
+            } else if (lsrValue > 2.8) {
+                factors.positive.push(`🔴 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.8;
+            } else if (lsrValue > 2.0) {
+                factors.positive.push(`🟡 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.5;
+            } else if (lsrValue > 1.5) {
+                factors.negative.push(`🟡 LSR: ${lsrValue.toFixed(3)}`);
+                totalScore += weights.LSR * 0.2;
+            } else {
+                factors.negative.push(`🔵 LSR: ${lsrValue.toFixed(3)}`);
+            }
+        }
+    } else {
+        factors.neutral.push(`⚪ LSR: Indisponível`);
+    }
 
     if (indicators.rsi) {
         const rsiValue = indicators.rsi;
@@ -1958,7 +2368,7 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
 
     if (indicators.emaCheck && indicators.emaCheck.analysis) {
         factors.positive.push(`📊 EMA confirmou`);
-        totalScore += 20;
+        totalScore += 15;
     }
 
     factors.score = Math.min(100, Math.round((totalScore / factors.maxScore) * 100));
@@ -2032,13 +2442,13 @@ async function analyzeTradeFactors(symbol, signalType, indicators) {
         }
     } else {
         if (factors.score >= 80) {
-            factors.summary = '🏆 Excelente PARA VENDA';
+            factors.summary = '🏆 Excelente PARA CORREÇÃO';
         } else if (factors.score >= 65) {
-            factors.summary = '👍 Favorável PARA VENDA';
+            factors.summary = '👍 Favorável PARA CORREÇÃO';
         } else if (factors.score >= 50) {
-            factors.summary = '⚖️ Neutra PARA VENDA';
+            factors.summary = '⚖️ Neutra PARA CORREÇÃO';
         } else {
-            factors.summary = '⚠️ Desfavorável PARA VENDA';
+            factors.summary = '⚠️ Desfavorável PARA CORREÇÃO';
         }
     }
 
@@ -2056,6 +2466,8 @@ async function sendStochasticAlertEnhanced(signal) {
     stochasticCooldown.set(signal.symbol, Date.now());
    
     const factors = await analyzeTradeFactors(signal.symbol, signal.type, {
+        funding: signal.funding,
+        lsr: signal.lsr,
         rsi: signal.rsi,
         pivotData: signal.pivotData,
         currentPrice: currentPrice,
@@ -2070,13 +2482,15 @@ async function sendStochasticAlertEnhanced(signal) {
     } catch (error) {}
    
     let atrTargetsText = 'Alvos: N/A';
+    let atrValue = 0;
     if (signal.atrTargets) {
         const atr = signal.atrTargets.atr;
+        atrValue = atr;
        
         if (signal.type === 'STOCHASTIC_COMPRA') {
-            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(8)} | T2: $${signal.atrTargets.targets.t2.toFixed(8)} | T3: $${signal.atrTargets.targets.t3.toFixed(8)} | T4: $${signal.atrTargets.targets.t4.toFixed(8)}`;
+            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
         } else {
-            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(8)} | T2: $${signal.atrTargets.targets.t2.toFixed(8)} | T3: $${signal.atrTargets.targets.t3.toFixed(8)} | T4: $${signal.atrTargets.targets.t4.toFixed(8)}`;
+            atrTargetsText = `Alvos: T1: $${signal.atrTargets.targets.t1.toFixed(6)} | T2: $${signal.atrTargets.targets.t2.toFixed(6)} | T3: $${signal.atrTargets.targets.t3.toFixed(6)} | T4: $${signal.atrTargets.targets.t4.toFixed(6)}`;
         }
     }
    
@@ -2096,7 +2510,7 @@ async function sendStochasticAlertEnhanced(signal) {
             }
            
             stopPercent = ((price - stopPrice) / price * 100);
-            stopCompact = `Stop: $${stopPrice.toFixed(8)} (${stopPercent.toFixed(2)}%)`;
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(2)}%)`;
            
         } else {
             stopPrice = srInfo.nearestResistance * 1.005;
@@ -2107,7 +2521,7 @@ async function sendStochasticAlertEnhanced(signal) {
             }
            
             stopPercent = ((stopPrice - price) / price * 100);
-            stopCompact = `Stop: $${stopPrice.toFixed(8)} (${stopPercent.toFixed(2)}%)`;
+            stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(2)}%)`;
         }
     } else if (signal.atrTargets) {
         const atr = signal.atrTargets.atr;
@@ -2119,7 +2533,7 @@ async function sendStochasticAlertEnhanced(signal) {
             stopPrice = entryPrice + (atr * 1.2);
             stopPercent = ((stopPrice - entryPrice) / entryPrice * 100);
         }
-        stopCompact = `Stop: $${stopPrice.toFixed(8)} (${stopPercent.toFixed(2)}%)`;
+        stopCompact = `Stop: $${stopPrice.toFixed(6)} (${stopPercent.toFixed(2)}%)`;
     }
    
     let srCompact = '';
@@ -2129,7 +2543,7 @@ async function sendStochasticAlertEnhanced(signal) {
         const distR = resistance ? ((resistance - currentPrice) / currentPrice * 100).toFixed(1) : 'N/A';
         const distS = support ? ((currentPrice - support) / currentPrice * 100).toFixed(1) : 'N/A';
        
-        srCompact = `Resist: $${resistance?.toFixed(8) || 'N/A'} (${distR}%) | Supt: $${support?.toFixed(8) || 'N/A'} (${distS}%)`;
+        srCompact = `Resist: $${resistance?.toFixed(6) || 'N/A'} (${distR}%) | Supt: $${support?.toFixed(6) || 'N/A'} (${distS}%)`;
     }
    
     let pivotDistanceText = '';
@@ -2140,7 +2554,7 @@ async function sendStochasticAlertEnhanced(signal) {
             if (pivot.nearestResistance) {
                 const distToResistance = pivot.nearestResistance.distancePercent;
                 const emoji = distToResistance > 5 ? '🟢' : distToResistance > 3 ? '🟡' : '🔴';
-                pivotDistanceText = `📊 Pivô: Resistência em $${pivot.nearestResistance.price.toFixed(8)} (${distToResistance.toFixed(2)}% ${emoji})`;
+                pivotDistanceText = `📊 Pivô: Resistência em $${pivot.nearestResistance.price.toFixed(6)} (${distToResistance.toFixed(2)}% ${emoji})`;
             } else {
                 pivotDistanceText = `📊 Pivô: N/A`;
             }
@@ -2148,7 +2562,7 @@ async function sendStochasticAlertEnhanced(signal) {
             if (pivot.nearestSupport) {
                 const distToSupport = pivot.nearestSupport.distancePercent;
                 const emoji = distToSupport > 5 ? '🔴' : distToSupport > 3 ? '🟡' : '🔵';
-                pivotDistanceText = `📊 Pivô: Suporte em $${pivot.nearestSupport.price.toFixed(8)} (${distToSupport.toFixed(2)}% ${emoji})`;
+                pivotDistanceText = `📊 Pivô: Suporte em $${pivot.nearestSupport.price.toFixed(6)} (${distToSupport.toFixed(2)}% ${emoji})`;
             } else {
                 pivotDistanceText = `📊 Pivô: N/A`;
             }
@@ -2156,6 +2570,32 @@ async function sendStochasticAlertEnhanced(signal) {
     } else {
         pivotDistanceText = `📊 Pivô: Indisponível`;
     }
+   
+    let lsrText = 'N/A';
+    let lsrEmoji = '';
+    if (signal.lsr) {
+        lsrText = signal.lsr.toFixed(2);
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            lsrEmoji = signal.lsr < 2.7 ? '✅' : '⚠️';
+        } else {
+            lsrEmoji = signal.lsr > 2.8 ? '✅' : '⚠️';
+        }
+    }
+   
+    let fundingText = '0.0000%';
+    let fundingEmoji = '';
+    if (signal.funding) {
+        const fundingValue = parseFloat(signal.funding) / 100;
+        fundingText = `${fundingValue > 0 ? '+' : ''}${(fundingValue * 100).toFixed(4)}%`;
+       
+        if (signal.type === 'STOCHASTIC_COMPRA') {
+            fundingEmoji = fundingValue < 0 ? '✅' : fundingValue > 0.0003 ? '❌' : '⚠️';
+        } else {
+            fundingEmoji = fundingValue > 0 ? '✅' : fundingValue < -0.0003 ? '❌' : '⚠️';
+        }
+    }
+   
+    const stochText = `K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)}`;
    
     let rsiText = 'N/A';
     if (signal.rsi) {
@@ -2184,26 +2624,46 @@ async function sendStochasticAlertEnhanced(signal) {
         volume3mText = `Volume 3m: ${vol3m.percentage}% ${vol3m.direction} ${vol3m.emoji}${abnormalText}`;
     }
    
+    // NOVO: Formatação do FVG 3m no alerta
+    let fvgText = '';
+    if (signal.fvg3m) {
+        if (signal.fvg3m.hasBullishFVG) {
+            fvgText = `FVG 3m: ✅ BULLISH`;
+            if (signal.fvg3m.fvgZone) {
+                fvgText += ` (${signal.fvg3m.fvgZone.bottom.toFixed(6)}-${signal.fvg3m.fvgZone.top.toFixed(6)})`;
+                if (signal.fvg3m.fvgZone.isMitigated) fvgText += ` [Mitigado]`;
+            }
+        } else if (signal.fvg3m.hasBearishFVG) {
+            fvgText = `FVG 3m: 🔴 BEARISH`;
+            if (signal.fvg3m.fvgZone) {
+                fvgText += ` (${signal.fvg3m.fvgZone.bottom.toFixed(6)}-${signal.fvg3m.fvgZone.top.toFixed(6)})`;
+                if (signal.fvg3m.fvgZone.isMitigated) fvgText += ` [Mitigado]`;
+            }
+        }
+    }
+   
     let entryRetractionText = '';
     if (signal.entryRetraction && signal.entryRetraction.retractionRange) {
         const range = signal.entryRetraction.retractionRange;
-        entryRetractionText = `Retração: $${range.min.toFixed(8)} ... $${range.max.toFixed(8)} (${range.percent.toFixed(2)}%)`;
+        entryRetractionText = `Retração: $${range.min.toFixed(6)} ... $${range.max.toFixed(6)} (${range.percent.toFixed(2)}%)`;
     }
    
     const symbolData = alertCounter.get(signal.symbol);
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'STOCHASTIC_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'STOCHASTIC_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar VENDA';
+    const actionText = signal.type === 'STOCHASTIC_COMPRA' ? '🔍Analisar COMPRA' : '🔍Analisar CORREÇÃO';
    
     let message = `_${actionEmoji} ${actionText} • ${signal.symbol}
-Preço: $${currentPrice.toFixed(8)}
+Preço: $${currentPrice.toFixed(6)}
 📍SCORE: ${factors.score}
 ${volumeText}
 ${volume3mText}
+${fvgText}
 ${counterText} - ${signal.time.full}
 ❅──────✧❅✨❅✧──────❅
-🔘#Stoch #4H K${signal.stochastic.k.toFixed(1)}/D${signal.stochastic.d.toFixed(1)} | RSI 1H ${rsiText}${rsi15mText}
+🔘#Stoch #4H ${stochText} | RSI 1H ${rsiText}${rsi15mText}
+LSR ${lsrEmoji} ${lsrText} | Fund ${fundingEmoji} ${fundingText}
 🔘${entryRetractionText}
 ${atrTargetsText}
 🛑 ${stopCompact}
@@ -2211,23 +2671,23 @@ ${atrTargetsText}
 ${srCompact}
 ${pivotDistanceText}
 Alerta Educativo, não é recomendação de investimento
-✨ Titanium Spot by @J4Rviz ✨_`;
+✨ Titanium by @J4Rviz ✨_`;
    
     message = message.replace(/\n\s*\n/g, '\n').trim();
    
     await sendTelegramAlert(message);
    
-    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | Volume 3m anormal: ${signal.volume3mData?.isAbnormal ? '✅' : '❌'} (${signal.volume3mData?.volumeRatio?.toFixed(2) || 'N/A'}x)`);
+    console.log(`✅ Alerta #${alertNumber} enviado: ${signal.symbol} (${actionText}) | Score: ${factors.score}% | FVG: ${signal.fvg3m?.hasBullishFVG ? 'BULLISH' : signal.fvg3m?.hasBearishFVG ? 'BEARISH' : 'Nenhum'} | Volume 3m anormal: ${signal.volume3mData?.isAbnormal ? '✅' : '❌'} (${signal.volume3mData?.volumeRatio?.toFixed(2) || 'N/A'}x)`);
 }
 
 // =====================================================================
 // === MONITORAMENTO PRINCIPAL OTIMIZADO ===
 // =====================================================================
-async function fetchAllSpotSymbols() {
+async function fetchAllFuturesSymbols() {
     try {
         const data = await ErrorHandler.retry(
             () => rateLimiter.makeRequest(
-                'https://api.binance.com/api/v3/exchangeInfo',
+                'https://fapi.binance.com/fapi/v1/exchangeInfo',
                 {},
                 'exchangeInfo'
             ),
@@ -2238,12 +2698,11 @@ async function fetchAllSpotSymbols() {
         
         const validatedData = ExchangeInfoSchema.parse(data);
         
-        // Filtrar apenas pares que negociam com USDT no spot
         return validatedData.symbols
-            .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING' && s.quoteAsset === 'USDT')
+            .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
     } catch (error) {
-        console.log('❌ Erro ao buscar símbolos spot, usando lista básica');
+        console.log('❌ Erro ao buscar símbolos, usando lista básica');
         return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
     }
 }
@@ -2271,12 +2730,12 @@ async function monitorBatch(symbols) {
 
 async function mainBotLoop() {
     try {
-        const symbols = await fetchAllSpotSymbols();
+        const symbols = await fetchAllFuturesSymbols();
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM SPOT');
-        console.log(`📈 ${symbols.length} símbolos SPOT | Batch: ${batchSize}`);
+        console.log('🚀 TITANIUM 4H');
+        console.log(`📈 ${symbols.length} símbolos | Batch: ${batchSize}`);
         console.log('='.repeat(60) + '\n');
        
         let cycle = 0;
@@ -2343,7 +2802,7 @@ async function startBot() {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 TITANIUM SPOT');
+        console.log('🚀 TITANIUM 4H');
         console.log('='.repeat(60) + '\n');
 
         console.log('📅 Inicializando...');
@@ -2358,7 +2817,7 @@ async function startBot() {
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
-        const testMessage = `_🤖 Bot Titanium SPOT iniciando em ${getBrazilianDateTime().full}_`;
+        const testMessage = `_🤖 Bot Titanium iniciando em ${getBrazilianDateTime().full}_`;
         const testResult = await sendTelegramAlert(testMessage);
 
         if (testResult) {
@@ -2398,7 +2857,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Iniciar o bot
-console.log('🚀 Iniciando Titanium SPOT Bot...');
+console.log('🚀 Iniciando Titanium 4H Bot...');
 
 startBot().catch(error => {
     console.error('❌ Erro fatal:', error);
