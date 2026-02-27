@@ -101,19 +101,26 @@ const StochRSISchema = z.object({
     timeframe: z.string()
 });
 
-// Schema para FVG (Fair Value Gap)
+// Schema para FVG (Fair Value Gap) - VERSÃO MAIS ROBUSTA
+const FVGZoneSchema = z.object({
+    top: z.number(),
+    bottom: z.number(),
+    isMitigated: z.boolean(),
+    mitigationPrice: z.number().optional(),
+    age: z.number()
+});
+
 const FVGSchema = z.object({
     hasBullishFVG: z.boolean(),
     hasBearishFVG: z.boolean(),
-    fvgZone: z.object({
-        top: z.number(),
-        bottom: z.number(),
-        isMitigated: z.boolean(),
-        mitigationPrice: z.number().optional(),
-        age: z.number()
-    }).optional(),
-    timeframe: z.string()
-});
+    fvgZone: z.union([
+        FVGZoneSchema,
+        z.null(),
+        z.undefined()
+    ]).optional(),
+    timeframe: z.string(),
+    error: z.string().optional() // Adicionado campo de erro opcional
+}).passthrough(); // Permite campos extras
 
 // Schema para alvos de ATR (AJUSTADO - Stops e alvos maiores)
 const ATRTargetsSchema = z.object({
@@ -203,14 +210,14 @@ const PivotMultiTimeframeSchema = z.object({
     analysis: z.string()
 });
 
-// Schema principal do sinal
+// Schema principal do sinal - VERSÃO MAIS ROBUSTA
 const CCISignalSchema = z.object({
     symbol: z.string().regex(/^[A-Z0-9]+USDT$/),
     type: z.enum(['CCI_COMPRA', 'CCI_VENDA']),
     cci: CCISchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
     stoch4h: StochRSISchema.optional().nullable(),
-    fvg3m: FVGSchema,
+    fvg3m: FVGSchema, // Agora usa o schema robusto
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     currentPrice: z.number().positive(),
@@ -232,15 +239,15 @@ const CCISignalSchema = z.object({
         percentage: z.string()
     }).optional(),
     pivotAnalysis: PivotMultiTimeframeSchema
-});
+}).passthrough(); // Permite campos extras para segurança
 
 // =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -680,6 +687,12 @@ class ErrorHandler {
             errorResponse.type = 'ZOD_VALIDATION_ERROR';
             errorResponse.retryable = false;
             errorResponse.message = 'Erro de validação';
+            
+            // Log detalhado do erro Zod para debug
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`📋 Detalhes Zod [${context}]:`, JSON.stringify(error.errors, null, 2));
+            }
+            
             return errorResponse;
         }
 
@@ -1085,15 +1098,17 @@ function calculateStochRSI(symbol, candles) {
 }
 
 // =====================================================================
-// === FUNÇÃO AVANÇADA DE DETECÇÃO DE FVG (Fair Value Gap) ===
+// === FUNÇÃO AVANÇADA DE DETECÇÃO DE FVG (Fair Value Gap) - VERSÃO MAIS ROBUSTA ===
 // =====================================================================
 function detectFVG(candles, signalType) {
     try {
-        if (candles.length < 10) {
+        if (!candles || candles.length < 10) {
             return {
                 hasBullishFVG: false,
                 hasBearishFVG: false,
-                timeframe: CONFIG.FVG.TIMEFRAME
+                fvgZone: null,
+                timeframe: CONFIG.FVG.TIMEFRAME,
+                error: 'Candles insuficientes'
             };
         }
 
@@ -1223,12 +1238,13 @@ function detectFVG(candles, signalType) {
         if (fvgZone && fvgZone.age > CONFIG.FVG.MAX_AGE_CANDLES) {
             if (bullishFVG) bullishFVG = false;
             if (bearishFVG) bearishFVG = false;
+            fvgZone = null; // Resetar fvgZone se muito antigo
         }
         
         return {
             hasBullishFVG: bullishFVG,
             hasBearishFVG: bearishFVG,
-            fvgZone: fvgZone,
+            fvgZone: fvgZone, // Pode ser null se não houver FVG
             timeframe: CONFIG.FVG.TIMEFRAME
         };
         
@@ -1237,7 +1253,9 @@ function detectFVG(candles, signalType) {
         return {
             hasBullishFVG: false,
             hasBearishFVG: false,
-            timeframe: CONFIG.FVG.TIMEFRAME
+            fvgZone: null,
+            timeframe: CONFIG.FVG.TIMEFRAME,
+            error: error.message
         };
     }
 }
@@ -1935,7 +1953,7 @@ async function calculateATRTargets(symbol, currentPrice, signalType) {
 }
 
 // =====================================================================
-// === SINAIS DE CCI COM FVG DE CONFIRMAÇÃO ===
+// === SINAIS DE CCI COM FVG DE CONFIRMAÇÃO - VERSÃO MAIS ROBUSTA ===
 // =====================================================================
 async function checkCCISignal(symbol) {
     if (!CONFIG.CCI.ENABLED) {
@@ -1970,7 +1988,7 @@ async function checkCCISignal(symbol) {
         const candles3m = await getCandles(symbol, CONFIG.FVG.TIMEFRAME, 50);
         const fvgAnalysis = detectFVG(candles3m, signalType);
         
-        // Validar FVG de acordo com o tipo de sinal
+        // Validar FVG de acordo com o tipo de sinal (com tratamento robusto)
         if (signalType === 'CCI_COMPRA' && !fvgAnalysis.hasBullishFVG) {
             logRejection(symbol, 'FVG 3m', 'Sem FVG de alta para confirmar compra');
             return null;
@@ -2075,10 +2093,16 @@ async function checkCCISignal(symbol) {
             pivotAnalysis: pivotAnalysis
         };
         
+        // Validar com o schema robusto
         return CCISignalSchema.parse(signal);
         
     } catch (error) {
-        logRejection(symbol, 'Erro', error.message);
+        if (error instanceof z.ZodError) {
+            // Log detalhado do erro de validação
+            console.log(`❌ Erro de validação Zod para ${symbol}:`, JSON.stringify(error.errors, null, 2));
+        } else {
+            logRejection(symbol, 'Erro', error.message);
+        }
         return null;
     }
 }
@@ -2161,9 +2185,10 @@ async function sendCCIAlert(signal) {
         }
     }
     
-    // Formatação do FVG 3m
+    // Formatação do FVG 3m - COM TRATAMENTO PARA fvgZone NULL
     let fvgText = 'FVG 3m: ';
     let fvgEmoji = '';
+    
     if (fvg3m) {
         if (fvg3m.hasBullishFVG) {
             fvgText += '✅ BULLISH';
@@ -2182,6 +2207,8 @@ async function sendCCIAlert(signal) {
         } else {
             fvgText += '❌ Nenhum';
         }
+    } else {
+        fvgText += '❌ Dados indisponíveis';
     }
    
     const symbolData = alertCounter.get(signal.symbol);
@@ -2213,7 +2240,7 @@ async function sendCCIAlert(signal) {
     const stopEmoji = signal.type === 'CCI_COMPRA' ? '⛔' : '⛔';
     const targetEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
     
-    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MÉDIO' ? '🟡' : '🟢';
+    const riskEmoji = proximity.riskLevel === 'ALTO' ? '🔴' : proximity.riskLevel === 'MEDIO' ? '🟡' : '🟢';
     
     // NOVA FORMATAÇÃO: Pivot Multi-timeframe SIMPLIFICADA
     const pivotEmoji = pivotAnalysis.confluenceEmoji;
@@ -2234,7 +2261,7 @@ async function sendCCIAlert(signal) {
     if (pivotAnalysis.possibleBreakout) {
         const breakoutEmoji = pivotAnalysis.breakoutDirection === 'ALTA' ? '🚀' : '📉';
         const confidenceEmoji = pivotAnalysis.breakoutConfidence === 'ALTA' ? '🔴' : 
-                               pivotAnalysis.breakoutConfidence === 'MÉDIA' ? '🟡' : '🟢';
+                               pivotAnalysis.breakoutConfidence === 'MEDIA' ? '🟡' : '🟢';
         breakoutText = `\n${breakoutEmoji} POSSÍVEL ROMPIMENTO para ${pivotAnalysis.breakoutDirection} (confiança ${pivotAnalysis.breakoutConfidence} ${confidenceEmoji}) - Volume ${volumeEma.ratio.toFixed(2)}x EMA9!`;
     }
     
