@@ -246,8 +246,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6A',
-        CHAT_ID: '-1002'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -2215,7 +2215,7 @@ async function sendCCIAlert(signal) {
     const counterText = ` ${signal.symbol}: #${alertNumber} (Hoje: C:${symbolData?.dailyCompra || 0}/V:${symbolData?.dailyVenda || 0})`;
    
     const actionEmoji = signal.type === 'CCI_COMPRA' ? '🟢' : '🔴';
-    const actionText = signal.type === 'CCI_COMPRA' ? '🔍 SINAL DE COMPRA' : '🔍 SINAL DE VENDA';
+    const actionText = signal.type === 'CCI_COMPRA' ? '🔍🤖Analisar Compra' : '🔍🤖IA Analisar Correção';
     
     const emaAnalysis = signal.emaCheck?.analysis || 'EMA: OK';
     const volumeAnalysis = signal.emaCheck?.volumeAnalysis || 'Volume: OK';
