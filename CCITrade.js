@@ -210,7 +210,7 @@ const CCISignalSchema = z.object({
     cci: CCISchema,
     rsi: z.number().min(0).max(100).optional().nullable(),
     stoch4h: StochRSISchema.optional().nullable(),
-    fvg15m: FVGSchema,
+    fvg3m: FVGSchema,
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     currentPrice: z.number().positive(),
@@ -239,8 +239,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSg',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
 
     CCI: {
@@ -261,7 +261,7 @@ const CONFIG = {
     },
 
     FVG: {
-        TIMEFRAME: '15m',
+        TIMEFRAME: '3m',  // ALTERADO DE 15m PARA 3m
         LOOKBACK: 30,
         REQUIRE_MITIGATION: false,
         MAX_AGE_CANDLES: 20
@@ -934,6 +934,7 @@ async function sendInitializationMessage() {
 📊 State: ${stateStats.alertCounter} símbolos ativos
 📈 Alvos estendidos para 15x ATR
 🛡️ Stops ajustados: 1.5x e 2.5x ATR
+⚡ FVG agora em 3 minutos para alertas mais rápidos
 `;
         
         return await sendTelegramAlert(message);
@@ -1965,18 +1966,18 @@ async function checkCCISignal(symbol) {
             return null;
         }
         
-        // Verificar FVG de 15 minutos como confirmação
-        const candles15m = await getCandles(symbol, CONFIG.FVG.TIMEFRAME, 50);
-        const fvgAnalysis = detectFVG(candles15m, signalType);
+        // Verificar FVG de 3 minutos como confirmação (ALTERADO DE 15m PARA 3m)
+        const candles3m = await getCandles(symbol, CONFIG.FVG.TIMEFRAME, 50);
+        const fvgAnalysis = detectFVG(candles3m, signalType);
         
         // Validar FVG de acordo com o tipo de sinal
         if (signalType === 'CCI_COMPRA' && !fvgAnalysis.hasBullishFVG) {
-            logRejection(symbol, 'FVG 15m', 'Sem FVG de alta para confirmar compra');
+            logRejection(symbol, 'FVG 3m', 'Sem FVG de alta para confirmar compra');
             return null;
         }
         
         if (signalType === 'CCI_VENDA' && !fvgAnalysis.hasBearishFVG) {
-            logRejection(symbol, 'FVG 15m', 'Sem FVG de baixa para confirmar venda');
+            logRejection(symbol, 'FVG 3m', 'Sem FVG de baixa para confirmar venda');
             return null;
         }
         
@@ -2060,7 +2061,7 @@ async function checkCCISignal(symbol) {
             cci: cci,
             rsi: rsiData.value,
             stoch4h: stoch4h,
-            fvg15m: fvgAnalysis,
+            fvg3m: fvgAnalysis,  // ALTERADO DE fvg15m PARA fvg3m
             lsr: lsrValue?.lsrValue,
             funding: fundingValue,
             currentPrice: currentPrice,
@@ -2093,7 +2094,7 @@ async function sendCCIAlert(signal) {
     const volumeEma = signal.volumeEma1h;
     const pivotAnalysis = signal.pivotAnalysis;
     const stoch4h = signal.stoch4h;
-    const fvg15m = signal.fvg15m;
+    const fvg3m = signal.fvg3m;  // ALTERADO DE fvg15m PARA fvg3m
    
     const alertNumber = incrementAlertCounter(signal.symbol, signal.type);
     cciCooldown.set(signal.symbol, Date.now());
@@ -2160,23 +2161,23 @@ async function sendCCIAlert(signal) {
         }
     }
     
-    // Formatação do FVG
-    let fvgText = 'FVG 15m: ';
+    // Formatação do FVG 3m
+    let fvgText = 'FVG 3m: ';
     let fvgEmoji = '';
-    if (fvg15m) {
-        if (fvg15m.hasBullishFVG) {
+    if (fvg3m) {
+        if (fvg3m.hasBullishFVG) {
             fvgText += '✅ BULLISH';
             fvgEmoji = '🟢';
-            if (fvg15m.fvgZone) {
-                fvgText += ` (${fvg15m.fvgZone.bottom.toFixed(6)}-${fvg15m.fvgZone.top.toFixed(6)})`;
-                if (fvg15m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
+            if (fvg3m.fvgZone) {
+                fvgText += ` (${fvg3m.fvgZone.bottom.toFixed(6)}-${fvg3m.fvgZone.top.toFixed(6)})`;
+                if (fvg3m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
             }
-        } else if (fvg15m.hasBearishFVG) {
+        } else if (fvg3m.hasBearishFVG) {
             fvgText += '🔴 BEARISH';
             fvgEmoji = '🔴';
-            if (fvg15m.fvgZone) {
-                fvgText += ` (${fvg15m.fvgZone.bottom.toFixed(6)}-${fvg15m.fvgZone.top.toFixed(6)})`;
-                if (fvg15m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
+            if (fvg3m.fvgZone) {
+                fvgText += ` (${fvg3m.fvgZone.bottom.toFixed(6)}-${fvg3m.fvgZone.top.toFixed(6)})`;
+                if (fvg3m.fvgZone.isMitigated) fvgText += ' [Mitigado]';
             }
         } else {
             fvgText += '❌ Nenhum';
@@ -2440,7 +2441,7 @@ async function startBot() {
         StateManager.init();
         
         console.log('📤 Testando conexão com Telegram...');
-        const testMessage = `🤖 Bot Titanium V2.0 iniciando em ${getBrazilianDateTime().full}\n📈 Alvos estendidos até 15x ATR\n🛡️ Stops ajustados: 1.5x e 2.5x ATR\n✅ FVG 15m como confirmação`;
+        const testMessage = `🤖 Bot Titanium V2.0 iniciando em ${getBrazilianDateTime().full}\n📈 Alvos estendidos até 15x ATR\n🛡️ Stops ajustados: 1.5x e 2.5x ATR\n⚡ FVG agora em 3 minutos para alertas mais rápidos`;
         const testResult = await sendTelegramAlert(testMessage);
 
         if (testResult) {
