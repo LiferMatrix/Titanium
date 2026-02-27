@@ -239,8 +239,8 @@ const CCISignalSchema = z.object({
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
-        CHAT_ID: '-1002554953979'
+        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
+        CHAT_ID: '-100255'
     },
 
     CCI: {
