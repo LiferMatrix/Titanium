@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6dg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200, // AUMENTADO de 50 para 200ms
@@ -786,7 +786,7 @@ function formatTradeAlert(alert) {
  TP3: ${tp3} 
 🛑 Stop : ${stop} (${CONFIG.TRADE.PARTIAL_CLOSE[0]}% do capital)
  💡 <b>Dica</b>
-• Entrada: ${alert.direction === 'Compra' ? 'Compra' : 'Venda'} à mercado DCA fracionado
+• Entrada: ${alert.direction === '' ? '' : ''} à mercado DCA fracionado
 • Stop: ${CONFIG.TRADE.PARTIAL_CLOSE[0]}% abaixo do ${alert.direction === 'COMPRA' ? 'suporte' : 'resistência'}
 • TP1: Fechar ${CONFIG.TRADE.PARTIAL_CLOSE[0]}% (mover stop para entrada)
 • TP2: Fechar ${CONFIG.TRADE.PARTIAL_CLOSE[1]}% (mover stop para TP1)
