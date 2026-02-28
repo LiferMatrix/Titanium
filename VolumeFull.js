@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVxg',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 50,
@@ -529,13 +529,18 @@ function formatRankingMessage(buyers, sellers, time) {
         
         const symbolName = item.symbol.replace('USDT', '');
         
-        return `${index+1}. ${dir} <b>${symbolName}</b> R$${formatPrice(item.price)} | Vol ${volPct}%${volEmoji} (${item.volumeRatio.toFixed(2)}x) | RSI${formatNumber(item.rsi, 0)}${rsiEmoji} | LSR${formatNumber(item.lsr, 2)}${lsrEmoji} | Fund${fundingSign}${fundingStr}%${fundingEmoji} | S/R ${supportStr}/${resistanceStr} | Score${item.score}`;
+        // Adiciona uma linha em branco entre os ativos (exceto o último)
+        const lineBreak = index < buyers.length - 1 ? '\n' : '';
+        
+        return `${index+1}. ${dir} <b>${symbolName}</b> R$${formatPrice(item.price)} | Vol:${volPct}%${volEmoji} (${item.volumeRatio.toFixed(2)}x) | #RSI 1H:${formatNumber(item.rsi, 0)}${rsiEmoji} | #LSR:${formatNumber(item.lsr, 2)}${lsrEmoji} | Fund:${fundingSign}${fundingStr}%${fundingEmoji} | S/R ${supportStr}/${resistanceStr} | #SCORE:${item.score}${lineBreak}`;
     };
 
+    // Formata os compradores com uma linha em branco entre cada ativo
     let buyersText = buyers.length === 0 
         ? '🔝 <b>TOP 0 COMPRADOR</b> 🟢\n    Nenhum comprador significativo' 
         : `🔝 <b>TOP ${buyers.length} COMPRADOR</b> 🟢\n${buyers.map((item, i) => formatLine(item, i, 'COMPRADOR')).join('\n')}`;
     
+    // Formata os vendedores com uma linha em branco entre cada ativo
     let sellersText = sellers.length === 0 
         ? '🔻 <b>TOP 0 VENDEDOR</b> 🔴\n    Nenhum vendedor significativo' 
         : `🔻 <b>TOP ${sellers.length} VENDEDOR</b> 🔴\n${sellers.map((item, i) => formatLine(item, i, 'VENDEDOR')).join('\n')}`;
@@ -546,9 +551,11 @@ function formatRankingMessage(buyers, sellers, time) {
 ${buyersText}
 
 ${sellersText}
-
-💡 Vol% + emoji | RSI | LSR | Fund% | S/R | Score
-⏱️ Atualizado ${CONFIG.PERFORMANCE.SCAN_INTERVAL_MINUTES}min
+ 💡Dica o SCORE quanto mais alto melhor,
+ observe o valor Suporte e Resistência
+ nas mensagens do alerta,dica stop de 2%.
+ Vol%  | RSI | LSR | Fund% | S/R | Score
+🤖 Atualização a cada ${CONFIG.PERFORMANCE.SCAN_INTERVAL_MINUTES}min
 ✨ Titanium Scanner by @J4Rviz</i>`;
 }
 
@@ -686,7 +693,7 @@ async function startBot() {
     const initTime = getBrazilianDateTime();
     const initMessage = `<i>🚀 <b>TITANIUM VOLUME SCANNER</b> 📅 ${initTime.full}
 
-📊 Monitorando 1h vs EMA9
+📊 Monitorando 
 🔝 Top ${CONFIG.VOLUME.TOP_COUNT} comprador/vendedor
 ⏱️ A cada ${CONFIG.PERFORMANCE.SCAN_INTERVAL_MINUTES}min
 📊 S/R$ incluídos no ranking
