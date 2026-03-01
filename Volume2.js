@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.6,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -44,15 +44,21 @@ const CONFIG = {
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
-        MIN_SCORE: 70,
+        MIN_SCORE: 80,
         MIN_VOLUME_RATIO: 1.5,
         ENABLE_SOUND: true,
-        MAX_ALERTS_PER_SCAN: 3,
+        MAX_ALERTS_PER_SCAN: 5,
+        MAX_DAILY_ALERTS_PER_SYMBOL: 10,
         PRIORITY_LEVELS: {
             ALTA: 85,
             MEDIA: 75,
             BAIXA: 70
         }
+    },
+    RSI: {
+        BUY_MAX: 64,      // RSI máximo para compra
+        SELL_MIN: 65,     // RSI mínimo para venda
+        PERIOD: 14
     },
     DEBUG: {
         VERBOSE: false
@@ -144,7 +150,9 @@ if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
 const candleCache = new Map();
 const alertCooldown = new Map();
 const lastAlertPrices = new Map();
-const fundingRateCache = new Map(); // NOVO: Cache para funding rates
+const fundingRateCache = new Map();
+const dailyMessageCounter = new Map();
+let dailyResetPerformed = false;
 
 class CacheManager {
     static get(symbol, timeframe, limit) {
@@ -305,6 +313,52 @@ function getDirectionEmoji(direction) {
 }
 
 // =====================================================================
+// === RESET CONTADOR DIÁRIO ÀS 21H ===
+// =====================================================================
+function resetDailyCounterIfNeeded() {
+    const now = getBrazilianDateTime();
+    const currentHour = parseInt(now.fullTime.split(':')[0]);
+    
+    if (currentHour === 21 && !dailyResetPerformed) {
+        const totalReset = dailyMessageCounter.size;
+        dailyMessageCounter.clear();
+        dailyResetPerformed = true;
+        console.log(`🔄 Contadores diários resetados às 21:00 - ${totalReset} moedas com alertas hoje`);
+        
+        if (CONFIG.DEBUG.VERBOSE) {
+            console.log('📊 Status do reset diário:', {
+                hora: currentHour,
+                resetPerformed: dailyResetPerformed,
+                contadoresResetados: totalReset
+            });
+        }
+    }
+    
+    if (currentHour !== 21) {
+        dailyResetPerformed = false;
+    }
+}
+
+// =====================================================================
+// === VERIFICAR LIMITE DIÁRIO POR MOEDA ===
+// =====================================================================
+function canSendDailyAlert(symbol) {
+    resetDailyCounterIfNeeded();
+    
+    const currentCount = dailyMessageCounter.get(symbol) || 0;
+    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
+    
+    if (currentCount >= maxDaily) {
+        if (CONFIG.DEBUG.VERBOSE) {
+            console.log(`⏸️ ${symbol} já recebeu ${currentCount}/${maxDaily} alertas hoje - limite diário atingido`);
+        }
+        return false;
+    }
+    
+    return true;
+}
+
+// =====================================================================
 // === CÁLCULOS TÉCNICOS ===
 // =====================================================================
 function calculateEMA(values, period) {
@@ -398,6 +452,9 @@ function canSendAlert(symbol, currentPrice, direction) {
     if (lastAlert) {
         const timeDiff = (now - lastAlert) / (1000 * 60);
         if (timeDiff < CONFIG.PERFORMANCE.COOLDOWN_MINUTES) {
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} em cooldown por mais ${(CONFIG.PERFORMANCE.COOLDOWN_MINUTES - timeDiff).toFixed(1)}min`);
+            }
             return false;
         }
     }
@@ -406,8 +463,15 @@ function canSendAlert(symbol, currentPrice, direction) {
     if (lastPrice) {
         const priceDiff = Math.abs((currentPrice - lastPrice) / lastPrice * 100);
         if (priceDiff < CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD) {
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} preço variou apenas ${priceDiff.toFixed(2)}% (mínimo ${CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD}%)`);
+            }
             return false;
         }
+    }
+    
+    if (!canSendDailyAlert(symbol)) {
+        return false;
     }
     
     return true;
@@ -420,6 +484,12 @@ function registerAlert(symbol, price, direction) {
     
     alertCooldown.set(cooldownKey, now);
     lastAlertPrices.set(priceKey, price);
+    
+    const currentCount = dailyMessageCounter.get(symbol) || 0;
+    const newCount = currentCount + 1;
+    dailyMessageCounter.set(symbol, newCount);
+    
+    console.log(`📊 ${symbol}: ${newCount}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alerta(s) hoje`);
     
     for (const [key, timestamp] of alertCooldown) {
         if (now - timestamp > 2 * 60 * 60 * 1000) {
@@ -475,31 +545,22 @@ async function getLSR(symbol) {
     }
 }
 
-// =====================================================================
-// === FUNÇÃO MELHORADA PARA FUNDING RATE ===
-// =====================================================================
 async function getFundingRate(symbol) {
     try {
-        // Verificar cache primeiro (funding rates mudam a cada 8h ou 4h)
         const cached = fundingRateCache.get(symbol);
-        if (cached && Date.now() - cached.timestamp < 3600000) { // Cache de 1 hora
+        if (cached && Date.now() - cached.timestamp < 3600000) {
             return cached.rate;
         }
 
-        // Buscar funding rate atual
         const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
         const data = await rateLimiter.makeRequest(url, {}, 'funding');
         
-        // O funding rate já vem em formato decimal (ex: -0.003479)
-        // Não multiplicar por 100 aqui!
         let fundingRate = parseFloat(data.lastFundingRate) || null;
         
-        // Log para debug
         if (CONFIG.DEBUG.VERBOSE && fundingRate !== null) {
             console.log(`💰 Funding ${symbol}: ${(fundingRate * 100).toFixed(4)}%`);
         }
         
-        // Salvar no cache
         if (fundingRate !== null) {
             fundingRateCache.set(symbol, {
                 rate: fundingRate,
@@ -510,7 +571,6 @@ async function getFundingRate(symbol) {
         return fundingRate;
         
     } catch (error) {
-        // Se falhar, tentar endpoint alternativo
         try {
             const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
             const data = await rateLimiter.makeRequest(url, {}, 'funding_alt');
@@ -610,56 +670,124 @@ async function analyzeForAlerts(symbol) {
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
-            Promise.resolve(calculateRSI(candles1h, 14)),
+            Promise.resolve(calculateRSI(candles1h, CONFIG.RSI.PERIOD)),
             Promise.resolve(calculateSupportResistance(candles1h)),
             Promise.resolve(calculateATR(candles1h, 14))
         ]);
         
-        if (!sr.support || !sr.resistance || !atr) return null;
+        if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
         
         let direction = null;
         let score = 0;
         let confidence = 0;
         
-        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
-            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO) {
-            
-            direction = 'COMPRA';
-            score = 50;
-            
-            if (buyerPercentage > 55) score += 10;
-            if (buyerPercentage > 60) score += 10;
-            if (volumeRatio > 2) score += 15;
-            else if (volumeRatio > 1.5) score += 10;
-            if (lsr && lsr < 2.0) score += 15;
-            else if (lsr && lsr < 2.5) score += 10;
-            if (funding && funding < -0.0005) score += 15; // Funding negativo favorece compra
-            if (rsi1h && rsi1h < 45) score += 10;
-            if (rsi1h && rsi1h < 35) score += 15;
-            if (currentPrice < sr.resistance * 0.98) score += 10;
-            
-            confidence = Math.min(100, score);
-        }
-        
-        if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
-            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO) {
-            
-            direction = 'VENDA';
-            score = 50;
-            
-            if (sellerPercentage > 55) score += 10;
-            if (sellerPercentage > 60) score += 10;
-            if (volumeRatio > 2) score += 15;
-            else if (volumeRatio > 1.5) score += 10;
-            if (lsr && lsr > 3.0) score += 15;
-            else if (lsr && lsr > 2.5) score += 10;
-            if (funding && funding > 0.0005) score += 15; // Funding positivo favorece venda
-            if (rsi1h && rsi1h > 60) score += 10;
-            if (rsi1h && rsi1h > 70) score += 15;
-            if (currentPrice > sr.support * 1.02) score += 10;
-            
-            confidence = Math.min(100, score);
-        }
+       // ANÁLISE PARA COMPRA - VERSÃO OTIMIZADA
+if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
+    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
+    rsi1h < CONFIG.RSI.BUY_MAX) {
+    
+    direction = 'COMPRA';
+    score = 50;
+    
+    // 1. VOLUME COMPRADOR (máx 20)
+    if (buyerPercentage > 60) score += 15;
+    else if (buyerPercentage > 55) score += 10;
+    else if (buyerPercentage > 52) score += 5;
+    
+    // 2. VOLUME RATIO (máx 20)
+    if (volumeRatio > 2.5) score += 20;
+    else if (volumeRatio > 2.0) score += 15;
+    else if (volumeRatio > 1.8) score += 10;
+    else if (volumeRatio > 1.6) score += 5;
+    
+    // 3. LSR (máx 20, com penalidade)
+    if (lsr) {
+        if (lsr < 1.8) score += 20;      // Muito bom (pouca gente comprada)
+        else if (lsr < 2.0) score += 15;  // Bom
+        else if (lsr < 2.3) score += 10;  // Moderado
+        else if (lsr < 2.6) score += 5;   // Pouco favorável
+        else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
+        else if (lsr > 2.8) score -= 5;   // Penalidade leve
+    }
+    
+    // 4. FUNDING (máx 15)
+    if (funding) {
+        if (funding < -0.001) score += 15;      // Muito negativo
+        else if (funding < -0.0005) score += 10; // Moderadamente negativo
+        else if (funding < -0.0001) score += 5;  // Levemente negativo
+    }
+    
+    // 5. RSI (máx 20)
+    if (rsi1h) {
+        if (rsi1h < 35) score += 20;      // Extremamente oversold
+        else if (rsi1h < 40) score += 15;  // Muito oversold
+        else if (rsi1h < 45) score += 10;  // Oversold moderado
+        else if (rsi1h < 50) score += 5;   // Levemente oversold
+    }
+    
+    // 6. POSIÇÃO PREÇO (máx 5)
+    if (currentPrice < sr.resistance) {
+        const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
+        if (distanceToResistance > 5) score += 5;       // Muito espaço
+        else if (distanceToResistance > 2) score += 3;  // Bom espaço
+    }
+    
+    confidence = Math.min(100, Math.max(0, score));
+}
+
+// ANÁLISE PARA VENDA - VERSÃO OTIMIZADA
+if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
+    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
+    rsi1h > CONFIG.RSI.SELL_MIN) {
+    
+    direction = 'VENDA';
+    score = 50;
+    
+    // 1. VOLUME VENDEDOR (máx 20)
+    if (sellerPercentage > 60) score += 15;
+    else if (sellerPercentage > 55) score += 10;
+    else if (sellerPercentage > 52) score += 5;
+    
+    // 2. VOLUME RATIO (máx 20)
+    if (volumeRatio > 2.5) score += 20;
+    else if (volumeRatio > 2.0) score += 15;
+    else if (volumeRatio > 1.8) score += 10;
+    else if (volumeRatio > 1.6) score += 5;
+    
+    // 3. LSR (máx 20, com penalidade)
+    if (lsr) {
+        if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
+        else if (lsr > 3.5) score += 15;    // Bom
+        else if (lsr > 3.0) score += 10;    // Moderado
+        else if (lsr > 2.7) score += 5;     // Pouco favorável
+        else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
+        else if (lsr < 1.2) score -= 5;     // Penalidade leve
+    }
+    
+    // 4. FUNDING (máx 15)
+    if (funding) {
+        if (funding > 0.001) score += 15;       // Muito positivo
+        else if (funding > 0.0005) score += 10;  // Moderadamente positivo
+        else if (funding > 0.0001) score += 5;   // Levemente positivo
+    }
+    
+    // 5. RSI (máx 20)
+    if (rsi1h) {
+        if (rsi1h > 75) score += 20;       // Extremamente overbought
+        else if (rsi1h > 70) score += 15;   // Muito overbought
+        else if (rsi1h > 65) score += 10;   // Overbought moderado
+        else if (rsi1h > 60) score += 5;    // Levemente overbought
+    }
+    
+    // 6. POSIÇÃO PREÇO (máx 5)
+    if (currentPrice > sr.support) {
+        const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
+        if (distanceToSupport > 5) score += 5;       // Muito espaço
+        else if (distanceToSupport > 2) score += 3;  // Bom espaço
+    }
+    
+    confidence = Math.min(100, Math.max(0, score));
+}
         
         if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
         
@@ -687,7 +815,7 @@ async function analyzeForAlerts(symbol) {
             buyerPercentage,
             sellerPercentage,
             lsr,
-            funding, // Mantém o valor decimal original
+            funding,
             rsi: rsi1h,
             support: sr.support,
             resistance: sr.resistance,
@@ -792,7 +920,6 @@ function formatTradeAlert(alert) {
     const volPct = alert.direction === 'COMPRA' ? 
         alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
     
-    // CORREÇÃO: funding já está em decimal, converter para porcentagem apenas na exibição
     const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
     
@@ -802,34 +929,44 @@ function formatTradeAlert(alert) {
     const tp2 = formatPrice(alert.takeProfit2);
     const tp3 = formatPrice(alert.takeProfit3);
     
+    const dailyCount = dailyMessageCounter.get(alert.symbol) || 1;
+    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
+    
+    let r1, r2, r3;
     if (alert.direction === 'COMPRA') {
-        var r1 = ((alert.takeProfit1 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        var r2 = ((alert.takeProfit2 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        var r3 = ((alert.takeProfit3 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
+        r1 = ((alert.takeProfit1 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
+        r2 = ((alert.takeProfit2 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
+        r3 = ((alert.takeProfit3 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
     } else {
-        var r1 = ((alert.entryPrice - alert.takeProfit1) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        var r2 = ((alert.entryPrice - alert.takeProfit2) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        var r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
+        r1 = ((alert.entryPrice - alert.takeProfit1) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
+        r2 = ((alert.entryPrice - alert.takeProfit2) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
+        r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
     }
+    
+    // Adicionar indicador visual do RSI
+    const rsiStatus = alert.direction === 'COMPRA' ? 
+        (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
+        (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>Análise de dados</b>
- ${time.full}
+ Alerta:${dailyCount}/${time.full}hs
  Preço: $${entry}
  Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
- RSI 1h: ${formatNumber(alert.rsi, 0)}
+ RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus}
  #LSR: ${formatNumber(alert.lsr, 2)}
  Fund: ${fundingSign}${fundingPct}%
  Suporte: ${formatPrice(alert.support)}
  Resistência: ${formatPrice(alert.resistance)}
  #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
  <b>Alvos</b>
- TP1: ${tp1} 
- TP2: ${tp2} 
- TP3: ${tp3} 
-🛑 Stop : ${stop} 
+ TP1: ${tp1} (${r1}%)
+ TP2: ${tp2} (${r2}%)
+ TP3: ${tp3} (${r3}%)
+ 🛑 Stop : ${stop}
  💡 <b>Dica...</b>
 • Entrada à mercado DCA fracionado
+Alerta Educativo, não é recomendação de investimento
 🤖 Titanium by @J4Rviz</i>`;
 }
 
@@ -864,6 +1001,8 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
+    console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
+    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
     
     let scanCount = 0;
     let alertsSent = 0;
@@ -874,7 +1013,19 @@ async function realTimeScanner() {
         const startTime = Date.now();
         scanCount++;
         
+        resetDailyCounterIfNeeded();
+        
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
+        
+        if (dailyMessageCounter.size > 0 && CONFIG.DEBUG.VERBOSE) {
+            console.log('📊 Alertas enviados hoje:');
+            const sortedCounts = Array.from(dailyMessageCounter.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            sortedCounts.forEach(([symbol, count]) => {
+                console.log(`   ${symbol}: ${count}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL}`);
+            });
+        }
         
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         const alerts = [];
@@ -909,7 +1060,7 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - Funding: ${(alert.funding * 100).toFixed(4)}%`);
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)}`);
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
@@ -929,6 +1080,7 @@ async function realTimeScanner() {
         const scanTime = Date.now() - startTime;
         console.log(`⏱️ Scan concluído em ${(scanTime/1000).toFixed(1)}s`);
         console.log(`📊 Total alertas enviados: ${alertsSent}`);
+        console.log(`📊 Moedas com alerta hoje: ${dailyMessageCounter.size}`);
         
         let nextScanInterval = CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS * 1000;
         if (consecutiveEmptyScans > 5) {
@@ -949,7 +1101,7 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM ');
+    console.log('🚀 TITANIUM - Real-Time Alert System');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
@@ -957,17 +1109,14 @@ async function startBot() {
     console.log(`📱 Telegram Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? '✅' : '❌'}`);
     console.log(`⏱️ Scan a cada: ${CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS}s`);
     console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
+    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
     console.log(`🛡️ Cooldown: ${CONFIG.PERFORMANCE.COOLDOWN_MINUTES}min`);
     console.log(`📊 Máx alertas/scan: ${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
+    console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
     
-    const initTime = getBrazilianDateTime();
-    const initMessage = `<i> <b>TITANIUM </b> 📅 ${initTime.full}
-
-📊 Monitorando em tempo real
-
-
-✅ Sistema ativo!</i>`;
+    // Mensagem de inicialização SUPER SIMPLES
+    const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
@@ -988,9 +1137,7 @@ process.on('uncaughtException', async (err) => {
     console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
     console.error('Stack:', err.stack);
     
-    const errorMessage = `<i>❌ <b>ERRO NO BOT</b>
-${err.message}
-Reiniciando em 60s...</i>`;
+    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s`;
     
     await sendTelegramAlert(errorMessage);
     
@@ -1011,14 +1158,12 @@ process.on('unhandledRejection', async (reason) => {
 // =====================================================================
 // === START ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium Real-Time Alert System (Versão Otimizada)...');
+console.log('🚀 Iniciando Titanium Real-Time Alert System...');
 startBot().catch(async error => {
     console.error('❌ Erro fatal:', error);
     
     try {
-        await sendTelegramAlert(`<i>❌ <b>ERRO FATAL</b>
-${error.message}
-Sistema parado.</i>`);
+        await sendTelegramAlert(`❌ ERRO FATAL`);
     } catch {}
     
     process.exit(1);
