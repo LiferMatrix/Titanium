@@ -10,32 +10,32 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8g',
-        CHAT_ID: '-10025549'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
-        SYMBOL_DELAY_MS: 200, // AUMENTADO de 50 para 200ms
-        SCAN_INTERVAL_SECONDS: 120, // AUMENTADO de 60 para 120 segundos
+        SYMBOL_DELAY_MS: 200,
+        SCAN_INTERVAL_SECONDS: 120,
         CANDLE_CACHE_TTL: 300000,
-        BATCH_SIZE: 15, // REDUZIDO de 20 para 15
-        REQUEST_TIMEOUT: 15000, // AUMENTADO de 10000 para 15000
+        BATCH_SIZE: 15,
+        REQUEST_TIMEOUT: 15000,
         COOLDOWN_MINUTES: 30,
         PRICE_DEVIATION_THRESHOLD: 0.5,
-        TELEGRAM_RETRY_ATTEMPTS: 3, // NOVO: tentativas para Telegram
-        TELEGRAM_RETRY_DELAY: 2000 // NOVO: delay entre tentativas
+        TELEGRAM_RETRY_ATTEMPTS: 3,
+        TELEGRAM_RETRY_DELAY: 2000
     },
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.2,
+        MIN_VOLUME_RATIO: 1.5,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
     },
     RATE_LIMITER: {
-        INITIAL_DELAY: 200, // AUMENTADO de 100 para 200ms
-        MAX_DELAY: 5000, // AUMENTADO de 2000 para 5000ms
-        BACKOFF_FACTOR: 2 // AUMENTADO de 1.5 para 2
+        INITIAL_DELAY: 200,
+        MAX_DELAY: 5000,
+        BACKOFF_FACTOR: 2
     },
     TRADE: {
         RISK_REWARD_RATIO: 2.5,
@@ -47,7 +47,7 @@ const CONFIG = {
         MIN_SCORE: 70,
         MIN_VOLUME_RATIO: 1.5,
         ENABLE_SOUND: true,
-        MAX_ALERTS_PER_SCAN: 3, // NOVO: reduzir flood
+        MAX_ALERTS_PER_SCAN: 3,
         PRIORITY_LEVELS: {
             ALTA: 85,
             MEDIA: 75,
@@ -144,6 +144,7 @@ if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
 const candleCache = new Map();
 const alertCooldown = new Map();
 const lastAlertPrices = new Map();
+const fundingRateCache = new Map(); // NOVO: Cache para funding rates
 
 class CacheManager {
     static get(symbol, timeframe, limit) {
@@ -172,7 +173,7 @@ class RateLimiter {
         this.requestCount = 0;
         this.minuteRequests = 0;
         this.lastMinuteReset = Date.now();
-        this.errorLog = new Map(); // Para log de erros frequentes
+        this.errorLog = new Map();
     }
 
     checkRateLimit() {
@@ -182,7 +183,7 @@ class RateLimiter {
             this.lastMinuteReset = now;
         }
         
-        if (this.minuteRequests >= 1000) { // REDUZIDO de 1200 para 1000 (mais seguro)
+        if (this.minuteRequests >= 1000) {
             const waitTime = 60000 - (now - this.lastMinuteReset);
             if (waitTime > 0) {
                 console.log(`⏳ Rate limit atingido, aguardando ${Math.ceil(waitTime/1000)}s`);
@@ -205,7 +206,6 @@ class RateLimiter {
             await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
         }
 
-        // Implementar retry com backoff
         const maxRetries = 3;
         let lastError;
 
@@ -222,7 +222,7 @@ class RateLimiter {
                 this.requestCount++;
 
                 if (!response.ok) {
-                    if (response.status === 429) { // Rate limit específico
+                    if (response.status === 429) {
                         const retryAfter = response.headers.get('retry-after') || 60;
                         console.log(`⏳ Rate limit 429, aguardando ${retryAfter}s`);
                         await new Promise(r => setTimeout(r, retryAfter * 1000));
@@ -475,13 +475,58 @@ async function getLSR(symbol) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO MELHORADA PARA FUNDING RATE ===
+// =====================================================================
 async function getFundingRate(symbol) {
     try {
-        const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
+        // Verificar cache primeiro (funding rates mudam a cada 8h ou 4h)
+        const cached = fundingRateCache.get(symbol);
+        if (cached && Date.now() - cached.timestamp < 3600000) { // Cache de 1 hora
+            return cached.rate;
+        }
+
+        // Buscar funding rate atual
+        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
         const data = await rateLimiter.makeRequest(url, {}, 'funding');
-        return data.length > 0 ? parseFloat(data[0].fundingRate) : null;
-    } catch {
-        return null;
+        
+        // O funding rate já vem em formato decimal (ex: -0.003479)
+        // Não multiplicar por 100 aqui!
+        let fundingRate = parseFloat(data.lastFundingRate) || null;
+        
+        // Log para debug
+        if (CONFIG.DEBUG.VERBOSE && fundingRate !== null) {
+            console.log(`💰 Funding ${symbol}: ${(fundingRate * 100).toFixed(4)}%`);
+        }
+        
+        // Salvar no cache
+        if (fundingRate !== null) {
+            fundingRateCache.set(symbol, {
+                rate: fundingRate,
+                timestamp: Date.now()
+            });
+        }
+        
+        return fundingRate;
+        
+    } catch (error) {
+        // Se falhar, tentar endpoint alternativo
+        try {
+            const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
+            const data = await rateLimiter.makeRequest(url, {}, 'funding_alt');
+            const fundingRate = data.length > 0 ? parseFloat(data[0].fundingRate) : null;
+            
+            if (fundingRate !== null) {
+                fundingRateCache.set(symbol, {
+                    rate: fundingRate,
+                    timestamp: Date.now()
+                });
+            }
+            
+            return fundingRate;
+        } catch {
+            return null;
+        }
     }
 }
 
@@ -588,7 +633,7 @@ async function analyzeForAlerts(symbol) {
             else if (volumeRatio > 1.5) score += 10;
             if (lsr && lsr < 2.0) score += 15;
             else if (lsr && lsr < 2.5) score += 10;
-            if (funding && funding < -0.0005) score += 15;
+            if (funding && funding < -0.0005) score += 15; // Funding negativo favorece compra
             if (rsi1h && rsi1h < 45) score += 10;
             if (rsi1h && rsi1h < 35) score += 15;
             if (currentPrice < sr.resistance * 0.98) score += 10;
@@ -608,7 +653,7 @@ async function analyzeForAlerts(symbol) {
             else if (volumeRatio > 1.5) score += 10;
             if (lsr && lsr > 3.0) score += 15;
             else if (lsr && lsr > 2.5) score += 10;
-            if (funding && funding > 0.0005) score += 15;
+            if (funding && funding > 0.0005) score += 15; // Funding positivo favorece venda
             if (rsi1h && rsi1h > 60) score += 10;
             if (rsi1h && rsi1h > 70) score += 15;
             if (currentPrice > sr.support * 1.02) score += 10;
@@ -642,7 +687,7 @@ async function analyzeForAlerts(symbol) {
             buyerPercentage,
             sellerPercentage,
             lsr,
-            funding,
+            funding, // Mantém o valor decimal original
             rsi: rsi1h,
             support: sr.support,
             resistance: sr.resistance,
@@ -705,7 +750,6 @@ async function sendTelegramAlert(message, parseMode = 'HTML') {
             if (!response.ok) {
                 const errorText = await response.text();
                 
-                // Se for rate limit do Telegram, aguardar mais
                 if (response.status === 429) {
                     const retryAfter = parseInt(response.headers.get('retry-after')) || 30;
                     console.log(`⏳ Rate limit Telegram, aguardando ${retryAfter}s (tentativa ${attempts}/${maxAttempts})`);
@@ -723,7 +767,6 @@ async function sendTelegramAlert(message, parseMode = 'HTML') {
                 return false;
             }
             
-            // Sucesso!
             return true;
             
         } catch (error) {
@@ -749,6 +792,7 @@ function formatTradeAlert(alert) {
     const volPct = alert.direction === 'COMPRA' ? 
         alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
     
+    // CORREÇÃO: funding já está em decimal, converter para porcentagem apenas na exibição
     const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
     
@@ -769,30 +813,23 @@ function formatTradeAlert(alert) {
     }
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
-
  <b>Análise de dados</b>
- Preço: R$${entry}
- Volume: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
+ ${time.full}
+ Preço: $${entry}
+ Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  RSI 1h: ${formatNumber(alert.rsi, 0)}
  #LSR: ${formatNumber(alert.lsr, 2)}
  Fund: ${fundingSign}${fundingPct}%
  Suporte: ${formatPrice(alert.support)}
  Resistência: ${formatPrice(alert.resistance)}
  #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
- <b>Gerenciamento</b>
  <b>Alvos</b>
  TP1: ${tp1} 
  TP2: ${tp2} 
  TP3: ${tp3} 
-🛑 Stop : ${stop} (${CONFIG.TRADE.PARTIAL_CLOSE[0]}% do capital)
- 💡 <b>Dica</b>
-• Entrada: ${alert.direction === '' ? '' : ''} à mercado DCA fracionado
-• Stop: ${CONFIG.TRADE.PARTIAL_CLOSE[0]}% abaixo do ${alert.direction === 'COMPRA' ? 'suporte' : 'resistência'}
-• TP1: Fechar ${CONFIG.TRADE.PARTIAL_CLOSE[0]}% (mover stop para entrada)
-• TP2: Fechar ${CONFIG.TRADE.PARTIAL_CLOSE[1]}% (mover stop para TP1)
-• TP3: Deixar ${CONFIG.TRADE.PARTIAL_CLOSE[2]}% correr com stop
-
- ${time.full}
+🛑 Stop : ${stop} 
+ 💡 <b>Dica...</b>
+• Entrada à mercado DCA fracionado
 🤖 Titanium by @J4Rviz</i>`;
 }
 
@@ -807,7 +844,6 @@ async function fetchAllFuturesSymbols() {
             'exchangeInfo'
         );
         
-        // Filtrar apenas USDT e volume mínimo (opcional)
         const symbols = data.symbols
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
@@ -873,13 +909,13 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)`);
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - Funding: ${(alert.funding * 100).toFixed(4)}%`);
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
             }
             
-            await new Promise(r => setTimeout(r, 1500)); // Delay entre envios
+            await new Promise(r => setTimeout(r, 1500));
         }
         
         if (topAlerts.length === 0) {
@@ -894,10 +930,9 @@ async function realTimeScanner() {
         console.log(`⏱️ Scan concluído em ${(scanTime/1000).toFixed(1)}s`);
         console.log(`📊 Total alertas enviados: ${alertsSent}`);
         
-        // Se muitos scans sem alertas, aumentar intervalo gradualmente
         let nextScanInterval = CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS * 1000;
         if (consecutiveEmptyScans > 5) {
-            nextScanInterval = Math.min(nextScanInterval * 1.5, 300000); // Máx 5 minutos
+            nextScanInterval = Math.min(nextScanInterval * 1.5, 300000);
             console.log(`⏳ ${consecutiveEmptyScans} scans sem alertas, aumentando intervalo...`);
         }
         
