@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_DA',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -690,7 +690,7 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     score = 50;
     
     // 1. VOLUME COMPRADOR (máx 20)
-    if (buyerPercentage > 60) score += 18;
+    if (buyerPercentage > 60) score += 15;
     else if (buyerPercentage > 55) score += 10;
     else if (buyerPercentage > 52) score += 5;
     
@@ -702,12 +702,12 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr < 1.5) score += 18;      // Muito bom (pouca gente comprada)
+        if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
         else if (lsr < 2.0) score += 12;  // Bom
         else if (lsr < 2.3) score += 10;  // Moderado
         else if (lsr < 2.6) score += 5;   // Pouco favorável
-        else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 8;   // Penalidade leve
+        else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
+        else if (lsr > 2.8) score -= 15;   // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
@@ -719,10 +719,10 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h < 35) score += 15;      // Extremamente oversold
-        else if (rsi1h < 40) score += 12;  // Muito oversold
-        else if (rsi1h < 45) score += 10;  // Oversold moderado
-        else if (rsi1h < 50) score += 8;   // Levemente oversold
+        if (rsi1h < 35) score += 12;      // Extremamente oversold
+        else if (rsi1h < 40) score += 10;  // Muito oversold
+        else if (rsi1h < 45) score += 8;  // Oversold moderado
+        else if (rsi1h < 50) score += 5;   // Levemente oversold
     }
     
     // 6. POSIÇÃO PREÇO (máx 5)
@@ -744,7 +744,7 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     score = 50;
     
     // 1. VOLUME VENDEDOR (máx 20)
-    if (sellerPercentage > 60) score += 18;
+    if (sellerPercentage > 60) score += 15;
     else if (sellerPercentage > 55) score += 10;
     else if (sellerPercentage > 52) score += 5;
     
@@ -756,12 +756,12 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr > 4.0) score += 18;        // Muito bom (muita gente comprada)
+        if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
         else if (lsr > 3.5) score += 12;    // Bom
         else if (lsr > 3.0) score += 10;    // Moderado
         else if (lsr > 2.7) score += 5;     // Pouco favorável
-        else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 8;     // Penalidade leve
+        else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
+        else if (lsr < 1.2) score -= 15;     // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
@@ -773,10 +773,10 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h > 75) score += 15;       // Extremamente overbought
-        else if (rsi1h > 70) score += 12;   // Muito overbought
-        else if (rsi1h > 65) score += 10;   // Overbought moderado
-        else if (rsi1h > 60) score += 8;    // Levemente overbought
+        if (rsi1h > 75) score += 12;       // Extremamente overbought
+        else if (rsi1h > 70) score += 10;   // Muito overbought
+        else if (rsi1h > 65) score += 8;   // Overbought moderado
+        else if (rsi1h > 60) score += 5;    // Levemente overbought
     }
     
     // 6. POSIÇÃO PREÇO (máx 5)
