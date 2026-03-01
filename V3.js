@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFsA',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.6,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -56,8 +56,8 @@ const CONFIG = {
         }
     },
     RSI: {
-        BUY_MAX: 65,      // RSI máximo para compra
-        SELL_MIN: 45,     // RSI mínimo para venda
+        BUY_MAX: 64,      // RSI máximo para compra
+        SELL_MIN: 55,     // RSI mínimo para venda
         PERIOD: 14
     },
     DEBUG: {
@@ -690,39 +690,39 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     score = 50;
     
     // 1. VOLUME COMPRADOR (máx 20)
-    if (buyerPercentage > 60) score += 15;
+    if (buyerPercentage > 60) score += 18;
     else if (buyerPercentage > 55) score += 10;
     else if (buyerPercentage > 52) score += 5;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 20;
-    else if (volumeRatio > 2.0) score += 15;
+    if (volumeRatio > 2.5) score += 15;
+    else if (volumeRatio > 2.0) score += 12;
     else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 5;
+    else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr < 1.8) score += 20;      // Muito bom (pouca gente comprada)
-        else if (lsr < 2.0) score += 15;  // Bom
+        if (lsr < 1.5) score += 18;      // Muito bom (pouca gente comprada)
+        else if (lsr < 2.0) score += 12;  // Bom
         else if (lsr < 2.3) score += 10;  // Moderado
         else if (lsr < 2.6) score += 5;   // Pouco favorável
         else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 5;   // Penalidade leve
+        else if (lsr > 2.8) score -= 8;   // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
     if (funding) {
-        if (funding < -0.001) score += 15;      // Muito negativo
-        else if (funding < -0.0005) score += 10; // Moderadamente negativo
-        else if (funding < -0.0001) score += 5;  // Levemente negativo
+        if (funding < -0.001) score += 12;      // Muito negativo
+        else if (funding < -0.0005) score += 8; // Moderadamente negativo
+        else if (funding < -0.0001) score += 3;  // Levemente negativo
     }
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h < 35) score += 20;      // Extremamente oversold
-        else if (rsi1h < 40) score += 15;  // Muito oversold
+        if (rsi1h < 35) score += 15;      // Extremamente oversold
+        else if (rsi1h < 40) score += 12;  // Muito oversold
         else if (rsi1h < 45) score += 10;  // Oversold moderado
-        else if (rsi1h < 50) score += 5;   // Levemente oversold
+        else if (rsi1h < 50) score += 8;   // Levemente oversold
     }
     
     // 6. POSIÇÃO PREÇO (máx 5)
@@ -744,39 +744,39 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     score = 50;
     
     // 1. VOLUME VENDEDOR (máx 20)
-    if (sellerPercentage > 60) score += 15;
+    if (sellerPercentage > 60) score += 18;
     else if (sellerPercentage > 55) score += 10;
     else if (sellerPercentage > 52) score += 5;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 20;
-    else if (volumeRatio > 2.0) score += 15;
+    if (volumeRatio > 2.5) score += 15;
+    else if (volumeRatio > 2.0) score += 12;
     else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 5;
+    else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
-        else if (lsr > 3.5) score += 15;    // Bom
+        if (lsr > 4.0) score += 18;        // Muito bom (muita gente comprada)
+        else if (lsr > 3.5) score += 12;    // Bom
         else if (lsr > 3.0) score += 10;    // Moderado
         else if (lsr > 2.7) score += 5;     // Pouco favorável
         else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 5;     // Penalidade leve
+        else if (lsr < 1.2) score -= 8;     // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
     if (funding) {
-        if (funding > 0.001) score += 15;       // Muito positivo
-        else if (funding > 0.0005) score += 10;  // Moderadamente positivo
-        else if (funding > 0.0001) score += 5;   // Levemente positivo
+        if (funding > 0.001) score += 12;       // Muito positivo
+        else if (funding > 0.0005) score += 8;  // Moderadamente positivo
+        else if (funding > 0.0001) score += 3;   // Levemente positivo
     }
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h > 75) score += 20;       // Extremamente overbought
-        else if (rsi1h > 70) score += 15;   // Muito overbought
+        if (rsi1h > 75) score += 15;       // Extremamente overbought
+        else if (rsi1h > 70) score += 12;   // Muito overbought
         else if (rsi1h > 65) score += 10;   // Overbought moderado
-        else if (rsi1h > 60) score += 5;    // Levemente overbought
+        else if (rsi1h > 60) score += 8;    // Levemente overbought
     }
     
     // 6. POSIÇÃO PREÇO (máx 5)
@@ -949,8 +949,8 @@ function formatTradeAlert(alert) {
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>Análise de dados</b>
- Alerta:${dailyCount}/${time.full}hs
+ <b>Indicadores</b>
+ Alerta:${dailyCount} | ${time.full}hs
  Preço: $${entry}
  Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus}
@@ -960,14 +960,14 @@ function formatTradeAlert(alert) {
  Resistência: ${formatPrice(alert.resistance)}
  #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
  <b>Alvos</b>
- TP1: ${tp1} (${r1}%)
- TP2: ${tp2} (${r2}%)
- TP3: ${tp3} (${r3}%)
+ TP1: ${tp1} 
+ TP2: ${tp2} 
+ TP3: ${tp3} 
  🛑 Stop : ${stop}
- 💡 <b>Dica...</b>
+ 💡 <b>🤖 IA Dica...</b>
 • Entrada à mercado DCA fracionado
 Alerta Educativo, não é recomendação de investimento
-🤖 Titanium by @J4Rviz</i>`;
+ Titanium Prime by @J4Rviz</i>`;
 }
 
 // =====================================================================
