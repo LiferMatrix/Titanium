@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6g',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.6,
+        MIN_VOLUME_RATIO: 1.7,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -44,8 +44,8 @@ const CONFIG = {
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
-        MIN_SCORE: 80,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_SCORE: 85,
+        MIN_VOLUME_RATIO: 1.7,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -57,11 +57,24 @@ const CONFIG = {
     },
     RSI: {
         BUY_MAX: 64,      // RSI máximo para compra
-        SELL_MIN: 65,     // RSI mínimo para venda
+        SELL_MIN: 55,     // RSI mínimo para venda
         PERIOD: 14
     },
     DEBUG: {
         VERBOSE: false
+    },
+    // =================================================================
+    // === CONFIGURAÇÕES DE LIMPEZA - NOVO ===
+    // =================================================================
+    CLEANUP: {
+        ENABLED: true,                    // Ativar/desativar limpeza
+        MAX_LOG_AGE_HOURS: 24,             // Manter logs por 24 horas
+        MAX_CACHE_AGE_HOURS: 12,            // Manter cache por 12 horas
+        MAX_ALERT_FILES_AGE_HOURS: 48,      // Manter arquivos de alerta por 48 horas
+        CLEANUP_INTERVAL_MINUTES: 60,       // Executar limpeza a cada 60 minutos
+        MAX_FOLDER_SIZE_MB: 500,             // Tamanho máximo total da pasta em MB
+        COMPRESS_OLD_LOGS: true,             // Comprimir logs antigos
+        MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
     }
 };
 
@@ -127,6 +140,7 @@ const TradeAlertSchema = z.object({
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
+    cciDaily: z.string().optional().nullable(), // Adicionado campo para CCI Diário
     support: z.number(),
     resistance: z.number(),
     emoji: z.string(),
@@ -143,6 +157,266 @@ const ALERTS_DIR = './alerts';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
+
+// =====================================================================
+// === SISTEMA DE LIMPEZA AUTOMÁTICA - NOVO ===
+// =====================================================================
+class CleanupManager {
+    constructor() {
+        this.cleanupInterval = null;
+        this.totalCleaned = 0;
+        this.lastCleanupTime = null;
+    }
+
+    start() {
+        if (!CONFIG.CLEANUP.ENABLED) {
+            console.log('🧹 Sistema de limpeza automática DESATIVADO');
+            return;
+        }
+
+        console.log('🧹 Iniciando sistema de limpeza automática...');
+        console.log(`   - Logs: manter últimos ${CONFIG.CLEANUP.MAX_LOG_AGE_HOURS}h`);
+        console.log(`   - Cache: manter últimos ${CONFIG.CLEANUP.MAX_CACHE_AGE_HOURS}h`);
+        console.log(`   - Alertas: manter últimos ${CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS}h`);
+        console.log(`   - Limpeza a cada: ${CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES}min`);
+        
+        // Executar primeira limpeza após 5 segundos
+        setTimeout(() => this.cleanup(), 5000);
+        
+        // Configurar limpeza periódica
+        this.cleanupInterval = setInterval(
+            () => this.cleanup(), 
+            CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000
+        );
+    }
+
+    async cleanup() {
+        const startTime = Date.now();
+        this.lastCleanupTime = new Date();
+        
+        console.log(`\n🧹 Iniciando limpeza automática - ${getBrazilianDateTime().full}`);
+        
+        let cleanedCount = 0;
+        let cleanedSize = 0;
+        let errors = [];
+
+        try {
+            // Limpar logs antigos
+            const logResult = this.cleanupDirectory(LOG_DIR, CONFIG.CLEANUP.MAX_LOG_AGE_HOURS);
+            cleanedCount += logResult.count;
+            cleanedSize += logResult.size;
+
+            // Limpar cache antigo
+            const cacheResult = this.cleanupDirectory(CACHE_DIR, CONFIG.CLEANUP.MAX_CACHE_AGE_HOURS);
+            cleanedCount += cacheResult.count;
+            cleanedSize += cacheResult.size;
+
+            // Limpar alertas antigos
+            const alertResult = this.cleanupDirectory(ALERTS_DIR, CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS);
+            cleanedCount += alertResult.count;
+            cleanedSize += alertResult.size;
+
+            // Limpar arquivos temporários do sistema
+            const tempResult = this.cleanupTempFiles();
+            cleanedCount += tempResult.count;
+            cleanedSize += tempResult.size;
+
+            // Verificar e limpar por tamanho máximo da pasta
+            const sizeCheckResult = await this.checkFolderSize();
+            if (sizeCheckResult.cleaned > 0) {
+                cleanedCount += sizeCheckResult.count;
+                cleanedSize += sizeCheckResult.size;
+            }
+
+            this.totalCleaned += cleanedCount;
+
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+            
+            if (cleanedCount > 0) {
+                console.log(`✅ Limpeza concluída em ${duration}s`);
+                console.log(`   - Arquivos removidos: ${cleanedCount}`);
+                console.log(`   - Espaço liberado: ${(cleanedSize / (1024 * 1024)).toFixed(2)} MB`);
+                console.log(`   - Total já limpo: ${this.totalCleaned} arquivos`);
+            } else {
+                console.log(`✅ Limpeza concluída em ${duration}s - Nenhum arquivo antigo encontrado`);
+            }
+
+            // Registrar limpeza em log
+            this.logCleanup(cleanedCount, cleanedSize, duration, errors);
+
+        } catch (error) {
+            console.error('❌ Erro durante limpeza:', error.message);
+            errors.push(error.message);
+        }
+    }
+
+    cleanupDirectory(dirPath, maxAgeHours) {
+        const result = { count: 0, size: 0 };
+        
+        if (!fs.existsSync(dirPath)) return result;
+
+        try {
+            const files = fs.readdirSync(dirPath);
+            const now = Date.now();
+            const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+
+            files.forEach(file => {
+                const filePath = path.join(dirPath, file);
+                
+                try {
+                    const stats = fs.statSync(filePath);
+                    
+                    // Verificar se é arquivo (não diretório)
+                    if (stats.isFile()) {
+                        const fileAge = now - stats.mtimeMs;
+                        
+                        // Remover se mais antigo que o limite
+                        if (fileAge > maxAgeMs) {
+                            const fileSize = stats.size;
+                            fs.unlinkSync(filePath);
+                            result.count++;
+                            result.size += fileSize;
+                            
+                            if (CONFIG.DEBUG.VERBOSE) {
+                                console.log(`   🗑️ Removido: ${file} (${(fileSize / 1024).toFixed(1)} KB)`);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    // Ignorar erros de arquivos individuais
+                }
+            });
+        } catch (err) {
+            console.error(`   ⚠️ Erro ao ler diretório ${dirPath}:`, err.message);
+        }
+
+        return result;
+    }
+
+    cleanupTempFiles() {
+        const result = { count: 0, size: 0 };
+        
+        try {
+            // Limpar arquivos temporários comuns
+            const tempPatterns = ['*.tmp', '*.temp', '*.log.*', 'core.*', 'npm-debug.log*'];
+            const files = fs.readdirSync('.');
+            
+            files.forEach(file => {
+                for (const pattern of tempPatterns) {
+                    if (file.includes('tmp') || file.includes('temp') || 
+                        (file.includes('.log.') && file !== 'system.log')) {
+                        try {
+                            const stats = fs.statSync(file);
+                            if (stats.isFile()) {
+                                // Remover arquivos temporários com mais de 1 hora
+                                if (Date.now() - stats.mtimeMs > 3600000) {
+                                    const fileSize = stats.size;
+                                    fs.unlinkSync(file);
+                                    result.count++;
+                                    result.size += fileSize;
+                                }
+                            }
+                        } catch (err) {
+                            // Ignorar erros
+                        }
+                        break;
+                    }
+                }
+            });
+        } catch (err) {
+            // Ignorar erros
+        }
+
+        return result;
+    }
+
+    async checkFolderSize() {
+        const result = { count: 0, size: 0, cleaned: 0 };
+        const maxSizeBytes = CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB * 1024 * 1024;
+
+        try {
+            // Calcular tamanho total das pastas
+            let totalSize = 0;
+            const allFiles = [];
+
+            [LOG_DIR, CACHE_DIR, ALERTS_DIR].forEach(dir => {
+                if (fs.existsSync(dir)) {
+                    const files = fs.readdirSync(dir);
+                    files.forEach(file => {
+                        const filePath = path.join(dir, file);
+                        try {
+                            const stats = fs.statSync(filePath);
+                            if (stats.isFile()) {
+                                totalSize += stats.size;
+                                allFiles.push({
+                                    path: filePath,
+                                    size: stats.size,
+                                    mtime: stats.mtimeMs
+                                });
+                            }
+                        } catch (err) {}
+                    });
+                }
+            });
+
+            // Se excedeu o limite, remover arquivos mais antigos até ficar abaixo
+            if (totalSize > maxSizeBytes) {
+                console.log(`   ⚠️ Espaço total (${(totalSize / (1024*1024)).toFixed(2)} MB) excede limite de ${CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB} MB`);
+                
+                // Ordenar por data de modificação (mais antigos primeiro)
+                allFiles.sort((a, b) => a.mtime - b.mtime);
+                
+                for (const file of allFiles) {
+                    if (totalSize <= maxSizeBytes) break;
+                    
+                    try {
+                        fs.unlinkSync(file.path);
+                        totalSize -= file.size;
+                        result.count++;
+                        result.size += file.size;
+                        result.cleaned++;
+                    } catch (err) {}
+                }
+                
+                console.log(`   🗑️ Removidos ${result.count} arquivos antigos para liberar espaço`);
+            }
+        } catch (err) {
+            console.error('   ⚠️ Erro ao verificar tamanho da pasta:', err.message);
+        }
+
+        return result;
+    }
+
+    logCleanup(count, size, duration, errors) {
+        try {
+            const logEntry = {
+                timestamp: Date.now(),
+                datetime: getBrazilianDateTime().full,
+                filesRemoved: count,
+                spaceFreedMB: (size / (1024 * 1024)).toFixed(2),
+                durationSeconds: duration,
+                errors: errors.length ? errors : undefined,
+                totalCleaned: this.totalCleaned
+            };
+
+            const logFile = path.join(LOG_DIR, 'cleanup.log');
+            fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
+        } catch (err) {
+            // Ignorar erros de log
+        }
+    }
+
+    stop() {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+            console.log('🧹 Sistema de limpeza automática interrompido');
+        }
+    }
+}
+
+// Instanciar o gerenciador de limpeza
+const cleanupManager = new CleanupManager();
 
 // =====================================================================
 // === CACHE E CONTROLE DE ALERTAS ===
@@ -411,6 +685,30 @@ function calculateRSI(candles, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
+// Função para calcular CCI (Commodity Channel Index)
+function calculateCCI(candles, period = 20) {
+    if (candles.length < period) return null;
+    
+    const typ = [];
+    for (let i = 0; i < candles.length; i++) {
+        typ.push((candles[i].high + candles[i].low + candles[i].close) / 3);
+    }
+    
+    const recentTyp = typ.slice(-period);
+    const sma = recentTyp.reduce((a, b) => a + b, 0) / period;
+    
+    let meanDeviation = 0;
+    for (let i = 0; i < recentTyp.length; i++) {
+        meanDeviation += Math.abs(recentTyp[i] - sma);
+    }
+    meanDeviation = meanDeviation / period;
+    
+    if (meanDeviation === 0) return 0;
+    
+    const cci = (recentTyp[recentTyp.length - 1] - sma) / (0.015 * meanDeviation);
+    return cci;
+}
+
 function calculateSupportResistance(candles) {
     if (candles.length < 50) return { support: null, resistance: null };
     
@@ -629,12 +927,13 @@ function calculateTradeLevels(price, atr, direction, support, resistance) {
 
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m] = await Promise.all([
+        const [candles1h, candles15m, candlesDaily] = await Promise.all([
             getCandles(symbol, '1h', 100),
-            getCandles(symbol, '15m', 50)
+            getCandles(symbol, '15m', 50),
+            getCandles(symbol, '1d', 50) // Adicionado candles diários para CCI
         ]);
         
-        if (candles1h.length < 30 || candles15m.length < 20) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
         const currentCandle15m = candles15m[candles15m.length - 1];
@@ -667,6 +966,25 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
+        // Calcular CCI diário
+        const cciDaily = calculateCCI(candlesDaily, 20);
+        const cciValuesDaily = [];
+        for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
+            const slice = candlesDaily.slice(0, i + 1);
+            cciValuesDaily.push(calculateCCI(slice, 20) || 0);
+        }
+        const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
+        
+        // Determinar tendência do CCI diário
+        let cciDailyTrend = "NEUTRO";
+        if (cciDaily !== null && cciEma5 !== null) {
+            if (cciDaily > cciEma5) {
+                cciDailyTrend = "CCI 💹ALTA";
+            } else if (cciDaily < cciEma5) {
+                cciDailyTrend = "CCI 🔴BAIXA";
+            }
+        }
+        
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
@@ -695,37 +1013,43 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     else if (buyerPercentage > 52) score += 5;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 20;
-    else if (volumeRatio > 2.0) score += 15;
+    if (volumeRatio > 2.5) score += 15;
+    else if (volumeRatio > 2.0) score += 12;
     else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 5;
+    else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr < 1.8) score += 20;      // Muito bom (pouca gente comprada)
-        else if (lsr < 2.0) score += 15;  // Bom
+        if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
+        else if (lsr < 2.0) score += 12;  // Bom
         else if (lsr < 2.3) score += 10;  // Moderado
         else if (lsr < 2.6) score += 5;   // Pouco favorável
-        else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 5;   // Penalidade leve
+        else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
+        else if (lsr > 2.8) score -= 15;   // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
     if (funding) {
-        if (funding < -0.001) score += 15;      // Muito negativo
-        else if (funding < -0.0005) score += 10; // Moderadamente negativo
-        else if (funding < -0.0001) score += 5;  // Levemente negativo
+        if (funding < -0.001) score += 12;      // Muito negativo
+        else if (funding < -0.0005) score += 8; // Moderadamente negativo
+        else if (funding < -0.0001) score += 3;  // Levemente negativo
     }
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h < 35) score += 20;      // Extremamente oversold
-        else if (rsi1h < 40) score += 15;  // Muito oversold
-        else if (rsi1h < 45) score += 10;  // Oversold moderado
+        if (rsi1h < 35) score += 12;      // Extremamente oversold
+        else if (rsi1h < 40) score += 10;  // Muito oversold
+        else if (rsi1h < 45) score += 8;  // Oversold moderado
         else if (rsi1h < 50) score += 5;   // Levemente oversold
     }
     
-    // 6. POSIÇÃO PREÇO (máx 5)
+    // 6. CCI DIÁRIO (pontuação/penalidade)
+    if (cciDailyTrend) {
+        if (cciDailyTrend === "CCI ALTA") score += 10;      // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
+    }
+    
+    // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice < sr.resistance) {
         const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
         if (distanceToResistance > 5) score += 5;       // Muito espaço
@@ -749,37 +1073,43 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     else if (sellerPercentage > 52) score += 5;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 20;
-    else if (volumeRatio > 2.0) score += 15;
+    if (volumeRatio > 2.5) score += 15;
+    else if (volumeRatio > 2.0) score += 12;
     else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 5;
+    else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
         if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
-        else if (lsr > 3.5) score += 15;    // Bom
+        else if (lsr > 3.5) score += 12;    // Bom
         else if (lsr > 3.0) score += 10;    // Moderado
         else if (lsr > 2.7) score += 5;     // Pouco favorável
-        else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 5;     // Penalidade leve
+        else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
+        else if (lsr < 1.2) score -= 15;     // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
     if (funding) {
-        if (funding > 0.001) score += 15;       // Muito positivo
-        else if (funding > 0.0005) score += 10;  // Moderadamente positivo
-        else if (funding > 0.0001) score += 5;   // Levemente positivo
+        if (funding > 0.001) score += 12;       // Muito positivo
+        else if (funding > 0.0005) score += 8;  // Moderadamente positivo
+        else if (funding > 0.0001) score += 3;   // Levemente positivo
     }
     
     // 5. RSI (máx 20)
     if (rsi1h) {
-        if (rsi1h > 75) score += 20;       // Extremamente overbought
-        else if (rsi1h > 70) score += 15;   // Muito overbought
-        else if (rsi1h > 65) score += 10;   // Overbought moderado
+        if (rsi1h > 75) score += 12;       // Extremamente overbought
+        else if (rsi1h > 70) score += 10;   // Muito overbought
+        else if (rsi1h > 65) score += 8;   // Overbought moderado
         else if (rsi1h > 60) score += 5;    // Levemente overbought
     }
     
-    // 6. POSIÇÃO PREÇO (máx 5)
+    // 6. CCI DIÁRIO (pontuação/penalidade)
+    if (cciDailyTrend) {
+        if (cciDailyTrend === "CCI ALTA") score -= 15;     // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score += 10; // CCI cruzando abaixo da EMA5
+    }
+    
+    // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice > sr.support) {
         const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
         if (distanceToSupport > 5) score += 5;       // Muito espaço
@@ -817,6 +1147,7 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
             lsr,
             funding,
             rsi: rsi1h,
+            cciDaily: cciDailyTrend, // Adicionando tendência do CCI diário
             support: sr.support,
             resistance: sr.resistance,
             emoji,
@@ -948,26 +1279,23 @@ function formatTradeAlert(alert) {
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
+    // Definir a mensagem da IA Dica baseada na direção
+    const iaDica = alert.direction === 'COMPRA' 
+        ? '💡 <b>🤖 IA Dica...</b>\n• Observar Zona do Suporte...' 
+        : '💡 <b>🤖 IA Dica...</b>\n• Realizar Lucro ou Parcial...';
+    
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>Análise de dados</b>
- Alerta:${dailyCount}/${time.full}hs
- Preço: $${entry}
- Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
- RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus}
- #LSR: ${formatNumber(alert.lsr, 2)}
- Fund: ${fundingSign}${fundingPct}%
- Suporte: ${formatPrice(alert.support)}
- Resistência: ${formatPrice(alert.resistance)}
- #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
- <b>Alvos</b>
- TP1: ${tp1} (${r1}%)
- TP2: ${tp2} (${r2}%)
- TP3: ${tp3} (${r3}%)
- 🛑 Stop : ${stop}
- 💡 <b>Dica...</b>
-• Entrada à mercado DCA fracionado
+ <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
+ Alerta:${dailyCount} | ${time.full}hs
+ 💲Preço: $${entry}
+ #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
+ #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
+ Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
+ #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
+<b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
+ ${iaDica}
 Alerta Educativo, não é recomendação de investimento
-🤖 Titanium by @J4Rviz</i>`;
+ Titanium Prime by @J4Rviz</i>`;
 }
 
 // =====================================================================
@@ -1060,7 +1388,7 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)}`);
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily}`);
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
@@ -1115,6 +1443,9 @@ async function startBot() {
     console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
     
+    // Iniciar sistema de limpeza automática
+    cleanupManager.start();
+    
     // Mensagem de inicialização SUPER SIMPLES
     const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
     
@@ -1166,5 +1497,7 @@ startBot().catch(async error => {
         await sendTelegramAlert(`❌ ERRO FATAL`);
     } catch {}
     
+    // Parar sistema de limpeza
+    cleanupManager.stop();
     process.exit(1);
 });
