@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_o0A',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.6,
+        MIN_VOLUME_RATIO: 1.7,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -44,7 +44,7 @@ const CONFIG = {
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
-        MIN_SCORE: 80,
+        MIN_SCORE: 85,
         MIN_VOLUME_RATIO: 1.5,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
@@ -127,6 +127,7 @@ const TradeAlertSchema = z.object({
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
+    cciDaily: z.string().optional().nullable(), // Adicionado campo para CCI Diário
     support: z.number(),
     resistance: z.number(),
     emoji: z.string(),
@@ -411,6 +412,30 @@ function calculateRSI(candles, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
+// Função para calcular CCI (Commodity Channel Index)
+function calculateCCI(candles, period = 20) {
+    if (candles.length < period) return null;
+    
+    const typ = [];
+    for (let i = 0; i < candles.length; i++) {
+        typ.push((candles[i].high + candles[i].low + candles[i].close) / 3);
+    }
+    
+    const recentTyp = typ.slice(-period);
+    const sma = recentTyp.reduce((a, b) => a + b, 0) / period;
+    
+    let meanDeviation = 0;
+    for (let i = 0; i < recentTyp.length; i++) {
+        meanDeviation += Math.abs(recentTyp[i] - sma);
+    }
+    meanDeviation = meanDeviation / period;
+    
+    if (meanDeviation === 0) return 0;
+    
+    const cci = (recentTyp[recentTyp.length - 1] - sma) / (0.015 * meanDeviation);
+    return cci;
+}
+
 function calculateSupportResistance(candles) {
     if (candles.length < 50) return { support: null, resistance: null };
     
@@ -629,12 +654,13 @@ function calculateTradeLevels(price, atr, direction, support, resistance) {
 
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m] = await Promise.all([
+        const [candles1h, candles15m, candlesDaily] = await Promise.all([
             getCandles(symbol, '1h', 100),
-            getCandles(symbol, '15m', 50)
+            getCandles(symbol, '15m', 50),
+            getCandles(symbol, '1d', 50) // Adicionado candles diários para CCI
         ]);
         
-        if (candles1h.length < 30 || candles15m.length < 20) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
         const currentCandle15m = candles15m[candles15m.length - 1];
@@ -666,6 +692,25 @@ async function analyzeForAlerts(symbol) {
         
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
+        
+        // Calcular CCI diário
+        const cciDaily = calculateCCI(candlesDaily, 20);
+        const cciValuesDaily = [];
+        for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
+            const slice = candlesDaily.slice(0, i + 1);
+            cciValuesDaily.push(calculateCCI(slice, 20) || 0);
+        }
+        const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
+        
+        // Determinar tendência do CCI diário
+        let cciDailyTrend = "NEUTRO";
+        if (cciDaily !== null && cciEma5 !== null) {
+            if (cciDaily > cciEma5) {
+                cciDailyTrend = "CCI 💹ALTA";
+            } else if (cciDaily < cciEma5) {
+                cciDailyTrend = "CCI 🔴BAIXA";
+            }
+        }
         
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
@@ -725,7 +770,13 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
         else if (rsi1h < 50) score += 5;   // Levemente oversold
     }
     
-    // 6. POSIÇÃO PREÇO (máx 5)
+    // 6. CCI DIÁRIO (pontuação/penalidade)
+    if (cciDailyTrend) {
+        if (cciDailyTrend === "CCI ALTA") score += 10;      // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
+    }
+    
+    // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice < sr.resistance) {
         const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
         if (distanceToResistance > 5) score += 5;       // Muito espaço
@@ -779,7 +830,13 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
         else if (rsi1h > 60) score += 5;    // Levemente overbought
     }
     
-    // 6. POSIÇÃO PREÇO (máx 5)
+    // 6. CCI DIÁRIO (pontuação/penalidade)
+    if (cciDailyTrend) {
+        if (cciDailyTrend === "CCI ALTA") score -= 15;     // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score += 10; // CCI cruzando abaixo da EMA5
+    }
+    
+    // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice > sr.support) {
         const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
         if (distanceToSupport > 5) score += 5;       // Muito espaço
@@ -817,6 +874,7 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
             lsr,
             funding,
             rsi: rsi1h,
+            cciDaily: cciDailyTrend, // Adicionando tendência do CCI diário
             support: sr.support,
             resistance: sr.resistance,
             emoji,
@@ -948,6 +1006,11 @@ function formatTradeAlert(alert) {
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
+    // Definir a mensagem da IA Dica baseada na direção
+    const iaDica = alert.direction === 'COMPRA' 
+        ? '💡 <b>🤖 IA Dica...</b>\n• Observar Zona do Suporte...' 
+        : '💡 <b>🤖 IA Dica...</b>\n• Realizar Lucro ou Parcial...';
+    
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>Indicadores</b>
  Alerta:${dailyCount} | ${time.full}hs
@@ -956,6 +1019,7 @@ function formatTradeAlert(alert) {
  RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus}
  #LSR: ${formatNumber(alert.lsr, 2)}
  Fund: ${fundingSign}${fundingPct}%
+ Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  Suporte: ${formatPrice(alert.support)}
  Resistência: ${formatPrice(alert.resistance)}
  #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
@@ -964,8 +1028,7 @@ function formatTradeAlert(alert) {
  TP2: ${tp2} 
  TP3: ${tp3} 
  🛑 Stop : ${stop}
- 💡 <b>🤖 IA Dica...</b>
-• Entrada à mercado DCA fracionado
+ ${iaDica}
 Alerta Educativo, não é recomendação de investimento
  Titanium Prime by @J4Rviz</i>`;
 }
@@ -1060,7 +1123,7 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)}`);
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily}`);
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
