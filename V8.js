@@ -5,14 +5,13 @@ const z = require('zod');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-
 // =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_A',
-        CHAT_ID: '-10019907'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -28,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -46,7 +45,7 @@ const CONFIG = {
     },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -57,46 +56,25 @@ const CONFIG = {
         }
     },
     RSI: {
-        BUY_MAX: 64,
-        SELL_MIN: 55,
+        BUY_MAX: 64,      // RSI máximo para compra
+        SELL_MIN: 55,     // RSI mínimo para venda
         PERIOD: 14
-    },
-    EMA: {
-        FAST: 13,
-        SLOW: 34,
-        SIGNAL: 55,
-        TIMEFRAME: '3m'
     },
     DEBUG: {
         VERBOSE: false
     },
-    STOP: {
-        ATR_MULTIPLIER_BASE: 1.5,
-        ATR_MULTIPLIER_STRUCTURE_CLOSE: 1.2,
-        ATR_MULTIPLIER_STRUCTURE_MEDIUM: 1.5,
-        ATR_MULTIPLIER_STRUCTURE_FAR: 1.8,
-        ATR_MULTIPLIER_NO_STRUCTURE: 2.0,
-        MAX_STOP_PERCENT: 5,
-        MIN_STOP_PERCENT: 0.8,
-        SUPPORT_BUFFER: 0.995,
-        RESISTANCE_BUFFER: 1.005
-    },
-    VOLUME_MEMORY: {
-        ENABLED: true,
-        MEMORY_DURATION_MINUTES: 30,
-        MAX_VOLUME_RATIO: 3.0,
-        MIN_VOLUME_RATIO: 1.5,
-        CHECK_INTERVAL_MINUTES: 5
-    },
+    // =================================================================
+    // === CONFIGURAÇÕES DE LIMPEZA - NOVO ===
+    // =================================================================
     CLEANUP: {
-        ENABLED: true,
-        MAX_LOG_AGE_HOURS: 24,
-        MAX_CACHE_AGE_HOURS: 12,
-        MAX_ALERT_FILES_AGE_HOURS: 48,
-        CLEANUP_INTERVAL_MINUTES: 60,
-        MAX_FOLDER_SIZE_MB: 500,
-        COMPRESS_OLD_LOGS: true,
-        MIN_FREE_SPACE_MB: 100
+        ENABLED: true,                    // Ativar/desativar limpeza
+        MAX_LOG_AGE_HOURS: 24,             // Manter logs por 24 horas
+        MAX_CACHE_AGE_HOURS: 12,            // Manter cache por 12 horas
+        MAX_ALERT_FILES_AGE_HOURS: 48,      // Manter arquivos de alerta por 48 horas
+        CLEANUP_INTERVAL_MINUTES: 60,       // Executar limpeza a cada 60 minutos
+        MAX_FOLDER_SIZE_MB: 500,             // Tamanho máximo total da pasta em MB
+        COMPRESS_OLD_LOGS: true,             // Comprimir logs antigos
+        MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
     }
 };
 
@@ -163,12 +141,8 @@ const TradeAlertSchema = z.object({
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
     cciDaily: z.string().optional().nullable(),
-    emaCrossSignal: z.string().optional().nullable(),
     support: z.number(),
     resistance: z.number(),
-    stopDistance: z.number(),
-    volumeMemoryUsed: z.boolean().optional(),
-    timeBetweenVolumeAndCross: z.number().optional(),
     emoji: z.string(),
     timestamp: z.number()
 });
@@ -183,143 +157,6 @@ const ALERTS_DIR = './alerts';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
-
-// =====================================================================
-// === CACHE DE VOLUME PARA LEMBRAR DE PICOS ===
-// =====================================================================
-const volumeSpikeMemory = new Map(); // Guarda informações de picos de volume
-const volumeCheckTracker = new Map(); // Controla quando foi a última verificação
-
-class VolumeMemoryManager {
-    static registerSpike(symbol, volumeRatio, buyerPercentage, sellerPercentage, price, direction, candles) {
-        const key = symbol;
-        const now = Date.now();
-        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
-        
-        // Limpar memórias expiradas
-        this.cleanExpiredMemories();
-        
-        // Verificar se já existe um spike registrado
-        const existing = volumeSpikeMemory.get(key);
-        
-        // Determinar direção baseada no volume
-        let spikeDirection = null;
-        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD) {
-            spikeDirection = 'COMPRA';
-        } else if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD)) {
-            spikeDirection = 'VENDA';
-        }
-        
-        // Se não tem direção definida, não registra
-        if (!spikeDirection) return;
-        
-        // Se não existe ou se este spike é MAIOR que o anterior, atualiza
-        if (!existing || (existing && volumeRatio > existing.volumeRatio)) {
-            volumeSpikeMemory.set(key, {
-                volumeRatio,
-                buyerPercentage,
-                sellerPercentage,
-                price: price,
-                direction: spikeDirection,
-                timestamp: now,
-                expiresAt: now + memoryDuration,
-                candles: candles ? candles.slice(-5) : null // Guarda últimos candles para referência
-            });
-            
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`💾 Volume spike registrado: ${symbol} - ${volumeRatio.toFixed(2)}x (${spikeDirection})`);
-            }
-        }
-    }
-    
-    static checkForSpike(symbol, currentEmaCross, currentPrice, currentRsi, currentLsr, currentFunding) {
-        const key = symbol;
-        const memory = volumeSpikeMemory.get(key);
-        
-        if (!memory) return null;
-        
-        const now = Date.now();
-        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
-        
-        // Verificar se memória expirou
-        if (now - memory.timestamp > memoryDuration) {
-            volumeSpikeMemory.delete(key);
-            return null;
-        }
-        
-        // Verificar se o EMA cross atual corresponde à direção do spike
-        if (!currentEmaCross || !currentEmaCross.signal) return null;
-        
-        // Calcular tempo entre volume e cross
-        const timeDiffMinutes = (now - memory.timestamp) / (60 * 1000);
-        
-        // Verificar se o preço não mudou muito (máximo 3% de variação)
-        const priceChange = Math.abs((currentPrice - memory.price) / memory.price * 100);
-        if (priceChange > 3) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} - Preço mudou ${priceChange.toFixed(2)}% desde o volume, ignorando memória`);
-            }
-            return null;
-        }
-        
-        // Verificar se o RSI ainda está favorável
-        if (memory.direction === 'COMPRA' && currentRsi > CONFIG.RSI.BUY_MAX) {
-            return null;
-        }
-        if (memory.direction === 'VENDA' && currentRsi < CONFIG.RSI.SELL_MIN) {
-            return null;
-        }
-        
-        // Se o EMA cross atual tem a mesma direção do spike
-        if (currentEmaCross.signal === memory.direction) {
-            return {
-                direction: memory.direction,
-                volumeRatio: memory.volumeRatio,
-                buyerPercentage: memory.buyerPercentage,
-                sellerPercentage: memory.sellerPercentage,
-                timeDiffMinutes: timeDiffMinutes,
-                originalPrice: memory.price,
-                memoryTimestamp: memory.timestamp
-            };
-        }
-        
-        return null;
-    }
-    
-    static cleanExpiredMemories() {
-        const now = Date.now();
-        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
-        
-        for (const [symbol, memory] of volumeSpikeMemory.entries()) {
-            if (now - memory.timestamp > memoryDuration) {
-                volumeSpikeMemory.delete(symbol);
-                if (CONFIG.DEBUG.VERBOSE) {
-                    console.log(`🧹 Memória de volume expirada: ${symbol}`);
-                }
-            }
-        }
-    }
-    
-    static getMemoryStats() {
-        const stats = {
-            totalMemories: volumeSpikeMemory.size,
-            memories: []
-        };
-        
-        for (const [symbol, memory] of volumeSpikeMemory.entries()) {
-            const ageMinutes = (Date.now() - memory.timestamp) / (60 * 1000);
-            stats.memories.push({
-                symbol,
-                direction: memory.direction,
-                volumeRatio: memory.volumeRatio,
-                ageMinutes: ageMinutes.toFixed(1),
-                expiresIn: ((memory.expiresAt - Date.now()) / (60 * 1000)).toFixed(1)
-            });
-        }
-        
-        return stats;
-    }
-}
 
 // =====================================================================
 // === SISTEMA DE LIMPEZA AUTOMÁTICA ===
@@ -880,215 +717,172 @@ function calculateSupportResistance(candles) {
     };
 }
 
-function checkEMACross(candles3m) {
-    if (!candles3m || candles3m.length < Math.max(CONFIG.EMA.FAST, CONFIG.EMA.SLOW, CONFIG.EMA.SIGNAL)) {
-        return { cross: null, signal: null };
-    }
+// =====================================================================
+// === NOVO SISTEMA DE STOP LOSS PROFISSIONAL ===
+// =====================================================================
+function calculateTradeLevels(price, atr, direction, support, resistance, candles) {
+    let stopLoss, takeProfit1, takeProfit2, takeProfit3;
     
-    const closes = candles3m.map(c => c.close);
+    // Calcular ATR em diferentes períodos para melhor análise
+    const atr14 = atr; // ATR padrão já calculado
+    const atr7 = calculateATR(candles.slice(-21), 7) || atr14; // ATR mais curto
+    const atr21 = calculateATR(candles, 21) || atr14 * 1.2; // ATR mais longo
     
-    const ema13 = calculateEMA(closes, CONFIG.EMA.FAST);
-    const ema34 = calculateEMA(closes, CONFIG.EMA.SLOW);
-    const ema55 = calculateEMA(closes, CONFIG.EMA.SIGNAL);
-    const currentPrice = closes[closes.length - 1];
+    // Usar o maior ATR para stop mais seguro (evita stops muito justos)
+    const atrMultiplier = 2.2; // Multiplicador aumentado para evitar stops curtos
+    const atrForStop = Math.max(atr7, atr14, atr21) * atrMultiplier;
     
-    const prevCloses = closes.slice(0, -1);
-    const prevEma13 = calculateEMA(prevCloses, CONFIG.EMA.FAST);
-    const prevEma34 = calculateEMA(prevCloses, CONFIG.EMA.SLOW);
+    // Identificar níveis estruturais importantes
+    const recentCandles = candles.slice(-30);
+    const recentHighs = recentCandles.map(c => c.high);
+    const recentLows = recentCandles.map(c => c.low);
     
-    if (prevEma13 <= prevEma34 && ema13 > ema34) {
-        if (currentPrice > ema55) {
-            return { cross: 'UP', signal: 'COMPRA' };
+    // Encontrar máximas e mínimas significativas
+    const significantHighs = [];
+    const significantLows = [];
+    
+    for (let i = 2; i < recentHighs.length - 2; i++) {
+        // Picos significativos
+        if (recentHighs[i] > recentHighs[i-1] && recentHighs[i] > recentHighs[i-2] &&
+            recentHighs[i] > recentHighs[i+1] && recentHighs[i] > recentHighs[i+2]) {
+            significantHighs.push(recentHighs[i]);
+        }
+        // Fundos significativos
+        if (recentLows[i] < recentLows[i-1] && recentLows[i] < recentLows[i-2] &&
+            recentLows[i] < recentLows[i+1] && recentLows[i] < recentLows[i+2]) {
+            significantLows.push(recentLows[i]);
         }
     }
-    
-    if (prevEma13 >= prevEma34 && ema13 < ema34) {
-        if (currentPrice < ema55) {
-            return { cross: 'DOWN', signal: 'VENDA' };
-        }
-    }
-    
-    return { cross: null, signal: null };
-}
-
-// =====================================================================
-// === CÁLCULO DE STOP LOSS MELHORADO ===
-// =====================================================================
-function calculateDynamicStopLoss(price, atr, direction, support, resistance, candles, symbol) {
-    if (!atr || atr <= 0) {
-        const stopPct = CONFIG.TRADE.STOP_PERCENTAGE / 100;
-        return direction === 'COMPRA' 
-            ? price * (1 - stopPct)
-            : price * (1 + stopPct);
-    }
-    
-    const recentCandles = candles.slice(-10);
-    let maxVolatility = 0;
-    for (let i = 1; i < recentCandles.length; i++) {
-        const candleRange = recentCandles[i].high - recentCandles[i].low;
-        maxVolatility = Math.max(maxVolatility, candleRange);
-    }
-    
-    let atrMultiplier;
-    let useStructure = false;
     
     if (direction === 'COMPRA') {
-        const distanceToSupport = price - support;
-        const supportStrength = distanceToSupport / price * 100;
+        // PARA COMPRA: Stop abaixo de suportes estruturais
         
-        if (supportStrength < 1) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_CLOSE;
-            useStructure = true;
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`📊 ${symbol} - Suporte próximo (${supportStrength.toFixed(2)}%), stop ajustado`);
-            }
-        } else if (supportStrength < 2) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_MEDIUM;
-            useStructure = true;
-        } else if (supportStrength < 3) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_FAR;
-            useStructure = true;
-        } else {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE;
-        }
+        // 1. Primeiro nível: abaixo do último fundo significativo
+        let structuralStop = Math.min(...significantLows.slice(-3)) * 0.99;
         
-        let stopLoss;
-        if (useStructure) {
-            stopLoss = Math.min(
-                support * CONFIG.STOP.SUPPORT_BUFFER,
-                price - (atr * atrMultiplier)
-            );
-        } else {
-            stopLoss = price - (atr * atrMultiplier);
-        }
+        // 2. Segundo nível: abaixo da mínima recente (últimas 5 velas)
+        const recentLow = Math.min(...recentLows.slice(-5)) * 0.995;
         
-        const maxStopDistance = price * (CONFIG.STOP.MAX_STOP_PERCENT / 100);
-        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
-        const actualDistance = price - stopLoss;
+        // 3. Terceiro nível: baseado em ATR
+        const atrStop = price - atrForStop;
         
-        if (actualDistance > maxStopDistance) {
-            stopLoss = price - maxStopDistance;
-        } else if (actualDistance < minStopDistance && atrMultiplier < CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE) {
+        // Escolher o stop mais conservador (mais distante)
+        stopLoss = Math.min(structuralStop, recentLow, atrStop);
+        
+        // Garantir que o stop não seja muito próximo do preço (mínimo 1.5% de distância)
+        const minStopDistance = price * 0.015; // 1.5% mínimo
+        if (price - stopLoss < minStopDistance) {
             stopLoss = price - minStopDistance;
         }
         
-        return stopLoss;
+        // Adicionar buffer para evitar stops em níveis óbvios
+        stopLoss = stopLoss * 0.998; // Buffer de 0.2% abaixo do nível estrutural
         
-    } else {
-        const distanceToResistance = resistance - price;
-        const resistanceStrength = distanceToResistance / price * 100;
+        // Calcular risco
+        const risk = price - stopLoss;
         
-        if (resistanceStrength < 1) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_CLOSE;
-            useStructure = true;
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`📊 ${symbol} - Resistência próxima (${resistanceStrength.toFixed(2)}%), stop ajustado`);
-            }
-        } else if (resistanceStrength < 2) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_MEDIUM;
-            useStructure = true;
-        } else if (resistanceStrength < 3) {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_FAR;
-            useStructure = true;
-        } else {
-            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE;
+        // Alvos baseados em resistências estruturais
+        let targetResistance = Math.min(...significantHighs.slice(-3)) * 1.01;
+        if (targetResistance <= price) {
+            targetResistance = resistance * 0.99;
         }
         
-        let stopLoss;
-        if (useStructure) {
-            stopLoss = Math.max(
-                resistance * CONFIG.STOP.RESISTANCE_BUFFER,
-                price + (atr * atrMultiplier)
-            );
-        } else {
-            stopLoss = price + (atr * atrMultiplier);
+        // Calcular alvos com base no risco e resistências
+        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
+        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
+        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
+        
+        // TP1: limitado pela primeira resistência significativa
+        takeProfit1 = Math.min(price + reward1, targetResistance);
+        
+        // TP2: pode ultrapassar um pouco a resistência se o momentum for forte
+        takeProfit2 = Math.min(price + reward2, targetResistance * 1.02);
+        
+        // TP3: alvo mais distante baseado apenas em risco
+        takeProfit3 = price + reward3;
+        
+        // Ajustar TPs para garantir que sejam progressivos
+        if (takeProfit2 <= takeProfit1) {
+            takeProfit2 = takeProfit1 * 1.01;
+        }
+        if (takeProfit3 <= takeProfit2) {
+            takeProfit3 = takeProfit2 * 1.02;
         }
         
-        const maxStopDistance = price * (CONFIG.STOP.MAX_STOP_PERCENT / 100);
-        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
-        const actualDistance = stopLoss - price;
+    } else { // VENDA
+        // PARA VENDA: Stop acima de resistências estruturais
         
-        if (actualDistance > maxStopDistance) {
-            stopLoss = price + maxStopDistance;
-        } else if (actualDistance < minStopDistance && atrMultiplier < CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE) {
+        // 1. Primeiro nível: acima do último topo significativo
+        let structuralStop = Math.max(...significantHighs.slice(-3)) * 1.01;
+        
+        // 2. Segundo nível: acima da máxima recente (últimas 5 velas)
+        const recentHigh = Math.max(...recentHighs.slice(-5)) * 1.005;
+        
+        // 3. Terceiro nível: baseado em ATR
+        const atrStop = price + atrForStop;
+        
+        // Escolher o stop mais conservador (mais distante)
+        stopLoss = Math.max(structuralStop, recentHigh, atrStop);
+        
+        // Garantir que o stop não seja muito próximo do preço (mínimo 1.5% de distância)
+        const minStopDistance = price * 0.015; // 1.5% mínimo
+        if (stopLoss - price < minStopDistance) {
             stopLoss = price + minStopDistance;
         }
         
-        return stopLoss;
-    }
-}
-
-function calculateDynamicTakeProfits(price, stopLoss, direction, resistance, support, atr) {
-    const risk = Math.abs(price - stopLoss);
-    
-    if (direction === 'COMPRA') {
-        const tp1ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[0]);
-        const tp1ByResistance = resistance * 0.99;
-        const takeProfit1 = Math.min(tp1ByRisk, tp1ByResistance);
+        // Adicionar buffer para evitar stops em níveis óbvios
+        stopLoss = stopLoss * 1.002; // Buffer de 0.2% acima do nível estrutural
         
-        const tp2ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[1]);
-        const tp2ByResistance = resistance * 1.02;
-        const takeProfit2 = Math.min(tp2ByRisk, tp2ByResistance);
+        // Calcular risco
+        const risk = stopLoss - price;
         
-        const tp3ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[2]);
-        const tp3Breakout = price + (atr * 5);
-        const takeProfit3 = Math.max(tp3ByRisk, tp3Breakout);
-        
-        return { takeProfit1, takeProfit2, takeProfit3 };
-        
-    } else {
-        const tp1ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[0]);
-        const tp1BySupport = support * 1.01;
-        const takeProfit1 = Math.max(tp1ByRisk, tp1BySupport);
-        
-        const tp2ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[1]);
-        const tp2BySupport = support * 0.98;
-        const takeProfit2 = Math.max(tp2ByRisk, tp2BySupport);
-        
-        const tp3ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[2]);
-        const tp3Breakout = price - (atr * 5);
-        const takeProfit3 = Math.min(tp3ByRisk, tp3Breakout);
-        
-        return { takeProfit1, takeProfit2, takeProfit3 };
-    }
-}
-
-function calculateTradeLevels(price, atr, direction, support, resistance, candles, symbol) {
-    const stopLoss = calculateDynamicStopLoss(price, atr, direction, support, resistance, candles, symbol);
-    
-    const { takeProfit1, takeProfit2, takeProfit3 } = 
-        calculateDynamicTakeProfits(price, stopLoss, direction, resistance, support, atr);
-    
-    const validatedLevels = validateTradeLevels(price, stopLoss, takeProfit1, takeProfit2, takeProfit3, direction);
-    
-    return validatedLevels;
-}
-
-function validateTradeLevels(price, stopLoss, tp1, tp2, tp3, direction) {
-    let validated = { stopLoss, takeProfit1: tp1, takeProfit2: tp2, takeProfit3: tp3 };
-    
-    if (direction === 'COMPRA') {
-        if (tp1 <= price) validated.takeProfit1 = price * 1.01;
-        if (tp2 <= tp1) validated.takeProfit2 = tp1 * 1.02;
-        if (tp3 <= tp2) validated.takeProfit3 = tp2 * 1.02;
-        
-        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
-        if (price - stopLoss < minStopDistance) {
-            validated.stopLoss = price - minStopDistance;
+        // Alvos baseados em suportes estruturais
+        let targetSupport = Math.max(...significantLows.slice(-3)) * 0.99;
+        if (targetSupport >= price) {
+            targetSupport = support * 1.01;
         }
         
-    } else {
-        if (tp1 >= price) validated.takeProfit1 = price * 0.99;
-        if (tp2 >= tp1) validated.takeProfit2 = tp1 * 0.98;
-        if (tp3 >= tp2) validated.takeProfit3 = tp2 * 0.98;
+        // Calcular alvos com base no risco e suportes
+        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
+        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
+        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
         
-        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
-        if (stopLoss - price < minStopDistance) {
-            validated.stopLoss = price + minStopDistance;
+        // TP1: limitado pelo primeiro suporte significativo
+        takeProfit1 = Math.max(price - reward1, targetSupport);
+        
+        // TP2: pode cair um pouco mais se o momentum for forte
+        takeProfit2 = Math.max(price - reward2, targetSupport * 0.98);
+        
+        // TP3: alvo mais distante baseado apenas em risco
+        takeProfit3 = price - reward3;
+        
+        // Ajustar TPs para garantir que sejam progressivos
+        if (takeProfit2 >= takeProfit1) {
+            takeProfit2 = takeProfit1 * 0.99;
+        }
+        if (takeProfit3 >= takeProfit2) {
+            takeProfit3 = takeProfit2 * 0.98;
         }
     }
     
-    return validated;
+    // Validações finais
+    if (direction === 'COMPRA') {
+        // Garantir que stop está abaixo do preço
+        stopLoss = Math.min(stopLoss, price * 0.985);
+        // Garantir que TPs estão acima do preço
+        takeProfit1 = Math.max(takeProfit1, price * 1.01);
+        takeProfit2 = Math.max(takeProfit2, takeProfit1 * 1.005);
+        takeProfit3 = Math.max(takeProfit3, takeProfit2 * 1.005);
+    } else {
+        // Garantir que stop está acima do preço
+        stopLoss = Math.max(stopLoss, price * 1.015);
+        // Garantir que TPs estão abaixo do preço
+        takeProfit1 = Math.min(takeProfit1, price * 0.99);
+        takeProfit2 = Math.min(takeProfit2, takeProfit1 * 0.995);
+        takeProfit3 = Math.min(takeProfit3, takeProfit2 * 0.995);
+    }
+    
+    return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
 }
 
 // =====================================================================
@@ -1157,7 +951,7 @@ async function getCandles(symbol, timeframe, limit = 100) {
     if (cached) return cached;
 
     const intervalMap = {
-        '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
         '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
     };
     
@@ -1243,18 +1037,16 @@ async function getFundingRate(symbol) {
 
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m, candlesDaily, candles3m] = await Promise.all([
+        const [candles1h, candles15m, candlesDaily] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 50),
-            getCandles(symbol, '3m', 100)
+            getCandles(symbol, '1d', 50)
         ]);
         
-        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25 || candles3m.length < 60) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
-        
-        const emaCross = checkEMACross(candles3m);
+        const currentCandle15m = candles15m[candles15m.length - 1];
         
         const volumes = candles1h.map(c => c.volume);
         const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
@@ -1284,6 +1076,7 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
+        // Calcular CCI diário
         const cciDaily = calculateCCI(candlesDaily, 20);
         const cciValuesDaily = [];
         for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
@@ -1292,6 +1085,7 @@ async function analyzeForAlerts(symbol) {
         }
         const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
         
+        // Determinar tendência do CCI diário
         let cciDailyTrend = "NEUTRO";
         if (cciDaily !== null && cciEma5 !== null) {
             if (cciDaily > cciEma5) {
@@ -1311,114 +1105,139 @@ async function analyzeForAlerts(symbol) {
         
         if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
         
-        // REGISTRAR SPIKE DE VOLUME NA MEMÓRIA
-        if (volumeRatio >= CONFIG.VOLUME_MEMORY.MIN_VOLUME_RATIO) {
-            VolumeMemoryManager.registerSpike(
-                symbol, 
-                volumeRatio, 
-                buyerPercentage, 
-                sellerPercentage, 
-                currentPrice,
-                null,
-                candles1h
-            );
-        }
-        
         let direction = null;
         let score = 0;
         let confidence = 0;
-        let emaCrossSignal = null;
-        let volumeMemoryUsed = false;
-        let timeBetweenVolumeAndCross = 0;
         
-        // VERIFICAÇÃO 1: CRITÉRIO NORMAL (VOLUME AGORA + EMA AGORA)
+        // ANÁLISE PARA COMPRA - VERSÃO OTIMIZADA
         if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h < CONFIG.RSI.BUY_MAX) {
             
-            if (emaCross && emaCross.signal === 'COMPRA') {
-                direction = 'COMPRA';
-                emaCrossSignal = 'EMA13 > EMA34, PREÇO > EMA55';
-                volumeMemoryUsed = false;
-                
-                // Calcular score normal
-                score = calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi1h, cciDailyTrend, currentPrice, sr);
-                confidence = Math.min(100, Math.max(0, score));
+            direction = 'COMPRA';
+            score = 50;
+            
+            // 1. VOLUME COMPRADOR (máx 20)
+            if (buyerPercentage > 60) score += 15;
+            else if (buyerPercentage > 55) score += 10;
+            else if (buyerPercentage > 52) score += 5;
+            
+            // 2. VOLUME RATIO (máx 20)
+            if (volumeRatio > 2.5) score += 15;
+            else if (volumeRatio > 2.0) score += 12;
+            else if (volumeRatio > 1.8) score += 10;
+            else if (volumeRatio > 1.6) score += 8;
+            
+            // 3. LSR (máx 20, com penalidade)
+            if (lsr) {
+                if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
+                else if (lsr < 2.0) score += 12;  // Bom
+                else if (lsr < 2.3) score += 10;  // Moderado
+                else if (lsr < 2.6) score += 5;   // Pouco favorável
+                else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
+                else if (lsr > 2.8) score -= 15;   // Penalidade leve
             }
+            
+            // 4. FUNDING (máx 15)
+            if (funding) {
+                if (funding < -0.001) score += 12;      // Muito negativo
+                else if (funding < -0.0005) score += 8; // Moderadamente negativo
+                else if (funding < -0.0001) score += 3;  // Levemente negativo
+            }
+            
+            // 5. RSI (máx 20)
+            if (rsi1h) {
+                if (rsi1h < 35) score += 12;      // Extremamente oversold
+                else if (rsi1h < 40) score += 10;  // Muito oversold
+                else if (rsi1h < 45) score += 8;  // Oversold moderado
+                else if (rsi1h < 50) score += 5;   // Levemente oversold
+            }
+            
+            // 6. CCI DIÁRIO (pontuação/penalidade)
+            if (cciDailyTrend) {
+                if (cciDailyTrend === "CCI 💹ALTA") score += 10;      // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
+            }
+            
+            // 7. POSIÇÃO PREÇO (máx 5)
+            if (currentPrice < sr.resistance) {
+                const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
+                if (distanceToResistance > 5) score += 5;       // Muito espaço
+                else if (distanceToResistance > 2) score += 3;  // Bom espaço
+            }
+            
+            confidence = Math.min(100, Math.max(0, score));
         }
-        
+
+        // ANÁLISE PARA VENDA - VERSÃO OTIMIZADA
         if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h > CONFIG.RSI.SELL_MIN) {
             
-            if (emaCross && emaCross.signal === 'VENDA') {
-                direction = 'VENDA';
-                emaCrossSignal = 'EMA13 < EMA34, PREÇO < EMA55';
-                volumeMemoryUsed = false;
-                
-                score = calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi1h, cciDailyTrend, currentPrice, sr);
-                confidence = Math.min(100, Math.max(0, score));
-            }
-        }
-        
-        // VERIFICAÇÃO 2: SE NÃO TEM DIRECAO, VERIFICAR MEMÓRIA DE VOLUME
-        if (!direction && CONFIG.VOLUME_MEMORY.ENABLED) {
-            const memoryResult = VolumeMemoryManager.checkForSpike(symbol, emaCross, currentPrice, rsi1h, lsr, funding);
+            direction = 'VENDA';
+            score = 50;
             
-            if (memoryResult) {
-                direction = memoryResult.direction;
-                volumeMemoryUsed = true;
-                timeBetweenVolumeAndCross = memoryResult.timeDiffMinutes;
-                
-                // Usar os dados de volume da memória
-                const volumeRatioFromMemory = memoryResult.volumeRatio;
-                const buyerPercentageFromMemory = memoryResult.buyerPercentage;
-                const sellerPercentageFromMemory = memoryResult.sellerPercentage;
-                
-                emaCrossSignal = direction === 'COMPRA' 
-                    ? 'EMA13 > EMA34, PREÇO > EMA55 (VOLUME MEMORY)'
-                    : 'EMA13 < EMA34, PREÇO < EMA55 (VOLUME MEMORY)';
-                
-                // Calcular score com os dados da memória
-                score = calculateScore(
-                    direction, 
-                    buyerPercentageFromMemory, 
-                    sellerPercentageFromMemory, 
-                    volumeRatioFromMemory, 
-                    lsr, 
-                    funding, 
-                    rsi1h, 
-                    cciDailyTrend, 
-                    currentPrice, 
-                    sr
-                );
-                
-                // Ajustar score baseado no tempo entre volume e cross
-                if (timeBetweenVolumeAndCross > 0) {
-                    // Reduzir score proporcionalmente ao tempo
-                    const timePenalty = Math.min(20, timeBetweenVolumeAndCross * 2);
-                    score = Math.max(0, score - timePenalty);
-                    
-                    if (CONFIG.DEBUG.VERBOSE) {
-                        console.log(`⏱️ ${symbol} - Volume há ${timeBetweenVolumeAndCross.toFixed(1)}min, penalidade: -${timePenalty}pts`);
-                    }
-                }
-                
-                confidence = Math.min(100, Math.max(0, score));
+            // 1. VOLUME VENDEDOR (máx 20)
+            if (sellerPercentage > 60) score += 15;
+            else if (sellerPercentage > 55) score += 10;
+            else if (sellerPercentage > 52) score += 5;
+            
+            // 2. VOLUME RATIO (máx 20)
+            if (volumeRatio > 2.5) score += 15;
+            else if (volumeRatio > 2.0) score += 12;
+            else if (volumeRatio > 1.8) score += 10;
+            else if (volumeRatio > 1.6) score += 8;
+            
+            // 3. LSR (máx 20, com penalidade)
+            if (lsr) {
+                if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
+                else if (lsr > 3.5) score += 12;    // Bom
+                else if (lsr > 3.0) score += 10;    // Moderado
+                else if (lsr > 2.7) score += 5;     // Pouco favorável
+                else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
+                else if (lsr < 1.2) score -= 15;     // Penalidade leve
             }
+            
+            // 4. FUNDING (máx 15)
+            if (funding) {
+                if (funding > 0.001) score += 12;       // Muito positivo
+                else if (funding > 0.0005) score += 8;  // Moderadamente positivo
+                else if (funding > 0.0001) score += 3;   // Levemente positivo
+            }
+            
+            // 5. RSI (máx 20)
+            if (rsi1h) {
+                if (rsi1h > 75) score += 12;       // Extremamente overbought
+                else if (rsi1h > 70) score += 10;   // Muito overbought
+                else if (rsi1h > 65) score += 8;   // Overbought moderado
+                else if (rsi1h > 60) score += 5;    // Levemente overbought
+            }
+            
+            // 6. CCI DIÁRIO (pontuação/penalidade)
+            if (cciDailyTrend) {
+                if (cciDailyTrend === "CCI 💹ALTA") score -= 15;     // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score += 10; // CCI cruzando abaixo da EMA5
+            }
+            
+            // 7. POSIÇÃO PREÇO (máx 5)
+            if (currentPrice > sr.support) {
+                const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
+                if (distanceToSupport > 5) score += 5;       // Muito espaço
+                else if (distanceToSupport > 2) score += 3;  // Bom espaço
+            }
+            
+            confidence = Math.min(100, Math.max(0, score));
         }
         
         if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
         
         if (!canSendAlert(symbol, currentPrice, direction)) return null;
         
+        // Usar a nova função de cálculo de níveis com análise estrutural
         const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
-            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance, candles1h, symbol);
+            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance, candles1h);
         
         const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
-        const stopDistance = direction === 'COMPRA' 
-            ? ((currentPrice - stopLoss) / currentPrice * 100).toFixed(2)
-            : ((stopLoss - currentPrice) / currentPrice * 100).toFixed(2);
         
         const emoji = getConfidenceEmoji(confidence);
         
@@ -1433,31 +1252,21 @@ async function analyzeForAlerts(symbol) {
             riskReward: parseFloat(riskReward.toFixed(2)),
             confidence,
             score: confidence,
-            volumeRatio: volumeMemoryUsed ? memoryResult.volumeRatio : volumeRatio,
-            buyerPercentage: volumeMemoryUsed ? memoryResult.buyerPercentage : buyerPercentage,
-            sellerPercentage: volumeMemoryUsed ? memoryResult.sellerPercentage : sellerPercentage,
+            volumeRatio,
+            buyerPercentage,
+            sellerPercentage,
             lsr,
             funding,
             rsi: rsi1h,
             cciDaily: cciDailyTrend,
-            emaCrossSignal,
             support: sr.support,
             resistance: sr.resistance,
-            stopDistance: parseFloat(stopDistance),
-            volumeMemoryUsed,
-            timeBetweenVolumeAndCross: timeBetweenVolumeAndCross > 0 ? parseFloat(timeBetweenVolumeAndCross.toFixed(1)) : undefined,
             emoji,
             timestamp: Date.now()
         };
         
         try {
             TradeAlertSchema.parse(alert);
-            
-            // Após enviar alerta, remover da memória
-            if (volumeMemoryUsed) {
-                volumeSpikeMemory.delete(symbol);
-            }
-            
             return alert;
         } catch (error) {
             if (CONFIG.DEBUG.VERBOSE) {
@@ -1472,112 +1281,6 @@ async function analyzeForAlerts(symbol) {
         }
         return null;
     }
-}
-
-function calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi, cciDailyTrend, currentPrice, sr) {
-    let score = 50; // Base
-    
-    if (direction === 'COMPRA') {
-        // Volume Comprador
-        if (buyerPercentage > 60) score += 15;
-        else if (buyerPercentage > 55) score += 10;
-        else if (buyerPercentage > 52) score += 5;
-        
-        // Volume Ratio
-        if (volumeRatio > 2.5) score += 15;
-        else if (volumeRatio > 2.0) score += 12;
-        else if (volumeRatio > 1.8) score += 10;
-        else if (volumeRatio > 1.6) score += 8;
-        
-        // LSR
-        if (lsr) {
-            if (lsr < 1.5) score += 20;
-            else if (lsr < 2.0) score += 12;
-            else if (lsr < 2.3) score += 10;
-            else if (lsr < 2.6) score += 5;
-            else if (lsr > 3.0) score -= 20;
-            else if (lsr > 2.8) score -= 15;
-        }
-        
-        // Funding
-        if (funding) {
-            if (funding < -0.001) score += 12;
-            else if (funding < -0.0005) score += 8;
-            else if (funding < -0.0001) score += 3;
-        }
-        
-        // RSI
-        if (rsi) {
-            if (rsi < 35) score += 12;
-            else if (rsi < 40) score += 10;
-            else if (rsi < 45) score += 8;
-            else if (rsi < 50) score += 5;
-        }
-        
-        // CCI Diário
-        if (cciDailyTrend) {
-            if (cciDailyTrend === "CCI 💹ALTA") score += 10;
-            else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15;
-        }
-        
-        // Distância da Resistência
-        if (currentPrice < sr.resistance) {
-            const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-            if (distanceToResistance > 5) score += 5;
-            else if (distanceToResistance > 2) score += 3;
-        }
-    } else {
-        // Volume Vendedor
-        if (sellerPercentage > 60) score += 15;
-        else if (sellerPercentage > 55) score += 10;
-        else if (sellerPercentage > 52) score += 5;
-        
-        // Volume Ratio
-        if (volumeRatio > 2.5) score += 15;
-        else if (volumeRatio > 2.0) score += 12;
-        else if (volumeRatio > 1.8) score += 10;
-        else if (volumeRatio > 1.6) score += 8;
-        
-        // LSR
-        if (lsr) {
-            if (lsr > 4.0) score += 20;
-            else if (lsr > 3.5) score += 12;
-            else if (lsr > 3.0) score += 10;
-            else if (lsr > 2.7) score += 5;
-            else if (lsr < 1.0) score -= 20;
-            else if (lsr < 1.2) score -= 15;
-        }
-        
-        // Funding
-        if (funding) {
-            if (funding > 0.001) score += 12;
-            else if (funding > 0.0005) score += 8;
-            else if (funding > 0.0001) score += 3;
-        }
-        
-        // RSI
-        if (rsi) {
-            if (rsi > 75) score += 12;
-            else if (rsi > 70) score += 10;
-            else if (rsi > 65) score += 8;
-            else if (rsi > 60) score += 5;
-        }
-        
-        // CCI Diário
-        if (cciDailyTrend) {
-            if (cciDailyTrend === "CCI 🔴BAIXA") score += 10;
-            else if (cciDailyTrend === "CCI 💹ALTA") score -= 15;
-        }
-        
-        // Distância do Suporte
-        if (currentPrice > sr.support) {
-            const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-            if (distanceToSupport > 5) score += 5;
-            else if (distanceToSupport > 2) score += 3;
-        }
-    }
-    
-    return score;
 }
 
 // =====================================================================
@@ -1682,30 +1385,27 @@ function formatTradeAlert(alert) {
         r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
     }
     
+    // Adicionar indicador visual do RSI
     const rsiStatus = alert.direction === 'COMPRA' ? 
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
-    // Adicionar informação de memória de volume se usada
-    const memoryInfo = alert.volumeMemoryUsed 
-        ? `Vol/Liquidação ${alert.timeBetweenVolumeAndCross}min` 
-        : '';
-    
-    const stopInfo = `🛑 Stop: ${stop} (${alert.stopDistance}%)`;
+    // Definir a mensagem da IA Dica baseada na direção
+    const iaDica = alert.direction === 'COMPRA' 
+        ? '<b>🤖 IA Dica</b>...Observar Zona do Suporte...' 
+        : '<b>🤖 IA Dica,</b>...Realizar Lucro ou Parcial...';
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume!</b> | #SCORE: ${alert.confidence}%
+ <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
  Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
-<b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}
-${stopInfo}
-${memoryInfo ? memoryInfo + '\n' : ''}
+<b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
- <b>🤖 IA Dica, </b>${alert.direction === 'COMPRA' ? 'Observar Zona do Suporte...' : 'Realizar Lucro ou Parcial...'}
+ ${iaDica}
 Alerta Educativo, não é recomendação de investimento
  Titanium Prime by @J4Rviz</i>`;
 }
@@ -1741,40 +1441,21 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`📊 Timeframe EMAs: ${CONFIG.EMA.TIMEFRAME} (EMA${CONFIG.EMA.FAST} x EMA${CONFIG.EMA.SLOW}, PREÇO x EMA${CONFIG.EMA.SIGNAL})`);
-    console.log(`📊 Memória de Volume: ATIVADA (guarda picos por ${CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES}min)`);
     console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
     console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    console.log(`📊 Stop Loss: Baseado em ATR + Estrutura (${CONFIG.STOP.MIN_STOP_PERCENT}% - ${CONFIG.STOP.MAX_STOP_PERCENT}%)`);
     
     let scanCount = 0;
     let alertsSent = 0;
     let consecutiveEmptyScans = 0;
     let lastAlertTime = Date.now();
     
-    // Mostrar estatísticas de memória a cada 10 scans
-    let statsCounter = 0;
-    
     while (true) {
         const startTime = Date.now();
         scanCount++;
-        statsCounter++;
         
         resetDailyCounterIfNeeded();
         
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
-        
-        // Mostrar estatísticas da memória de volume
-        if (statsCounter >= 10) {
-            const memoryStats = VolumeMemoryManager.getMemoryStats();
-            if (memoryStats.totalMemories > 0) {
-                console.log(`💾 Memória de Volume: ${memoryStats.totalMemories} spikes armazenados`);
-                memoryStats.memories.slice(0, 5).forEach(m => {
-                    console.log(`   ${m.symbol}: ${m.direction} ${m.volumeRatio.toFixed(2)}x (há ${m.ageMinutes}min)`);
-                });
-            }
-            statsCounter = 0;
-        }
         
         if (dailyMessageCounter.size > 0 && CONFIG.DEBUG.VERBOSE) {
             console.log('📊 Alertas enviados hoje:');
@@ -1819,14 +1500,7 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                
-                const memoryTag = alert.volumeMemoryUsed ? ' [MEMORY]' : '';
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)${memoryTag} - Stop: ${alert.stopDistance}% - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily} - EMA: ${alert.emaCrossSignal}`);
-                
-                if (alert.volumeMemoryUsed) {
-                    console.log(`   ⏱️ Volume detectado há ${alert.timeBetweenVolumeAndCross}min`);
-                }
-                
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily}`);
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
@@ -1867,7 +1541,7 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM - Real-Time Alert System (Com Memória de Volume)');
+    console.log('🚀 TITANIUM - Real-Time Alert System');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
@@ -1876,17 +1550,16 @@ async function startBot() {
     console.log(`⏱️ Scan a cada: ${CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS}s`);
     console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
     console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    console.log(`📊 Critério EMAs 3min: EMA13 x EMA34 + PREÇO x EMA55`);
-    console.log(`📊 Memória de Volume: Guarda picos por ${CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES}min`);
-    console.log(`📊 Stop Loss: ATR + Estrutura (${CONFIG.STOP.MIN_STOP_PERCENT}% - ${CONFIG.STOP.MAX_STOP_PERCENT}%)`);
     console.log(`🛡️ Cooldown: ${CONFIG.PERFORMANCE.COOLDOWN_MINUTES}min`);
     console.log(`📊 Máx alertas/scan: ${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
     console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
     
+    // Iniciar sistema de limpeza automática
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium Ativado - Sistema pronto.`;
+    // Mensagem de inicialização SUPER SIMPLES
+    const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
@@ -1936,6 +1609,7 @@ startBot().catch(async error => {
         await sendTelegramAlert(`❌ ERRO FATAL`);
     } catch {}
     
+    // Parar sistema de limpeza
     cleanupManager.stop();
     process.exit(1);
 });
