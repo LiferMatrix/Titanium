@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8',
-        CHAT_ID: '-1002554'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 2.0,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -44,8 +44,8 @@ const CONFIG = {
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
-        MIN_SCORE: 80,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_SCORE: 85,
+        MIN_VOLUME_RATIO: 2.0,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -56,23 +56,25 @@ const CONFIG = {
         }
     },
     RSI: {
-        BUY_MAX: 64,      // RSI máximo para compra
-        SELL_MIN: 55,     // RSI mínimo para venda
+        BUY_MAX: 60,      // RSI máximo para compra
+        SELL_MIN: 65,     // RSI mínimo para venda
         PERIOD: 14
     },
     DEBUG: {
         VERBOSE: false
     },
-    // Configurações de limpeza
+    // =================================================================
+    // === CONFIGURAÇÕES DE LIMPEZA - NOVO ===
+    // =================================================================
     CLEANUP: {
-        ENABLED: true,
-        MAX_LOG_AGE_HOURS: 24,
-        MAX_CACHE_AGE_HOURS: 12,
-        MAX_ALERT_FILES_AGE_HOURS: 48,
-        CLEANUP_INTERVAL_MINUTES: 60,
-        MAX_FOLDER_SIZE_MB: 500,
-        COMPRESS_OLD_LOGS: true,
-        MIN_FREE_SPACE_MB: 100
+        ENABLED: true,                    // Ativar/desativar limpeza
+        MAX_LOG_AGE_HOURS: 24,             // Manter logs por 24 horas
+        MAX_CACHE_AGE_HOURS: 12,            // Manter cache por 12 horas
+        MAX_ALERT_FILES_AGE_HOURS: 48,      // Manter arquivos de alerta por 48 horas
+        CLEANUP_INTERVAL_MINUTES: 60,       // Executar limpeza a cada 60 minutos
+        MAX_FOLDER_SIZE_MB: 500,             // Tamanho máximo total da pasta em MB
+        COMPRESS_OLD_LOGS: true,             // Comprimir logs antigos
+        MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
     }
 };
 
@@ -94,6 +96,22 @@ const KlineResponseSchema = z.array(
         z.string(), z.number(), z.string(), z.number(), z.string(),
         z.string(), z.string()
     ])
+);
+
+const LSRResponseSchema = z.array(
+    z.object({
+        longShortRatio: z.string(),
+        longAccount: z.string(),
+        shortAccount: z.string()
+    })
+);
+
+const FundingRateSchema = z.array(
+    z.object({
+        symbol: z.string(),
+        fundingRate: z.string(),
+        fundingTime: z.number()
+    })
 );
 
 const ExchangeInfoSchema = z.object({
@@ -119,6 +137,8 @@ const TradeAlertSchema = z.object({
     volumeRatio: z.number(),
     buyerPercentage: z.number(),
     sellerPercentage: z.number(),
+    lsr: z.number().optional().nullable(),
+    funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
     cciDaily: z.string().optional().nullable(),
     support: z.number(),
@@ -384,6 +404,7 @@ const cleanupManager = new CleanupManager();
 const candleCache = new Map();
 const alertCooldown = new Map();
 const lastAlertPrices = new Map();
+const fundingRateCache = new Map();
 const dailyMessageCounter = new Map();
 let dailyResetPerformed = false;
 
@@ -697,6 +718,174 @@ function calculateSupportResistance(candles) {
 }
 
 // =====================================================================
+// === NOVO SISTEMA DE STOP LOSS PROFISSIONAL ===
+// =====================================================================
+function calculateTradeLevels(price, atr, direction, support, resistance, candles) {
+    let stopLoss, takeProfit1, takeProfit2, takeProfit3;
+    
+    // Calcular ATR em diferentes períodos para melhor análise
+    const atr14 = atr; // ATR padrão já calculado
+    const atr7 = calculateATR(candles.slice(-21), 7) || atr14; // ATR mais curto
+    const atr21 = calculateATR(candles, 21) || atr14 * 1.2; // ATR mais longo
+    
+    // Usar o maior ATR para stop mais seguro (evita stops muito justos)
+    const atrMultiplier = 2.2; // Multiplicador aumentado para evitar stops curtos
+    const atrForStop = Math.max(atr7, atr14, atr21) * atrMultiplier;
+    
+    // Identificar níveis estruturais importantes
+    const recentCandles = candles.slice(-30);
+    const recentHighs = recentCandles.map(c => c.high);
+    const recentLows = recentCandles.map(c => c.low);
+    
+    // Encontrar máximas e mínimas significativas
+    const significantHighs = [];
+    const significantLows = [];
+    
+    for (let i = 2; i < recentHighs.length - 2; i++) {
+        // Picos significativos
+        if (recentHighs[i] > recentHighs[i-1] && recentHighs[i] > recentHighs[i-2] &&
+            recentHighs[i] > recentHighs[i+1] && recentHighs[i] > recentHighs[i+2]) {
+            significantHighs.push(recentHighs[i]);
+        }
+        // Fundos significativos
+        if (recentLows[i] < recentLows[i-1] && recentLows[i] < recentLows[i-2] &&
+            recentLows[i] < recentLows[i+1] && recentLows[i] < recentLows[i+2]) {
+            significantLows.push(recentLows[i]);
+        }
+    }
+    
+    if (direction === 'COMPRA') {
+        // PARA COMPRA: Stop abaixo de suportes estruturais
+        
+        // 1. Primeiro nível: abaixo do último fundo significativo
+        let structuralStop = Math.min(...significantLows.slice(-3)) * 0.99;
+        
+        // 2. Segundo nível: abaixo da mínima recente (últimas 5 velas)
+        const recentLow = Math.min(...recentLows.slice(-5)) * 0.995;
+        
+        // 3. Terceiro nível: baseado em ATR
+        const atrStop = price - atrForStop;
+        
+        // Escolher o stop mais conservador (mais distante)
+        stopLoss = Math.min(structuralStop, recentLow, atrStop);
+        
+        // Garantir que o stop não seja muito próximo do preço (mínimo 1.5% de distância)
+        const minStopDistance = price * 0.015; // 1.5% mínimo
+        if (price - stopLoss < minStopDistance) {
+            stopLoss = price - minStopDistance;
+        }
+        
+        // Adicionar buffer para evitar stops em níveis óbvios
+        stopLoss = stopLoss * 0.998; // Buffer de 0.2% abaixo do nível estrutural
+        
+        // Calcular risco
+        const risk = price - stopLoss;
+        
+        // Alvos baseados em resistências estruturais
+        let targetResistance = Math.min(...significantHighs.slice(-3)) * 1.01;
+        if (targetResistance <= price) {
+            targetResistance = resistance * 0.99;
+        }
+        
+        // Calcular alvos com base no risco e resistências
+        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
+        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
+        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
+        
+        // TP1: limitado pela primeira resistência significativa
+        takeProfit1 = Math.min(price + reward1, targetResistance);
+        
+        // TP2: pode ultrapassar um pouco a resistência se o momentum for forte
+        takeProfit2 = Math.min(price + reward2, targetResistance * 1.02);
+        
+        // TP3: alvo mais distante baseado apenas em risco
+        takeProfit3 = price + reward3;
+        
+        // Ajustar TPs para garantir que sejam progressivos
+        if (takeProfit2 <= takeProfit1) {
+            takeProfit2 = takeProfit1 * 1.01;
+        }
+        if (takeProfit3 <= takeProfit2) {
+            takeProfit3 = takeProfit2 * 1.02;
+        }
+        
+    } else { // VENDA
+        // PARA VENDA: Stop acima de resistências estruturais
+        
+        // 1. Primeiro nível: acima do último topo significativo
+        let structuralStop = Math.max(...significantHighs.slice(-3)) * 1.01;
+        
+        // 2. Segundo nível: acima da máxima recente (últimas 5 velas)
+        const recentHigh = Math.max(...recentHighs.slice(-5)) * 1.005;
+        
+        // 3. Terceiro nível: baseado em ATR
+        const atrStop = price + atrForStop;
+        
+        // Escolher o stop mais conservador (mais distante)
+        stopLoss = Math.max(structuralStop, recentHigh, atrStop);
+        
+        // Garantir que o stop não seja muito próximo do preço (mínimo 1.5% de distância)
+        const minStopDistance = price * 0.015; // 1.5% mínimo
+        if (stopLoss - price < minStopDistance) {
+            stopLoss = price + minStopDistance;
+        }
+        
+        // Adicionar buffer para evitar stops em níveis óbvios
+        stopLoss = stopLoss * 1.002; // Buffer de 0.2% acima do nível estrutural
+        
+        // Calcular risco
+        const risk = stopLoss - price;
+        
+        // Alvos baseados em suportes estruturais
+        let targetSupport = Math.max(...significantLows.slice(-3)) * 0.99;
+        if (targetSupport >= price) {
+            targetSupport = support * 1.01;
+        }
+        
+        // Calcular alvos com base no risco e suportes
+        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
+        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
+        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
+        
+        // TP1: limitado pelo primeiro suporte significativo
+        takeProfit1 = Math.max(price - reward1, targetSupport);
+        
+        // TP2: pode cair um pouco mais se o momentum for forte
+        takeProfit2 = Math.max(price - reward2, targetSupport * 0.98);
+        
+        // TP3: alvo mais distante baseado apenas em risco
+        takeProfit3 = price - reward3;
+        
+        // Ajustar TPs para garantir que sejam progressivos
+        if (takeProfit2 >= takeProfit1) {
+            takeProfit2 = takeProfit1 * 0.99;
+        }
+        if (takeProfit3 >= takeProfit2) {
+            takeProfit3 = takeProfit2 * 0.98;
+        }
+    }
+    
+    // Validações finais
+    if (direction === 'COMPRA') {
+        // Garantir que stop está abaixo do preço
+        stopLoss = Math.min(stopLoss, price * 0.985);
+        // Garantir que TPs estão acima do preço
+        takeProfit1 = Math.max(takeProfit1, price * 1.01);
+        takeProfit2 = Math.max(takeProfit2, takeProfit1 * 1.005);
+        takeProfit3 = Math.max(takeProfit3, takeProfit2 * 1.005);
+    } else {
+        // Garantir que stop está acima do preço
+        stopLoss = Math.max(stopLoss, price * 1.015);
+        // Garantir que TPs estão abaixo do preço
+        takeProfit1 = Math.min(takeProfit1, price * 0.99);
+        takeProfit2 = Math.min(takeProfit2, takeProfit1 * 0.995);
+        takeProfit3 = Math.min(takeProfit3, takeProfit2 * 0.995);
+    }
+    
+    return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
+}
+
+// =====================================================================
 // === COOLDOWN CHECK ===
 // =====================================================================
 function canSendAlert(symbol, currentPrice, direction) {
@@ -755,7 +944,7 @@ function registerAlert(symbol, price, direction) {
 }
 
 // =====================================================================
-// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS (VERSÃO SPOT) ===
+// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
 // =====================================================================
 async function getCandles(symbol, timeframe, limit = 100) {
     const cached = CacheManager.get(symbol, timeframe, limit);
@@ -767,8 +956,7 @@ async function getCandles(symbol, timeframe, limit = 100) {
     };
     
     const interval = intervalMap[timeframe] || '1h';
-    // URL para SPOT
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     
     try {
         const data = await rateLimiter.makeRequest(url, {}, 'klines');
@@ -792,41 +980,59 @@ async function getCandles(symbol, timeframe, limit = 100) {
     }
 }
 
-function calculateTradeLevels(price, atr, direction, support, resistance) {
-    let stopLoss, takeProfit1, takeProfit2, takeProfit3;
-    
-    if (direction === 'COMPRA') {
-        stopLoss = Math.min(
-            support * 0.995,
-            price - (atr * 1.5)
-        );
-        
-        const risk = price - stopLoss;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.min(price + reward1, resistance * 0.99);
-        takeProfit2 = Math.min(price + reward2, resistance * 1.02);
-        takeProfit3 = price + reward3;
-        
-    } else {
-        stopLoss = Math.max(
-            resistance * 1.005,
-            price + (atr * 1.5)
-        );
-        
-        const risk = stopLoss - price;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.max(price - reward1, support * 1.01);
-        takeProfit2 = Math.max(price - reward2, support * 0.98);
-        takeProfit3 = price - reward3;
+async function getLSR(symbol) {
+    try {
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`;
+        const data = await rateLimiter.makeRequest(url, {}, 'lsr');
+        return data.length > 0 ? parseFloat(data[0].longShortRatio) : null;
+    } catch {
+        return null;
     }
-    
-    return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
+}
+
+async function getFundingRate(symbol) {
+    try {
+        const cached = fundingRateCache.get(symbol);
+        if (cached && Date.now() - cached.timestamp < 3600000) {
+            return cached.rate;
+        }
+
+        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
+        const data = await rateLimiter.makeRequest(url, {}, 'funding');
+        
+        let fundingRate = parseFloat(data.lastFundingRate) || null;
+        
+        if (CONFIG.DEBUG.VERBOSE && fundingRate !== null) {
+            console.log(`💰 Funding ${symbol}: ${(fundingRate * 100).toFixed(4)}%`);
+        }
+        
+        if (fundingRate !== null) {
+            fundingRateCache.set(symbol, {
+                rate: fundingRate,
+                timestamp: Date.now()
+            });
+        }
+        
+        return fundingRate;
+        
+    } catch (error) {
+        try {
+            const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
+            const data = await rateLimiter.makeRequest(url, {}, 'funding_alt');
+            const fundingRate = data.length > 0 ? parseFloat(data[0].fundingRate) : null;
+            
+            if (fundingRate !== null) {
+                fundingRateCache.set(symbol, {
+                    rate: fundingRate,
+                    timestamp: Date.now()
+                });
+            }
+            
+            return fundingRate;
+        } catch {
+            return null;
+        }
+    }
 }
 
 async function analyzeForAlerts(symbol) {
@@ -879,6 +1085,7 @@ async function analyzeForAlerts(symbol) {
         }
         const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
         
+        // Determinar tendência do CCI diário
         let cciDailyTrend = "NEUTRO";
         if (cciDaily !== null && cciEma5 !== null) {
             if (cciDaily > cciEma5) {
@@ -888,7 +1095,9 @@ async function analyzeForAlerts(symbol) {
             }
         }
         
-        const [rsi1h, sr, atr] = await Promise.all([
+        const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
+            getLSR(symbol),
+            getFundingRate(symbol),
             Promise.resolve(calculateRSI(candles1h, CONFIG.RSI.PERIOD)),
             Promise.resolve(calculateSupportResistance(candles1h)),
             Promise.resolve(calculateATR(candles1h, 14))
@@ -900,87 +1109,121 @@ async function analyzeForAlerts(symbol) {
         let score = 0;
         let confidence = 0;
         
-        // ANÁLISE PARA COMPRA - VERSÃO SPOT (sem LSR e Funding)
+        // ANÁLISE PARA COMPRA - VERSÃO OTIMIZADA
         if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h < CONFIG.RSI.BUY_MAX) {
             
             direction = 'COMPRA';
-            score = 40; // Base maior pois removemos LSR/Funding
+            score = 50;
             
-            // 1. VOLUME COMPRADOR (máx 25)
-            if (buyerPercentage > 60) score += 18;
-            else if (buyerPercentage > 55) score += 15;
-            else if (buyerPercentage > 52) score += 10;
+            // 1. VOLUME COMPRADOR (máx 20)
+            if (buyerPercentage > 60) score += 15;
+            else if (buyerPercentage > 55) score += 10;
+            else if (buyerPercentage > 52) score += 5;
             
-            // 2. VOLUME RATIO (máx 25)
-            if (volumeRatio > 2.5) score += 18;
-            else if (volumeRatio > 2.0) score += 15;
-            else if (volumeRatio > 1.8) score += 12;
+            // 2. VOLUME RATIO (máx 20)
+            if (volumeRatio > 2.5) score += 15;
+            else if (volumeRatio > 2.0) score += 12;
+            else if (volumeRatio > 1.8) score += 10;
             else if (volumeRatio > 1.6) score += 8;
             
-            // 3. RSI (máx 25)
+            // 3. LSR (máx 20, com penalidade)
+            if (lsr) {
+                if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
+                else if (lsr < 2.0) score += 12;  // Bom
+                else if (lsr < 2.3) score += 10;  // Moderado
+                else if (lsr < 2.6) score += 5;   // Pouco favorável
+                else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
+                else if (lsr > 2.8) score -= 15;   // Penalidade leve
+            }
+            
+            // 4. FUNDING (máx 15)
+            if (funding) {
+                if (funding < -0.001) score += 12;      // Muito negativo
+                else if (funding < -0.0005) score += 8; // Moderadamente negativo
+                else if (funding < -0.0001) score += 3;  // Levemente negativo
+            }
+            
+            // 5. RSI (máx 20)
             if (rsi1h) {
-                if (rsi1h < 35) score += 12;
-                else if (rsi1h < 40) score += 10;
-                else if (rsi1h < 45) score += 8;
-                else if (rsi1h < 50) score += 3;
+                if (rsi1h < 35) score += 12;      // Extremamente oversold
+                else if (rsi1h < 40) score += 10;  // Muito oversold
+                else if (rsi1h < 45) score += 8;  // Oversold moderado
+                else if (rsi1h < 50) score += 5;   // Levemente oversold
             }
             
-            // 4. CCI DIÁRIO (máx 15)
+            // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score += 10;
-                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 20; // Penalidade reduzida
+                if (cciDailyTrend === "CCI 💹ALTA") score += 10;      // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
             }
             
-            // 5. POSIÇÃO PREÇO (máx 10)
+            // 7. POSIÇÃO PREÇO (máx 5)
             if (currentPrice < sr.resistance) {
                 const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-                if (distanceToResistance > 5) score += 10;
-                else if (distanceToResistance > 2) score += 5;
+                if (distanceToResistance > 5) score += 5;       // Muito espaço
+                else if (distanceToResistance > 2) score += 3;  // Bom espaço
             }
             
             confidence = Math.min(100, Math.max(0, score));
         }
-        
-        // ANÁLISE PARA VENDA - VERSÃO SPOT (sem LSR e Funding)
+
+        // ANÁLISE PARA VENDA - VERSÃO OTIMIZADA
         if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h > CONFIG.RSI.SELL_MIN) {
             
             direction = 'VENDA';
-            score = 40; // Base maior pois removemos LSR/Funding
+            score = 50;
             
-            // 1. VOLUME VENDEDOR (máx 25)
-            if (sellerPercentage > 60) score += 18;
-            else if (sellerPercentage > 55) score += 12;
-            else if (sellerPercentage > 52) score += 18;
+            // 1. VOLUME VENDEDOR (máx 20)
+            if (sellerPercentage > 60) score += 15;
+            else if (sellerPercentage > 55) score += 10;
+            else if (sellerPercentage > 52) score += 5;
             
-            // 2. VOLUME RATIO (máx 25)
-            if (volumeRatio > 2.5) score += 18;
-            else if (volumeRatio > 2.0) score += 15;
-            else if (volumeRatio > 1.8) score += 12;
+            // 2. VOLUME RATIO (máx 20)
+            if (volumeRatio > 2.5) score += 15;
+            else if (volumeRatio > 2.0) score += 12;
+            else if (volumeRatio > 1.8) score += 10;
             else if (volumeRatio > 1.6) score += 8;
             
-            // 3. RSI (máx 25)
+            // 3. LSR (máx 20, com penalidade)
+            if (lsr) {
+                if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
+                else if (lsr > 3.5) score += 12;    // Bom
+                else if (lsr > 3.0) score += 10;    // Moderado
+                else if (lsr > 2.7) score += 5;     // Pouco favorável
+                else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
+                else if (lsr < 1.2) score -= 15;     // Penalidade leve
+            }
+            
+            // 4. FUNDING (máx 15)
+            if (funding) {
+                if (funding > 0.001) score += 12;       // Muito positivo
+                else if (funding > 0.0005) score += 8;  // Moderadamente positivo
+                else if (funding > 0.0001) score += 3;   // Levemente positivo
+            }
+            
+            // 5. RSI (máx 20)
             if (rsi1h) {
-                if (rsi1h > 75) score += 12;
-                else if (rsi1h > 70) score += 10;
-                else if (rsi1h > 65) score += 8;
-                else if (rsi1h > 60) score += 3;
+                if (rsi1h > 75) score += 12;       // Extremamente overbought
+                else if (rsi1h > 70) score += 10;   // Muito overbought
+                else if (rsi1h > 65) score += 8;   // Overbought moderado
+                else if (rsi1h > 60) score += 5;    // Levemente overbought
             }
             
-            // 4. CCI DIÁRIO (máx 15)
+            // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 🔴BAIXA") score += 10;
-                else if (cciDailyTrend === "CCI 💹ALTA") score -= 20; // Penalidade reduzida
+                if (cciDailyTrend === "CCI 💹ALTA") score -= 15;     // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score += 10; // CCI cruzando abaixo da EMA5
             }
             
-            // 5. POSIÇÃO PREÇO (máx 10)
+            // 7. POSIÇÃO PREÇO (máx 5)
             if (currentPrice > sr.support) {
                 const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-                if (distanceToSupport > 5) score += 10;
-                else if (distanceToSupport > 2) score += 5;
+                if (distanceToSupport > 5) score += 5;       // Muito espaço
+                else if (distanceToSupport > 2) score += 3;  // Bom espaço
             }
             
             confidence = Math.min(100, Math.max(0, score));
@@ -990,8 +1233,9 @@ async function analyzeForAlerts(symbol) {
         
         if (!canSendAlert(symbol, currentPrice, direction)) return null;
         
+        // Usar a nova função de cálculo de níveis com análise estrutural
         const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
-            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance);
+            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance, candles1h);
         
         const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
         
@@ -1011,6 +1255,8 @@ async function analyzeForAlerts(symbol) {
             volumeRatio,
             buyerPercentage,
             sellerPercentage,
+            lsr,
+            funding,
             rsi: rsi1h,
             cciDaily: cciDailyTrend,
             support: sr.support,
@@ -1116,6 +1362,9 @@ function formatTradeAlert(alert) {
     const volPct = alert.direction === 'COMPRA' ? 
         alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
     
+    const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
+    const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
+    
     const entry = formatPrice(alert.entryPrice);
     const stop = formatPrice(alert.stopLoss);
     const tp1 = formatPrice(alert.takeProfit1);
@@ -1136,35 +1385,38 @@ function formatTradeAlert(alert) {
         r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
     }
     
+    // Adicionar indicador visual do RSI
     const rsiStatus = alert.direction === 'COMPRA' ? 
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
+    // Definir a mensagem da IA Dica baseada na direção
     const iaDica = alert.direction === 'COMPRA' 
-        ? ' <b>🤖 IA Dica,</b> Observar Zona do Suporte' 
-        : ' <b>🤖 IA Dica,</b> Realizar Lucro ou Parcial';
+        ? '<b>🤖 IA Dica</b>...Observar Zona do Suporte...' 
+        : '<b>🤖 IA Dica,</b>...Realizar Lucro ou Parcial...';
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
+ #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
  Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
-❅───✧❅🔸SPOT🔸❅✧───❅
+❅──────✧❅🔹❅✧──────❅
  ${iaDica}
 Alerta Educativo, não é recomendação de investimento
  Titanium Prime by @J4Rviz</i>`;
 }
 
 // =====================================================================
-// === FETCH SYMBOLS (VERSÃO SPOT) ===
+// === FETCH SYMBOLS ===
 // =====================================================================
-async function fetchAllSpotSymbols() {
+async function fetchAllFuturesSymbols() {
     try {
         const data = await rateLimiter.makeRequest(
-            'https://api.binance.com/api/v3/exchangeInfo',
+            'https://fapi.binance.com/fapi/v1/exchangeInfo',
             {},
             'exchangeInfo'
         );
@@ -1173,7 +1425,7 @@ async function fetchAllSpotSymbols() {
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
             
-        console.log(`📊 Encontrados ${symbols.length} símbolos USDT no SPOT`);
+        console.log(`📊 Encontrados ${symbols.length} símbolos USDT`);
         return symbols;
     } catch (error) {
         console.log('❌ Erro ao buscar símbolos, usando lista básica');
@@ -1185,9 +1437,9 @@ async function fetchAllSpotSymbols() {
 // === SCANNER EM TEMPO REAL MELHORADO ===
 // =====================================================================
 async function realTimeScanner() {
-    console.log('\n🔍 Iniciando scanner em tempo real (SPOT)...');
+    console.log('\n🔍 Iniciando scanner em tempo real...');
     
-    const symbols = await fetchAllSpotSymbols();
+    const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
     console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
     console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
@@ -1289,7 +1541,7 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM SPOT - Real-Time Alert System');
+    console.log('🚀 TITANIUM - Real-Time Alert System');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
@@ -1306,16 +1558,17 @@ async function startBot() {
     // Iniciar sistema de limpeza automática
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium SPOT Ativado - Sistema pronto!`;
+    // Mensagem de inicialização SUPER SIMPLES
+    const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
-        console.log('✅ Bot SPOT inicializado! Mensagem de confirmação enviada.');
+        console.log('✅ Bot inicializado! Mensagem de confirmação enviada.');
     } else {
-        console.log('⚠️ Bot SPOT inicializado mas falha ao enviar mensagem de confirmação.');
+        console.log('⚠️ Bot inicializado mas falha ao enviar mensagem de confirmação.');
     }
     
-    console.log('\n🔍 Iniciando scanner em tempo real (SPOT)...\n');
+    console.log('\n🔍 Iniciando scanner em tempo real...\n');
     
     await realTimeScanner();
 }
@@ -1327,12 +1580,12 @@ process.on('uncaughtException', async (err) => {
     console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
     console.error('Stack:', err.stack);
     
-    const errorMessage = `❌ ERRO NO BOT SPOT - Reiniciando em 60s`;
+    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s`;
     
     await sendTelegramAlert(errorMessage);
     
     setTimeout(() => {
-        console.log('🔄 Reiniciando bot SPOT...');
+        console.log('🔄 Reiniciando bot...');
         process.exit(1);
     }, 60000);
 });
@@ -1348,14 +1601,15 @@ process.on('unhandledRejection', async (reason) => {
 // =====================================================================
 // === START ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium SPOT Real-Time Alert System...');
+console.log('🚀 Iniciando Titanium Real-Time Alert System...');
 startBot().catch(async error => {
     console.error('❌ Erro fatal:', error);
     
     try {
-        await sendTelegramAlert(`❌ ERRO FATAL SPOT`);
+        await sendTelegramAlert(`❌ ERRO FATAL`);
     } catch {}
     
+    // Parar sistema de limpeza
     cleanupManager.stop();
     process.exit(1);
 });
