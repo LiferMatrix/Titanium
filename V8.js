@@ -5,13 +5,14 @@ const z = require('zod');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
+
 // =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +28,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -43,31 +44,16 @@ const CONFIG = {
         TAKE_PROFIT_LEVELS: [2, 3, 4],
         PARTIAL_CLOSE: [30, 30, 40]
     },
-    EMA: {
-        FAST: 13,      // Fibonacci - Micro tendência
-        MEDIUM: 34,    // Fibonacci - Tendência curta
-        SLOW: 55,      // Fibonacci - Tendência média
-        MACRO: 233     // Proporção áurea - Macro tendência
-    },
-    SCORING: {
-        ALIGNMENT_BONUS: 25,      // Todas EMAs alinhadas
-        MACRO_CONFIRMATION: 20,    // Confirmado por EMA 233
-        TREND_CONFIRMATION: 15,    // Confirmado por EMA 55
-        FAST_CONFIRMATION: 12,     // Confirmado por EMA 34
-        MOMENTUM_BONUS: 8,         // Acima da EMA 13
-        MACRO_PENALTY: -25,        // Contra EMA 233
-        TRADE_PENALTY: -15         // Contra tendência
-    },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
         PRIORITY_LEVELS: {
-            ALTA: 90,    // Aumentado devido ao novo sistema
-            MEDIA: 80,
-            BAIXA: 75
+            ALTA: 85,
+            MEDIA: 75,
+            BAIXA: 70
         }
     },
     RSI: {
@@ -75,18 +61,32 @@ const CONFIG = {
         SELL_MIN: 55,
         PERIOD: 14
     },
-    RISK_MANAGEMENT: {
-        MAX_RISK_PER_TRADE: 2,
-        ADAPTIVE_STOPS: true,
-        USE_VOLATILITY_FILTER: true,
-        MIN_VOLUME_CONFIRMATION: 1.5, // Aumentado para melhor filtro
-        MAX_STOP_DISTANCE_PERCENT: 5,
-        USE_MULTIPLE_TIMEFRAMES: true,
-        STRONG_TREND_MULTIPLIER: 1.3,  // R:R maior em alinhamento
-        WEAK_TREND_MULTIPLIER: 0.8      // R:R menor em tendência fraca
+    EMA: {
+        FAST: 13,
+        SLOW: 34,
+        SIGNAL: 55,
+        TIMEFRAME: '3m'
     },
     DEBUG: {
         VERBOSE: false
+    },
+    STOP: {
+        ATR_MULTIPLIER_BASE: 1.5,
+        ATR_MULTIPLIER_STRUCTURE_CLOSE: 1.2,
+        ATR_MULTIPLIER_STRUCTURE_MEDIUM: 1.5,
+        ATR_MULTIPLIER_STRUCTURE_FAR: 1.8,
+        ATR_MULTIPLIER_NO_STRUCTURE: 2.0,
+        MAX_STOP_PERCENT: 5,
+        MIN_STOP_PERCENT: 0.8,
+        SUPPORT_BUFFER: 0.995,
+        RESISTANCE_BUFFER: 1.005
+    },
+    VOLUME_MEMORY: {
+        ENABLED: true,
+        MEMORY_DURATION_MINUTES: 30,
+        MAX_VOLUME_RATIO: 3.0,
+        MIN_VOLUME_RATIO: 1.5,
+        CHECK_INTERVAL_MINUTES: 5
     },
     CLEANUP: {
         ENABLED: true,
@@ -163,21 +163,14 @@ const TradeAlertSchema = z.object({
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
     cciDaily: z.string().optional().nullable(),
+    emaCrossSignal: z.string().optional().nullable(),
     support: z.number(),
     resistance: z.number(),
+    stopDistance: z.number(),
+    volumeMemoryUsed: z.boolean().optional(),
+    timeBetweenVolumeAndCross: z.number().optional(),
     emoji: z.string(),
-    timestamp: z.number(),
-    volatility: z.object({
-        level: z.string(),
-        atrPercent: z.number(),
-        isExpanding: z.boolean()
-    }).optional(),
-    marketTrend: z.string().optional(),
-    emaAlignment: z.object({
-        isBullish: z.boolean(),
-        isBearish: z.boolean(),
-        strength: z.string()
-    }).optional()
+    timestamp: z.number()
 });
 
 // =====================================================================
@@ -190,6 +183,143 @@ const ALERTS_DIR = './alerts';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
+
+// =====================================================================
+// === CACHE DE VOLUME PARA LEMBRAR DE PICOS ===
+// =====================================================================
+const volumeSpikeMemory = new Map(); // Guarda informações de picos de volume
+const volumeCheckTracker = new Map(); // Controla quando foi a última verificação
+
+class VolumeMemoryManager {
+    static registerSpike(symbol, volumeRatio, buyerPercentage, sellerPercentage, price, direction, candles) {
+        const key = symbol;
+        const now = Date.now();
+        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
+        
+        // Limpar memórias expiradas
+        this.cleanExpiredMemories();
+        
+        // Verificar se já existe um spike registrado
+        const existing = volumeSpikeMemory.get(key);
+        
+        // Determinar direção baseada no volume
+        let spikeDirection = null;
+        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD) {
+            spikeDirection = 'COMPRA';
+        } else if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD)) {
+            spikeDirection = 'VENDA';
+        }
+        
+        // Se não tem direção definida, não registra
+        if (!spikeDirection) return;
+        
+        // Se não existe ou se este spike é MAIOR que o anterior, atualiza
+        if (!existing || (existing && volumeRatio > existing.volumeRatio)) {
+            volumeSpikeMemory.set(key, {
+                volumeRatio,
+                buyerPercentage,
+                sellerPercentage,
+                price: price,
+                direction: spikeDirection,
+                timestamp: now,
+                expiresAt: now + memoryDuration,
+                candles: candles ? candles.slice(-5) : null // Guarda últimos candles para referência
+            });
+            
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`💾 Volume spike registrado: ${symbol} - ${volumeRatio.toFixed(2)}x (${spikeDirection})`);
+            }
+        }
+    }
+    
+    static checkForSpike(symbol, currentEmaCross, currentPrice, currentRsi, currentLsr, currentFunding) {
+        const key = symbol;
+        const memory = volumeSpikeMemory.get(key);
+        
+        if (!memory) return null;
+        
+        const now = Date.now();
+        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
+        
+        // Verificar se memória expirou
+        if (now - memory.timestamp > memoryDuration) {
+            volumeSpikeMemory.delete(key);
+            return null;
+        }
+        
+        // Verificar se o EMA cross atual corresponde à direção do spike
+        if (!currentEmaCross || !currentEmaCross.signal) return null;
+        
+        // Calcular tempo entre volume e cross
+        const timeDiffMinutes = (now - memory.timestamp) / (60 * 1000);
+        
+        // Verificar se o preço não mudou muito (máximo 3% de variação)
+        const priceChange = Math.abs((currentPrice - memory.price) / memory.price * 100);
+        if (priceChange > 3) {
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} - Preço mudou ${priceChange.toFixed(2)}% desde o volume, ignorando memória`);
+            }
+            return null;
+        }
+        
+        // Verificar se o RSI ainda está favorável
+        if (memory.direction === 'COMPRA' && currentRsi > CONFIG.RSI.BUY_MAX) {
+            return null;
+        }
+        if (memory.direction === 'VENDA' && currentRsi < CONFIG.RSI.SELL_MIN) {
+            return null;
+        }
+        
+        // Se o EMA cross atual tem a mesma direção do spike
+        if (currentEmaCross.signal === memory.direction) {
+            return {
+                direction: memory.direction,
+                volumeRatio: memory.volumeRatio,
+                buyerPercentage: memory.buyerPercentage,
+                sellerPercentage: memory.sellerPercentage,
+                timeDiffMinutes: timeDiffMinutes,
+                originalPrice: memory.price,
+                memoryTimestamp: memory.timestamp
+            };
+        }
+        
+        return null;
+    }
+    
+    static cleanExpiredMemories() {
+        const now = Date.now();
+        const memoryDuration = CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES * 60 * 1000;
+        
+        for (const [symbol, memory] of volumeSpikeMemory.entries()) {
+            if (now - memory.timestamp > memoryDuration) {
+                volumeSpikeMemory.delete(symbol);
+                if (CONFIG.DEBUG.VERBOSE) {
+                    console.log(`🧹 Memória de volume expirada: ${symbol}`);
+                }
+            }
+        }
+    }
+    
+    static getMemoryStats() {
+        const stats = {
+            totalMemories: volumeSpikeMemory.size,
+            memories: []
+        };
+        
+        for (const [symbol, memory] of volumeSpikeMemory.entries()) {
+            const ageMinutes = (Date.now() - memory.timestamp) / (60 * 1000);
+            stats.memories.push({
+                symbol,
+                direction: memory.direction,
+                volumeRatio: memory.volumeRatio,
+                ageMinutes: ageMinutes.toFixed(1),
+                expiresIn: ((memory.expiresAt - Date.now()) / (60 * 1000)).toFixed(1)
+            });
+        }
+        
+        return stats;
+    }
+}
 
 // =====================================================================
 // === SISTEMA DE LIMPEZA AUTOMÁTICA ===
@@ -587,7 +717,6 @@ function formatPrice(price) {
 }
 
 function getConfidenceEmoji(score) {
-    if (score >= 95) return '🔥🔥🔥';
     if (score >= 90) return '🔥🔥';
     if (score >= 85) return '🔥';
     if (score >= 80) return '⚡';
@@ -600,25 +729,8 @@ function getDirectionEmoji(direction) {
     return direction === 'COMPRA' ? '🟢' : '🔴';
 }
 
-function getVolatilityEmoji(level) {
-    switch(level) {
-        case 'BAIXA': return '🐢';
-        case 'MEDIA': return '⚖️';
-        case 'ALTA': return '🌊';
-        default: return '📊';
-    }
-}
-
-function getAlignmentEmoji(alignment) {
-    if (alignment.isBullish && alignment.strength === 'FORTE') return '💹💹';
-    if (alignment.isBullish) return '💹';
-    if (alignment.isBearish && alignment.strength === 'FORTE') return '📉📉';
-    if (alignment.isBearish) return '📉';
-    return '🔄';
-}
-
 // =====================================================================
-// === RESET CONTADOR DIÁRIO ===
+// === RESET CONTADOR DIÁRIO ÀS 21H ===
 // =====================================================================
 function resetDailyCounterIfNeeded() {
     const now = getBrazilianDateTime();
@@ -664,7 +776,7 @@ function canSendDailyAlert(symbol) {
 }
 
 // =====================================================================
-// === CÁLCULOS TÉCNICOS AVANÇADOS ===
+// === CÁLCULOS TÉCNICOS ===
 // =====================================================================
 function calculateEMA(values, period) {
     if (values.length < period) {
@@ -768,357 +880,215 @@ function calculateSupportResistance(candles) {
     };
 }
 
-// =====================================================================
-// === NOVA FUNÇÃO: DETECTAR ESTRUTURA DE MERCADO COM EMAS 13,34,55,233 ===
-// =====================================================================
-function detectMarketStructure(candles) {
-    if (candles.length < 250) return null;
+function checkEMACross(candles3m) {
+    if (!candles3m || candles3m.length < Math.max(CONFIG.EMA.FAST, CONFIG.EMA.SLOW, CONFIG.EMA.SIGNAL)) {
+        return { cross: null, signal: null };
+    }
     
-    const closes = candles.map(c => c.close);
+    const closes = candles3m.map(c => c.close);
+    
+    const ema13 = calculateEMA(closes, CONFIG.EMA.FAST);
+    const ema34 = calculateEMA(closes, CONFIG.EMA.SLOW);
+    const ema55 = calculateEMA(closes, CONFIG.EMA.SIGNAL);
     const currentPrice = closes[closes.length - 1];
     
-    // Calcular as 4 EMAs
-    const ema13 = calculateEMA(closes, CONFIG.EMA.FAST);    // Micro tendência
-    const ema34 = calculateEMA(closes, CONFIG.EMA.MEDIUM);  // Tendência curta
-    const ema55 = calculateEMA(closes, CONFIG.EMA.SLOW);    // Tendência média
-    const ema233 = calculateEMA(closes, CONFIG.EMA.MACRO);  // Macro tendência
+    const prevCloses = closes.slice(0, -1);
+    const prevEma13 = calculateEMA(prevCloses, CONFIG.EMA.FAST);
+    const prevEma34 = calculateEMA(prevCloses, CONFIG.EMA.SLOW);
     
-    // Verificar alinhamento das EMAs
-    const bullishAlignment = ema13 > ema34 && ema34 > ema55 && ema55 > ema233;
-    const bearishAlignment = ema13 < ema34 && ema34 < ema55 && ema55 < ema233;
-    
-    // Determinar força do alinhamento
-    let alignmentStrength = 'FRACO';
-    if (bullishAlignment || bearishAlignment) {
-        // Verificar distância entre as EMAs (quanto maior a distância, mais forte)
-        const spread = Math.abs(ema13 - ema233) / currentPrice * 100;
-        alignmentStrength = spread > 5 ? 'FORTE' : 'MÉDIO';
-    }
-    
-    // Determinar tendência baseada nas EMAs
-    let trend = 'NEUTRO';
-    let trendStrength = 0;
-    
-    if (ema13 > ema34 && currentPrice > ema13) {
-        trend = 'ALTA';
-        trendStrength = currentPrice > ema233 ? 2 : 1;
-    } else if (ema13 < ema34 && currentPrice < ema13) {
-        trend = 'BAIXA';
-        trendStrength = currentPrice < ema233 ? 2 : 1;
-    }
-    
-    // Calcular score de alinhamento
-    let alignmentScore = 50;
-    
-    // CAMADA 1: Micro tendência (EMA 13)
-    if (currentPrice > ema13) alignmentScore += CONFIG.SCORING.MOMENTUM_BONUS;
-    else alignmentScore -= 5;
-    
-    // CAMADA 2: Confirmação 1 (EMA 34)
-    if (ema13 > ema34) alignmentScore += CONFIG.SCORING.FAST_CONFIRMATION;
-    else alignmentScore -= 8;
-    
-    // CAMADA 3: Tendência principal (EMA 55)
-    if (ema34 > ema55) alignmentScore += CONFIG.SCORING.TREND_CONFIRMATION;
-    else alignmentScore -= 10;
-    
-    // CAMADA 4: Contexto macro (EMA 233)
-    if (currentPrice > ema233) {
-        if (trend === 'ALTA') {
-            alignmentScore += CONFIG.SCORING.MACRO_CONFIRMATION;
-            trendStrength = 2;
-        }
-    } else {
-        if (trend === 'ALTA') {
-            alignmentScore += CONFIG.SCORING.MACRO_PENALTY;
-            trendStrength = 0;
+    if (prevEma13 <= prevEma34 && ema13 > ema34) {
+        if (currentPrice > ema55) {
+            return { cross: 'UP', signal: 'COMPRA' };
         }
     }
     
-    // Bônus por alinhamento perfeito
-    if (bullishAlignment || bearishAlignment) {
-        alignmentScore += CONFIG.SCORING.ALIGNMENT_BONUS;
+    if (prevEma13 >= prevEma34 && ema13 < ema34) {
+        if (currentPrice < ema55) {
+            return { cross: 'DOWN', signal: 'VENDA' };
+        }
     }
     
-    return {
-        trend,
-        trendStrength,
-        ema13,
-        ema34,
-        ema55,
-        ema233,
-        alignment: {
-            isBullish: bullishAlignment,
-            isBearish: bearishAlignment,
-            strength: alignmentStrength,
-            score: alignmentScore
-        },
-        currentPrice
-    };
+    return { cross: null, signal: null };
 }
 
 // =====================================================================
-// === NOVA FUNÇÃO: VALIDAR ENTRADA COM EMAS ===
+// === CÁLCULO DE STOP LOSS MELHORADO ===
 // =====================================================================
-function validateWithEMAs(alert, marketStructure) {
-    const { alignment, trend } = marketStructure;
-    const { direction } = alert;
-    
-    // REGRA 1: Não entrar contra alinhamento forte
-    if (alignment.isBullish && direction === 'VENDA' && alignment.strength === 'FORTE') {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⛔ ${alert.symbol}: Tentativa de venda com EMAs fortemente alinhadas para alta`);
-        }
-        return false;
+function calculateDynamicStopLoss(price, atr, direction, support, resistance, candles, symbol) {
+    if (!atr || atr <= 0) {
+        const stopPct = CONFIG.TRADE.STOP_PERCENTAGE / 100;
+        return direction === 'COMPRA' 
+            ? price * (1 - stopPct)
+            : price * (1 + stopPct);
     }
     
-    if (alignment.isBearish && direction === 'COMPRA' && alignment.strength === 'FORTE') {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⛔ ${alert.symbol}: Tentativa de compra com EMAs fortemente alinhadas para baixa`);
-        }
-        return false;
+    const recentCandles = candles.slice(-10);
+    let maxVolatility = 0;
+    for (let i = 1; i < recentCandles.length; i++) {
+        const candleRange = recentCandles[i].high - recentCandles[i].low;
+        maxVolatility = Math.max(maxVolatility, candleRange);
     }
     
-    // REGRA 2: Verificar consistência com tendência
-    if (direction === 'COMPRA' && trend === 'BAIXA' && alignment.strength !== 'FRACO') {
-        alert.confidence += CONFIG.SCORING.TRADE_PENALTY;
-        if (alert.confidence < CONFIG.ALERTS.MIN_SCORE) {
-            return false;
-        }
-    }
-    
-    if (direction === 'VENDA' && trend === 'ALTA' && alignment.strength !== 'FRACO') {
-        alert.confidence += CONFIG.SCORING.TRADE_PENALTY;
-        if (alert.confidence < CONFIG.ALERTS.MIN_SCORE) {
-            return false;
-        }
-    }
-    
-    // REGRA 3: Bônus por alinhamento
-    if ((direction === 'COMPRA' && alignment.isBullish) ||
-        (direction === 'VENDA' && alignment.isBearish)) {
-        
-        if (alignment.strength === 'FORTE') {
-            alert.confidence += 15;
-            alert.riskReward *= CONFIG.RISK_MANAGEMENT.STRONG_TREND_MULTIPLIER;
-            alert.emoji = '🔥🔥🔥';
-        } else {
-            alert.confidence += 8;
-            alert.riskReward *= 1.1;
-        }
-    }
-    
-    return true;
-}
-
-// =====================================================================
-// === NOVA FUNÇÃO: CALCULAR STOP COM EMAS ===
-// =====================================================================
-function calculateStopWithEMAs(price, direction, marketStructure, atr, volatility) {
-    const { ema13, ema34, ema55, ema233, alignment } = marketStructure;
-    
-    let stopPrice;
-    let stopDistance;
+    let atrMultiplier;
+    let useStructure = false;
     
     if (direction === 'COMPRA') {
-        // Coletar todas as EMAs abaixo do preço
-        const emasBelow = [];
-        if (ema13 < price) emasBelow.push({ value: ema13, period: 13 });
-        if (ema34 < price) emasBelow.push({ value: ema34, period: 34 });
-        if (ema55 < price) emasBelow.push({ value: ema55, period: 55 });
-        if (ema233 < price) emasBelow.push({ value: ema233, period: 233 });
+        const distanceToSupport = price - support;
+        const supportStrength = distanceToSupport / price * 100;
         
-        if (emasBelow.length > 0) {
-            // Ordenar por valor (maior para menor)
-            emasBelow.sort((a, b) => b.value - a.value);
-            
-            // Usar a EMA mais próxima como stop base
-            stopPrice = emasBelow[0].value;
-            
-            // Ajustar baseado na quantidade de EMAs abaixo
-            if (emasBelow.length >= 3) {
-                // Muitas EMAs abaixo = tendência forte, stop mais largo
-                const atrAdjustment = atr * 0.5;
-                stopPrice = Math.max(stopPrice - atrAdjustment, emasBelow[1]?.value || stopPrice);
+        if (supportStrength < 1) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_CLOSE;
+            useStructure = true;
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`📊 ${symbol} - Suporte próximo (${supportStrength.toFixed(2)}%), stop ajustado`);
             }
-            
-            // Ajuste por volatilidade
-            if (volatility.isExpanding) {
-                stopPrice -= atr * 0.3;
-            }
-            
-            // Não deixar stop muito distante
-            const maxStopDistance = price * (CONFIG.RISK_MANAGEMENT.MAX_STOP_DISTANCE_PERCENT / 100);
-            stopPrice = Math.max(stopPrice, price - maxStopDistance);
-            
+        } else if (supportStrength < 2) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_MEDIUM;
+            useStructure = true;
+        } else if (supportStrength < 3) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_FAR;
+            useStructure = true;
         } else {
-            // Fallback: usar ATR
-            stopPrice = price - (atr * 2);
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE;
         }
+        
+        let stopLoss;
+        if (useStructure) {
+            stopLoss = Math.min(
+                support * CONFIG.STOP.SUPPORT_BUFFER,
+                price - (atr * atrMultiplier)
+            );
+        } else {
+            stopLoss = price - (atr * atrMultiplier);
+        }
+        
+        const maxStopDistance = price * (CONFIG.STOP.MAX_STOP_PERCENT / 100);
+        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
+        const actualDistance = price - stopLoss;
+        
+        if (actualDistance > maxStopDistance) {
+            stopLoss = price - maxStopDistance;
+        } else if (actualDistance < minStopDistance && atrMultiplier < CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE) {
+            stopLoss = price - minStopDistance;
+        }
+        
+        return stopLoss;
         
     } else {
-        // Para VENDA
-        const emasAbove = [];
-        if (ema13 > price) emasAbove.push({ value: ema13, period: 13 });
-        if (ema34 > price) emasAbove.push({ value: ema34, period: 34 });
-        if (ema55 > price) emasAbove.push({ value: ema55, period: 55 });
-        if (ema233 > price) emasAbove.push({ value: ema233, period: 233 });
+        const distanceToResistance = resistance - price;
+        const resistanceStrength = distanceToResistance / price * 100;
         
-        if (emasAbove.length > 0) {
-            emasAbove.sort((a, b) => a.value - b.value);
-            stopPrice = emasAbove[0].value;
-            
-            if (emasAbove.length >= 3) {
-                const atrAdjustment = atr * 0.5;
-                stopPrice = Math.min(stopPrice + atrAdjustment, emasAbove[1]?.value || stopPrice);
+        if (resistanceStrength < 1) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_CLOSE;
+            useStructure = true;
+            if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`📊 ${symbol} - Resistência próxima (${resistanceStrength.toFixed(2)}%), stop ajustado`);
             }
-            
-            if (volatility.isExpanding) {
-                stopPrice += atr * 0.3;
-            }
-            
-            const maxStopDistance = price * (CONFIG.RISK_MANAGEMENT.MAX_STOP_DISTANCE_PERCENT / 100);
-            stopPrice = Math.min(stopPrice, price + maxStopDistance);
-            
+        } else if (resistanceStrength < 2) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_MEDIUM;
+            useStructure = true;
+        } else if (resistanceStrength < 3) {
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_STRUCTURE_FAR;
+            useStructure = true;
         } else {
-            stopPrice = price + (atr * 2);
+            atrMultiplier = CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE;
         }
+        
+        let stopLoss;
+        if (useStructure) {
+            stopLoss = Math.max(
+                resistance * CONFIG.STOP.RESISTANCE_BUFFER,
+                price + (atr * atrMultiplier)
+            );
+        } else {
+            stopLoss = price + (atr * atrMultiplier);
+        }
+        
+        const maxStopDistance = price * (CONFIG.STOP.MAX_STOP_PERCENT / 100);
+        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
+        const actualDistance = stopLoss - price;
+        
+        if (actualDistance > maxStopDistance) {
+            stopLoss = price + maxStopDistance;
+        } else if (actualDistance < minStopDistance && atrMultiplier < CONFIG.STOP.ATR_MULTIPLIER_NO_STRUCTURE) {
+            stopLoss = price + minStopDistance;
+        }
+        
+        return stopLoss;
     }
-    
-    return stopPrice;
 }
 
-// =====================================================================
-// === ANÁLISE DE VOLATILIDADE AVANÇADA ===
-// =====================================================================
-function calculateVolatilityProfile(candles) {
-    if (candles.length < 50) return null;
-    
-    const closes = candles.map(c => c.close);
-    const highs = candles.map(c => c.high);
-    const lows = candles.map(c => c.low);
-    const currentPrice = candles[candles.length - 1].close;
-    
-    // 1. ATR percentual
-    const atr = calculateATR(candles, 14);
-    const atrPercent = (atr / currentPrice) * 100;
-    
-    // 2. Desvio padrão dos retornos
-    const returns = [];
-    for (let i = 1; i < closes.length; i++) {
-        returns.push((closes[i] - closes[i-1]) / closes[i-1] * 100);
-    }
-    
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
-    const stdDev = Math.sqrt(variance);
-    
-    // 3. Range média percentual
-    const avgRange = highs.map((h, i) => ((h - lows[i]) / closes[i]) * 100)
-                          .reduce((a, b) => a + b, 0) / highs.length;
-    
-    // 4. Detectar expansão/contração
-    const recentATR = calculateATR(candles.slice(-20), 14);
-    const recentATRPercent = (recentATR / currentPrice) * 100;
-    const atrExpansion = recentATRPercent / atrPercent;
-    
-    // 5. Classificar volatilidade
-    let volatilityLevel = 'MEDIA';
-    if (atrPercent < 1) volatilityLevel = 'BAIXA';
-    else if (atrPercent > 2) volatilityLevel = 'ALTA';
-    
-    return {
-        atrPercent,
-        stdDev,
-        avgRange,
-        atrExpansion,
-        volatilityLevel,
-        isExpanding: atrExpansion > 1.2,
-        isContracting: atrExpansion < 0.8
-    };
-}
-
-// =====================================================================
-// === TAKE PROFIT DINÂMICO ===
-// =====================================================================
-function calculateDynamicTakeProfits(price, stopLoss, direction, volatility, marketStructure) {
+function calculateDynamicTakeProfits(price, stopLoss, direction, resistance, support, atr) {
     const risk = Math.abs(price - stopLoss);
     
-    // Multiplicador base
-    let baseMultiplier = CONFIG.TRADE.RISK_REWARD_RATIO;
-    
-    // Ajustar por volatilidade
-    if (volatility.volatilityLevel === 'ALTA') {
-        baseMultiplier *= 1.3;
-    } else if (volatility.volatilityLevel === 'BAIXA') {
-        baseMultiplier *= 0.8;
+    if (direction === 'COMPRA') {
+        const tp1ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[0]);
+        const tp1ByResistance = resistance * 0.99;
+        const takeProfit1 = Math.min(tp1ByRisk, tp1ByResistance);
+        
+        const tp2ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[1]);
+        const tp2ByResistance = resistance * 1.02;
+        const takeProfit2 = Math.min(tp2ByRisk, tp2ByResistance);
+        
+        const tp3ByRisk = price + (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[2]);
+        const tp3Breakout = price + (atr * 5);
+        const takeProfit3 = Math.max(tp3ByRisk, tp3Breakout);
+        
+        return { takeProfit1, takeProfit2, takeProfit3 };
+        
+    } else {
+        const tp1ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[0]);
+        const tp1BySupport = support * 1.01;
+        const takeProfit1 = Math.max(tp1ByRisk, tp1BySupport);
+        
+        const tp2ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[1]);
+        const tp2BySupport = support * 0.98;
+        const takeProfit2 = Math.max(tp2ByRisk, tp2BySupport);
+        
+        const tp3ByRisk = price - (risk * CONFIG.TRADE.TAKE_PROFIT_LEVELS[2]);
+        const tp3Breakout = price - (atr * 5);
+        const takeProfit3 = Math.min(tp3ByRisk, tp3Breakout);
+        
+        return { takeProfit1, takeProfit2, takeProfit3 };
     }
-    
-    // Ajustar por força da tendência
-    if (marketStructure.trendStrength === 2) {
-        baseMultiplier *= CONFIG.RISK_MANAGEMENT.STRONG_TREND_MULTIPLIER;
-    } else if (marketStructure.trendStrength === 0) {
-        baseMultiplier *= CONFIG.RISK_MANAGEMENT.WEAK_TREND_MULTIPLIER;
-    }
-    
-    // Calcular TPs
-    const tp1 = direction === 'COMPRA'
-        ? price + (risk * baseMultiplier)
-        : price - (risk * baseMultiplier);
-    
-    const tp2 = direction === 'COMPRA'
-        ? price + (risk * baseMultiplier * 1.8)
-        : price - (risk * baseMultiplier * 1.8);
-    
-    const tp3 = direction === 'COMPRA'
-        ? price + (risk * baseMultiplier * 2.5)
-        : price - (risk * baseMultiplier * 2.5);
-    
-    return {
-        takeProfit1: tp1,
-        takeProfit2: tp2,
-        takeProfit3: tp3,
-        riskReward: baseMultiplier
-    };
 }
 
-// =====================================================================
-// === VALIDAÇÃO DE ENTRADA COM VOLUME ===
-// =====================================================================
-function validateEntryWithVolume(alert, candles) {
-    if (!CONFIG.RISK_MANAGEMENT.USE_VOLATILITY_FILTER) return true;
+function calculateTradeLevels(price, atr, direction, support, resistance, candles, symbol) {
+    const stopLoss = calculateDynamicStopLoss(price, atr, direction, support, resistance, candles, symbol);
     
-    const lastCandle = candles[candles.length - 1];
-    const prevCandle = candles[candles.length - 2];
-    const prev5Candles = candles.slice(-6, -1);
+    const { takeProfit1, takeProfit2, takeProfit3 } = 
+        calculateDynamicTakeProfits(price, stopLoss, direction, resistance, support, atr);
     
-    // Volume deve estar crescendo
-    const volumeIncreasing = lastCandle.volume > prevCandle.volume * CONFIG.RISK_MANAGEMENT.MIN_VOLUME_CONFIRMATION;
+    const validatedLevels = validateTradeLevels(price, stopLoss, takeProfit1, takeProfit2, takeProfit3, direction);
     
-    // Volume atual vs média
-    const avgVolume = prev5Candles.reduce((sum, c) => sum + c.volume, 0) / 5;
-    const volumeSpike = lastCandle.volume > avgVolume * 1.5;
+    return validatedLevels;
+}
+
+function validateTradeLevels(price, stopLoss, tp1, tp2, tp3, direction) {
+    let validated = { stopLoss, takeProfit1: tp1, takeProfit2: tp2, takeProfit3: tp3 };
     
-    // Confirmação do candle
-    let candleConfirms = false;
-    if (alert.direction === 'COMPRA') {
-        candleConfirms = lastCandle.close > lastCandle.open;
-        if (lastCandle.close > lastCandle.open * 1.02 && volumeSpike) {
-            alert.confidence += 8;
+    if (direction === 'COMPRA') {
+        if (tp1 <= price) validated.takeProfit1 = price * 1.01;
+        if (tp2 <= tp1) validated.takeProfit2 = tp1 * 1.02;
+        if (tp3 <= tp2) validated.takeProfit3 = tp2 * 1.02;
+        
+        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
+        if (price - stopLoss < minStopDistance) {
+            validated.stopLoss = price - minStopDistance;
         }
+        
     } else {
-        candleConfirms = lastCandle.close < lastCandle.open;
-        if (lastCandle.close < lastCandle.open * 0.98 && volumeSpike) {
-            alert.confidence += 8;
+        if (tp1 >= price) validated.takeProfit1 = price * 0.99;
+        if (tp2 >= tp1) validated.takeProfit2 = tp1 * 0.98;
+        if (tp3 >= tp2) validated.takeProfit3 = tp2 * 0.98;
+        
+        const minStopDistance = price * (CONFIG.STOP.MIN_STOP_PERCENT / 100);
+        if (stopLoss - price < minStopDistance) {
+            validated.stopLoss = price + minStopDistance;
         }
     }
     
-    // Penalizar se volume não confirmar
-    if (!volumeIncreasing) {
-        alert.confidence -= 12;
-    }
-    
-    return alert.confidence >= CONFIG.ALERTS.MIN_SCORE;
+    return validated;
 }
 
 // =====================================================================
@@ -1180,14 +1150,14 @@ function registerAlert(symbol, price, direction) {
 }
 
 // =====================================================================
-// === FETCH DE DADOS ===
+// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
 // =====================================================================
 async function getCandles(symbol, timeframe, limit = 100) {
     const cached = CacheManager.get(symbol, timeframe, limit);
     if (cached) return cached;
 
     const intervalMap = {
-        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
         '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
     };
     
@@ -1271,22 +1241,21 @@ async function getFundingRate(symbol) {
     }
 }
 
-// =====================================================================
-// === ANÁLISE PRINCIPAL (ATUALIZADA COM EMAS 13,34,55,233) ===
-// =====================================================================
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m, candlesDaily] = await Promise.all([
-            getCandles(symbol, '1h', 300), // Aumentado para ter dados suficientes para EMA 233
+        const [candles1h, candles15m, candlesDaily, candles3m] = await Promise.all([
+            getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 50)
+            getCandles(symbol, '1d', 50),
+            getCandles(symbol, '3m', 100)
         ]);
         
-        if (candles1h.length < 250 || candles15m.length < 20 || candlesDaily.length < 25) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25 || candles3m.length < 60) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
         
-        // Análises técnicas básicas
+        const emaCross = checkEMACross(candles3m);
+        
         const volumes = candles1h.map(c => c.volume);
         const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
         const currentVolume = volumes[volumes.length - 1];
@@ -1295,7 +1264,6 @@ async function analyzeForAlerts(symbol) {
         const closes = candles1h.map(c => c.close);
         const ema9 = calculateEMA(closes.slice(-20), 9);
         
-        // Análise de comprador/vendedor
         let buyerVolume = 0, sellerVolume = 0, totalVolume = 0;
         const recentCandles = candles1h.slice(-24);
         
@@ -1316,7 +1284,6 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
-        // CCI Diário
         const cciDaily = calculateCCI(candlesDaily, 20);
         const cciValuesDaily = [];
         for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
@@ -1334,7 +1301,6 @@ async function analyzeForAlerts(symbol) {
             }
         }
         
-        // Dados adicionais
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
@@ -1345,165 +1311,116 @@ async function analyzeForAlerts(symbol) {
         
         if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
         
-        // Análises avançadas
-        const volatility = calculateVolatilityProfile(candles1h);
-        const marketStructure = detectMarketStructure(candles1h);
+        // REGISTRAR SPIKE DE VOLUME NA MEMÓRIA
+        if (volumeRatio >= CONFIG.VOLUME_MEMORY.MIN_VOLUME_RATIO) {
+            VolumeMemoryManager.registerSpike(
+                symbol, 
+                volumeRatio, 
+                buyerPercentage, 
+                sellerPercentage, 
+                currentPrice,
+                null,
+                candles1h
+            );
+        }
         
-        if (!volatility || !marketStructure) return null;
-        
-        // Determinar direção
         let direction = null;
-        let score = 50;
+        let score = 0;
         let confidence = 0;
+        let emaCrossSignal = null;
+        let volumeMemoryUsed = false;
+        let timeBetweenVolumeAndCross = 0;
         
-        // ANÁLISE PARA COMPRA
+        // VERIFICAÇÃO 1: CRITÉRIO NORMAL (VOLUME AGORA + EMA AGORA)
         if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h < CONFIG.RSI.BUY_MAX) {
             
-            direction = 'COMPRA';
-            
-            // Volume comprador
-            if (buyerPercentage > 60) score += 15;
-            else if (buyerPercentage > 55) score += 10;
-            else if (buyerPercentage > 52) score += 5;
-            
-            // Volume ratio
-            if (volumeRatio > 2.5) score += 15;
-            else if (volumeRatio > 2.0) score += 12;
-            else if (volumeRatio > 1.8) score += 10;
-            else if (volumeRatio > 1.6) score += 8;
-            
-            // LSR
-            if (lsr) {
-                if (lsr < 1.5) score += 20;
-                else if (lsr < 2.0) score += 12;
-                else if (lsr < 2.3) score += 10;
-                else if (lsr < 2.6) score += 5;
-                else if (lsr > 3.0) score -= 20;
-                else if (lsr > 2.8) score -= 15;
+            if (emaCross && emaCross.signal === 'COMPRA') {
+                direction = 'COMPRA';
+                emaCrossSignal = 'EMA13 > EMA34, PREÇO > EMA55';
+                volumeMemoryUsed = false;
+                
+                // Calcular score normal
+                score = calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi1h, cciDailyTrend, currentPrice, sr);
+                confidence = Math.min(100, Math.max(0, score));
             }
-            
-            // Funding
-            if (funding) {
-                if (funding < -0.001) score += 12;
-                else if (funding < -0.0005) score += 8;
-                else if (funding < -0.0001) score += 3;
-            }
-            
-            // RSI
-            if (rsi1h) {
-                if (rsi1h < 35) score += 12;
-                else if (rsi1h < 40) score += 10;
-                else if (rsi1h < 45) score += 8;
-                else if (rsi1h < 50) score += 5;
-            }
-            
-            // CCI Diário
-            if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score += 10;
-                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15;
-            }
-            
-            // Volatilidade
-            if (volatility.volatilityLevel === 'BAIXA') score += 8;
-            else if (volatility.volatilityLevel === 'ALTA') score -= 5;
-            
-            confidence = Math.min(100, Math.max(0, score));
         }
         
-        // ANÁLISE PARA VENDA
         if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h > CONFIG.RSI.SELL_MIN) {
             
-            direction = 'VENDA';
-            score = 50;
-            
-            // Volume vendedor
-            if (sellerPercentage > 60) score += 15;
-            else if (sellerPercentage > 55) score += 10;
-            else if (sellerPercentage > 52) score += 5;
-            
-            // Volume ratio
-            if (volumeRatio > 2.5) score += 15;
-            else if (volumeRatio > 2.0) score += 12;
-            else if (volumeRatio > 1.8) score += 10;
-            else if (volumeRatio > 1.6) score += 8;
-            
-            // LSR
-            if (lsr) {
-                if (lsr > 4.0) score += 20;
-                else if (lsr > 3.5) score += 12;
-                else if (lsr > 3.0) score += 10;
-                else if (lsr > 2.7) score += 5;
-                else if (lsr < 1.0) score -= 20;
-                else if (lsr < 1.2) score -= 15;
+            if (emaCross && emaCross.signal === 'VENDA') {
+                direction = 'VENDA';
+                emaCrossSignal = 'EMA13 < EMA34, PREÇO < EMA55';
+                volumeMemoryUsed = false;
+                
+                score = calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi1h, cciDailyTrend, currentPrice, sr);
+                confidence = Math.min(100, Math.max(0, score));
             }
+        }
+        
+        // VERIFICAÇÃO 2: SE NÃO TEM DIRECAO, VERIFICAR MEMÓRIA DE VOLUME
+        if (!direction && CONFIG.VOLUME_MEMORY.ENABLED) {
+            const memoryResult = VolumeMemoryManager.checkForSpike(symbol, emaCross, currentPrice, rsi1h, lsr, funding);
             
-            // Funding
-            if (funding) {
-                if (funding > 0.001) score += 12;
-                else if (funding > 0.0005) score += 8;
-                else if (funding > 0.0001) score += 3;
+            if (memoryResult) {
+                direction = memoryResult.direction;
+                volumeMemoryUsed = true;
+                timeBetweenVolumeAndCross = memoryResult.timeDiffMinutes;
+                
+                // Usar os dados de volume da memória
+                const volumeRatioFromMemory = memoryResult.volumeRatio;
+                const buyerPercentageFromMemory = memoryResult.buyerPercentage;
+                const sellerPercentageFromMemory = memoryResult.sellerPercentage;
+                
+                emaCrossSignal = direction === 'COMPRA' 
+                    ? 'EMA13 > EMA34, PREÇO > EMA55 (VOLUME MEMORY)'
+                    : 'EMA13 < EMA34, PREÇO < EMA55 (VOLUME MEMORY)';
+                
+                // Calcular score com os dados da memória
+                score = calculateScore(
+                    direction, 
+                    buyerPercentageFromMemory, 
+                    sellerPercentageFromMemory, 
+                    volumeRatioFromMemory, 
+                    lsr, 
+                    funding, 
+                    rsi1h, 
+                    cciDailyTrend, 
+                    currentPrice, 
+                    sr
+                );
+                
+                // Ajustar score baseado no tempo entre volume e cross
+                if (timeBetweenVolumeAndCross > 0) {
+                    // Reduzir score proporcionalmente ao tempo
+                    const timePenalty = Math.min(20, timeBetweenVolumeAndCross * 2);
+                    score = Math.max(0, score - timePenalty);
+                    
+                    if (CONFIG.DEBUG.VERBOSE) {
+                        console.log(`⏱️ ${symbol} - Volume há ${timeBetweenVolumeAndCross.toFixed(1)}min, penalidade: -${timePenalty}pts`);
+                    }
+                }
+                
+                confidence = Math.min(100, Math.max(0, score));
             }
-            
-            // RSI
-            if (rsi1h) {
-                if (rsi1h > 75) score += 12;
-                else if (rsi1h > 70) score += 10;
-                else if (rsi1h > 65) score += 8;
-                else if (rsi1h > 60) score += 5;
-            }
-            
-            // CCI Diário
-            if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score -= 15;
-                else if (cciDailyTrend === "CCI 🔴BAIXA") score += 10;
-            }
-            
-            // Volatilidade
-            if (volatility.volatilityLevel === 'ALTA') score += 8;
-            else if (volatility.volatilityLevel === 'BAIXA') score -= 5;
-            
-            confidence = Math.min(100, Math.max(0, score));
         }
         
         if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
         
         if (!canSendAlert(symbol, currentPrice, direction)) return null;
         
-        // Criar alerta temporário para validações
-        const tempAlert = { direction, confidence, symbol: symbol };
+        const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
+            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance, candles1h, symbol);
         
-        // VALIDAÇÃO COM EMAS (NOVA)
-        if (!validateWithEMAs(tempAlert, marketStructure)) {
-            return null;
-        }
-        confidence = tempAlert.confidence;
-        
-        // Calcular Stop Loss usando EMAs
-        const stopLoss = calculateStopWithEMAs(
-            currentPrice,
-            direction,
-            marketStructure,
-            atr,
-            volatility
-        );
-        
-        // Calcular Take Profits Dinâmicos
-        const { takeProfit1, takeProfit2, takeProfit3, riskReward } = 
-            calculateDynamicTakeProfits(currentPrice, stopLoss, direction, volatility, marketStructure);
-        
-        // Validar entrada com volume
-        if (!validateEntryWithVolume(tempAlert, candles15m)) {
-            return null;
-        }
-        confidence = tempAlert.confidence;
+        const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
+        const stopDistance = direction === 'COMPRA' 
+            ? ((currentPrice - stopLoss) / currentPrice * 100).toFixed(2)
+            : ((stopLoss - currentPrice) / currentPrice * 100).toFixed(2);
         
         const emoji = getConfidenceEmoji(confidence);
-        const volEmoji = getVolatilityEmoji(volatility.volatilityLevel);
-        const alignEmoji = getAlignmentEmoji(marketStructure.alignment);
         
         const alert = {
             symbol,
@@ -1516,28 +1433,31 @@ async function analyzeForAlerts(symbol) {
             riskReward: parseFloat(riskReward.toFixed(2)),
             confidence,
             score: confidence,
-            volumeRatio,
-            buyerPercentage,
-            sellerPercentage,
+            volumeRatio: volumeMemoryUsed ? memoryResult.volumeRatio : volumeRatio,
+            buyerPercentage: volumeMemoryUsed ? memoryResult.buyerPercentage : buyerPercentage,
+            sellerPercentage: volumeMemoryUsed ? memoryResult.sellerPercentage : sellerPercentage,
             lsr,
             funding,
             rsi: rsi1h,
             cciDaily: cciDailyTrend,
+            emaCrossSignal,
             support: sr.support,
             resistance: sr.resistance,
-            emoji: `${emoji} ${volEmoji} ${alignEmoji}`,
-            timestamp: Date.now(),
-            volatility: {
-                level: volatility.volatilityLevel,
-                atrPercent: volatility.atrPercent,
-                isExpanding: volatility.isExpanding
-            },
-            marketTrend: marketStructure.trend,
-            emaAlignment: marketStructure.alignment
+            stopDistance: parseFloat(stopDistance),
+            volumeMemoryUsed,
+            timeBetweenVolumeAndCross: timeBetweenVolumeAndCross > 0 ? parseFloat(timeBetweenVolumeAndCross.toFixed(1)) : undefined,
+            emoji,
+            timestamp: Date.now()
         };
         
         try {
             TradeAlertSchema.parse(alert);
+            
+            // Após enviar alerta, remover da memória
+            if (volumeMemoryUsed) {
+                volumeSpikeMemory.delete(symbol);
+            }
+            
             return alert;
         } catch (error) {
             if (CONFIG.DEBUG.VERBOSE) {
@@ -1554,8 +1474,114 @@ async function analyzeForAlerts(symbol) {
     }
 }
 
+function calculateScore(direction, buyerPercentage, sellerPercentage, volumeRatio, lsr, funding, rsi, cciDailyTrend, currentPrice, sr) {
+    let score = 50; // Base
+    
+    if (direction === 'COMPRA') {
+        // Volume Comprador
+        if (buyerPercentage > 60) score += 15;
+        else if (buyerPercentage > 55) score += 10;
+        else if (buyerPercentage > 52) score += 5;
+        
+        // Volume Ratio
+        if (volumeRatio > 2.5) score += 15;
+        else if (volumeRatio > 2.0) score += 12;
+        else if (volumeRatio > 1.8) score += 10;
+        else if (volumeRatio > 1.6) score += 8;
+        
+        // LSR
+        if (lsr) {
+            if (lsr < 1.5) score += 20;
+            else if (lsr < 2.0) score += 12;
+            else if (lsr < 2.3) score += 10;
+            else if (lsr < 2.6) score += 5;
+            else if (lsr > 3.0) score -= 20;
+            else if (lsr > 2.8) score -= 15;
+        }
+        
+        // Funding
+        if (funding) {
+            if (funding < -0.001) score += 12;
+            else if (funding < -0.0005) score += 8;
+            else if (funding < -0.0001) score += 3;
+        }
+        
+        // RSI
+        if (rsi) {
+            if (rsi < 35) score += 12;
+            else if (rsi < 40) score += 10;
+            else if (rsi < 45) score += 8;
+            else if (rsi < 50) score += 5;
+        }
+        
+        // CCI Diário
+        if (cciDailyTrend) {
+            if (cciDailyTrend === "CCI 💹ALTA") score += 10;
+            else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15;
+        }
+        
+        // Distância da Resistência
+        if (currentPrice < sr.resistance) {
+            const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
+            if (distanceToResistance > 5) score += 5;
+            else if (distanceToResistance > 2) score += 3;
+        }
+    } else {
+        // Volume Vendedor
+        if (sellerPercentage > 60) score += 15;
+        else if (sellerPercentage > 55) score += 10;
+        else if (sellerPercentage > 52) score += 5;
+        
+        // Volume Ratio
+        if (volumeRatio > 2.5) score += 15;
+        else if (volumeRatio > 2.0) score += 12;
+        else if (volumeRatio > 1.8) score += 10;
+        else if (volumeRatio > 1.6) score += 8;
+        
+        // LSR
+        if (lsr) {
+            if (lsr > 4.0) score += 20;
+            else if (lsr > 3.5) score += 12;
+            else if (lsr > 3.0) score += 10;
+            else if (lsr > 2.7) score += 5;
+            else if (lsr < 1.0) score -= 20;
+            else if (lsr < 1.2) score -= 15;
+        }
+        
+        // Funding
+        if (funding) {
+            if (funding > 0.001) score += 12;
+            else if (funding > 0.0005) score += 8;
+            else if (funding > 0.0001) score += 3;
+        }
+        
+        // RSI
+        if (rsi) {
+            if (rsi > 75) score += 12;
+            else if (rsi > 70) score += 10;
+            else if (rsi > 65) score += 8;
+            else if (rsi > 60) score += 5;
+        }
+        
+        // CCI Diário
+        if (cciDailyTrend) {
+            if (cciDailyTrend === "CCI 🔴BAIXA") score += 10;
+            else if (cciDailyTrend === "CCI 💹ALTA") score -= 15;
+        }
+        
+        // Distância do Suporte
+        if (currentPrice > sr.support) {
+            const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
+            if (distanceToSupport > 5) score += 5;
+            else if (distanceToSupport > 2) score += 3;
+        }
+    }
+    
+    return score;
+}
+
 // =====================================================================
-// === TELEGRAM ===
+// === TELEGRAM MELHORADO COM RETRY ===
 // =====================================================================
 async function sendTelegramAlert(message, parseMode = 'HTML') {
     let attempts = 0;
@@ -1660,43 +1686,26 @@ function formatTradeAlert(alert) {
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
-    const volatilityInfo = `${alert.volatility?.level || 'MÉDIA'} ${alert.volatility?.isExpanding ? '📈' : '📉'}`;
+    // Adicionar informação de memória de volume se usada
+    const memoryInfo = alert.volumeMemoryUsed 
+        ? `Vol/Liquidação ${alert.timeBetweenVolumeAndCross}min` 
+        : '';
     
-    // Informações do alinhamento das EMAs
-    let alignmentInfo = '';
-    if (alert.emaAlignment) {
-        if (alert.emaAlignment.isBullish) {
-            alignmentInfo = alert.emaAlignment.strength === 'FORTE' ? '💹💹 ALINHADO FORTE' : '💹 ALINHADO';
-        } else if (alert.emaAlignment.isBearish) {
-            alignmentInfo = alert.emaAlignment.strength === 'FORTE' ? '📉📉 ALINHADO FORTE' : '📉 ALINHADO';
-        } else {
-            alignmentInfo = '🔄 MISTURADO';
-        }
-    }
+    const stopInfo = `🛑 Stop: ${stop} (${alert.stopDistance}%)`;
     
-    // Determinar emoji para a tendência
-    const trendEmoji = alert.marketTrend === 'ALTA' ? '💹' : alert.marketTrend === 'BAIXA' ? '📛' : '⚪';
-    const trendText = alert.marketTrend === 'ALTA' ? 'ALTA' : alert.marketTrend === 'BAIXA' ? 'BAIXA' : 'NEUTRO';
-    
-    const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica,</b> Observar Zona do Suporte...\n🔸Volatilidade ' + volatilityInfo
-        : '<b>🤖 IA Dica,</b> Realizar Lucro ou Parcial...\n🔸Volatilidade ' + volatilityInfo;
-    
-    return `<i><b>${dirEmoji} Analisar ${direction} - ${symbolName}</b>
-    SENSORES: ${alert.emoji} 
- <b>🐋Volume!!!</b> | #SCORE: ${alert.confidence}%
+    return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
+ <b>🐋Volume!</b> | #SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
- Alinhamento : ${alignmentInfo}
- Tendência CCI Diário: ${trendEmoji} ${trendText} 
+ Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
-<b>Alvos</b> | Volatilidade: ${volatilityInfo}
- TP1: ${tp1} | TP2: ${tp2}  | TP3: ${tp3} 
- 🛑 Stop: ${stop} 
+<b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}
+${stopInfo}
+${memoryInfo ? memoryInfo + '\n' : ''}
 ❅──────✧❅🔹❅✧──────❅
- ${iaDica}
+ <b>🤖 IA Dica, </b>${alert.direction === 'COMPRA' ? 'Observar Zona do Suporte...' : 'Realizar Lucro ou Parcial...'}
 Alerta Educativo, não é recomendação de investimento
  Titanium Prime by @J4Rviz</i>`;
 }
@@ -1725,31 +1734,47 @@ async function fetchAllFuturesSymbols() {
 }
 
 // =====================================================================
-// === SCANNER EM TEMPO REAL ===
+// === SCANNER EM TEMPO REAL MELHORADO ===
 // =====================================================================
 async function realTimeScanner() {
     console.log('\n🔍 Iniciando scanner em tempo real...');
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
+    console.log(`📊 Timeframe EMAs: ${CONFIG.EMA.TIMEFRAME} (EMA${CONFIG.EMA.FAST} x EMA${CONFIG.EMA.SLOW}, PREÇO x EMA${CONFIG.EMA.SIGNAL})`);
+    console.log(`📊 Memória de Volume: ATIVADA (guarda picos por ${CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES}min)`);
     console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
     console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    console.log(`📊 Sistema de EMAs: 13, 34, 55, 233 (Fibonacci + Macro)`);
-    console.log(`📊 Stop Loss Inteligente: BASEADO NAS EMAS`);
-    console.log(`📊 Take Profit Dinâmico: AJUSTADO POR ALINHAMENTO`);
+    console.log(`📊 Stop Loss: Baseado em ATR + Estrutura (${CONFIG.STOP.MIN_STOP_PERCENT}% - ${CONFIG.STOP.MAX_STOP_PERCENT}%)`);
     
     let scanCount = 0;
     let alertsSent = 0;
     let consecutiveEmptyScans = 0;
     let lastAlertTime = Date.now();
     
+    // Mostrar estatísticas de memória a cada 10 scans
+    let statsCounter = 0;
+    
     while (true) {
         const startTime = Date.now();
         scanCount++;
+        statsCounter++;
         
         resetDailyCounterIfNeeded();
         
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
+        
+        // Mostrar estatísticas da memória de volume
+        if (statsCounter >= 10) {
+            const memoryStats = VolumeMemoryManager.getMemoryStats();
+            if (memoryStats.totalMemories > 0) {
+                console.log(`💾 Memória de Volume: ${memoryStats.totalMemories} spikes armazenados`);
+                memoryStats.memories.slice(0, 5).forEach(m => {
+                    console.log(`   ${m.symbol}: ${m.direction} ${m.volumeRatio.toFixed(2)}x (há ${m.ageMinutes}min)`);
+                });
+            }
+            statsCounter = 0;
+        }
         
         if (dailyMessageCounter.size > 0 && CONFIG.DEBUG.VERBOSE) {
             console.log('📊 Alertas enviados hoje:');
@@ -1794,7 +1819,14 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - EMAs: ${alert.emaAlignment?.strength || 'MISTURADO'} - R:R ${alert.riskReward}`);
+                
+                const memoryTag = alert.volumeMemoryUsed ? ' [MEMORY]' : '';
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)${memoryTag} - Stop: ${alert.stopDistance}% - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily} - EMA: ${alert.emaCrossSignal}`);
+                
+                if (alert.volumeMemoryUsed) {
+                    console.log(`   ⏱️ Volume detectado há ${alert.timeBetweenVolumeAndCross}min`);
+                }
+                
                 lastAlertTime = Date.now();
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
@@ -1835,7 +1867,7 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME - SISTEMA DE ALERTAS');
+    console.log('🚀 TITANIUM - Real-Time Alert System (Com Memória de Volume)');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
@@ -1844,25 +1876,17 @@ async function startBot() {
     console.log(`⏱️ Scan a cada: ${CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS}s`);
     console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
     console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
+    console.log(`📊 Critério EMAs 3min: EMA13 x EMA34 + PREÇO x EMA55`);
+    console.log(`📊 Memória de Volume: Guarda picos por ${CONFIG.VOLUME_MEMORY.MEMORY_DURATION_MINUTES}min`);
+    console.log(`📊 Stop Loss: ATR + Estrutura (${CONFIG.STOP.MIN_STOP_PERCENT}% - ${CONFIG.STOP.MAX_STOP_PERCENT}%)`);
     console.log(`🛡️ Cooldown: ${CONFIG.PERFORMANCE.COOLDOWN_MINUTES}min`);
     console.log(`📊 Máx alertas/scan: ${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
     console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
-    
-    console.log('\n🔧 EMAS FIBONACCI IMPLEMENTADAS:');
-    console.log(`   ✅ EMA 13 - Micro tendência (entrada)`);
-    console.log(`   ✅ EMA 34 - Confirmação curta`);
-    console.log(`   ✅ EMA 55 - Tendência média`);
-    console.log(`   ✅ EMA 233 - Contexto macro`);
-    
-    console.log('\n🔧 RECURSOS AVANÇADOS ATIVADOS:');
-    console.log('   ✅ Stop Loss Baseado em EMAs');
-    console.log('   ✅ Validação de Alinhamento de EMAs');
-    console.log('   ✅ Bônus de Pontuação por Alinhamento Forte');
-    console.log('   ✅ Filtro Contra EMAs Desalinhadas\n');
+    console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
     
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium Prime Ativado - Sistema pronto!`;
+    const initMessage = `🤖 Titanium Ativado - Sistema pronto.`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
@@ -1877,7 +1901,7 @@ async function startBot() {
 }
 
 // =====================================================================
-// === HANDLERS DE ERRO ===
+// === HANDLERS DE ERRO MELHORADOS ===
 // =====================================================================
 process.on('uncaughtException', async (err) => {
     console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
@@ -1904,7 +1928,7 @@ process.on('unhandledRejection', async (reason) => {
 // =====================================================================
 // === START ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium Prime com EMAs 13,34,55,233...');
+console.log('🚀 Iniciando Titanium Real-Time Alert System...');
 startBot().catch(async error => {
     console.error('❌ Erro fatal:', error);
     
