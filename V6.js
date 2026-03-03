@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 2.0,
+        MIN_VOLUME_RATIO: 1.7,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -45,7 +45,7 @@ const CONFIG = {
     },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 2.0,
+        MIN_VOLUME_RATIO: 1.7,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -57,7 +57,7 @@ const CONFIG = {
     },
     RSI: {
         BUY_MAX: 60,      // RSI máximo para compra
-        SELL_MIN: 65,     // RSI mínimo para venda
+        SELL_MIN: 45,     // RSI mínimo para venda
         PERIOD: 14
     },
     DEBUG: {
@@ -1130,12 +1130,12 @@ async function analyzeForAlerts(symbol) {
             
             // 3. LSR (máx 20, com penalidade)
             if (lsr) {
-                if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
-                else if (lsr < 2.0) score += 12;  // Bom
-                else if (lsr < 2.3) score += 10;  // Moderado
+                if (lsr < 1.5) score += 15;      // Muito bom (pouca gente comprada)
+                else if (lsr < 2.0) score += 10;  // Bom
+                else if (lsr < 2.3) score += 8;  // Moderado
                 else if (lsr < 2.6) score += 5;   // Pouco favorável
-                else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
-                else if (lsr > 2.8) score -= 15;   // Penalidade leve
+                else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
+                else if (lsr > 2.8) score -= 12;   // Penalidade leve
             }
             
             // 4. FUNDING (máx 15)
@@ -1155,8 +1155,8 @@ async function analyzeForAlerts(symbol) {
             
             // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score += 10;      // CCI cruzando acima da EMA5
-                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
+                if (cciDailyTrend === "CCI 💹ALTA") score += 25;      // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 30; // CCI cruzando abaixo da EMA5
             }
             
             // 7. POSIÇÃO PREÇO (máx 5)
@@ -1190,12 +1190,12 @@ async function analyzeForAlerts(symbol) {
             
             // 3. LSR (máx 20, com penalidade)
             if (lsr) {
-                if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
-                else if (lsr > 3.5) score += 12;    // Bom
-                else if (lsr > 3.0) score += 10;    // Moderado
+                if (lsr > 4.0) score += 15;        // Muito bom (muita gente comprada)
+                else if (lsr > 3.5) score += 10;    // Bom
+                else if (lsr > 3.0) score += 8;    // Moderado
                 else if (lsr > 2.7) score += 5;     // Pouco favorável
-                else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
-                else if (lsr < 1.2) score -= 15;     // Penalidade leve
+                else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
+                else if (lsr < 1.2) score -= 12;     // Penalidade leve
             }
             
             // 4. FUNDING (máx 15)
@@ -1215,8 +1215,8 @@ async function analyzeForAlerts(symbol) {
             
             // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score -= 15;     // CCI cruzando acima da EMA5
-                else if (cciDailyTrend === "CCI 🔴BAIXA") score += 10; // CCI cruzando abaixo da EMA5
+                if (cciDailyTrend === "CCI 💹ALTA") score -= 25;     // CCI cruzando acima da EMA5
+                else if (cciDailyTrend === "CCI 🔴BAIXA") score += 30; // CCI cruzando abaixo da EMA5
             }
             
             // 7. POSIÇÃO PREÇO (máx 5)
