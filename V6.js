@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyz',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -1115,7 +1115,7 @@ async function analyzeForAlerts(symbol) {
             rsi1h < CONFIG.RSI.BUY_MAX) {
             
             direction = 'COMPRA';
-            score = 50;
+            score = 30;
             
             // 1. VOLUME COMPRADOR (máx 20)
             if (buyerPercentage > 60) score += 15;
@@ -1155,7 +1155,7 @@ async function analyzeForAlerts(symbol) {
             
             // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score += 25;      // CCI cruzando acima da EMA5
+                if (cciDailyTrend === "CCI 💹ALTA") score += 30;      // CCI cruzando acima da EMA5
                 else if (cciDailyTrend === "CCI 🔴BAIXA") score -= 30; // CCI cruzando abaixo da EMA5
             }
             
@@ -1175,7 +1175,7 @@ async function analyzeForAlerts(symbol) {
             rsi1h > CONFIG.RSI.SELL_MIN) {
             
             direction = 'VENDA';
-            score = 50;
+            score = 30;
             
             // 1. VOLUME VENDEDOR (máx 20)
             if (sellerPercentage > 60) score += 15;
@@ -1215,7 +1215,7 @@ async function analyzeForAlerts(symbol) {
             
             // 6. CCI DIÁRIO (pontuação/penalidade)
             if (cciDailyTrend) {
-                if (cciDailyTrend === "CCI 💹ALTA") score -= 25;     // CCI cruzando acima da EMA5
+                if (cciDailyTrend === "CCI 💹ALTA") score -= 30;     // CCI cruzando acima da EMA5
                 else if (cciDailyTrend === "CCI 🔴BAIXA") score += 30; // CCI cruzando abaixo da EMA5
             }
             
@@ -1541,7 +1541,7 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM - Real-Time Alert System');
+    console.log('🚀 TITANIUM ');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
