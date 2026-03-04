@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZA',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -1036,29 +1036,29 @@ async function analyzeForAlerts(symbol) {
                 score = 45;
                 
                 // 1. VOLUME COMPRADOR (máx 20)
-                if (buyerPercentage > 60) score += 12;
-                else if (buyerPercentage > 55) score += 10;
+                if (buyerPercentage > 60) score += 15;
+                else if (buyerPercentage > 55) score += 12;
                 else if (buyerPercentage > 52) score += 8;
                 
                 // 2. VOLUME RATIO (máx 20)
-                if (volumeRatio > 2.5) score += 12;
-                else if (volumeRatio > 2.0) score += 10;
-                else if (volumeRatio > 1.8) score += 8;
+                if (volumeRatio > 2.5) score += 15;
+                else if (volumeRatio > 2.0) score += 12;
+                else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
                 // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr < 1.5) score += 12;      // Muito bom (pouca gente comprada)
-                    else if (lsr < 2.0) score += 10;  // Bom
-                    else if (lsr < 2.3) score += 8;  // Moderado
-                    else if (lsr < 2.6) score += 5;   // Pouco favorável
+                    if (lsr < 1.5) score += 18;      // Muito bom (pouca gente comprada)
+                    else if (lsr < 2.0) score += 15;  // Bom
+                    else if (lsr < 2.3) score += 12;  // Moderado
+                    else if (lsr < 2.6) score += 8;   // Pouco favorável
                     else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
                     else if (lsr > 2.8) score -= 12;   // Penalidade leve
                 }
                 
                 // 4. FUNDING (máx 15)
                 if (funding) {
-                    if (funding < -0.001) score += 12;      // Muito negativo
+                    if (funding < -0.001) score += 15;      // Muito negativo
                     else if (funding < -0.0005) score += 8; // Moderadamente negativo
                     else if (funding < -0.0001) score += 3;  // Levemente negativo
                 }
@@ -1093,29 +1093,29 @@ async function analyzeForAlerts(symbol) {
                 score = 45;
                 
                 // 1. VOLUME VENDEDOR (máx 20)
-                if (sellerPercentage > 60) score += 12;
-                else if (sellerPercentage > 55) score += 10;
+                if (sellerPercentage > 60) score += 15;
+                else if (sellerPercentage > 55) score += 12;
                 else if (sellerPercentage > 52) score += 8;
                 
                 // 2. VOLUME RATIO (máx 20)
-                if (volumeRatio > 2.5) score += 12;
-                else if (volumeRatio > 2.0) score += 10;
-                else if (volumeRatio > 1.8) score += 8;
+                if (volumeRatio > 2.5) score += 15;
+                else if (volumeRatio > 2.0) score += 12;
+                else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
                 // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr > 4.0) score += 12;        // Muito bom (muita gente comprada)
-                    else if (lsr > 3.5) score += 10;    // Bom
-                    else if (lsr > 3.0) score += 10;    // Moderado
-                    else if (lsr > 2.7) score += 5;     // Pouco favorável
+                    if (lsr > 4.0) score += 18;        // Muito bom (muita gente comprada)
+                    else if (lsr > 3.5) score += 15;    // Bom
+                    else if (lsr > 3.0) score += 12;    // Moderado
+                    else if (lsr > 2.7) score += 8;     // Pouco favorável
                     else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
                     else if (lsr < 1.2) score -= 12;     // Penalidade leve
                 }
                 
                 // 4. FUNDING (máx 15)
                 if (funding) {
-                    if (funding > 0.001) score += 12;       // Muito positivo
+                    if (funding > 0.001) score += 15;       // Muito positivo
                     else if (funding > 0.0005) score += 8;  // Moderadamente positivo
                     else if (funding > 0.0001) score += 3;   // Levemente positivo
                 }
@@ -1313,8 +1313,8 @@ function formatTradeAlert(alert) {
     
     // Definir a mensagem da IA Dica baseada na direção
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b>Observar Zona do Suporte' 
-        : '<b>🤖 IA Dica...</b>Realizar Lucro ou Parcial';
+        ? '<b>🤖 IA Dica,</b>\n• Observar Zona do Suporte...' 
+        : '<b>🤖 IA Dica,</b>\n• Realizar Lucro ou Parcial...';
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
@@ -1327,7 +1327,7 @@ function formatTradeAlert(alert) {
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
  ${iaDica}
-Alerta Educativo, não é recomendação de investimento
+Alerta Educativo, não é recomendação de investimento.
  Titanium Prime by @J4Rviz</i>`;
 }
 
