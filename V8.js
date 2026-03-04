@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -57,7 +57,7 @@ const CONFIG = {
     },
     RSI: {
         BUY_MAX: 64,      // RSI máximo para compra
-        SELL_MIN: 55,     // RSI mínimo para venda
+        SELL_MIN: 66,     // RSI mínimo para venda
         PERIOD: 14
     },
     DEBUG: {
