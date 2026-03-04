@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6g',
-        CHAT_ID: '-10025549'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -19,7 +19,7 @@ const CONFIG = {
         CANDLE_CACHE_TTL: 300000,
         BATCH_SIZE: 15,
         REQUEST_TIMEOUT: 15000,
-        COOLDOWN_MINUTES: 30,
+        COOLDOWN_MINUTES: 15,
         PRICE_DEVIATION_THRESHOLD: 0.5,
         TELEGRAM_RETRY_ATTEMPTS: 3,
         TELEGRAM_RETRY_DELAY: 2000
@@ -1005,27 +1005,27 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     rsi1h < CONFIG.RSI.BUY_MAX) {
     
     direction = 'COMPRA';
-    score = 50;
+    score = 25;
     
     // 1. VOLUME COMPRADOR (máx 20)
-    if (buyerPercentage > 60) score += 15;
+    if (buyerPercentage > 60) score += 12;
     else if (buyerPercentage > 55) score += 10;
-    else if (buyerPercentage > 52) score += 5;
+    else if (buyerPercentage > 52) score += 8;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 15;
-    else if (volumeRatio > 2.0) score += 12;
-    else if (volumeRatio > 1.8) score += 10;
+    if (volumeRatio > 2.5) score += 12;
+    else if (volumeRatio > 2.0) score += 10;
+    else if (volumeRatio > 1.8) score += 8;
     else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
-        else if (lsr < 2.0) score += 12;  // Bom
-        else if (lsr < 2.3) score += 10;  // Moderado
+        if (lsr < 1.5) score += 12;      // Muito bom (pouca gente comprada)
+        else if (lsr < 2.0) score += 10;  // Bom
+        else if (lsr < 2.3) score += 8;  // Moderado
         else if (lsr < 2.6) score += 5;   // Pouco favorável
-        else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 15;   // Penalidade leve
+        else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
+        else if (lsr > 2.8) score -= 12;   // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
@@ -1045,15 +1045,15 @@ if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD &&
     
     // 6. CCI DIÁRIO (pontuação/penalidade)
     if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score += 10;      // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score -= 25; // CCI cruzando abaixo da EMA5
+        if (cciDailyTrend === "CCI ALTA") score += 30;      // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score -= 100; // CCI cruzando abaixo da EMA5
     }
     
     // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice < sr.resistance) {
         const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-        if (distanceToResistance > 5) score += 5;       // Muito espaço
-        else if (distanceToResistance > 2) score += 3;  // Bom espaço
+        if (distanceToResistance > 5) score += 8;       // Muito espaço
+        else if (distanceToResistance > 2) score += 5;  // Bom espaço
     }
     
     confidence = Math.min(100, Math.max(0, score));
@@ -1065,27 +1065,27 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     rsi1h > CONFIG.RSI.SELL_MIN) {
     
     direction = 'VENDA';
-    score = 50;
+    score = 25;
     
     // 1. VOLUME VENDEDOR (máx 20)
-    if (sellerPercentage > 60) score += 15;
+    if (sellerPercentage > 60) score += 12;
     else if (sellerPercentage > 55) score += 10;
-    else if (sellerPercentage > 52) score += 5;
+    else if (sellerPercentage > 52) score += 8;
     
     // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 15;
-    else if (volumeRatio > 2.0) score += 12;
-    else if (volumeRatio > 1.8) score += 10;
+    if (volumeRatio > 2.5) score += 12;
+    else if (volumeRatio > 2.0) score += 10;
+    else if (volumeRatio > 1.8) score += 8;
     else if (volumeRatio > 1.6) score += 8;
     
     // 3. LSR (máx 20, com penalidade)
     if (lsr) {
-        if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
-        else if (lsr > 3.5) score += 12;    // Bom
+        if (lsr > 4.0) score += 12;        // Muito bom (muita gente comprada)
+        else if (lsr > 3.5) score += 10;    // Bom
         else if (lsr > 3.0) score += 10;    // Moderado
         else if (lsr > 2.7) score += 5;     // Pouco favorável
-        else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 15;     // Penalidade leve
+        else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
+        else if (lsr < 1.2) score -= 12;     // Penalidade leve
     }
     
     // 4. FUNDING (máx 15)
@@ -1105,15 +1105,15 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
     
     // 6. CCI DIÁRIO (pontuação/penalidade)
     if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score -= 25;     // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score += 10; // CCI cruzando abaixo da EMA5
+        if (cciDailyTrend === "CCI ALTA") score -= 100;     // CCI cruzando acima da EMA5
+        else if (cciDailyTrend === "CCI BAIXA") score += 30; // CCI cruzando abaixo da EMA5
     }
     
     // 7. POSIÇÃO PREÇO (máx 5)
     if (currentPrice > sr.support) {
         const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-        if (distanceToSupport > 5) score += 5;       // Muito espaço
-        else if (distanceToSupport > 2) score += 3;  // Bom espaço
+        if (distanceToSupport > 5) score += 8;       // Muito espaço
+        else if (distanceToSupport > 2) score += 5;  // Bom espaço
     }
     
     confidence = Math.min(100, Math.max(0, score));
