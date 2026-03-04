@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFsA',
-        CHAT_ID: '-100199
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -1065,9 +1065,9 @@ async function analyzeForAlerts(symbol) {
                 
                 // 5. RSI (máx 20)
                 if (rsi1h) {
-                    if (rsi1h < 35) score += 12;      // Extremamente oversold
-                    else if (rsi1h < 40) score += 10;  // Muito oversold
-                    else if (rsi1h < 45) score += 8;  // Oversold moderado
+                    if (rsi1h < 35) score += 14;      // Extremamente oversold
+                    else if (rsi1h < 40) score += 12;  // Muito oversold
+                    else if (rsi1h < 45) score += 10;  // Oversold moderado
                     else if (rsi1h < 50) score += 5;   // Levemente oversold
                 }
                 
@@ -1122,9 +1122,9 @@ async function analyzeForAlerts(symbol) {
                 
                 // 5. RSI (máx 20)
                 if (rsi1h) {
-                    if (rsi1h > 75) score += 12;       // Extremamente overbought
-                    else if (rsi1h > 70) score += 10;   // Muito overbought
-                    else if (rsi1h > 65) score += 8;   // Overbought moderado
+                    if (rsi1h > 75) score += 14;       // Extremamente overbought
+                    else if (rsi1h > 70) score += 12;   // Muito overbought
+                    else if (rsi1h > 65) score += 10;   // Overbought moderado
                     else if (rsi1h > 60) score += 5;    // Levemente overbought
                 }
                 
@@ -1313,16 +1313,16 @@ function formatTradeAlert(alert) {
     
     // Definir a mensagem da IA Dica baseada na direção
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica,</b>\n• Observar Zona do Suporte...' 
-        : '<b>🤖 IA Dica,</b>\n• Realizar Lucro ou Parcial...';
+        ? '<b>🤖 IA Dica...</b> Observar Zona do Suporte' 
+        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial';
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
+ <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
- Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
+ 📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
