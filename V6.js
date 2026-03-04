@@ -1313,8 +1313,8 @@ function formatTradeAlert(alert) {
     
     // Definir a mensagem da IA Dica baseada na direção
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica,</b>\n• Observar Zona do Suporte...' 
-        : '<b>🤖 IA Dica,</b>\n• Realizar Lucro ou Parcial...';
+        ? '<b>🤖 IA Dica...</b>Observar Zona do Suporte' 
+        : '<b>🤖 IA Dica...</b>Realizar Lucro ou Parcial';
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume Detectado</b> | #SCORE: ${alert.confidence}%
