@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -1033,25 +1033,25 @@ async function analyzeForAlerts(symbol) {
             // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite COMPRA se CCI estiver em ALTA
             if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
                 direction = 'COMPRA';
-                score = 40;
+                score = 45;
                 
                 // 1. VOLUME COMPRADOR (máx 20)
-                if (buyerPercentage > 60) score += 12;
-                else if (buyerPercentage > 55) score += 10;
+                if (buyerPercentage > 60) score += 15;
+                else if (buyerPercentage > 55) score += 12;
                 else if (buyerPercentage > 52) score += 8;
                 
                 // 2. VOLUME RATIO (máx 20)
-                if (volumeRatio > 2.5) score += 12;
-                else if (volumeRatio > 2.0) score += 10;
-                else if (volumeRatio > 1.8) score += 8;
+                if (volumeRatio > 2.5) score += 15;
+                else if (volumeRatio > 2.0) score += 12;
+                else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
                 // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr < 1.5) score += 12;      // Muito bom (pouca gente comprada)
-                    else if (lsr < 2.0) score += 10;  // Bom
-                    else if (lsr < 2.3) score += 8;  // Moderado
-                    else if (lsr < 2.6) score += 5;   // Pouco favorável
+                    if (lsr < 1.5) score += 18;      // Muito bom (pouca gente comprada)
+                    else if (lsr < 2.0) score += 15;  // Bom
+                    else if (lsr < 2.3) score += 12;  // Moderado
+                    else if (lsr < 2.6) score += 8;   // Pouco favorável
                     else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
                     else if (lsr > 2.8) score -= 12;   // Penalidade leve
                 }
@@ -1090,25 +1090,25 @@ async function analyzeForAlerts(symbol) {
             // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite VENDA se CCI estiver em BAIXA
             if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
                 direction = 'VENDA';
-                score = 40;
+                score = 45;
                 
                 // 1. VOLUME VENDEDOR (máx 20)
-                if (sellerPercentage > 60) score += 12;
-                else if (sellerPercentage > 55) score += 10;
+                if (sellerPercentage > 60) score += 15;
+                else if (sellerPercentage > 55) score += 12;
                 else if (sellerPercentage > 52) score += 8;
                 
                 // 2. VOLUME RATIO (máx 20)
-                if (volumeRatio > 2.5) score += 12;
-                else if (volumeRatio > 2.0) score += 10;
-                else if (volumeRatio > 1.8) score += 8;
+                if (volumeRatio > 2.5) score += 15;
+                else if (volumeRatio > 2.0) score += 12;
+                else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
                 // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr > 4.0) score += 12;        // Muito bom (muita gente comprada)
-                    else if (lsr > 3.5) score += 10;    // Bom
-                    else if (lsr > 3.0) score += 10;    // Moderado
-                    else if (lsr > 2.7) score += 5;     // Pouco favorável
+                    if (lsr > 4.0) score += 18;        // Muito bom (muita gente comprada)
+                    else if (lsr > 3.5) score += 15;    // Bom
+                    else if (lsr > 3.0) score += 12;    // Moderado
+                    else if (lsr > 2.7) score += 8;     // Pouco favorável
                     else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
                     else if (lsr < 1.2) score -= 12;     // Penalidade leve
                 }
@@ -1327,7 +1327,7 @@ function formatTradeAlert(alert) {
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
  ${iaDica}
-Alerta Educativo, não é recomendação de investimento
+Alerta Educativo, não é recomendação de investimento.
  Titanium Prime by @J4Rviz</i>`;
 }
 
