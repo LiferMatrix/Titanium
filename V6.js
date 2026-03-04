@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_0A',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -75,6 +75,18 @@ const CONFIG = {
         MAX_FOLDER_SIZE_MB: 500,             // Tamanho máximo total da pasta em MB
         COMPRESS_OLD_LOGS: true,             // Comprimir logs antigos
         MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
+    },
+    // =================================================================
+    // === CONFIGURAÇÕES CCI - NOVO ===
+    // =================================================================
+    CCI: {
+        ENABLED: true,                      // Ativar/desativar CCI obrigatório
+        PERIOD: 20,                          // Período do CCI
+        EMA_PERIOD: 5,                        // Período da EMA do CCI
+        MIN_ALTA_SCORE: 30,                    // Pontuação mínima quando CCI está em ALTA
+        MIN_BAIXA_SCORE: 30,                    // Pontuação mínima quando CCI está em BAIXA
+        REQUIRED_FOR_BUY: 'ALTA',               // Tendência CCI necessária para COMPRA
+        REQUIRED_FOR_SELL: 'BAIXA'               // Tendência CCI necessária para VENDA
     }
 };
 
@@ -140,7 +152,9 @@ const TradeAlertSchema = z.object({
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
-    cciDaily: z.string().optional().nullable(), // Adicionado campo para CCI Diário
+    cciDaily: z.string().optional().nullable(), // Campo para tendência do CCI Diário
+    cciValue: z.number().optional().nullable(), // Valor numérico do CCI
+    cciEma: z.number().optional().nullable(),   // EMA do CCI
     support: z.number(),
     resistance: z.number(),
     emoji: z.string(),
@@ -709,6 +723,34 @@ function calculateCCI(candles, period = 20) {
     return cci;
 }
 
+// Função para calcular tendência do CCI
+function calculateCCITrend(candles) {
+    const cciValues = [];
+    for (let i = candles.length - 26; i < candles.length; i++) {
+        const slice = candles.slice(0, i + 1);
+        cciValues.push(calculateCCI(slice, CONFIG.CCI.PERIOD) || 0);
+    }
+    
+    const cciCurrent = cciValues.length > 0 ? cciValues[cciValues.length - 1] : null;
+    const cciEma = cciValues.length >= CONFIG.CCI.EMA_PERIOD ? 
+        calculateEMA(cciValues, CONFIG.CCI.EMA_PERIOD) : null;
+    
+    let trend = "NEUTRO";
+    if (cciCurrent !== null && cciEma !== null) {
+        if (cciCurrent > cciEma) {
+            trend = "ALTA";
+        } else if (cciCurrent < cciEma) {
+            trend = "BAIXA";
+        }
+    }
+    
+    return {
+        trend,
+        value: cciCurrent,
+        ema: cciEma
+    };
+}
+
 function calculateSupportResistance(candles) {
     if (candles.length < 50) return { support: null, resistance: null };
     
@@ -930,7 +972,7 @@ async function analyzeForAlerts(symbol) {
         const [candles1h, candles15m, candlesDaily] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 50) // Adicionado candles diários para CCI
+            getCandles(symbol, '1d', 50) // Candles diários para CCI
         ]);
         
         if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
@@ -967,23 +1009,7 @@ async function analyzeForAlerts(symbol) {
         const sellerPercentage = 100 - buyerPercentage;
         
         // Calcular CCI diário
-        const cciDaily = calculateCCI(candlesDaily, 20);
-        const cciValuesDaily = [];
-        for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
-            const slice = candlesDaily.slice(0, i + 1);
-            cciValuesDaily.push(calculateCCI(slice, 20) || 0);
-        }
-        const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
-        
-        // Determinar tendência do CCI diário
-        let cciDailyTrend = "NEUTRO";
-        if (cciDaily !== null && cciEma5 !== null) {
-            if (cciDaily > cciEma5) {
-                cciDailyTrend = "CCI 💹ALTA";
-            } else if (cciDaily < cciEma5) {
-                cciDailyTrend = "CCI 🔴BAIXA";
-            }
-        }
+        const cciDaily = calculateCCITrend(candlesDaily);
         
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
@@ -999,136 +1025,140 @@ async function analyzeForAlerts(symbol) {
         let score = 0;
         let confidence = 0;
         
-       // ANÁLISE PARA COMPRA - VERSÃO OTIMIZADA
-if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
-    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-    rsi1h < CONFIG.RSI.BUY_MAX) {
-    
-    direction = 'COMPRA';
-    score = 25;
-    
-    // 1. VOLUME COMPRADOR (máx 20)
-    if (buyerPercentage > 60) score += 12;
-    else if (buyerPercentage > 55) score += 10;
-    else if (buyerPercentage > 52) score += 8;
-    
-    // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 12;
-    else if (volumeRatio > 2.0) score += 10;
-    else if (volumeRatio > 1.8) score += 8;
-    else if (volumeRatio > 1.6) score += 8;
-    
-    // 3. LSR (máx 20, com penalidade)
-    if (lsr) {
-        if (lsr < 1.5) score += 12;      // Muito bom (pouca gente comprada)
-        else if (lsr < 2.0) score += 10;  // Bom
-        else if (lsr < 2.3) score += 8;  // Moderado
-        else if (lsr < 2.6) score += 5;   // Pouco favorável
-        else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 12;   // Penalidade leve
-    }
-    
-    // 4. FUNDING (máx 15)
-    if (funding) {
-        if (funding < -0.001) score += 12;      // Muito negativo
-        else if (funding < -0.0005) score += 8; // Moderadamente negativo
-        else if (funding < -0.0001) score += 3;  // Levemente negativo
-    }
-    
-    // 5. RSI (máx 20)
-    if (rsi1h) {
-        if (rsi1h < 35) score += 12;      // Extremamente oversold
-        else if (rsi1h < 40) score += 10;  // Muito oversold
-        else if (rsi1h < 45) score += 8;  // Oversold moderado
-        else if (rsi1h < 50) score += 5;   // Levemente oversold
-    }
-    
-    // 6. CCI DIÁRIO (pontuação/penalidade)
-    if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score += 30;      // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score -= 100; // CCI cruzando abaixo da EMA5
-    }
-    
-    // 7. POSIÇÃO PREÇO (máx 5)
-    if (currentPrice < sr.resistance) {
-        const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-        if (distanceToResistance > 5) score += 8;       // Muito espaço
-        else if (distanceToResistance > 2) score += 5;  // Bom espaço
-    }
-    
-    confidence = Math.min(100, Math.max(0, score));
-}
-
-// ANÁLISE PARA VENDA - VERSÃO OTIMIZADA
-if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
-    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-    rsi1h > CONFIG.RSI.SELL_MIN) {
-    
-    direction = 'VENDA';
-    score = 25;
-    
-    // 1. VOLUME VENDEDOR (máx 20)
-    if (sellerPercentage > 60) score += 12;
-    else if (sellerPercentage > 55) score += 10;
-    else if (sellerPercentage > 52) score += 8;
-    
-    // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 12;
-    else if (volumeRatio > 2.0) score += 10;
-    else if (volumeRatio > 1.8) score += 8;
-    else if (volumeRatio > 1.6) score += 8;
-    
-    // 3. LSR (máx 20, com penalidade)
-    if (lsr) {
-        if (lsr > 4.0) score += 12;        // Muito bom (muita gente comprada)
-        else if (lsr > 3.5) score += 10;    // Bom
-        else if (lsr > 3.0) score += 10;    // Moderado
-        else if (lsr > 2.7) score += 5;     // Pouco favorável
-        else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 12;     // Penalidade leve
-    }
-    
-    // 4. FUNDING (máx 15)
-    if (funding) {
-        if (funding > 0.001) score += 12;       // Muito positivo
-        else if (funding > 0.0005) score += 8;  // Moderadamente positivo
-        else if (funding > 0.0001) score += 3;   // Levemente positivo
-    }
-    
-    // 5. RSI (máx 20)
-    if (rsi1h) {
-        if (rsi1h > 75) score += 12;       // Extremamente overbought
-        else if (rsi1h > 70) score += 10;   // Muito overbought
-        else if (rsi1h > 65) score += 8;   // Overbought moderado
-        else if (rsi1h > 60) score += 5;    // Levemente overbought
-    }
-    
-    // 6. CCI DIÁRIO (pontuação/penalidade)
-    if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score -= 100;     // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score += 30; // CCI cruzando abaixo da EMA5
-    }
-    
-    // 7. POSIÇÃO PREÇO (máx 5)
-    if (currentPrice > sr.support) {
-        const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-        if (distanceToSupport > 5) score += 8;       // Muito espaço
-        else if (distanceToSupport > 2) score += 5;  // Bom espaço
-    }
-    
-    confidence = Math.min(100, Math.max(0, score));
-}
+        // ANÁLISE PARA COMPRA - COM VALIDAÇÃO OBRIGATÓRIA DO CCI
+        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
+            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
+            rsi1h < CONFIG.RSI.BUY_MAX) {
+            
+            // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite COMPRA se CCI estiver em ALTA
+            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
+                direction = 'COMPRA';
+                score = 45;
+                
+                // 1. VOLUME COMPRADOR (máx 20)
+                if (buyerPercentage > 60) score += 12;
+                else if (buyerPercentage > 55) score += 10;
+                else if (buyerPercentage > 52) score += 8;
+                
+                // 2. VOLUME RATIO (máx 20)
+                if (volumeRatio > 2.5) score += 12;
+                else if (volumeRatio > 2.0) score += 10;
+                else if (volumeRatio > 1.8) score += 8;
+                else if (volumeRatio > 1.6) score += 8;
+                
+                // 3. LSR (máx 20, com penalidade)
+                if (lsr) {
+                    if (lsr < 1.5) score += 12;      // Muito bom (pouca gente comprada)
+                    else if (lsr < 2.0) score += 10;  // Bom
+                    else if (lsr < 2.3) score += 8;  // Moderado
+                    else if (lsr < 2.6) score += 5;   // Pouco favorável
+                    else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
+                    else if (lsr > 2.8) score -= 12;   // Penalidade leve
+                }
+                
+                // 4. FUNDING (máx 15)
+                if (funding) {
+                    if (funding < -0.001) score += 12;      // Muito negativo
+                    else if (funding < -0.0005) score += 8; // Moderadamente negativo
+                    else if (funding < -0.0001) score += 3;  // Levemente negativo
+                }
+                
+                // 5. RSI (máx 20)
+                if (rsi1h) {
+                    if (rsi1h < 35) score += 12;      // Extremamente oversold
+                    else if (rsi1h < 40) score += 10;  // Muito oversold
+                    else if (rsi1h < 45) score += 8;  // Oversold moderado
+                    else if (rsi1h < 50) score += 5;   // Levemente oversold
+                }
+                
+                // 6. POSIÇÃO PREÇO (máx 5)
+                if (currentPrice < sr.resistance) {
+                    const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
+                    if (distanceToResistance > 5) score += 8;       // Muito espaço
+                    else if (distanceToResistance > 2) score += 5;  // Bom espaço
+                }
+            } else if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} rejeitado para COMPRA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_BUY})`);
+            }
+        }
         
+        // ANÁLISE PARA VENDA - COM VALIDAÇÃO OBRIGATÓRIA DO CCI
+        if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
+            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
+            rsi1h > CONFIG.RSI.SELL_MIN) {
+            
+            // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite VENDA se CCI estiver em BAIXA
+            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
+                direction = 'VENDA';
+                score = 45;
+                
+                // 1. VOLUME VENDEDOR (máx 20)
+                if (sellerPercentage > 60) score += 12;
+                else if (sellerPercentage > 55) score += 10;
+                else if (sellerPercentage > 52) score += 8;
+                
+                // 2. VOLUME RATIO (máx 20)
+                if (volumeRatio > 2.5) score += 12;
+                else if (volumeRatio > 2.0) score += 10;
+                else if (volumeRatio > 1.8) score += 8;
+                else if (volumeRatio > 1.6) score += 8;
+                
+                // 3. LSR (máx 20, com penalidade)
+                if (lsr) {
+                    if (lsr > 4.0) score += 12;        // Muito bom (muita gente comprada)
+                    else if (lsr > 3.5) score += 10;    // Bom
+                    else if (lsr > 3.0) score += 10;    // Moderado
+                    else if (lsr > 2.7) score += 5;     // Pouco favorável
+                    else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
+                    else if (lsr < 1.2) score -= 12;     // Penalidade leve
+                }
+                
+                // 4. FUNDING (máx 15)
+                if (funding) {
+                    if (funding > 0.001) score += 12;       // Muito positivo
+                    else if (funding > 0.0005) score += 8;  // Moderadamente positivo
+                    else if (funding > 0.0001) score += 3;   // Levemente positivo
+                }
+                
+                // 5. RSI (máx 20)
+                if (rsi1h) {
+                    if (rsi1h > 75) score += 12;       // Extremamente overbought
+                    else if (rsi1h > 70) score += 10;   // Muito overbought
+                    else if (rsi1h > 65) score += 8;   // Overbought moderado
+                    else if (rsi1h > 60) score += 5;    // Levemente overbought
+                }
+                
+                // 6. POSIÇÃO PREÇO (máx 5)
+                if (currentPrice > sr.support) {
+                    const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
+                    if (distanceToSupport > 5) score += 8;       // Muito espaço
+                    else if (distanceToSupport > 2) score += 5;  // Bom espaço
+                }
+            } else if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} rejeitado para VENDA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_SELL})`);
+            }
+        }
+        
+        confidence = Math.min(100, Math.max(0, score));
+        
+        // Verificar score mínimo
         if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
         
+        // Verificar cooldown
         if (!canSendAlert(symbol, currentPrice, direction)) return null;
         
+        // Calcular níveis de trade
         const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
             calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance);
         
         const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
         
         const emoji = getConfidenceEmoji(confidence);
+        
+        // Formatar tendência do CCI para exibição
+        let cciDisplay = "NEUTRO";
+        if (cciDaily.trend === "ALTA") cciDisplay = "CCI 💹ALTA";
+        else if (cciDaily.trend === "BAIXA") cciDisplay = "CCI 🔴BAIXA";
         
         const alert = {
             symbol,
@@ -1147,7 +1177,9 @@ if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) &&
             lsr,
             funding,
             rsi: rsi1h,
-            cciDaily: cciDailyTrend, // Adicionando tendência do CCI diário
+            cciDaily: cciDisplay,
+            cciValue: cciDaily.value,
+            cciEma: cciDaily.ema,
             support: sr.support,
             resistance: sr.resistance,
             emoji,
@@ -1330,8 +1362,7 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
-    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
+    console.log(`   - Venda necessita: ${CONFIG.CCI.REQUIRED_FOR_SELL}`);
     
     let scanCount = 0;
     let alertsSent = 0;
@@ -1430,18 +1461,11 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM - Real-Time Alert System');
+    console.log('🚀 TITANIUM ');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
     console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`📱 Telegram Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? '✅' : '❌'}`);
-    console.log(`⏱️ Scan a cada: ${CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS}s`);
-    console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
-    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    console.log(`🛡️ Cooldown: ${CONFIG.PERFORMANCE.COOLDOWN_MINUTES}min`);
-    console.log(`📊 Máx alertas/scan: ${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
-    console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
     
     // Iniciar sistema de limpeza automática
