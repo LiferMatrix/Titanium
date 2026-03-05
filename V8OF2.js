@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -64,7 +64,7 @@ const CONFIG = {
         VERBOSE: false
     },
     // =================================================================
-    // === CONFIGURAÇÕES DE LIMPEZA - NOVO ===
+    // === CONFIGURAÇÕES DE LIMPEZA ===
     // =================================================================
     CLEANUP: {
         ENABLED: true,                    // Ativar/desativar limpeza
@@ -77,7 +77,7 @@ const CONFIG = {
         MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
     },
     // =================================================================
-    // === CONFIGURAÇÕES CCI - NOVO ===
+    // === CONFIGURAÇÕES CCI ===
     // =================================================================
     CCI: {
         ENABLED: true,                      // Ativar/desativar CCI obrigatório
@@ -87,6 +87,23 @@ const CONFIG = {
         MIN_BAIXA_SCORE: 30,                    // Pontuação mínima quando CCI está em BAIXA
         REQUIRED_FOR_BUY: 'ALTA',               // Tendência CCI necessária para COMPRA
         REQUIRED_FOR_SELL: 'BAIXA'               // Tendência CCI necessária para VENDA
+    },
+    // =================================================================
+    // === CONFIGURAÇÕES STOCHASTIC - NOVO ===
+    // =================================================================
+    STOCH: {
+        PERIOD_1D: 5,                        // Período K diário
+        SLOW_1D: 3,                          // Desaceleração diário
+        SMOOTH_1D: 3,                        // Suavização diário
+        PERIOD_4H: 14,                        // Período K 4h
+        SLOW_4H: 3,                           // Desaceleração 4h
+        SMOOTH_4H: 3,                         // Suavização 4h
+        COLORS: {
+            EXTREME_OVERSOLD: 10,              // 🔵 Abaixo de 10
+            OVERSOLD: 30,                       // 🟢 11-30
+            NEUTRAL: 65,                         // 🟡 31-65
+            OVERBOUGHT: 80                        // 🟠 66-78, 🔴 acima de 80
+        }
     }
 };
 
@@ -152,9 +169,12 @@ const TradeAlertSchema = z.object({
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
-    cciDaily: z.string().optional().nullable(), // Campo para tendência do CCI Diário
-    cciValue: z.number().optional().nullable(), // Valor numérico do CCI
-    cciEma: z.number().optional().nullable(),   // EMA do CCI
+    cciDaily: z.string().optional().nullable(),
+    cciValue: z.number().optional().nullable(),
+    cciEma: z.number().optional().nullable(),
+    // Campos novos para Stochastic
+    stochDaily: z.string().optional().nullable(),
+    stoch4h: z.string().optional().nullable(),
     support: z.number(),
     resistance: z.number(),
     emoji: z.string(),
@@ -173,7 +193,7 @@ if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
 
 // =====================================================================
-// === SISTEMA DE LIMPEZA AUTOMÁTICA - NOVO ===
+// === SISTEMA DE LIMPEZA AUTOMÁTICA ===
 // =====================================================================
 class CleanupManager {
     constructor() {
@@ -601,6 +621,17 @@ function getDirectionEmoji(direction) {
 }
 
 // =====================================================================
+// === FUNÇÃO PARA EMOJI DO STOCHASTIC - NOVO ===
+// =====================================================================
+function getStochEmoji(value) {
+    if (value < CONFIG.STOCH.COLORS.EXTREME_OVERSOLD) return '🔵';
+    if (value <= CONFIG.STOCH.COLORS.OVERSOLD) return '🟢';
+    if (value <= CONFIG.STOCH.COLORS.NEUTRAL) return '🟡';
+    if (value <= CONFIG.STOCH.COLORS.OVERBOUGHT) return '🟠';
+    return '🔴';
+}
+
+// =====================================================================
 // === RESET CONTADOR DIÁRIO ÀS 21H ===
 // =====================================================================
 function resetDailyCounterIfNeeded() {
@@ -749,6 +780,51 @@ function calculateCCITrend(candles) {
         value: cciCurrent,
         ema: cciEma
     };
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOCHASTIC - NOVO ===
+// =====================================================================
+function calculateStochastic(candles, kPeriod = 14, dPeriod = 3, smooth = 3) {
+    if (candles.length < kPeriod + dPeriod + smooth) return { k: null, d: null };
+    
+    const kValues = [];
+    
+    for (let i = kPeriod; i < candles.length; i++) {
+        const periodCandles = candles.slice(i - kPeriod + 1, i + 1);
+        const high = Math.max(...periodCandles.map(c => c.high));
+        const low = Math.min(...periodCandles.map(c => c.low));
+        const close = candles[i].close;
+        
+        const k = ((close - low) / (high - low)) * 100;
+        kValues.push(k);
+    }
+    
+    // Calcular %K (média móvel do K)
+    const kLine = [];
+    for (let i = smooth - 1; i < kValues.length; i++) {
+        const sum = kValues.slice(i - smooth + 1, i + 1).reduce((a, b) => a + b, 0);
+        kLine.push(sum / smooth);
+    }
+    
+    // Calcular %D (média móvel do %K)
+    const dLine = [];
+    for (let i = dPeriod - 1; i < kLine.length; i++) {
+        const sum = kLine.slice(i - dPeriod + 1, i + 1).reduce((a, b) => a + b, 0);
+        dLine.push(sum / dPeriod);
+    }
+    
+    const currentK = kLine.length > 0 ? kLine[kLine.length - 1] : null;
+    const currentD = dLine.length > 0 ? dLine[dLine.length - 1] : null;
+    
+    return { k: currentK, d: currentD };
+}
+
+function formatStochastic(k, d, emoji) {
+    if (k === null || d === null) return 'N/D';
+    
+    const arrow = k > d ? '⤴️' : '⤵️';
+    return `K${Math.round(k)}${arrow}D${Math.round(d)} ${emoji}`;
 }
 
 function calculateSupportResistance(candles) {
@@ -969,13 +1045,14 @@ function calculateTradeLevels(price, atr, direction, support, resistance) {
 
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m, candlesDaily] = await Promise.all([
+        const [candles1h, candles15m, candlesDaily, candles4h] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 50) // Candles diários para CCI
+            getCandles(symbol, '1d', 100), // Candles diários para CCI e Stochastic
+            getCandles(symbol, '4h', 100)   // Candles 4h para Stochastic
         ]);
         
-        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 50 || candles4h.length < 50) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
         const currentCandle15m = candles15m[candles15m.length - 1];
@@ -1010,6 +1087,38 @@ async function analyzeForAlerts(symbol) {
         
         // Calcular CCI diário
         const cciDaily = calculateCCITrend(candlesDaily);
+        
+        // =================================================================
+        // === CALCULAR STOCHASTIC - NOVO ===
+        // =================================================================
+        // Stochastic Diário (5,3,3)
+        const stochDaily = calculateStochastic(
+            candlesDaily, 
+            CONFIG.STOCH.PERIOD_1D, 
+            CONFIG.STOCH.SLOW_1D, 
+            CONFIG.STOCH.SMOOTH_1D
+        );
+        
+        // Stochastic 4h (14,3,3)
+        const stoch4h = calculateStochastic(
+            candles4h, 
+            CONFIG.STOCH.PERIOD_4H, 
+            CONFIG.STOCH.SLOW_4H, 
+            CONFIG.STOCH.SMOOTH_4H
+        );
+        
+        // Formatar Stochastic para exibição
+        let stochDailyDisplay = "N/D";
+        if (stochDaily.k !== null && stochDaily.d !== null) {
+            const emoji = getStochEmoji(stochDaily.k);
+            stochDailyDisplay = formatStochastic(stochDaily.k, stochDaily.d, emoji);
+        }
+        
+        let stoch4hDisplay = "N/D";
+        if (stoch4h.k !== null && stoch4h.d !== null) {
+            const emoji = getStochEmoji(stoch4h.k);
+            stoch4hDisplay = formatStochastic(stoch4h.k, stoch4h.d, emoji);
+        }
         
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
@@ -1180,6 +1289,9 @@ async function analyzeForAlerts(symbol) {
             cciDaily: cciDisplay,
             cciValue: cciDaily.value,
             cciEma: cciDaily.ema,
+            // Campos novos para Stochastic
+            stochDaily: stochDailyDisplay,
+            stoch4h: stoch4hDisplay,
             support: sr.support,
             resistance: sr.resistance,
             emoji,
@@ -1316,6 +1428,10 @@ function formatTradeAlert(alert) {
         ? '<b>🤖 IA Dica...</b> Observar Zona do Suporte' 
         : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial';
     
+    // Usar os valores de Stochastic do alerta
+    const stochDaily = alert.stochDaily || 'N/D';
+    const stoch4h = alert.stoch4h || 'N/D';
+    
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
@@ -1323,6 +1439,8 @@ function formatTradeAlert(alert) {
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
  📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
+ STOCH 1D: ${stochDaily}
+ STOCH 4H: ${stoch4h}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
