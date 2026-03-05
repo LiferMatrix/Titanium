@@ -1439,8 +1439,8 @@ function formatTradeAlert(alert) {
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
  📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
- STOCH 1D: ${stochDaily}
- STOCH 4H: ${stoch4h}
+ Stoch 1D: ${stochDaily}
+ Stoch 4H: ${stoch4h}
  #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
 <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
 ❅──────✧❅🔹❅✧──────❅
