@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZf
-        CHAT_ID: '-100199
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -56,54 +56,53 @@ const CONFIG = {
         }
     },
     RSI: {
-        BUY_MAX: 64,      // RSI máximo para compra
-        SELL_MIN: 66,     // RSI mínimo para venda
+        BUY_MAX: 64,
+        SELL_MIN: 66,
         PERIOD: 14
     },
     DEBUG: {
         VERBOSE: false
     },
-    // =================================================================
-    // === CONFIGURAÇÕES DE LIMPEZA ===
-    // =================================================================
     CLEANUP: {
-        ENABLED: true,                    // Ativar/desativar limpeza
-        MAX_LOG_AGE_HOURS: 24,             // Manter logs por 24 horas
-        MAX_CACHE_AGE_HOURS: 12,            // Manter cache por 12 horas
-        MAX_ALERT_FILES_AGE_HOURS: 48,      // Manter arquivos de alerta por 48 horas
-        CLEANUP_INTERVAL_MINUTES: 60,       // Executar limpeza a cada 60 minutos
-        MAX_FOLDER_SIZE_MB: 500,             // Tamanho máximo total da pasta em MB
-        COMPRESS_OLD_LOGS: true,             // Comprimir logs antigos
-        MIN_FREE_SPACE_MB: 100                // Espaço mínimo livre necessário
+        ENABLED: true,
+        MAX_LOG_AGE_HOURS: 24,
+        MAX_CACHE_AGE_HOURS: 12,
+        MAX_ALERT_FILES_AGE_HOURS: 48,
+        CLEANUP_INTERVAL_MINUTES: 60,
+        MAX_FOLDER_SIZE_MB: 500,
+        COMPRESS_OLD_LOGS: true,
+        MIN_FREE_SPACE_MB: 100
     },
-    // =================================================================
-    // === CONFIGURAÇÕES CCI ===
-    // =================================================================
     CCI: {
-        ENABLED: true,                      // Ativar/desativar CCI obrigatório
-        PERIOD: 20,                          // Período do CCI
-        EMA_PERIOD: 5,                        // Período da EMA do CCI
-        MIN_ALTA_SCORE: 30,                    // Pontuação mínima quando CCI está em ALTA
-        MIN_BAIXA_SCORE: 30,                    // Pontuação mínima quando CCI está em BAIXA
-        REQUIRED_FOR_BUY: 'ALTA',               // Tendência CCI necessária para COMPRA
-        REQUIRED_FOR_SELL: 'BAIXA'               // Tendência CCI necessária para VENDA
+        ENABLED: true,
+        PERIOD: 20,
+        EMA_PERIOD: 5,
+        MIN_ALTA_SCORE: 30,
+        MIN_BAIXA_SCORE: 30,
+        REQUIRED_FOR_BUY: 'ALTA',
+        REQUIRED_FOR_SELL: 'BAIXA'
     },
-    // =================================================================
-    // === CONFIGURAÇÕES STOCHASTIC - NOVO ===
-    // =================================================================
     STOCH: {
-        PERIOD_1D: 5,                        // Período K diário
-        SLOW_1D: 3,                          // Desaceleração diário
-        SMOOTH_1D: 3,                        // Suavização diário
-        PERIOD_4H: 14,                        // Período K 4h
-        SLOW_4H: 3,                           // Desaceleração 4h
-        SMOOTH_4H: 3,                         // Suavização 4h
+        PERIOD_1D: 5,
+        SLOW_1D: 3,
+        SMOOTH_1D: 3,
+        PERIOD_4H: 14,
+        SLOW_4H: 3,
+        SMOOTH_4H: 3,
         COLORS: {
-            EXTREME_OVERSOLD: 10,              // 🔵 Abaixo de 10
-            OVERSOLD: 30,                       // 🟢 11-30
-            NEUTRAL: 65,                         // 🟡 31-65
-            OVERBOUGHT: 80                        // 🟠 66-78, 🔴 acima de 80
+            EXTREME_OVERSOLD: 10,
+            OVERSOLD: 30,
+            NEUTRAL: 65,
+            OVERBOUGHT: 80
         }
+    },
+    LIQUIDATION: {
+        ENABLED: true,
+        LOOKBACK_CANDLES: 100,
+        CLUSTER_THRESHOLD: 0.02,
+        MAX_ZONES: 3,
+        VOLUME_WEIGHT: 0.6,
+        PRICE_WEIGHT: 0.4
     }
 };
 
@@ -172,9 +171,12 @@ const TradeAlertSchema = z.object({
     cciDaily: z.string().optional().nullable(),
     cciValue: z.number().optional().nullable(),
     cciEma: z.number().optional().nullable(),
-    // Campos novos para Stochastic
     stochDaily: z.string().optional().nullable(),
     stoch4h: z.string().optional().nullable(),
+    longLiquidationZones: z.array(z.number()).optional().nullable(),
+    shortLiquidationZones: z.array(z.number()).optional().nullable(),
+    nearestLongLiq: z.number().optional().nullable(),
+    nearestShortLiq: z.number().optional().nullable(),
     support: z.number(),
     resistance: z.number(),
     emoji: z.string(),
@@ -214,10 +216,8 @@ class CleanupManager {
         console.log(`   - Alertas: manter últimos ${CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS}h`);
         console.log(`   - Limpeza a cada: ${CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES}min`);
         
-        // Executar primeira limpeza após 5 segundos
         setTimeout(() => this.cleanup(), 5000);
         
-        // Configurar limpeza periódica
         this.cleanupInterval = setInterval(
             () => this.cleanup(), 
             CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000
@@ -235,27 +235,22 @@ class CleanupManager {
         let errors = [];
 
         try {
-            // Limpar logs antigos
             const logResult = this.cleanupDirectory(LOG_DIR, CONFIG.CLEANUP.MAX_LOG_AGE_HOURS);
             cleanedCount += logResult.count;
             cleanedSize += logResult.size;
 
-            // Limpar cache antigo
             const cacheResult = this.cleanupDirectory(CACHE_DIR, CONFIG.CLEANUP.MAX_CACHE_AGE_HOURS);
             cleanedCount += cacheResult.count;
             cleanedSize += cacheResult.size;
 
-            // Limpar alertas antigos
             const alertResult = this.cleanupDirectory(ALERTS_DIR, CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS);
             cleanedCount += alertResult.count;
             cleanedSize += alertResult.size;
 
-            // Limpar arquivos temporários do sistema
             const tempResult = this.cleanupTempFiles();
             cleanedCount += tempResult.count;
             cleanedSize += tempResult.size;
 
-            // Verificar e limpar por tamanho máximo da pasta
             const sizeCheckResult = await this.checkFolderSize();
             if (sizeCheckResult.cleaned > 0) {
                 cleanedCount += sizeCheckResult.count;
@@ -275,7 +270,6 @@ class CleanupManager {
                 console.log(`✅ Limpeza concluída em ${duration}s - Nenhum arquivo antigo encontrado`);
             }
 
-            // Registrar limpeza em log
             this.logCleanup(cleanedCount, cleanedSize, duration, errors);
 
         } catch (error) {
@@ -300,11 +294,9 @@ class CleanupManager {
                 try {
                     const stats = fs.statSync(filePath);
                     
-                    // Verificar se é arquivo (não diretório)
                     if (stats.isFile()) {
                         const fileAge = now - stats.mtimeMs;
                         
-                        // Remover se mais antigo que o limite
                         if (fileAge > maxAgeMs) {
                             const fileSize = stats.size;
                             fs.unlinkSync(filePath);
@@ -316,9 +308,7 @@ class CleanupManager {
                             }
                         }
                     }
-                } catch (err) {
-                    // Ignorar erros de arquivos individuais
-                }
+                } catch (err) {}
             });
         } catch (err) {
             console.error(`   ⚠️ Erro ao ler diretório ${dirPath}:`, err.message);
@@ -331,35 +321,25 @@ class CleanupManager {
         const result = { count: 0, size: 0 };
         
         try {
-            // Limpar arquivos temporários comuns
-            const tempPatterns = ['*.tmp', '*.temp', '*.log.*', 'core.*', 'npm-debug.log*'];
             const files = fs.readdirSync('.');
             
             files.forEach(file => {
-                for (const pattern of tempPatterns) {
-                    if (file.includes('tmp') || file.includes('temp') || 
-                        (file.includes('.log.') && file !== 'system.log')) {
-                        try {
-                            const stats = fs.statSync(file);
-                            if (stats.isFile()) {
-                                // Remover arquivos temporários com mais de 1 hora
-                                if (Date.now() - stats.mtimeMs > 3600000) {
-                                    const fileSize = stats.size;
-                                    fs.unlinkSync(file);
-                                    result.count++;
-                                    result.size += fileSize;
-                                }
+                if (file.includes('tmp') || file.includes('temp') || 
+                    (file.includes('.log.') && file !== 'system.log')) {
+                    try {
+                        const stats = fs.statSync(file);
+                        if (stats.isFile()) {
+                            if (Date.now() - stats.mtimeMs > 3600000) {
+                                const fileSize = stats.size;
+                                fs.unlinkSync(file);
+                                result.count++;
+                                result.size += fileSize;
                             }
-                        } catch (err) {
-                            // Ignorar erros
                         }
-                        break;
-                    }
+                    } catch (err) {}
                 }
             });
-        } catch (err) {
-            // Ignorar erros
-        }
+        } catch (err) {}
 
         return result;
     }
@@ -369,7 +349,6 @@ class CleanupManager {
         const maxSizeBytes = CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB * 1024 * 1024;
 
         try {
-            // Calcular tamanho total das pastas
             let totalSize = 0;
             const allFiles = [];
 
@@ -393,11 +372,9 @@ class CleanupManager {
                 }
             });
 
-            // Se excedeu o limite, remover arquivos mais antigos até ficar abaixo
             if (totalSize > maxSizeBytes) {
                 console.log(`   ⚠️ Espaço total (${(totalSize / (1024*1024)).toFixed(2)} MB) excede limite de ${CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB} MB`);
                 
-                // Ordenar por data de modificação (mais antigos primeiro)
                 allFiles.sort((a, b) => a.mtime - b.mtime);
                 
                 for (const file of allFiles) {
@@ -435,9 +412,7 @@ class CleanupManager {
 
             const logFile = path.join(LOG_DIR, 'cleanup.log');
             fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
-        } catch (err) {
-            // Ignorar erros de log
-        }
+        } catch (err) {}
     }
 
     stop() {
@@ -449,7 +424,6 @@ class CleanupManager {
     }
 }
 
-// Instanciar o gerenciador de limpeza
 const cleanupManager = new CleanupManager();
 
 // =====================================================================
@@ -620,15 +594,122 @@ function getDirectionEmoji(direction) {
     return direction === 'COMPRA' ? '🟢' : '🔴';
 }
 
-// =====================================================================
-// === FUNÇÃO PARA EMOJI DO STOCHASTIC - NOVO ===
-// =====================================================================
 function getStochEmoji(value) {
     if (value < CONFIG.STOCH.COLORS.EXTREME_OVERSOLD) return '🔵';
     if (value <= CONFIG.STOCH.COLORS.OVERSOLD) return '🟢';
     if (value <= CONFIG.STOCH.COLORS.NEUTRAL) return '🟡';
     if (value <= CONFIG.STOCH.COLORS.OVERBOUGHT) return '🟠';
     return '🔴';
+}
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR ZONAS DE LIQUIDAÇÃO ===
+// =====================================================================
+function detectLiquidationZones(candles, currentPrice) {
+    if (!CONFIG.LIQUIDATION.ENABLED || candles.length < 50) {
+        return { longZones: [], shortZones: [], nearestLong: null, nearestShort: null };
+    }
+
+    const lookback = Math.min(CONFIG.LIQUIDATION.LOOKBACK_CANDLES, candles.length);
+    const recentCandles = candles.slice(-lookback);
+    
+    const priceVolumeClusters = [];
+    
+    for (let i = 0; i < recentCandles.length; i++) {
+        const candle = recentCandles[i];
+        const volumeWeight = candle.volume / Math.max(...recentCandles.map(c => c.volume));
+        
+        if (candle.high > candle.close && candle.high > candle.open) {
+            priceVolumeClusters.push({
+                price: candle.high,
+                volumeWeight,
+                type: 'short',
+                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
+                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
+            });
+        }
+        
+        if (candle.low < candle.close && candle.low < candle.open) {
+            priceVolumeClusters.push({
+                price: candle.low,
+                volumeWeight,
+                type: 'long',
+                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
+                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
+            });
+        }
+    }
+    
+    const clusterThreshold = currentPrice * CONFIG.LIQUIDATION.CLUSTER_THRESHOLD;
+    
+    const clusterPoints = (points) => {
+        const clusters = [];
+        const used = new Set();
+        
+        for (let i = 0; i < points.length; i++) {
+            if (used.has(i)) continue;
+            
+            const cluster = {
+                prices: [points[i].price],
+                strengths: [points[i].strength],
+                totalStrength: points[i].strength,
+                avgPrice: points[i].price
+            };
+            used.add(i);
+            
+            for (let j = i + 1; j < points.length; j++) {
+                if (used.has(j)) continue;
+                
+                if (Math.abs(points[i].price - points[j].price) <= clusterThreshold) {
+                    cluster.prices.push(points[j].price);
+                    cluster.strengths.push(points[j].strength);
+                    cluster.totalStrength += points[j].strength;
+                    used.add(j);
+                }
+            }
+            
+            let weightedSum = 0;
+            for (let k = 0; k < cluster.prices.length; k++) {
+                weightedSum += cluster.prices[k] * cluster.strengths[k];
+            }
+            cluster.avgPrice = weightedSum / cluster.strengths.reduce((a, b) => a + b, 0);
+            
+            clusters.push(cluster);
+        }
+        
+        return clusters
+            .sort((a, b) => b.totalStrength - a.totalStrength)
+            .slice(0, CONFIG.LIQUIDATION.MAX_ZONES)
+            .map(c => c.avgPrice);
+    };
+    
+    const longPoints = priceVolumeClusters
+        .filter(p => p.type === 'long' && p.price < currentPrice)
+        .sort((a, b) => b.strength - a.strength);
+    
+    const shortPoints = priceVolumeClusters
+        .filter(p => p.type === 'short' && p.price > currentPrice)
+        .sort((a, b) => b.strength - a.strength);
+    
+    const longZones = clusterPoints(longPoints);
+    const shortZones = clusterPoints(shortPoints);
+    
+    const nearestLong = longZones.length > 0 
+        ? longZones.reduce((nearest, zone) => 
+            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
+        ) : null;
+    
+    const nearestShort = shortZones.length > 0 
+        ? shortZones.reduce((nearest, zone) => 
+            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
+        ) : null;
+    
+    return {
+        longZones,
+        shortZones,
+        nearestLong,
+        nearestShort
+    };
 }
 
 // =====================================================================
@@ -730,7 +811,6 @@ function calculateRSI(candles, period = 14) {
     return 100 - (100 / (1 + rs));
 }
 
-// Função para calcular CCI (Commodity Channel Index)
 function calculateCCI(candles, period = 20) {
     if (candles.length < period) return null;
     
@@ -754,7 +834,6 @@ function calculateCCI(candles, period = 20) {
     return cci;
 }
 
-// Função para calcular tendência do CCI
 function calculateCCITrend(candles) {
     const cciValues = [];
     for (let i = candles.length - 26; i < candles.length; i++) {
@@ -782,9 +861,6 @@ function calculateCCITrend(candles) {
     };
 }
 
-// =====================================================================
-// === FUNÇÃO PARA CALCULAR STOCHASTIC - NOVO ===
-// =====================================================================
 function calculateStochastic(candles, kPeriod = 14, dPeriod = 3, smooth = 3) {
     if (candles.length < kPeriod + dPeriod + smooth) return { k: null, d: null };
     
@@ -800,14 +876,12 @@ function calculateStochastic(candles, kPeriod = 14, dPeriod = 3, smooth = 3) {
         kValues.push(k);
     }
     
-    // Calcular %K (média móvel do K)
     const kLine = [];
     for (let i = smooth - 1; i < kValues.length; i++) {
         const sum = kValues.slice(i - smooth + 1, i + 1).reduce((a, b) => a + b, 0);
         kLine.push(sum / smooth);
     }
     
-    // Calcular %D (média móvel do %K)
     const dLine = [];
     for (let i = dPeriod - 1; i < kLine.length; i++) {
         const sum = kLine.slice(i - dPeriod + 1, i + 1).reduce((a, b) => a + b, 0);
@@ -1048,8 +1122,8 @@ async function analyzeForAlerts(symbol) {
         const [candles1h, candles15m, candlesDaily, candles4h] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 100), // Candles diários para CCI e Stochastic
-            getCandles(symbol, '4h', 100)   // Candles 4h para Stochastic
+            getCandles(symbol, '1d', 100),
+            getCandles(symbol, '4h', 100)
         ]);
         
         if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 50 || candles4h.length < 50) return null;
@@ -1085,13 +1159,8 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
-        // Calcular CCI diário
         const cciDaily = calculateCCITrend(candlesDaily);
         
-        // =================================================================
-        // === CALCULAR STOCHASTIC - NOVO ===
-        // =================================================================
-        // Stochastic Diário (5,3,3)
         const stochDaily = calculateStochastic(
             candlesDaily, 
             CONFIG.STOCH.PERIOD_1D, 
@@ -1099,7 +1168,6 @@ async function analyzeForAlerts(symbol) {
             CONFIG.STOCH.SMOOTH_1D
         );
         
-        // Stochastic 4h (14,3,3)
         const stoch4h = calculateStochastic(
             candles4h, 
             CONFIG.STOCH.PERIOD_4H, 
@@ -1107,7 +1175,6 @@ async function analyzeForAlerts(symbol) {
             CONFIG.STOCH.SMOOTH_4H
         );
         
-        // Formatar Stochastic para exibição
         let stochDailyDisplay = "N/D";
         if (stochDaily.k !== null && stochDaily.d !== null) {
             const emoji = getStochEmoji(stochDaily.k);
@@ -1119,6 +1186,8 @@ async function analyzeForAlerts(symbol) {
             const emoji = getStochEmoji(stoch4h.k);
             stoch4hDisplay = formatStochastic(stoch4h.k, stoch4h.d, emoji);
         }
+        
+        const liquidationZones = detectLiquidationZones(candles1h, currentPrice);
         
         const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
@@ -1134,114 +1203,98 @@ async function analyzeForAlerts(symbol) {
         let score = 0;
         let confidence = 0;
         
-        // ANÁLISE PARA COMPRA - COM VALIDAÇÃO OBRIGATÓRIA DO CCI
         if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h < CONFIG.RSI.BUY_MAX) {
             
-            // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite COMPRA se CCI estiver em ALTA
             if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
                 direction = 'COMPRA';
                 score = 45;
                 
-                // 1. VOLUME COMPRADOR (máx 20)
                 if (buyerPercentage > 60) score += 15;
                 else if (buyerPercentage > 55) score += 12;
                 else if (buyerPercentage > 52) score += 8;
                 
-                // 2. VOLUME RATIO (máx 20)
                 if (volumeRatio > 2.5) score += 15;
                 else if (volumeRatio > 2.0) score += 12;
                 else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
-                // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr < 1.5) score += 18;      // Muito bom (pouca gente comprada)
-                    else if (lsr < 2.0) score += 15;  // Bom
-                    else if (lsr < 2.3) score += 12;  // Moderado
-                    else if (lsr < 2.6) score += 8;   // Pouco favorável
-                    else if (lsr > 3.0) score -= 15;  // PENALIDADE: Muita gente comprada
-                    else if (lsr > 2.8) score -= 12;   // Penalidade leve
+                    if (lsr < 1.5) score += 18;
+                    else if (lsr < 2.0) score += 15;
+                    else if (lsr < 2.3) score += 12;
+                    else if (lsr < 2.6) score += 8;
+                    else if (lsr > 3.0) score -= 15;
+                    else if (lsr > 2.8) score -= 12;
                 }
                 
-                // 4. FUNDING (máx 15)
                 if (funding) {
-                    if (funding < -0.001) score += 15;      // Muito negativo
-                    else if (funding < -0.0005) score += 8; // Moderadamente negativo
-                    else if (funding < -0.0001) score += 3;  // Levemente negativo
+                    if (funding < -0.001) score += 15;
+                    else if (funding < -0.0005) score += 8;
+                    else if (funding < -0.0001) score += 3;
                 }
                 
-                // 5. RSI (máx 20)
                 if (rsi1h) {
-                    if (rsi1h < 35) score += 14;      // Extremamente oversold
-                    else if (rsi1h < 40) score += 12;  // Muito oversold
-                    else if (rsi1h < 45) score += 10;  // Oversold moderado
-                    else if (rsi1h < 50) score += 5;   // Levemente oversold
+                    if (rsi1h < 35) score += 14;
+                    else if (rsi1h < 40) score += 12;
+                    else if (rsi1h < 45) score += 10;
+                    else if (rsi1h < 50) score += 5;
                 }
                 
-                // 6. POSIÇÃO PREÇO (máx 5)
                 if (currentPrice < sr.resistance) {
                     const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-                    if (distanceToResistance > 5) score += 8;       // Muito espaço
-                    else if (distanceToResistance > 2) score += 5;  // Bom espaço
+                    if (distanceToResistance > 5) score += 8;
+                    else if (distanceToResistance > 2) score += 5;
                 }
             } else if (CONFIG.DEBUG.VERBOSE) {
                 console.log(`⏸️ ${symbol} rejeitado para COMPRA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_BUY})`);
             }
         }
         
-        // ANÁLISE PARA VENDA - COM VALIDAÇÃO OBRIGATÓRIA DO CCI
         if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
             rsi1h > CONFIG.RSI.SELL_MIN) {
             
-            // VERIFICAÇÃO OBRIGATÓRIA DO CCI - Só permite VENDA se CCI estiver em BAIXA
             if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
                 direction = 'VENDA';
                 score = 45;
                 
-                // 1. VOLUME VENDEDOR (máx 20)
                 if (sellerPercentage > 60) score += 15;
                 else if (sellerPercentage > 55) score += 12;
                 else if (sellerPercentage > 52) score += 8;
                 
-                // 2. VOLUME RATIO (máx 20)
                 if (volumeRatio > 2.5) score += 15;
                 else if (volumeRatio > 2.0) score += 12;
                 else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
-                // 3. LSR (máx 20, com penalidade)
                 if (lsr) {
-                    if (lsr > 4.0) score += 18;        // Muito bom (muita gente comprada)
-                    else if (lsr > 3.5) score += 15;    // Bom
-                    else if (lsr > 3.0) score += 12;    // Moderado
-                    else if (lsr > 2.7) score += 8;     // Pouco favorável
-                    else if (lsr < 1.0) score -= 15;    // PENALIDADE: Muita gente vendida
-                    else if (lsr < 1.2) score -= 12;     // Penalidade leve
+                    if (lsr > 4.0) score += 18;
+                    else if (lsr > 3.5) score += 15;
+                    else if (lsr > 3.0) score += 12;
+                    else if (lsr > 2.7) score += 8;
+                    else if (lsr < 1.0) score -= 15;
+                    else if (lsr < 1.2) score -= 12;
                 }
                 
-                // 4. FUNDING (máx 15)
                 if (funding) {
-                    if (funding > 0.001) score += 15;       // Muito positivo
-                    else if (funding > 0.0005) score += 8;  // Moderadamente positivo
-                    else if (funding > 0.0001) score += 3;   // Levemente positivo
+                    if (funding > 0.001) score += 15;
+                    else if (funding > 0.0005) score += 8;
+                    else if (funding > 0.0001) score += 3;
                 }
                 
-                // 5. RSI (máx 20)
                 if (rsi1h) {
-                    if (rsi1h > 75) score += 14;       // Extremamente overbought
-                    else if (rsi1h > 70) score += 12;   // Muito overbought
-                    else if (rsi1h > 65) score += 10;   // Overbought moderado
-                    else if (rsi1h > 60) score += 5;    // Levemente overbought
+                    if (rsi1h > 75) score += 14;
+                    else if (rsi1h > 70) score += 12;
+                    else if (rsi1h > 65) score += 10;
+                    else if (rsi1h > 60) score += 5;
                 }
                 
-                // 6. POSIÇÃO PREÇO (máx 5)
                 if (currentPrice > sr.support) {
                     const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-                    if (distanceToSupport > 5) score += 8;       // Muito espaço
-                    else if (distanceToSupport > 2) score += 5;  // Bom espaço
+                    if (distanceToSupport > 5) score += 8;
+                    else if (distanceToSupport > 2) score += 5;
                 }
             } else if (CONFIG.DEBUG.VERBOSE) {
                 console.log(`⏸️ ${symbol} rejeitado para VENDA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_SELL})`);
@@ -1250,13 +1303,10 @@ async function analyzeForAlerts(symbol) {
         
         confidence = Math.min(100, Math.max(0, score));
         
-        // Verificar score mínimo
         if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
         
-        // Verificar cooldown
         if (!canSendAlert(symbol, currentPrice, direction)) return null;
         
-        // Calcular níveis de trade
         const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
             calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance);
         
@@ -1264,7 +1314,6 @@ async function analyzeForAlerts(symbol) {
         
         const emoji = getConfidenceEmoji(confidence);
         
-        // Formatar tendência do CCI para exibição
         let cciDisplay = "NEUTRO";
         if (cciDaily.trend === "ALTA") cciDisplay = "CCI 💹ALTA";
         else if (cciDaily.trend === "BAIXA") cciDisplay = "CCI 🔴BAIXA";
@@ -1289,9 +1338,12 @@ async function analyzeForAlerts(symbol) {
             cciDaily: cciDisplay,
             cciValue: cciDaily.value,
             cciEma: cciDaily.ema,
-            // Campos novos para Stochastic
             stochDaily: stochDailyDisplay,
             stoch4h: stoch4hDisplay,
+            longLiquidationZones: liquidationZones.longZones,
+            shortLiquidationZones: liquidationZones.shortZones,
+            nearestLongLiq: liquidationZones.nearestLong,
+            nearestShortLiq: liquidationZones.nearestShort,
             support: sr.support,
             resistance: sr.resistance,
             emoji,
@@ -1323,69 +1375,61 @@ async function sendTelegramAlert(message, parseMode = 'HTML') {
     let attempts = 0;
     const maxAttempts = CONFIG.PERFORMANCE.TELEGRAM_RETRY_ATTEMPTS;
     
+    if (!CONFIG.TELEGRAM.BOT_TOKEN) {
+        console.log('⚠️ Token do Telegram não configurado');
+        return false;
+    }
+
+    const chatIdVariations = [
+        CONFIG.TELEGRAM.CHAT_ID,
+        CONFIG.TELEGRAM.CHAT_ID.replace('-100', ''),
+        `-100${CONFIG.TELEGRAM.CHAT_ID}`,
+        CONFIG.TELEGRAM.CHAT_ID.toString().trim()
+    ];
+    
+    const uniqueChatIds = [...new Set(chatIdVariations)];
+    
     while (attempts < maxAttempts) {
         attempts++;
         
-        try {
-            if (!CONFIG.TELEGRAM.BOT_TOKEN || !CONFIG.TELEGRAM.CHAT_ID) {
-                console.log('⚠️ Telegram não configurado');
-                return false;
-            }
-
-            const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
-            
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                    text: message,
-                    parse_mode: parseMode,
-                    disable_web_page_preview: true
-                }),
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
+        for (const chatId of uniqueChatIds) {
+            try {
+                const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
                 
-                if (response.status === 429) {
-                    const retryAfter = parseInt(response.headers.get('retry-after')) || 30;
-                    console.log(`⏳ Rate limit Telegram, aguardando ${retryAfter}s (tentativa ${attempts}/${maxAttempts})`);
-                    await new Promise(r => setTimeout(r, retryAfter * 1000));
-                    continue;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        text: message,
+                        parse_mode: parseMode,
+                        disable_web_page_preview: true
+                    }),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    return true;
                 }
                 
-                console.log(`❌ Erro Telegram (tentativa ${attempts}/${maxAttempts}): ${errorText}`);
-                
-                if (attempts < maxAttempts) {
-                    await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY * attempts));
-                    continue;
-                }
-                
-                return false;
-            }
-            
-            return true;
-            
-        } catch (error) {
-            console.log(`❌ Erro Telegram (tentativa ${attempts}/${maxAttempts}): ${error.message}`);
-            
-            if (attempts < maxAttempts) {
-                console.log(`⏳ Tentando novamente em ${CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY/1000 * attempts}s...`);
-                await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY * attempts));
-            }
+            } catch (error) {}
+        }
+        
+        if (attempts < maxAttempts) {
+            await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY));
         }
     }
     
-    console.log('❌ Todas as tentativas de envio ao Telegram falharam');
     return false;
 }
 
+// =====================================================================
+// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA ===
+// =====================================================================
 function formatTradeAlert(alert) {
     const time = getBrazilianDateTime();
     const symbolName = alert.symbol.replace('USDT', '');
@@ -1405,32 +1449,38 @@ function formatTradeAlert(alert) {
     const tp3 = formatPrice(alert.takeProfit3);
     
     const dailyCount = dailyMessageCounter.get(alert.symbol) || 1;
-    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
     
-    let r1, r2, r3;
-    if (alert.direction === 'COMPRA') {
-        r1 = ((alert.takeProfit1 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        r2 = ((alert.takeProfit2 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        r3 = ((alert.takeProfit3 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-    } else {
-        r1 = ((alert.entryPrice - alert.takeProfit1) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        r2 = ((alert.entryPrice - alert.takeProfit2) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-    }
-    
-    // Adicionar indicador visual do RSI
     const rsiStatus = alert.direction === 'COMPRA' ? 
         (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
-    // Definir a mensagem da IA Dica baseada na direção
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b> Observar Zona do Suporte' 
-        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial';
+        ? '<b>🤖 IA Dica...</b> Observar Zonas de Suporte de Compra' 
+        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da Resistência.';
     
-    // Usar os valores de Stochastic do alerta
     const stochDaily = alert.stochDaily || 'N/D';
     const stoch4h = alert.stoch4h || 'N/D';
+    
+    // =================================================================
+    // === FORMATAR ZONAS DE LIQUIDAÇÃO - LINHAS SEPARADAS ===
+    // =================================================================
+    let longLiqText = '';
+    let shortLiqText = '';
+    
+    if (CONFIG.LIQUIDATION.ENABLED) {
+        const longZones = alert.longLiquidationZones || [];
+        const shortZones = alert.shortLiquidationZones || [];
+        
+        if (longZones.length > 0) {
+            const zonesFormatted = longZones.slice(0, 2).map(z => formatPrice(z)).join(' | ');
+            longLiqText = `🔹Supt: ${zonesFormatted}`;
+        }
+        
+        if (shortZones.length > 0) {
+            const zonesFormatted = shortZones.slice(0, 2).map(z => formatPrice(z)).join(' | ');
+            shortLiqText = `🔻Resist: ${zonesFormatted}`;
+        }
+    }
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
@@ -1441,8 +1491,9 @@ function formatTradeAlert(alert) {
  📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  Stoch 1D: ${stochDaily}
  Stoch 4H: ${stoch4h}
- #Supt: ${formatPrice(alert.support)} | #Resist: ${formatPrice(alert.resistance)}
-<b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop : ${stop}
+ ${shortLiqText}
+ ${longLiqText} 
+ <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}
 ❅──────✧❅🔹❅✧──────❅
  ${iaDica}
 Alerta Educativo, não é recomendação de investimento.
@@ -1473,7 +1524,7 @@ async function fetchAllFuturesSymbols() {
 }
 
 // =====================================================================
-// === SCANNER EM TEMPO REAL MELHORADO ===
+// === SCANNER EM TEMPO REAL ===
 // =====================================================================
 async function realTimeScanner() {
     console.log('\n🔍 Iniciando scanner em tempo real...');
@@ -1481,11 +1532,13 @@ async function realTimeScanner() {
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
     console.log(`   - Venda necessita: ${CONFIG.CCI.REQUIRED_FOR_SELL}`);
+    if (CONFIG.LIQUIDATION.ENABLED) {
+        console.log(`   - Zonas de liquidação: ATIVADO`);
+    }
     
     let scanCount = 0;
     let alertsSent = 0;
     let consecutiveEmptyScans = 0;
-    let lastAlertTime = Date.now();
     
     while (true) {
         const startTime = Date.now();
@@ -1494,16 +1547,6 @@ async function realTimeScanner() {
         resetDailyCounterIfNeeded();
         
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
-        
-        if (dailyMessageCounter.size > 0 && CONFIG.DEBUG.VERBOSE) {
-            console.log('📊 Alertas enviados hoje:');
-            const sortedCounts = Array.from(dailyMessageCounter.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5);
-            sortedCounts.forEach(([symbol, count]) => {
-                console.log(`   ${symbol}: ${count}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL}`);
-            });
-        }
         
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         const alerts = [];
@@ -1538,8 +1581,7 @@ async function realTimeScanner() {
                 registerAlert(alert.symbol, alert.entryPrice, alert.direction);
                 alertsSent++;
                 successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily}`);
-                lastAlertTime = Date.now();
+                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)`);
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
             }
@@ -1558,12 +1600,10 @@ async function realTimeScanner() {
         const scanTime = Date.now() - startTime;
         console.log(`⏱️ Scan concluído em ${(scanTime/1000).toFixed(1)}s`);
         console.log(`📊 Total alertas enviados: ${alertsSent}`);
-        console.log(`📊 Moedas com alerta hoje: ${dailyMessageCounter.size}`);
         
         let nextScanInterval = CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS * 1000;
         if (consecutiveEmptyScans > 5) {
             nextScanInterval = Math.min(nextScanInterval * 1.5, 300000);
-            console.log(`⏳ ${consecutiveEmptyScans} scans sem alertas, aumentando intervalo...`);
         }
         
         const waitTime = nextScanInterval - scanTime;
@@ -1579,18 +1619,20 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM ');
+    console.log('🚀 TITANIUM PRIME');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
     console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
+    console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}`);
+    if (CONFIG.LIQUIDATION.ENABLED) {
+        console.log(`💰 Zonas de Liquidação: ATIVADO`);
+    }
+    console.log('');
     
-    // Iniciar sistema de limpeza automática
     cleanupManager.start();
     
-    // Mensagem de inicialização SUPER SIMPLES
-    const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
+    const initMessage = `🤖 Titanium Prime Ativado - Sistema pronto!`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
@@ -1605,11 +1647,10 @@ async function startBot() {
 }
 
 // =====================================================================
-// === HANDLERS DE ERRO MELHORADOS ===
+// === HANDLERS DE ERRO ===
 // =====================================================================
 process.on('uncaughtException', async (err) => {
     console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
-    console.error('Stack:', err.stack);
     
     const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s`;
     
@@ -1623,16 +1664,12 @@ process.on('uncaughtException', async (err) => {
 
 process.on('unhandledRejection', async (reason) => {
     console.error('\n❌ UNHANDLED REJECTION:', reason);
-    
-    if (reason.message && reason.message.includes('telegram')) {
-        console.log('⚠️ Erro no Telegram ignorado, continuando execução...');
-    }
 });
 
 // =====================================================================
 // === START ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium Real-Time Alert System...');
+console.log('🚀 Iniciando Titanium Prime Real-Time Alert System...');
 startBot().catch(async error => {
     console.error('❌ Erro fatal:', error);
     
@@ -1640,7 +1677,6 @@ startBot().catch(async error => {
         await sendTelegramAlert(`❌ ERRO FATAL`);
     } catch {}
     
-    // Parar sistema de limpeza
     cleanupManager.stop();
     process.exit(1);
 });
