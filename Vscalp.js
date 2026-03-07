@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -37,6 +37,15 @@ const CONFIG = {
             WEIGHTS: [1.2, 1.5, 2.0],
             MIN_CONFLUENCE: 2
         }
+    },
+    EMA: {
+        ENABLED: true,
+        TIMEFRAME: '3m',
+        FAST_PERIOD: 13,
+        MEDIUM_PERIOD: 34,
+        SLOW_PERIOD: 55,
+        REQUIRED_FOR_BUY: 'CROSS_UP',
+        REQUIRED_FOR_SELL: 'CROSS_DOWN'
     },
     DIVERGENCE: {
         ENABLED: true,
@@ -184,6 +193,11 @@ const TradeAlertSchema = z.object({
     volume3m: z.number().optional().nullable(),
     volume5m: z.number().optional().nullable(),
     volume15m: z.number().optional().nullable(),
+    emaSignal: z.string().optional().nullable(),
+    ema13: z.number().optional().nullable(),
+    ema34: z.number().optional().nullable(),
+    ema55: z.number().optional().nullable(),
+    emaCross: z.string().optional().nullable(),
     divergence: z.string().optional().nullable(),
     divergenceImpact: z.number().optional().nullable(),
     lsr: z.number().optional().nullable(),
@@ -622,6 +636,71 @@ function getStochEmoji(value) {
     if (value <= CONFIG.STOCH.COLORS.NEUTRAL) return '🟡';
     if (value <= CONFIG.STOCH.COLORS.OVERBOUGHT) return '🟠';
     return '🔴';
+}
+
+// =====================================================================
+// === NOVA FUNÇÃO: ANÁLISE DE EMAS NO TIMEFRAME 3 MINUTOS ===
+// =====================================================================
+function analyzeEMA3m(candles) {
+    if (!CONFIG.EMA.ENABLED || candles.length < CONFIG.EMA.SLOW_PERIOD + 10) {
+        return {
+            signal: 'NEUTRO',
+            ema13: null,
+            ema34: null,
+            ema55: null,
+            cross: 'SEM_CROSS',
+            price: null
+        };
+    }
+
+    const closes = candles.map(c => c.close);
+    const currentPrice = closes[closes.length - 1];
+    
+    // Calcular EMAs
+    const ema13 = calculateEMA(closes, CONFIG.EMA.FAST_PERIOD);
+    const ema34 = calculateEMA(closes, CONFIG.EMA.MEDIUM_PERIOD);
+    const ema55 = calculateEMA(closes, CONFIG.EMA.SLOW_PERIOD);
+    
+    // Verificar cruzamento
+    const prevEma13 = calculateEMA(closes.slice(0, -1), CONFIG.EMA.FAST_PERIOD);
+    const prevEma34 = calculateEMA(closes.slice(0, -1), CONFIG.EMA.MEDIUM_PERIOD);
+    
+    let cross = 'SEM_CROSS';
+    let signal = 'NEUTRO';
+    
+    // Cruzamento para cima (EMA13 cruza acima da EMA34)
+    if (prevEma13 <= prevEma34 && ema13 > ema34) {
+        cross = 'CROSS_UP';
+        if (currentPrice > ema55) {
+            signal = 'COMPRA';
+        }
+    }
+    
+    // Cruzamento para baixo (EMA13 cruza abaixo da EMA34)
+    if (prevEma13 >= prevEma34 && ema13 < ema34) {
+        cross = 'CROSS_DOWN';
+        if (currentPrice < ema55) {
+            signal = 'VENDA';
+        }
+    }
+    
+    // Verificar se o preço já estava do lado correto da EMA55
+    if (cross === 'SEM_CROSS') {
+        if (ema13 > ema34 && currentPrice > ema55) {
+            signal = 'COMPRA_ESTABELECIDA';
+        } else if (ema13 < ema34 && currentPrice < ema55) {
+            signal = 'VENDA_ESTABELECIDA';
+        }
+    }
+    
+    return {
+        signal,
+        ema13,
+        ema34,
+        ema55,
+        cross,
+        price: currentPrice
+    };
 }
 
 // =====================================================================
@@ -1426,24 +1505,28 @@ function detectLiquidationZones(candles, currentPrice) {
 }
 
 // =====================================================================
-// === FUNÇÃO PRINCIPAL DE ANÁLISE (MODIFICADA) ===
+// === FUNÇÃO PRINCIPAL DE ANÁLISE (MODIFICADA COM EMAS 3m) ===
 // =====================================================================
 async function analyzeForAlerts(symbol) {
     try {
-        // Busca candles para múltiplos timeframes
+        // Busca candles para múltiplos timeframes (incluindo 3m para EMAs)
         const [candles15m, candles1h, candlesDaily, candles4h, candles3m, candles5m] = await Promise.all([
             getCandles(symbol, '15m', 200),     // Principal para volume
             getCandles(symbol, '1h', 100),       // 1h para RSI e CCI
             getCandles(symbol, '1d', 100),       // Diário para CCI Diário
             getCandles(symbol, '4h', 100),       // 4h para Stoch
-            getCandles(symbol, '3m', 100),       // 3m para volume
+            getCandles(symbol, '3m', 100),       // 3m para EMAs e volume
             getCandles(symbol, '5m', 100)        // 5m para volume
         ]);
         
         // Validação
-        if (candles15m.length < 50 || candles1h.length < 30 || candlesDaily.length < 50 || candles4h.length < 50) return null;
+        if (candles15m.length < 50 || candles1h.length < 30 || candlesDaily.length < 50 || 
+            candles4h.length < 50 || candles3m.length < 60) return null;
         
         const currentPrice = candles15m[candles15m.length - 1].close;
+        
+        // ANÁLISE DE EMAS NO TIMEFRAME 3 MINUTOS
+        const emaAnalysis = analyzeEMA3m(candles3m);
         
         // ANÁLISE DE VOLUME MULTI-TIMEFRAME (3m, 5m, 15m)
         const volumeMulti = await analyzeMultiTimeframeVolume(symbol);
@@ -1538,12 +1621,16 @@ async function analyzeForAlerts(symbol) {
         // Definir buyerPercentage final (usar multi-timeframe se disponível)
         const finalBuyerPercentage = volumeMulti.isConfluent ? volumeMulti.buyerPercentage : buyerPercentage15m;
         
-        // CRITÉRIOS DE COMPRA
+        // ==================== CRITÉRIOS DE COMPRA ====================
         if (finalBuyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h < CONFIG.RSI.BUY_MAX) {
+            rsi1h < CONFIG.RSI.BUY_MAX &&
+            cci1h.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
             
-            if (cci1h.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
+            // VERIFICAR CONDIÇÃO DAS EMAS 3m PARA COMPRA
+            const emaValidForBuy = emaAnalysis.signal === 'COMPRA' || emaAnalysis.signal === 'COMPRA_ESTABELECIDA';
+            
+            if (emaValidForBuy) {
                 direction = 'COMPRA';
                 score = 45;
                 
@@ -1555,6 +1642,11 @@ async function analyzeForAlerts(symbol) {
                 // Bônus por divergência
                 if (divergence.type === 'BULLISH_DIVERGENCE' || divergence.type === 'HIDDEN_BULLISH') {
                     score += divergence.impact;
+                }
+                
+                // Bônus por cruzamento recente das EMAs
+                if (emaAnalysis.cross === 'CROSS_UP') {
+                    score += 15; // Bônus extra por cruzamento recente
                 }
                 
                 if (finalBuyerPercentage > 60) score += 15;
@@ -1596,12 +1688,16 @@ async function analyzeForAlerts(symbol) {
             }
         }
         
-        // CRITÉRIOS DE VENDA
+        // ==================== CRITÉRIOS DE VENDA ====================
         if (finalBuyerPercentage < (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h > CONFIG.RSI.SELL_MIN) {
+            rsi1h > CONFIG.RSI.SELL_MIN &&
+            cci1h.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
             
-            if (cci1h.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
+            // VERIFICAR CONDIÇÃO DAS EMAS 3m PARA VENDA
+            const emaValidForSell = emaAnalysis.signal === 'VENDA' || emaAnalysis.signal === 'VENDA_ESTABELECIDA';
+            
+            if (emaValidForSell) {
                 direction = 'VENDA';
                 score = 45;
                 
@@ -1613,6 +1709,11 @@ async function analyzeForAlerts(symbol) {
                 // Bônus/penalidade por divergência
                 if (divergence.type === 'BEARISH_DIVERGENCE') {
                     score += divergence.impact;
+                }
+                
+                // Bônus por cruzamento recente das EMAs
+                if (emaAnalysis.cross === 'CROSS_DOWN') {
+                    score += 15; // Bônus extra por cruzamento recente
                 }
                 
                 if (finalBuyerPercentage < 40) score += 15; // Mais vendedores
@@ -1683,6 +1784,13 @@ async function analyzeForAlerts(symbol) {
             divergenceDisplay = divergence.description;
         }
         
+        // Formatar sinal das EMAs
+        let emaSignalDisplay = "NEUTRO";
+        if (emaAnalysis.signal === 'COMPRA') emaSignalDisplay = "📈 EMA CRUZOU ALTA";
+        else if (emaAnalysis.signal === 'COMPRA_ESTABELECIDA') emaSignalDisplay = "📈 EMA ESTABELECIDA ALTA";
+        else if (emaAnalysis.signal === 'VENDA') emaSignalDisplay = "📉 EMA CRUZOU BAIXA";
+        else if (emaAnalysis.signal === 'VENDA_ESTABELECIDA') emaSignalDisplay = "📉 EMA ESTABELECIDA BAIXA";
+        
         const alert = {
             symbol,
             direction,
@@ -1701,6 +1809,11 @@ async function analyzeForAlerts(symbol) {
             volume3m: volumeMulti.volume3m,
             volume5m: volumeMulti.volume5m,
             volume15m: volumeMulti.volume15m,
+            emaSignal: emaSignalDisplay,
+            ema13: emaAnalysis.ema13,
+            ema34: emaAnalysis.ema34,
+            ema55: emaAnalysis.ema55,
+            emaCross: emaAnalysis.cross,
             divergence: divergenceDisplay,
             divergenceImpact: divergence.impact,
             lsr,
@@ -1800,7 +1913,7 @@ async function sendTelegramAlert(message, parseMode = 'HTML') {
 }
 
 // =====================================================================
-// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA ===
+// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA (MODIFICADA) ===
 // =====================================================================
 function formatTradeAlert(alert) {
     const time = getBrazilianDateTime();
@@ -1855,15 +1968,17 @@ function formatTradeAlert(alert) {
     // Informações de volume multi-timeframe
     let volumeInfo = '';
     if (alert.volume3m && alert.volume5m && alert.volume15m) {
-        volumeInfo = `📊 Vol 3/5/15m: ${alert.volume3m.toFixed(0)}/${alert.volume5m.toFixed(0)}/${alert.volume15m.toFixed(0)}% | Conf: ${alert.volumeConfluence}/3`;
+        volumeInfo = ` Vol 3/5/15m: ${alert.volume3m.toFixed(0)}/${alert.volume5m.toFixed(0)}/${alert.volume15m.toFixed(0)}% | Conf: ${alert.volumeConfluence}/3`;
     }
     
     // Informação de divergência
     let divergenceInfo = '';
     if (alert.divergence && alert.divergence !== 'Sem divergência') {
-        const divEmoji = alert.divergence.includes('Altaista') ? '🚀' : '⚠️';
+        const divEmoji = alert.divergence.includes('Alta') ? '🚀' : '⚠️';
         divergenceInfo = `\n${divEmoji} ${alert.divergence}`;
     }
+    
+    
     
     return `<i>${alert.emoji} <b>${dirEmoji} 🎯SCALP ${direction} - ${symbolName}</b> ${alert.emoji}
  <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
@@ -1917,9 +2032,10 @@ async function realTimeScanner() {
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
     console.log(`   - Timeframes Volume: 3m, 5m, 15m (multi-timeframe)`);
+    console.log(`   - EMAs 3m: ${CONFIG.EMA.FAST_PERIOD}/${CONFIG.EMA.MEDIUM_PERIOD}/${CONFIG.EMA.SLOW_PERIOD} (OBRIGATÓRIO)`);
+    console.log(`   - Critério Compra: EMA13 > EMA34 | Preço > EMA55 | Volume >52% | RSI <60 | CCI 1h ALTA`);
+    console.log(`   - Critério Venda: EMA13 < EMA34 | Preço < EMA55 | Volume >52% | RSI >66 | CCI 1h BAIXA`);
     console.log(`   - Divergências: ATIVADO (timeframe 15m)`);
-    console.log(`   - Critério Compra: Volume >52% (confluência) | RSI <64 (1h) | CCI 1h ALTA`);
-    console.log(`   - Critério Venda: Volume >52% (confluência) | RSI >66 (1h) | CCI 1h BAIXA`);
     if (CONFIG.LIQUIDATION.ENABLED) {
         console.log(`   - Zonas de liquidação: ATIVADO`);
     }
@@ -1970,6 +2086,9 @@ async function realTimeScanner() {
                 alertsSent++;
                 successfulAlerts++;
                 console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)`);
+                if (alert.emaSignal) {
+                    console.log(`   📊 EMAs 3m: ${alert.emaSignal}`);
+                }
                 if (alert.divergence && alert.divergence !== 'Sem divergência') {
                     console.log(`   📊 Divergência: ${alert.divergence}`);
                 }
@@ -2019,6 +2138,7 @@ async function startBot() {
     console.log('📅 Inicializando...');
     console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
     console.log(`📊 Timeframes Volume: 3m, 5m, 15m (confluência mínima: ${CONFIG.VOLUME.MULTI_TIMEFRAME.MIN_CONFLUENCE})`);
+    console.log(`📊 EMAs 3m: ${CONFIG.EMA.FAST_PERIOD}/${CONFIG.EMA.MEDIUM_PERIOD}/${CONFIG.EMA.SLOW_PERIOD} (OBRIGATÓRIO)`);
     console.log(`📊 Divergências: ${CONFIG.DIVERGENCE.ENABLED ? '✅' : '❌'} (timeframe 15m)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}`);
     console.log(`📊 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
@@ -2026,7 +2146,7 @@ async function startBot() {
     
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium Prime Ativado `;
+    const initMessage = `🤖 Titanium Prime Ativado - EMAs 3m Obrigatórias`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
