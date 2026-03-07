@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oA',
-        CHAT_ID: '-1001'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 2.0,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -45,7 +45,7 @@ const CONFIG = {
     },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 2.0,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -1455,8 +1455,8 @@ function formatTradeAlert(alert) {
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b> Observar Zonas de Suporte de Compra' 
-        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da Resistência.';
+        ? '<b>🤖 IA Dica...</b> Observar Zonas de 🔹Suporte de Compra' 
+        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da 🔻Resistência.';
     
     const stochDaily = alert.stochDaily || 'N/D';
     const stoch4h = alert.stoch4h || 'N/D';
@@ -1483,7 +1483,7 @@ function formatTradeAlert(alert) {
     }
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
+ <b>🐋Volume!</b> | ✨#SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
  #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
