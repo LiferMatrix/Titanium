@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
@@ -27,7 +27,7 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.8,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
@@ -38,14 +38,14 @@ const CONFIG = {
         BACKOFF_FACTOR: 2
     },
     TRADE: {
-        RISK_REWARD_RATIO: 2.5,
+        RISK_REWARD_RATIO: 1.8,
         STOP_PERCENTAGE: 2,
         TAKE_PROFIT_LEVELS: [2, 3, 4],
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 2.0,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -165,6 +165,8 @@ const TradeAlertSchema = z.object({
     volumeRatio: z.number(),
     buyerPercentage: z.number(),
     sellerPercentage: z.number(),
+    volume24hVsEma9: z.string(),
+    volume24hEmoji: z.string(),
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
@@ -931,6 +933,70 @@ function calculateSupportResistance(candles) {
 }
 
 // =====================================================================
+// === NOVA FUNÇÃO: ANÁLISE VOLUME 24H VS EMA 9 ===
+// =====================================================================
+function calculateVolume24hVsEma9(candles) {
+    if (!candles || candles.length < 24) {
+        return { percentage: 0, status: 'NEUTRO', emoji: '⚪' };
+    }
+    
+    // Pegar últimos 24 candles (24h se timeframe for 1h)
+    const last24Candles = candles.slice(-24);
+    
+    // Calcular EMA 9 dos preços de fechamento
+    const closes = last24Candles.map(c => c.close);
+    const ema9 = calculateEMA(closes, 9);
+    
+    // Calcular volume total e volume por categoria
+    let volumeAboveEma = 0;
+    let volumeBelowEma = 0;
+    let totalVolume = 0;
+    
+    last24Candles.forEach(candle => {
+        const vol = candle.volume;
+        totalVolume += vol;
+        
+        if (candle.close > ema9) {
+            volumeAboveEma += vol;
+        } else if (candle.close < ema9) {
+            volumeBelowEma += vol;
+        } else {
+            // Se igual, divide igualmente
+            volumeAboveEma += vol / 2;
+            volumeBelowEma += vol / 2;
+        }
+    });
+    
+    const percentageAbove = (volumeAboveEma / totalVolume) * 100;
+    const percentageBelow = (volumeBelowEma / totalVolume) * 100;
+    
+    let status = 'NEUTRO';
+    let emoji = '⚪';
+    
+    if (percentageAbove > 55) {
+        status = 'COMPRADOR';
+        emoji = '🟢';
+    } else if (percentageBelow > 55) {
+        status = 'VENDEDOR';
+        emoji = '🔴';
+    }
+    
+    // Formatar string: "+25% 🟢 Comprador" ou "+18% 🔴 Vendedor"
+    const dominantPercentage = percentageAbove > percentageBelow ? percentageAbove : percentageBelow;
+    const sign = percentageAbove > percentageBelow ? '+' : '-';
+    const statusText = percentageAbove > percentageBelow ? 'Comprador' : 'Vendedor';
+    
+    const formattedString = `${sign}${dominantPercentage.toFixed(0)}% ${emoji} ${statusText}`;
+    
+    return {
+        percentage: dominantPercentage,
+        status: statusText,
+        emoji: emoji,
+        formatted: formattedString
+    };
+}
+
+// =====================================================================
 // === COOLDOWN CHECK ===
 // =====================================================================
 function canSendAlert(symbol, currentPrice, direction) {
@@ -1159,6 +1225,9 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
+        // NOVO: Calcular Volume 24h vs EMA 9
+        const volume24hVsEma9 = calculateVolume24hVsEma9(candles1h);
+        
         const cciDaily = calculateCCITrend(candlesDaily);
         
         const stochDaily = calculateStochastic(
@@ -1332,6 +1401,8 @@ async function analyzeForAlerts(symbol) {
             volumeRatio,
             buyerPercentage,
             sellerPercentage,
+            volume24hVsEma9: volume24hVsEma9.formatted,
+            volume24hEmoji: volume24hVsEma9.emoji,
             lsr,
             funding,
             rsi: rsi1h,
@@ -1455,8 +1526,8 @@ function formatTradeAlert(alert) {
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b> Observar Zonas de Suporte de Compra' 
-        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da Resistência.';
+        ? '<b>🤖 IA Dica...</b> Observar Zonas de 🔹Suporte de Compra' 
+        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da 🔻Resistência.';
     
     const stochDaily = alert.stochDaily || 'N/D';
     const stoch4h = alert.stoch4h || 'N/D';
@@ -1483,10 +1554,11 @@ function formatTradeAlert(alert) {
     }
     
     return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
+ <b>🐋Volume!</b> | ✨#SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
- #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
+ ▫️Vol 24hs: ${alert.volume24hVsEma9} 
+ #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol 1h: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
  📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  Stoch 1D: ${stochDaily}
@@ -1531,6 +1603,7 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
+    console.log(`   - Compra necessita: ${CONFIG.CCI.REQUIRED_FOR_BUY}`);
     console.log(`   - Venda necessita: ${CONFIG.CCI.REQUIRED_FOR_SELL}`);
     if (CONFIG.LIQUIDATION.ENABLED) {
         console.log(`   - Zonas de liquidação: ATIVADO`);
