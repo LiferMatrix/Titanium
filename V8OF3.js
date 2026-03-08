@@ -10,69 +10,45 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS,
-        CHAT_ID: '-10025549
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 200,
-        SCAN_INTERVAL_SECONDS: 120,
-        CANDLE_CACHE_TTL: 300000,
-        BATCH_SIZE: 15,
+        SCAN_INTERVAL_SECONDS: 30, // Reduzido para monitorar BTC mais frequentemente
+        CANDLE_CACHE_TTL: 60000, // Reduzido para 1 minuto
+        BATCH_SIZE: 5,
         REQUEST_TIMEOUT: 15000,
-        COOLDOWN_MINUTES: 15,
-        PRICE_DEVIATION_THRESHOLD: 0.5,
+        COOLDOWN_MINUTES: 1, // Reduzido para alertar rapidamente em mudanças
+        PRICE_DEVIATION_THRESHOLD: 0.1, // Reduzido para capturar pequenas mudanças
         TELEGRAM_RETRY_ATTEMPTS: 3,
         TELEGRAM_RETRY_DELAY: 2000
     },
     VOLUME: {
-        TIMEFRAME: '15m',
+        TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
-        CONFIRMATION_CANDLES: 4,
-        MULTI_TIMEFRAME: {
-            ENABLED: true,
-            TIMEFRAMES: ['3m', '5m', '15m'],
-            WEIGHTS: [1.2, 1.5, 2.0],
-            MIN_CONFLUENCE: 2
-        }
-    },
-    EMA: {
-        ENABLED: true,
-        TIMEFRAME: '3m',
-        FAST_PERIOD: 13,
-        MEDIUM_PERIOD: 34,
-        SLOW_PERIOD: 55,
-        REQUIRED_FOR_BUY: 'CROSS_UP',
-        REQUIRED_FOR_SELL: 'CROSS_DOWN'
-    },
-    DIVERGENCE: {
-        ENABLED: true,
-        TIMEFRAME: '15m',
-        LOOKBACK: 20,
-        BULLISH_BONUS: 15,
-        BEARISH_PENALTY: -15,
-        PRICE_CHANGE_MIN: 0.5,
-        VOLUME_CHANGE_MIN: 20
+        CONFIRMATION_CANDLES: 2
     },
     RATE_LIMITER: {
-        INITIAL_DELAY: 200,
-        MAX_DELAY: 5000,
+        INITIAL_DELAY: 100, // Reduzido para BTC
+        MAX_DELAY: 2000,
         BACKOFF_FACTOR: 2
     },
     TRADE: {
-        RISK_REWARD_RATIO: 2.5,
+        RISK_REWARD_RATIO: 1.8,
         STOP_PERCENTAGE: 2,
         TAKE_PROFIT_LEVELS: [2, 3, 4],
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
-        MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_SCORE: 70,
+        MIN_VOLUME_RATIO: 1.5,
         ENABLE_SOUND: true,
-        MAX_ALERTS_PER_SCAN: 5,
-        MAX_DAILY_ALERTS_PER_SYMBOL: 10,
+        MAX_ALERTS_PER_SCAN: 2,
+        MAX_DAILY_ALERTS_PER_SYMBOL: 50, // Aumentado para BTC
         PRIORITY_LEVELS: {
             ALTA: 85,
             MEDIA: 75,
@@ -80,12 +56,12 @@ const CONFIG = {
         }
     },
     RSI: {
-        BUY_MAX: 60,
-        SELL_MIN: 66,
+        BUY_MAX: 70,
+        SELL_MIN: 60,
         PERIOD: 14
     },
     DEBUG: {
-        VERBOSE: false
+        VERBOSE: true // Ativado para monitorar BTC
     },
     CLEANUP: {
         ENABLED: true,
@@ -127,6 +103,14 @@ const CONFIG = {
         MAX_ZONES: 3,
         VOLUME_WEIGHT: 0.6,
         PRICE_WEIGHT: 0.4
+    },
+    BTC_MONITOR: {
+        ENABLED: true,
+        SYMBOL: 'BTCUSDT',
+        TIMEFRAME: '15m',
+        EMA13_PERIOD: 13,
+        EMA34_PERIOD: 34,
+        EMA55_PERIOD: 55
     }
 };
 
@@ -189,21 +173,11 @@ const TradeAlertSchema = z.object({
     volumeRatio: z.number(),
     buyerPercentage: z.number(),
     sellerPercentage: z.number(),
-    volumeConfluence: z.number().optional().nullable(),
-    volume3m: z.number().optional().nullable(),
-    volume5m: z.number().optional().nullable(),
-    volume15m: z.number().optional().nullable(),
-    emaSignal: z.string().optional().nullable(),
-    ema13: z.number().optional().nullable(),
-    ema34: z.number().optional().nullable(),
-    ema55: z.number().optional().nullable(),
-    emaCross: z.string().optional().nullable(),
-    divergence: z.string().optional().nullable(),
-    divergenceImpact: z.number().optional().nullable(),
+    volume24hVsEma9: z.string(),
+    volume24hEmoji: z.string(),
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
-    cci1h: z.string().optional().nullable(),
     cciDaily: z.string().optional().nullable(),
     cciValue: z.number().optional().nullable(),
     cciEma: z.number().optional().nullable(),
@@ -470,6 +444,7 @@ const alertCooldown = new Map();
 const lastAlertPrices = new Map();
 const fundingRateCache = new Map();
 const dailyMessageCounter = new Map();
+const lastBTCSignal = new Map(); // Para controlar o último sinal do BTC
 let dailyResetPerformed = false;
 
 class CacheManager {
@@ -639,354 +614,113 @@ function getStochEmoji(value) {
 }
 
 // =====================================================================
-// === NOVA FUNÇÃO: ANÁLISE DE EMAS NO TIMEFRAME 3 MINUTOS ===
+// === FUNÇÃO PARA DETECTAR ZONAS DE LIQUIDAÇÃO ===
 // =====================================================================
-function analyzeEMA3m(candles) {
-    if (!CONFIG.EMA.ENABLED || candles.length < CONFIG.EMA.SLOW_PERIOD + 10) {
-        return {
-            signal: 'NEUTRO',
-            ema13: null,
-            ema34: null,
-            ema55: null,
-            cross: 'SEM_CROSS',
-            price: null
-        };
+function detectLiquidationZones(candles, currentPrice) {
+    if (!CONFIG.LIQUIDATION.ENABLED || candles.length < 50) {
+        return { longZones: [], shortZones: [], nearestLong: null, nearestShort: null };
     }
 
-    const closes = candles.map(c => c.close);
-    const currentPrice = closes[closes.length - 1];
-    
-    // Calcular EMAs
-    const ema13 = calculateEMA(closes, CONFIG.EMA.FAST_PERIOD);
-    const ema34 = calculateEMA(closes, CONFIG.EMA.MEDIUM_PERIOD);
-    const ema55 = calculateEMA(closes, CONFIG.EMA.SLOW_PERIOD);
-    
-    // Verificar cruzamento
-    const prevEma13 = calculateEMA(closes.slice(0, -1), CONFIG.EMA.FAST_PERIOD);
-    const prevEma34 = calculateEMA(closes.slice(0, -1), CONFIG.EMA.MEDIUM_PERIOD);
-    
-    let cross = 'SEM_CROSS';
-    let signal = 'NEUTRO';
-    
-    // Cruzamento para cima (EMA13 cruza acima da EMA34)
-    if (prevEma13 <= prevEma34 && ema13 > ema34) {
-        cross = 'CROSS_UP';
-        if (currentPrice > ema55) {
-            signal = 'COMPRA';
-        }
-    }
-    
-    // Cruzamento para baixo (EMA13 cruza abaixo da EMA34)
-    if (prevEma13 >= prevEma34 && ema13 < ema34) {
-        cross = 'CROSS_DOWN';
-        if (currentPrice < ema55) {
-            signal = 'VENDA';
-        }
-    }
-    
-    // Verificar se o preço já estava do lado correto da EMA55
-    if (cross === 'SEM_CROSS') {
-        if (ema13 > ema34 && currentPrice > ema55) {
-            signal = 'COMPRA_ESTABELECIDA';
-        } else if (ema13 < ema34 && currentPrice < ema55) {
-            signal = 'VENDA_ESTABELECIDA';
-        }
-    }
-    
-    return {
-        signal,
-        ema13,
-        ema34,
-        ema55,
-        cross,
-        price: currentPrice
-    };
-}
-
-// =====================================================================
-// === NOVA FUNÇÃO: ANÁLISE DE VOLUME EM 3 TIMEFRAMES (3m, 5m, 15m) ===
-// =====================================================================
-async function analyzeMultiTimeframeVolume(symbol) {
-    if (!CONFIG.VOLUME.MULTI_TIMEFRAME.ENABLED) {
-        return {
-            buyerPercentage: null,
-            confluence: 0,
-            volume3m: null,
-            volume5m: null,
-            volume15m: null
-        };
-    }
-
-    try {
-        // Busca candles dos 3 timeframes
-        const [candles3m, candles5m, candles15m] = await Promise.all([
-            getCandles(symbol, '3m', 50),
-            getCandles(symbol, '5m', 50),
-            getCandles(symbol, '15m', 50)
-        ]);
-
-        // Análise para 3 minutos
-        const volume3m = await analyzeVolumeForTimeframe(candles3m, '3m');
-        
-        // Análise para 5 minutos
-        const volume5m = await analyzeVolumeForTimeframe(candles5m, '5m');
-        
-        // Análise para 15 minutos (principal)
-        const volume15m = await analyzeVolumeForTimeframe(candles15m, '15m');
-
-        // Calcular confluência (quantos timeframes concordam)
-        let confluence = 0;
-        let totalScore = 0;
-
-        // Definir direção dominante baseada no 15m
-        const dominantDirection = volume15m.buyerPercentage > 50 ? 'COMPRA' : 'VENDA';
-
-        // Verificar 3m
-        if (volume3m.buyerPercentage > 50 && dominantDirection === 'COMPRA') {
-            confluence++;
-            totalScore += volume3m.buyerPercentage * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[0];
-        } else if (volume3m.buyerPercentage < 50 && dominantDirection === 'VENDA') {
-            confluence++;
-            totalScore += (100 - volume3m.buyerPercentage) * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[0];
-        }
-
-        // Verificar 5m
-        if (volume5m.buyerPercentage > 50 && dominantDirection === 'COMPRA') {
-            confluence++;
-            totalScore += volume5m.buyerPercentage * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[1];
-        } else if (volume5m.buyerPercentage < 50 && dominantDirection === 'VENDA') {
-            confluence++;
-            totalScore += (100 - volume5m.buyerPercentage) * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[1];
-        }
-
-        // Adicionar 15m
-        if (dominantDirection === 'COMPRA') {
-            totalScore += volume15m.buyerPercentage * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[2];
-        } else {
-            totalScore += (100 - volume15m.buyerPercentage) * CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS[2];
-        }
-
-        // Calcular buyerPercentage final ponderado
-        const totalWeight = CONFIG.VOLUME.MULTI_TIMEFRAME.WEIGHTS.reduce((a, b) => a + b, 0);
-        const finalBuyerPercentage = totalScore / totalWeight;
-
-        return {
-            buyerPercentage: dominantDirection === 'COMPRA' ? finalBuyerPercentage : 100 - finalBuyerPercentage,
-            confluence,
-            volume3m: volume3m.buyerPercentage,
-            volume5m: volume5m.buyerPercentage,
-            volume15m: volume15m.buyerPercentage,
-            dominantDirection,
-            minConfluenceRequired: CONFIG.VOLUME.MULTI_TIMEFRAME.MIN_CONFLUENCE,
-            isConfluent: confluence >= CONFIG.VOLUME.MULTI_TIMEFRAME.MIN_CONFLUENCE
-        };
-
-    } catch (error) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⚠️ Erro na análise multi-timeframe para ${symbol}: ${error.message}`);
-        }
-        return {
-            buyerPercentage: null,
-            confluence: 0,
-            volume3m: null,
-            volume5m: null,
-            volume15m: null,
-            isConfluent: false
-        };
-    }
-}
-
-// =====================================================================
-// === FUNÇÃO AUXILIAR: ANÁLISE DE VOLUME PARA UM TIMEFRAME ESPECÍFICO ===
-// =====================================================================
-async function analyzeVolumeForTimeframe(candles, timeframe) {
-    if (!candles || candles.length < 30) {
-        return { buyerPercentage: 50, volumeRatio: 1 };
-    }
-
-    const volumes = candles.map(c => c.volume);
-    const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-    const currentVolume = volumes[volumes.length - 1];
-    const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
-
-    // Calcular EMA
-    const closes = candles.map(c => c.close);
-    const ema9 = calculateEMA(closes.slice(-30), 9);
-
-    const lookbackCandles = timeframe === '3m' ? 10 : (timeframe === '5m' ? 12 : 16);
-    let buyerVolume = 0, sellerVolume = 0, totalVolume = 0;
-    const recentCandles = candles.slice(-lookbackCandles);
-
-    recentCandles.forEach(candle => {
-        const vol = candle.volume;
-        totalVolume += vol;
-        
-        if (candle.close > ema9) {
-            buyerVolume += vol;
-        } else if (candle.close < ema9) {
-            sellerVolume += vol;
-        } else {
-            buyerVolume += vol / 2;
-            sellerVolume += vol / 2;
-        }
-    });
-
-    const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
-    
-    return {
-        buyerPercentage,
-        sellerPercentage: 100 - buyerPercentage,
-        volumeRatio,
-        totalVolume
-    };
-}
-
-// =====================================================================
-// === NOVA FUNÇÃO: DETECTOR DE DIVERGÊNCIAS (TIMEFRAME 15m) ===
-// =====================================================================
-function detectDivergence(candles) {
-    if (!CONFIG.DIVERGENCE.ENABLED || candles.length < CONFIG.DIVERGENCE.LOOKBACK) {
-        return {
-            type: 'NEUTRAL',
-            description: 'Sem divergência ',
-            impact: 0,
-            strength: 0
-        };
-    }
-
-    const lookback = CONFIG.DIVERGENCE.LOOKBACK;
+    const lookback = Math.min(CONFIG.LIQUIDATION.LOOKBACK_CANDLES, candles.length);
     const recentCandles = candles.slice(-lookback);
     
-    // Extrair preços e volumes
-    const prices = recentCandles.map(c => c.close);
-    const volumes = recentCandles.map(c => c.volume);
-    const highs = recentCandles.map(c => c.high);
-    const lows = recentCandles.map(c => c.low);
+    const priceVolumeClusters = [];
     
-    // Encontrar topos e fundos
-    const peaks = [];
-    const troughs = [];
-    
-    for (let i = 2; i < prices.length - 2; i++) {
-        // Topo (máxima)
-        if (highs[i] > highs[i-1] && highs[i] > highs[i-2] && 
-            highs[i] > highs[i+1] && highs[i] > highs[i+2]) {
-            peaks.push({
-                index: i,
-                price: highs[i],
-                volume: volumes[i]
+    for (let i = 0; i < recentCandles.length; i++) {
+        const candle = recentCandles[i];
+        const volumeWeight = candle.volume / Math.max(...recentCandles.map(c => c.volume));
+        
+        if (candle.high > candle.close && candle.high > candle.open) {
+            priceVolumeClusters.push({
+                price: candle.high,
+                volumeWeight,
+                type: 'short',
+                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
+                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
             });
         }
         
-        // Fundo (mínima)
-        if (lows[i] < lows[i-1] && lows[i] < lows[i-2] && 
-            lows[i] < lows[i+1] && lows[i] < lows[i+2]) {
-            troughs.push({
-                index: i,
-                price: lows[i],
-                volume: volumes[i]
+        if (candle.low < candle.close && candle.low < candle.open) {
+            priceVolumeClusters.push({
+                price: candle.low,
+                volumeWeight,
+                type: 'long',
+                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
+                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
             });
         }
     }
     
-    // Análise de divergências
-    let divergence = {
-        type: 'NEUTRAL',
-        description: 'Sem divergência ',
-        impact: 0,
-        strength: 0
+    const clusterThreshold = currentPrice * CONFIG.LIQUIDATION.CLUSTER_THRESHOLD;
+    
+    const clusterPoints = (points) => {
+        const clusters = [];
+        const used = new Set();
+        
+        for (let i = 0; i < points.length; i++) {
+            if (used.has(i)) continue;
+            
+            const cluster = {
+                prices: [points[i].price],
+                strengths: [points[i].strength],
+                totalStrength: points[i].strength,
+                avgPrice: points[i].price
+            };
+            used.add(i);
+            
+            for (let j = i + 1; j < points.length; j++) {
+                if (used.has(j)) continue;
+                
+                if (Math.abs(points[i].price - points[j].price) <= clusterThreshold) {
+                    cluster.prices.push(points[j].price);
+                    cluster.strengths.push(points[j].strength);
+                    cluster.totalStrength += points[j].strength;
+                    used.add(j);
+                }
+            }
+            
+            let weightedSum = 0;
+            for (let k = 0; k < cluster.prices.length; k++) {
+                weightedSum += cluster.prices[k] * cluster.strengths[k];
+            }
+            cluster.avgPrice = weightedSum / cluster.strengths.reduce((a, b) => a + b, 0);
+            
+            clusters.push(cluster);
+        }
+        
+        return clusters
+            .sort((a, b) => b.totalStrength - a.totalStrength)
+            .slice(0, CONFIG.LIQUIDATION.MAX_ZONES)
+            .map(c => c.avgPrice);
     };
     
-    // DIVERGÊNCIA ALTAISTA (BULLISH)
-    // Preço faz fundo mais baixo, volume faz fundo mais alto
-    if (troughs.length >= 2) {
-        const lastTwoTroughs = troughs.slice(-2);
-        if (lastTwoTroughs.length === 2) {
-            const priceLower = lastTwoTroughs[1].price < lastTwoTroughs[0].price;
-            const volumeHigher = lastTwoTroughs[1].volume > lastTwoTroughs[0].volume * 1.2; // 20% maior
-            
-            if (priceLower && volumeHigher) {
-                const strength = Math.min(100, Math.round(
-                    ((lastTwoTroughs[0].price - lastTwoTroughs[1].price) / lastTwoTroughs[1].price * 100) * 10 +
-                    (lastTwoTroughs[1].volume / lastTwoTroughs[0].volume * 50)
-                ));
-                
-                divergence = {
-                    type: 'BULLISH_DIVERGENCE',
-                    description: '🚀 Divergência ALTA',
-                    impact: CONFIG.DIVERGENCE.BULLISH_BONUS,
-                    strength: Math.min(100, strength),
-                    details: `Preço: ${formatPrice(lastTwoTroughs[1].price)} → ${formatPrice(lastTwoTroughs[0].price)} | Volume: ${Math.round(lastTwoTroughs[1].volume/1000)}K → ${Math.round(lastTwoTroughs[0].volume/1000)}K`
-                };
-            }
-        }
-    }
+    const longPoints = priceVolumeClusters
+        .filter(p => p.type === 'long' && p.price < currentPrice)
+        .sort((a, b) => b.strength - a.strength);
     
-    // DIVERGÊNCIA BAIXISTA (BEARISH)
-    // Preço faz topo mais alto, volume faz topo mais baixo
-    if (peaks.length >= 2) {
-        const lastTwoPeaks = peaks.slice(-2);
-        if (lastTwoPeaks.length === 2) {
-            const priceHigher = lastTwoPeaks[1].price > lastTwoPeaks[0].price;
-            const volumeLower = lastTwoPeaks[1].volume < lastTwoPeaks[0].volume * 0.8; // 20% menor
-            
-            if (priceHigher && volumeLower) {
-                const strength = Math.min(100, Math.round(
-                    ((lastTwoPeaks[1].price - lastTwoPeaks[0].price) / lastTwoPeaks[0].price * 100) * 10 +
-                    ((lastTwoPeaks[0].volume - lastTwoPeaks[1].volume) / lastTwoPeaks[0].volume * 50)
-                ));
-                
-                divergence = {
-                    type: 'BEARISH_DIVERGENCE',
-                    description: '⚠️ Divergência de Baixa',
-                    impact: CONFIG.DIVERGENCE.BEARISH_PENALTY,
-                    strength: Math.min(100, strength),
-                    details: `Preço: ${formatPrice(lastTwoPeaks[0].price)} → ${formatPrice(lastTwoPeaks[1].price)} | Volume: ${Math.round(lastTwoPeaks[0].volume/1000)}K → ${Math.round(lastTwoPeaks[1].volume/1000)}K`
-                };
-            }
-        }
-    }
+    const shortPoints = priceVolumeClusters
+        .filter(p => p.type === 'short' && p.price > currentPrice)
+        .sort((a, b) => b.strength - a.strength);
     
-    // DIVERGÊNCIA OCULTA (ainda mais forte)
-    // Oculta Altaista: Preço faz fundo mais alto, volume faz fundo mais baixo
-    if (troughs.length >= 2) {
-        const lastTwoTroughs = troughs.slice(-2);
-        if (lastTwoTroughs.length === 2) {
-            const priceHigher = lastTwoTroughs[1].price > lastTwoTroughs[0].price;
-            const volumeLower = lastTwoTroughs[1].volume < lastTwoTroughs[0].volume * 0.7;
-            
-            if (priceHigher && volumeLower && divergence.type === 'NEUTRAL') {
-                divergence = {
-                    type: 'HIDDEN_BULLISH',
-                    description: '🔮 Divergência Oculta Correção fraca',
-                    impact: 10,
-                    strength: 80,
-                    details: 'Momento de acumulação'
-                };
-            }
-        }
-    }
+    const longZones = clusterPoints(longPoints);
+    const shortZones = clusterPoints(shortPoints);
     
-    // CONFIRMAÇÃO DE TENDÊNCIA
-    if (peaks.length >= 2 && troughs.length >= 2) {
-        const lastPeak = peaks[peaks.length - 1];
-        const lastTrough = troughs[troughs.length - 1];
-        
-        // Preço e volume alinhados (tendência forte)
-        if (lastPeak.index > lastTrough.index) { // Tendência de alta
-            if (lastPeak.volume > volumes.slice(-5).reduce((a,b) => a+b,0)/5 * 1.5) {
-                divergence = {
-                    type: 'STRONG_UPTREND',
-                    description: '💪 Tendência de Alta ',
-                    impact: 10,
-                    strength: 90,
-                    details: 'Alta com volume crescente'
-                };
-            }
-        }
-    }
+    const nearestLong = longZones.length > 0 
+        ? longZones.reduce((nearest, zone) => 
+            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
+        ) : null;
     
-    return divergence;
+    const nearestShort = shortZones.length > 0 
+        ? shortZones.reduce((nearest, zone) => 
+            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
+        ) : null;
+    
+    return {
+        longZones,
+        shortZones,
+        nearestLong,
+        nearestShort
+    };
 }
 
 // =====================================================================
@@ -1023,7 +757,7 @@ function canSendDailyAlert(symbol) {
     resetDailyCounterIfNeeded();
     
     const currentCount = dailyMessageCounter.get(symbol) || 0;
-    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
+    const maxDaily = symbol === 'BTCUSDT' ? 50 : CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL; // BTC tem limite maior
     
     if (currentCount >= maxDaily) {
         if (CONFIG.DEBUG.VERBOSE) {
@@ -1208,6 +942,225 @@ function calculateSupportResistance(candles) {
 }
 
 // =====================================================================
+// === NOVA FUNÇÃO: ANÁLISE VOLUME 24H VS EMA 9 ===
+// =====================================================================
+function calculateVolume24hVsEma9(candles) {
+    if (!candles || candles.length < 24) {
+        return { percentage: 0, status: 'NEUTRO', emoji: '⚪' };
+    }
+    
+    // Pegar últimos 24 candles (24h se timeframe for 1h)
+    const last24Candles = candles.slice(-24);
+    
+    // Calcular EMA 9 dos preços de fechamento
+    const closes = last24Candles.map(c => c.close);
+    const ema9 = calculateEMA(closes, 9);
+    
+    // Calcular volume total e volume por categoria
+    let volumeAboveEma = 0;
+    let volumeBelowEma = 0;
+    let totalVolume = 0;
+    
+    last24Candles.forEach(candle => {
+        const vol = candle.volume;
+        totalVolume += vol;
+        
+        if (candle.close > ema9) {
+            volumeAboveEma += vol;
+        } else if (candle.close < ema9) {
+            volumeBelowEma += vol;
+        } else {
+            // Se igual, divide igualmente
+            volumeAboveEma += vol / 2;
+            volumeBelowEma += vol / 2;
+        }
+    });
+    
+    const percentageAbove = (volumeAboveEma / totalVolume) * 100;
+    const percentageBelow = (volumeBelowEma / totalVolume) * 100;
+    
+    let status = 'NEUTRO';
+    let emoji = '⚪';
+    
+    if (percentageAbove > 55) {
+        status = 'COMPRADOR';
+        emoji = '🟢';
+    } else if (percentageBelow > 55) {
+        status = 'VENDEDOR';
+        emoji = '🔴';
+    }
+    
+    // Formatar string: "+25% 🟢 Comprador" ou "+18% 🔴 Vendedor"
+    const dominantPercentage = percentageAbove > percentageBelow ? percentageAbove : percentageBelow;
+    const sign = percentageAbove > percentageBelow ? '+' : '-';
+    const statusText = percentageAbove > percentageBelow ? 'Comprador' : 'Vendedor';
+    
+    const formattedString = `${sign}${dominantPercentage.toFixed(0)}% ${emoji} ${statusText}`;
+    
+    return {
+        percentage: dominantPercentage,
+        status: statusText,
+        emoji: emoji,
+        formatted: formattedString
+    };
+}
+
+// =====================================================================
+// === NOVA FUNÇÃO: MONITOR BTC COM EMA ===
+// =====================================================================
+async function monitorBTC() {
+    if (!CONFIG.BTC_MONITOR.ENABLED) return null;
+    
+    try {
+        const symbol = CONFIG.BTC_MONITOR.SYMBOL;
+        const timeframe = CONFIG.BTC_MONITOR.TIMEFRAME;
+        
+        // Buscar candles suficientes para calcular as EMAs
+        const candles = await getCandles(symbol, timeframe, 100);
+        
+        if (!candles || candles.length < 55) {
+            console.log('⚠️ Dados insuficientes para monitorar BTC');
+            return null;
+        }
+        
+        const closes = candles.map(c => c.close);
+        const currentPrice = closes[closes.length - 1];
+        
+        // Calcular EMAs
+        const ema13 = calculateEMA(closes, CONFIG.BTC_MONITOR.EMA13_PERIOD);
+        const ema34 = calculateEMA(closes, CONFIG.BTC_MONITOR.EMA34_PERIOD);
+        const ema55 = calculateEMA(closes, CONFIG.BTC_MONITOR.EMA55_PERIOD);
+        
+        // Verificar cruzamento da EMA13 sobre a EMA34
+        // Precisamos do valor anterior para confirmar o cruzamento
+        const prevEma13 = calculateEMA(closes.slice(0, -1), CONFIG.BTC_MONITOR.EMA13_PERIOD);
+        const prevEma34 = calculateEMA(closes.slice(0, -1), CONFIG.BTC_MONITOR.EMA34_PERIOD);
+        
+        const ema13CrossedAboveEma34 = prevEma13 <= prevEma34 && ema13 > ema34;
+        
+        // Determinar o sinal baseado no preço em relação à EMA55
+        let signal = null;
+        let signalType = null;
+        
+        if (ema13CrossedAboveEma34) {
+            if (currentPrice < ema55) {
+                signal = 'BEAR';
+                signalType = '🔴 BTC Monitor Momentum Bear';
+            } else if (currentPrice > ema55) {
+                signal = 'BULL';
+                signalType = '🟢 BTC Monitor Momentum Bull';
+            }
+        }
+        
+        // Verificar se houve mudança de sinal
+        const lastSignal = lastBTCSignal.get('lastSignal');
+        const lastSignalTime = lastBTCSignal.get('lastSignalTime') || 0;
+        const lastPrice = lastBTCSignal.get('lastPrice');
+        
+        // Cooldown reduzido para BTC (30 segundos)
+        const cooldownMs = 30000;
+        const now = Date.now();
+        
+        if (signal && (signal !== lastSignal || Math.abs(currentPrice - (lastPrice || 0)) / (lastPrice || 1) > 0.001) && 
+            (now - lastSignalTime) > cooldownMs) {
+            
+            // Atualizar último sinal
+            lastBTCSignal.set('lastSignal', signal);
+            lastBTCSignal.set('lastSignalTime', now);
+            lastBTCSignal.set('lastPrice', currentPrice);
+            
+            // Buscar dados adicionais para o alerta
+            const [candles1h, candlesDaily, candles4h] = await Promise.all([
+                getCandles(symbol, '1h', 100),
+                getCandles(symbol, '1d', 100),
+                getCandles(symbol, '4h', 100)
+            ]);
+            
+            // Calcular indicadores
+            const volume24hVsEma9 = calculateVolume24hVsEma9(candles1h);
+            const rsi1h = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
+            const volumes = candles1h.map(c => c.volume);
+            const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+            const currentVolume = volumes[volumes.length - 1];
+            const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+            
+            const cciDaily = calculateCCITrend(candlesDaily);
+            let cciDisplay = "NEUTRO";
+            if (cciDaily.trend === "ALTA") cciDisplay = "CCI 💹ALTA";
+            else if (cciDaily.trend === "BAIXA") cciDisplay = "CCI 🔴BAIXA";
+            
+            const stochDaily = calculateStochastic(
+                candlesDaily, 
+                CONFIG.STOCH.PERIOD_1D, 
+                CONFIG.STOCH.SLOW_1D, 
+                CONFIG.STOCH.SMOOTH_1D
+            );
+            
+            const stoch4h = calculateStochastic(
+                candles4h, 
+                CONFIG.STOCH.PERIOD_4H, 
+                CONFIG.STOCH.SLOW_4H, 
+                CONFIG.STOCH.SMOOTH_4H
+            );
+            
+            let stochDailyDisplay = "N/D";
+            if (stochDaily.k !== null && stochDaily.d !== null) {
+                const emoji = getStochEmoji(stochDaily.k);
+                stochDailyDisplay = formatStochastic(stochDaily.k, stochDaily.d, emoji);
+            }
+            
+            let stoch4hDisplay = "N/D";
+            if (stoch4h.k !== null && stoch4h.d !== null) {
+                const emoji = getStochEmoji(stoch4h.k);
+                stoch4hDisplay = formatStochastic(stoch4h.k, stoch4h.d, emoji);
+            }
+            
+            const lsr = await getLSR(symbol);
+            const funding = await getFundingRate(symbol);
+            const sr = calculateSupportResistance(candles1h);
+            
+            const fundingPct = funding ? (funding * 100).toFixed(4) : '0.0000';
+            const fundingSign = funding && funding > 0 ? '+' : '';
+            
+            const time = getBrazilianDateTime();
+            
+            // Contador de alertas diários
+            const dailyCount = dailyMessageCounter.get(symbol) || 0;
+            const newCount = dailyCount + 1;
+            dailyMessageCounter.set(symbol, newCount);
+            
+            // Formatar a mensagem conforme solicitado
+            const message = `<i>${signalType}
+ <b>🐋Volume!</b> | ✨#SCORE: 100%
+ Alerta:${newCount} | ${time.full}hs
+ 💲Preço: $${formatPrice(currentPrice)}
+ ▫️Vol 24hs: ${volume24hVsEma9.formatted} 
+ #RSI 1h: ${formatNumber(rsi1h, 0)} 🚀 | #Vol: ${volumeRatio.toFixed(2)}x (${volumeRatio > 1.5 ? '77' : '50'}%)
+ #LSR: ${formatNumber(lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
+ 📊 Gráfico Diário: ${cciDisplay}
+ Stoch 1D: ${stochDailyDisplay}
+ Stoch 4H: ${stoch4hDisplay}
+ 🔻Resist: ${formatPrice(sr.resistance)} | ${formatPrice(sr.resistance * 1.03)}
+ 🔹Supt: ${formatPrice(sr.support)} 
+❅──────✧❅🔹❅✧──────❅
+ <b>🤖 IA Dica...</b> Observar Zonas de 🔹Suporte 
+Alerta Educativo, não é recomendação de investimento.
+ Titanium Prime by @J4Rviz</i>`;
+            
+            console.log(`📊 BTC Signal: ${signalType} - Preço: $${formatPrice(currentPrice)}`);
+            
+            return message;
+        }
+        
+        return null;
+        
+    } catch (error) {
+        console.error('❌ Erro no monitor BTC:', error.message);
+        return null;
+    }
+}
+
+// =====================================================================
 // === COOLDOWN CHECK ===
 // =====================================================================
 function canSendAlert(symbol, currentPrice, direction) {
@@ -1256,7 +1209,7 @@ function registerAlert(symbol, price, direction) {
     const newCount = currentCount + 1;
     dailyMessageCounter.set(symbol, newCount);
     
-    console.log(`📊 ${symbol}: ${newCount}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alerta(s) hoje`);
+    console.log(`📊 ${symbol}: ${newCount}/${symbol === 'BTCUSDT' ? 50 : CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alerta(s) hoje`);
     
     for (const [key, timestamp] of alertCooldown) {
         if (now - timestamp > 2 * 60 * 60 * 1000) {
@@ -1273,11 +1226,11 @@ async function getCandles(symbol, timeframe, limit = 100) {
     if (cached) return cached;
 
     const intervalMap = {
-        '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
         '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
     };
     
-    const interval = intervalMap[timeframe] || '15m';
+    const interval = intervalMap[timeframe] || '1h';
     const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     
     try {
@@ -1394,156 +1347,30 @@ function calculateTradeLevels(price, atr, direction, support, resistance) {
     return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
 }
 
-// =====================================================================
-// === FUNÇÃO PARA DETECTAR ZONAS DE LIQUIDAÇÃO ===
-// =====================================================================
-function detectLiquidationZones(candles, currentPrice) {
-    if (!CONFIG.LIQUIDATION.ENABLED || candles.length < 50) {
-        return { longZones: [], shortZones: [], nearestLong: null, nearestShort: null };
-    }
-
-    const lookback = Math.min(CONFIG.LIQUIDATION.LOOKBACK_CANDLES, candles.length);
-    const recentCandles = candles.slice(-lookback);
-    
-    const priceVolumeClusters = [];
-    
-    for (let i = 0; i < recentCandles.length; i++) {
-        const candle = recentCandles[i];
-        const volumeWeight = candle.volume / Math.max(...recentCandles.map(c => c.volume));
-        
-        if (candle.high > candle.close && candle.high > candle.open) {
-            priceVolumeClusters.push({
-                price: candle.high,
-                volumeWeight,
-                type: 'short',
-                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
-                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
-            });
-        }
-        
-        if (candle.low < candle.close && candle.low < candle.open) {
-            priceVolumeClusters.push({
-                price: candle.low,
-                volumeWeight,
-                type: 'long',
-                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
-                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
-            });
-        }
-    }
-    
-    const clusterThreshold = currentPrice * CONFIG.LIQUIDATION.CLUSTER_THRESHOLD;
-    
-    const clusterPoints = (points) => {
-        const clusters = [];
-        const used = new Set();
-        
-        for (let i = 0; i < points.length; i++) {
-            if (used.has(i)) continue;
-            
-            const cluster = {
-                prices: [points[i].price],
-                strengths: [points[i].strength],
-                totalStrength: points[i].strength,
-                avgPrice: points[i].price
-            };
-            used.add(i);
-            
-            for (let j = i + 1; j < points.length; j++) {
-                if (used.has(j)) continue;
-                
-                if (Math.abs(points[i].price - points[j].price) <= clusterThreshold) {
-                    cluster.prices.push(points[j].price);
-                    cluster.strengths.push(points[j].strength);
-                    cluster.totalStrength += points[j].strength;
-                    used.add(j);
-                }
-            }
-            
-            let weightedSum = 0;
-            for (let k = 0; k < cluster.prices.length; k++) {
-                weightedSum += cluster.prices[k] * cluster.strengths[k];
-            }
-            cluster.avgPrice = weightedSum / cluster.strengths.reduce((a, b) => a + b, 0);
-            
-            clusters.push(cluster);
-        }
-        
-        return clusters
-            .sort((a, b) => b.totalStrength - a.totalStrength)
-            .slice(0, CONFIG.LIQUIDATION.MAX_ZONES)
-            .map(c => c.avgPrice);
-    };
-    
-    const longPoints = priceVolumeClusters
-        .filter(p => p.type === 'long' && p.price < currentPrice)
-        .sort((a, b) => b.strength - a.strength);
-    
-    const shortPoints = priceVolumeClusters
-        .filter(p => p.type === 'short' && p.price > currentPrice)
-        .sort((a, b) => b.strength - a.strength);
-    
-    const longZones = clusterPoints(longPoints);
-    const shortZones = clusterPoints(shortPoints);
-    
-    const nearestLong = longZones.length > 0 
-        ? longZones.reduce((nearest, zone) => 
-            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
-        ) : null;
-    
-    const nearestShort = shortZones.length > 0 
-        ? shortZones.reduce((nearest, zone) => 
-            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
-        ) : null;
-    
-    return {
-        longZones,
-        shortZones,
-        nearestLong,
-        nearestShort
-    };
-}
-
-// =====================================================================
-// === FUNÇÃO PRINCIPAL DE ANÁLISE (MODIFICADA COM EMAS 3m) ===
-// =====================================================================
 async function analyzeForAlerts(symbol) {
     try {
-        // Busca candles para múltiplos timeframes (incluindo 3m para EMAs)
-        const [candles15m, candles1h, candlesDaily, candles4h, candles3m, candles5m] = await Promise.all([
-            getCandles(symbol, '15m', 200),     // Principal para volume
-            getCandles(symbol, '1h', 100),       // 1h para RSI e CCI
-            getCandles(symbol, '1d', 100),       // Diário para CCI Diário
-            getCandles(symbol, '4h', 100),       // 4h para Stoch
-            getCandles(symbol, '3m', 100),       // 3m para EMAs e volume
-            getCandles(symbol, '5m', 100)        // 5m para volume
+        const [candles1h, candles15m, candlesDaily, candles4h] = await Promise.all([
+            getCandles(symbol, '1h', 100),
+            getCandles(symbol, '15m', 50),
+            getCandles(symbol, '1d', 100),
+            getCandles(symbol, '4h', 100)
         ]);
         
-        // Validação
-        if (candles15m.length < 50 || candles1h.length < 30 || candlesDaily.length < 50 || 
-            candles4h.length < 50 || candles3m.length < 60) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 50 || candles4h.length < 50) return null;
         
-        const currentPrice = candles15m[candles15m.length - 1].close;
+        const currentPrice = candles1h[candles1h.length - 1].close;
+        const currentCandle15m = candles15m[candles15m.length - 1];
         
-        // ANÁLISE DE EMAS NO TIMEFRAME 3 MINUTOS
-        const emaAnalysis = analyzeEMA3m(candles3m);
-        
-        // ANÁLISE DE VOLUME MULTI-TIMEFRAME (3m, 5m, 15m)
-        const volumeMulti = await analyzeMultiTimeframeVolume(symbol);
-        
-        // Análise de volume tradicional (15m)
-        const volumes = candles15m.map(c => c.volume);
-        const avgVolume = volumes.slice(-40).reduce((a, b) => a + b, 0) / 40;
+        const volumes = candles1h.map(c => c.volume);
+        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
         const currentVolume = volumes[volumes.length - 1];
         const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
         
-        // Calcular EMA para determinar buyer/seller (15m)
-        const closes = candles15m.map(c => c.close);
-        const ema9 = calculateEMA(closes.slice(-40), 9);
+        const closes = candles1h.map(c => c.close);
+        const ema9 = calculateEMA(closes.slice(-20), 9);
         
-        const lookbackCandles = 16;
         let buyerVolume = 0, sellerVolume = 0, totalVolume = 0;
-        const recentCandles = candles15m.slice(-lookbackCandles);
+        const recentCandles = candles1h.slice(-24);
         
         recentCandles.forEach(candle => {
             const vol = candle.volume;
@@ -1559,22 +1386,14 @@ async function analyzeForAlerts(symbol) {
             }
         });
         
-        const buyerPercentage15m = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
-        const sellerPercentage15m = 100 - buyerPercentage15m;
+        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
+        const sellerPercentage = 100 - buyerPercentage;
         
-        // DETECTOR DE DIVERGÊNCIAS (15m)
-        const divergence = detectDivergence(candles15m);
+        // NOVO: Calcular Volume 24h vs EMA 9
+        const volume24hVsEma9 = calculateVolume24hVsEma9(candles1h);
         
-        // RSI em 1h
-        const rsi1h = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
-        
-        // CCI em 1 hora
-        const cci1h = calculateCCITrend(candles1h);
-        
-        // CCI Diário
         const cciDaily = calculateCCITrend(candlesDaily);
         
-        // Stochastics
         const stochDaily = calculateStochastic(
             candlesDaily, 
             CONFIG.STOCH.PERIOD_1D, 
@@ -1601,15 +1420,14 @@ async function analyzeForAlerts(symbol) {
             stoch4hDisplay = formatStochastic(stoch4h.k, stoch4h.d, emoji);
         }
         
-        // Zonas de liquidação
-        const liquidationZones = detectLiquidationZones(candles15m, currentPrice);
+        const liquidationZones = detectLiquidationZones(candles1h, currentPrice);
         
-        // Outros indicadores
-        const [lsr, funding, sr, atr] = await Promise.all([
+        const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
             getLSR(symbol),
             getFundingRate(symbol),
-            Promise.resolve(calculateSupportResistance(candles15m)),
-            Promise.resolve(calculateATR(candles15m, 14))
+            Promise.resolve(calculateRSI(candles1h, CONFIG.RSI.PERIOD)),
+            Promise.resolve(calculateSupportResistance(candles1h)),
+            Promise.resolve(calculateATR(candles1h, 14))
         ]);
         
         if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
@@ -1618,40 +1436,17 @@ async function analyzeForAlerts(symbol) {
         let score = 0;
         let confidence = 0;
         
-        // Definir buyerPercentage final (usar multi-timeframe se disponível)
-        const finalBuyerPercentage = volumeMulti.isConfluent ? volumeMulti.buyerPercentage : buyerPercentage15m;
-        
-        // ==================== CRITÉRIOS DE COMPRA ====================
-        if (finalBuyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
+        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h < CONFIG.RSI.BUY_MAX &&
-            cci1h.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
+            rsi1h < CONFIG.RSI.BUY_MAX) {
             
-            // VERIFICAR CONDIÇÃO DAS EMAS 3m PARA COMPRA
-            const emaValidForBuy = emaAnalysis.signal === 'COMPRA' || emaAnalysis.signal === 'COMPRA_ESTABELECIDA';
-            
-            if (emaValidForBuy) {
+            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
                 direction = 'COMPRA';
                 score = 45;
                 
-                // Bônus por confluência de timeframes
-                if (volumeMulti.isConfluent) {
-                    score += volumeMulti.confluence * 5; // +5 por cada timeframe confluente
-                }
-                
-                // Bônus por divergência
-                if (divergence.type === 'BULLISH_DIVERGENCE' || divergence.type === 'HIDDEN_BULLISH') {
-                    score += divergence.impact;
-                }
-                
-                // Bônus por cruzamento recente das EMAs
-                if (emaAnalysis.cross === 'CROSS_UP') {
-                    score += 15; // Bônus extra por cruzamento recente
-                }
-                
-                if (finalBuyerPercentage > 60) score += 15;
-                else if (finalBuyerPercentage > 55) score += 12;
-                else if (finalBuyerPercentage > 52) score += 8;
+                if (buyerPercentage > 60) score += 15;
+                else if (buyerPercentage > 55) score += 12;
+                else if (buyerPercentage > 52) score += 8;
                 
                 if (volumeRatio > 2.5) score += 15;
                 else if (volumeRatio > 2.0) score += 12;
@@ -1685,40 +1480,22 @@ async function analyzeForAlerts(symbol) {
                     if (distanceToResistance > 5) score += 8;
                     else if (distanceToResistance > 2) score += 5;
                 }
+            } else if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} rejeitado para COMPRA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_BUY})`);
             }
         }
         
-        // ==================== CRITÉRIOS DE VENDA ====================
-        if (finalBuyerPercentage < (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
+        if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h > CONFIG.RSI.SELL_MIN &&
-            cci1h.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
+            rsi1h > CONFIG.RSI.SELL_MIN) {
             
-            // VERIFICAR CONDIÇÃO DAS EMAS 3m PARA VENDA
-            const emaValidForSell = emaAnalysis.signal === 'VENDA' || emaAnalysis.signal === 'VENDA_ESTABELECIDA';
-            
-            if (emaValidForSell) {
+            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
                 direction = 'VENDA';
                 score = 45;
                 
-                // Bônus por confluência de timeframes
-                if (volumeMulti.isConfluent) {
-                    score += volumeMulti.confluence * 5;
-                }
-                
-                // Bônus/penalidade por divergência
-                if (divergence.type === 'BEARISH_DIVERGENCE') {
-                    score += divergence.impact;
-                }
-                
-                // Bônus por cruzamento recente das EMAs
-                if (emaAnalysis.cross === 'CROSS_DOWN') {
-                    score += 15; // Bônus extra por cruzamento recente
-                }
-                
-                if (finalBuyerPercentage < 40) score += 15; // Mais vendedores
-                else if (finalBuyerPercentage < 45) score += 12;
-                else if (finalBuyerPercentage < 48) score += 8;
+                if (sellerPercentage > 60) score += 15;
+                else if (sellerPercentage > 55) score += 12;
+                else if (sellerPercentage > 52) score += 8;
                 
                 if (volumeRatio > 2.5) score += 15;
                 else if (volumeRatio > 2.0) score += 12;
@@ -1752,6 +1529,8 @@ async function analyzeForAlerts(symbol) {
                     if (distanceToSupport > 5) score += 8;
                     else if (distanceToSupport > 2) score += 5;
                 }
+            } else if (CONFIG.DEBUG.VERBOSE) {
+                console.log(`⏸️ ${symbol} rejeitado para VENDA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_SELL})`);
             }
         }
         
@@ -1768,28 +1547,9 @@ async function analyzeForAlerts(symbol) {
         
         const emoji = getConfidenceEmoji(confidence);
         
-        // Formatar CCI 1H
-        let cci1hDisplay = "NEUTRO";
-        if (cci1h.trend === "ALTA") cci1hDisplay = "CCI 💹ALTA";
-        else if (cci1h.trend === "BAIXA") cci1hDisplay = "CCI 🔴BAIXA";
-        
-        // Formatar CCI Diário
-        let cciDailyDisplay = "NEUTRO";
-        if (cciDaily.trend === "ALTA") cciDailyDisplay = "CCI 💹ALTA";
-        else if (cciDaily.trend === "BAIXA") cciDailyDisplay = "CCI 🔴BAIXA";
-        
-        // Formatar divergência
-        let divergenceDisplay = "Sem divergência";
-        if (divergence.type !== 'NEUTRAL') {
-            divergenceDisplay = divergence.description;
-        }
-        
-        // Formatar sinal das EMAs
-        let emaSignalDisplay = "NEUTRO";
-        if (emaAnalysis.signal === 'COMPRA') emaSignalDisplay = "📈 EMA CRUZOU ALTA";
-        else if (emaAnalysis.signal === 'COMPRA_ESTABELECIDA') emaSignalDisplay = "📈 EMA ESTABELECIDA ALTA";
-        else if (emaAnalysis.signal === 'VENDA') emaSignalDisplay = "📉 EMA CRUZOU BAIXA";
-        else if (emaAnalysis.signal === 'VENDA_ESTABELECIDA') emaSignalDisplay = "📉 EMA ESTABELECIDA BAIXA";
+        let cciDisplay = "NEUTRO";
+        if (cciDaily.trend === "ALTA") cciDisplay = "CCI 💹ALTA";
+        else if (cciDaily.trend === "BAIXA") cciDisplay = "CCI 🔴BAIXA";
         
         const alert = {
             symbol,
@@ -1803,26 +1563,16 @@ async function analyzeForAlerts(symbol) {
             confidence,
             score: confidence,
             volumeRatio,
-            buyerPercentage: finalBuyerPercentage,
-            sellerPercentage: 100 - finalBuyerPercentage,
-            volumeConfluence: volumeMulti.confluence,
-            volume3m: volumeMulti.volume3m,
-            volume5m: volumeMulti.volume5m,
-            volume15m: volumeMulti.volume15m,
-            emaSignal: emaSignalDisplay,
-            ema13: emaAnalysis.ema13,
-            ema34: emaAnalysis.ema34,
-            ema55: emaAnalysis.ema55,
-            emaCross: emaAnalysis.cross,
-            divergence: divergenceDisplay,
-            divergenceImpact: divergence.impact,
+            buyerPercentage,
+            sellerPercentage,
+            volume24hVsEma9: volume24hVsEma9.formatted,
+            volume24hEmoji: volume24hVsEma9.emoji,
             lsr,
             funding,
             rsi: rsi1h,
-            cci1h: cci1hDisplay,
-            cciDaily: cciDailyDisplay,
-            cciValue: cci1h.value,
-            cciEma: cci1h.ema,
+            cciDaily: cciDisplay,
+            cciValue: cciDaily.value,
+            cciEma: cciDaily.ema,
             stochDaily: stochDailyDisplay,
             stoch4h: stoch4hDisplay,
             longLiquidationZones: liquidationZones.longZones,
@@ -1913,7 +1663,7 @@ async function sendTelegramAlert(message, parseMode = 'HTML') {
 }
 
 // =====================================================================
-// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA (MODIFICADA) ===
+// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA ===
 // =====================================================================
 function formatTradeAlert(alert) {
     const time = getBrazilianDateTime();
@@ -1940,13 +1690,15 @@ function formatTradeAlert(alert) {
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b> Com CCI Diário em ALTA a probabilidade do Scalp dar certo e maior...Observar Zonas de Suporte de Compra' 
-        : '<b>🤖 IA Dica...</b> Com CCI Diário em BAIXA a probabilidade do Scalp dar certo e maior...Realizar Lucro ou Parcial perto da Resistência.';
+        ? '<b>🤖 IA Dica...</b> Observar Zonas de 🔹Suporte de Compra' 
+        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da 🔻Resistência.';
     
     const stochDaily = alert.stochDaily || 'N/D';
     const stoch4h = alert.stoch4h || 'N/D';
     
-    // Formatar zonas de liquidação
+    // =================================================================
+    // === FORMATAR ZONAS DE LIQUIDAÇÃO - LINHAS SEPARADAS ===
+    // =================================================================
     let longLiqText = '';
     let shortLiqText = '';
     
@@ -1965,29 +1717,13 @@ function formatTradeAlert(alert) {
         }
     }
     
-    // Informações de volume multi-timeframe
-    let volumeInfo = '';
-    if (alert.volume3m && alert.volume5m && alert.volume15m) {
-        volumeInfo = ` Vol 3/5/15m: ${alert.volume3m.toFixed(0)}/${alert.volume5m.toFixed(0)}/${alert.volume15m.toFixed(0)}% | Conf: ${alert.volumeConfluence}/3`;
-    }
-    
-    // Informação de divergência
-    let divergenceInfo = '';
-    if (alert.divergence && alert.divergence !== 'Sem divergência') {
-        const divEmoji = alert.divergence.includes('Alta') ? '🚀' : '⚠️';
-        divergenceInfo = `\n${divEmoji} ${alert.divergence}`;
-    }
-    
-    
-    
-    return `<i>${alert.emoji} <b>${dirEmoji} 🎯SCALP ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume💱!</b> | ✨#SCORE: ${alert.confidence}%
+    return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
+ <b>🐋Volume!</b> | ✨#SCORE: ${alert.confidence}%
  Alerta:${dailyCount} | ${time.full}hs
  💲Preço: $${entry}
- #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
- ${volumeInfo}${divergenceInfo}
+ ▫️Vol 24hs: ${alert.volume24hVsEma9} 
+ #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol 1h: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
  #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
- 📊 Gráfico 1H: ${alert.cci1h || 'NEUTRO'}
  📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
  Stoch 1D: ${stochDaily}
  Stoch 4H: ${stoch4h}
@@ -2031,11 +1767,9 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`   - Timeframes Volume: 3m, 5m, 15m (multi-timeframe)`);
-    console.log(`   - EMAs 3m: ${CONFIG.EMA.FAST_PERIOD}/${CONFIG.EMA.MEDIUM_PERIOD}/${CONFIG.EMA.SLOW_PERIOD} (OBRIGATÓRIO)`);
-    console.log(`   - Critério Compra: EMA13 > EMA34 | Preço > EMA55 | Volume >52% | RSI <60 | CCI 1h ALTA`);
-    console.log(`   - Critério Venda: EMA13 < EMA34 | Preço < EMA55 | Volume >52% | RSI >66 | CCI 1h BAIXA`);
-    console.log(`   - Divergências: ATIVADO (timeframe 15m)`);
+    console.log(`   - Compra necessita: ${CONFIG.CCI.REQUIRED_FOR_BUY}`);
+    console.log(`   - Venda necessita: ${CONFIG.CCI.REQUIRED_FOR_SELL}`);
+    console.log(`   - BTC Monitor: ATIVADO (EMA13/34/55 no timeframe 15m)`);
     if (CONFIG.LIQUIDATION.ENABLED) {
         console.log(`   - Zonas de liquidação: ATIVADO`);
     }
@@ -2051,6 +1785,16 @@ async function realTimeScanner() {
         resetDailyCounterIfNeeded();
         
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
+        
+        // Monitor BTC primeiro (prioridade máxima)
+        const btcAlert = await monitorBTC();
+        if (btcAlert) {
+            const sent = await sendTelegramAlert(btcAlert);
+            if (sent) {
+                alertsSent++;
+                console.log(`✅ Alerta BTC enviado!`);
+            }
+        }
         
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         const alerts = [];
@@ -2086,15 +1830,6 @@ async function realTimeScanner() {
                 alertsSent++;
                 successfulAlerts++;
                 console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)`);
-                if (alert.emaSignal) {
-                    console.log(`   📊 EMAs 3m: ${alert.emaSignal}`);
-                }
-                if (alert.divergence && alert.divergence !== 'Sem divergência') {
-                    console.log(`   📊 Divergência: ${alert.divergence}`);
-                }
-                if (alert.volumeConfluence) {
-                    console.log(`   📊 Confluência: ${alert.volumeConfluence}/3 timeframes`);
-                }
             } else {
                 console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
             }
@@ -2102,11 +1837,12 @@ async function realTimeScanner() {
             await new Promise(r => setTimeout(r, 1500));
         }
         
-        if (topAlerts.length === 0) {
+        if (topAlerts.length === 0 && !btcAlert) {
             console.log('📭 Nenhum alerta no momento');
             consecutiveEmptyScans++;
         } else {
-            console.log(`📨 Alertas enviados com sucesso: ${successfulAlerts}/${topAlerts.length}`);
+            if (btcAlert) console.log(`📨 Alerta BTC enviado`);
+            if (topAlerts.length > 0) console.log(`📨 Alertas enviados com sucesso: ${successfulAlerts}/${topAlerts.length}`);
             consecutiveEmptyScans = 0;
         }
         
@@ -2132,21 +1868,21 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME ');
+    console.log('🚀 TITANIUM PRIME - BTC MONITOR EDITION');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
     console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`📊 Timeframes Volume: 3m, 5m, 15m (confluência mínima: ${CONFIG.VOLUME.MULTI_TIMEFRAME.MIN_CONFLUENCE})`);
-    console.log(`📊 EMAs 3m: ${CONFIG.EMA.FAST_PERIOD}/${CONFIG.EMA.MEDIUM_PERIOD}/${CONFIG.EMA.SLOW_PERIOD} (OBRIGATÓRIO)`);
-    console.log(`📊 Divergências: ${CONFIG.DIVERGENCE.ENABLED ? '✅' : '❌'} (timeframe 15m)`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}`);
-    console.log(`📊 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
+    console.log(`💰 BTC Monitor: ATIVADO - EMA13/34/55 (15m)`);
+    if (CONFIG.LIQUIDATION.ENABLED) {
+        console.log(`💰 Zonas de Liquidação: ATIVADO`);
+    }
     console.log('');
     
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium Prime Ativado - EMAs 3m Obrigatórias`;
+    const initMessage = `🤖 Titanium Prime Ativado - BTC Monitor Momentum Ativo!\nMonitorando EMA13/34/55 no timeframe 15m`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
