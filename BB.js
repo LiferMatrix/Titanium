@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyz
-        CHAT_ID: '-100255
+        BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: process.env.TELEGRAM_CHAT_ID || '-1002554953979'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -30,6 +30,21 @@ const CONFIG = {
     },
     VOLUME: {
         EMA_PERIOD: 9
+    },
+    RSI: {
+        PERIOD: 14
+    },
+    STOCHASTIC: {
+        DAILY: {
+            K_PERIOD: 5,
+            K_SMOOTH: 3,
+            D_PERIOD: 3
+        },
+        FOUR_HOUR: {
+            K_PERIOD: 14,
+            K_SMOOTH: 3,
+            D_PERIOD: 3
+        }
     }
 };
 
@@ -52,7 +67,7 @@ function getBrazilianDateTime() {
 }
 
 function formatPrice(price) {
-    if (!price) return '-';
+    if (!price || isNaN(price)) return '-';
     if (price > 1000) return price.toFixed(2);
     if (price > 1) return price.toFixed(3);
     if (price > 0.1) return price.toFixed(4);
@@ -107,8 +122,16 @@ const rateLimiter = new SimpleRateLimiter();
 // === FUNÇÕES DE CÁLCULO ===
 // =====================================================================
 
+// Calcular SMA
+function calculateSMA(values, period) {
+    if (!values || values.length < period) return 0;
+    const sum = values.slice(-period).reduce((a, b) => a + b, 0);
+    return sum / period;
+}
+
 // Calcular EMA
 function calculateEMA(values, period) {
+    if (!values || values.length === 0) return 0;
     if (values.length < period) {
         return values.reduce((a, b) => a + b, 0) / values.length;
     }
@@ -118,6 +141,121 @@ function calculateEMA(values, period) {
         ema = (values[i] - ema) * multiplier + ema;
     }
     return ema;
+}
+
+// RMA (Wilder's Smoothing) - usado no RSI oficial
+function calculateRMA(values, period) {
+    if (!values || values.length === 0) return 0;
+    if (values.length < period) {
+        return values.reduce((a, b) => a + b, 0) / values.length;
+    }
+    
+    let rma = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    const alpha = 1 / period;
+    
+    for (let i = period; i < values.length; i++) {
+        rma = alpha * values[i] + (1 - alpha) * rma;
+    }
+    return rma;
+}
+
+// Calcular RSI OFICIAL (igual ao TradingView)
+function calculateRSI(candles, period = 14) {
+    if (!candles || candles.length <= period) {
+        return 50;
+    }
+    
+    // Calcular mudanças de preço
+    const changes = [];
+    for (let i = 1; i < candles.length; i++) {
+        changes.push(candles[i].close - candles[i-1].close);
+    }
+    
+    // Separar ganhos e perdas
+    const gains = changes.map(c => c > 0 ? c : 0);
+    const losses = changes.map(c => c < 0 ? -c : 0);
+    
+    // Calcular RMA (Wilder's Smoothing) para gains e losses
+    const avgGain = calculateRMA(gains, period);
+    const avgLoss = calculateRMA(losses, period);
+    
+    // Calcular RSI
+    if (avgLoss === 0) return 100;
+    if (avgGain === 0) return 0;
+    
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return Math.min(100, Math.max(0, Math.round(rsi * 100) / 100));
+}
+
+// Calcular Estocástico (igual ao TradingView)
+function calculateStochastic(candles, kPeriod, kSmooth, dPeriod) {
+    if (!candles || candles.length < kPeriod + kSmooth + dPeriod) {
+        return { k: 50, d: 50 };
+    }
+    
+    // Calcular %K raw (Stochastic rápido)
+    const kRaw = [];
+    for (let i = kPeriod - 1; i < candles.length; i++) {
+        const periodCandles = candles.slice(i - kPeriod + 1, i + 1);
+        const highestHigh = Math.max(...periodCandles.map(c => c.high));
+        const lowestLow = Math.min(...periodCandles.map(c => c.low));
+        const currentClose = candles[i].close;
+        
+        if (highestHigh - lowestLow === 0) {
+            kRaw.push(50);
+        } else {
+            const kValue = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kRaw.push(Math.min(100, Math.max(0, kValue)));
+        }
+    }
+    
+    // Suavizar %K com SMA (kSmooth)
+    const kSmoothValues = [];
+    for (let i = kSmooth - 1; i < kRaw.length; i++) {
+        const smoothSum = kRaw.slice(i - kSmooth + 1, i + 1).reduce((a, b) => a + b, 0);
+        kSmoothValues.push(smoothSum / kSmooth);
+    }
+    
+    // Calcular %D (SMA do %K suavizado)
+    const dValues = [];
+    for (let i = dPeriod - 1; i < kSmoothValues.length; i++) {
+        const dSum = kSmoothValues.slice(i - dPeriod + 1, i + 1).reduce((a, b) => a + b, 0);
+        dValues.push(dSum / dPeriod);
+    }
+    
+    // Pegar os valores mais recentes
+    const currentK = kSmoothValues.length > 0 ? kSmoothValues[kSmoothValues.length - 1] : 50;
+    const currentD = dValues.length > 0 ? dValues[dValues.length - 1] : 50;
+    
+    return {
+        k: Math.min(100, Math.max(0, Math.round(currentK * 100) / 100)),
+        d: Math.min(100, Math.max(0, Math.round(currentD * 100) / 100))
+    };
+}
+
+// Formatar Estocástico para exibição
+function formatStochastic(stoch, type) {
+    const k = stoch.k;
+    const d = stoch.d;
+    
+    let emoji = '🟡';
+    let signal = '';
+    
+    if (k < 20 && d < 25) {
+        emoji = '🟢'; // Sobre vendido
+        signal = '';
+    } else if (k > 80 && d > 75) {
+        emoji = '🔴'; // Sobre comprado
+        signal = '';
+    }
+    
+    if (k > d) {
+        return `K${Math.round(k)}⤴️D${Math.round(d)} ${emoji} ${signal}`.trim();
+    } else {
+        return `K${Math.round(k)}⤵️D${Math.round(d)} ${emoji} ${signal}`.trim();
+    }
 }
 
 // Determinar Comprador vs Vendedor baseado no EMA 9
@@ -239,11 +377,12 @@ async function getCandles(symbol, interval, limit = 100) {
 async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
     try {
         // Buscar candles para diferentes timeframes
-        const [candles1h, candles3m, candlesDaily, candlesWeekly] = await Promise.all([
-            getCandles(symbol, '1h', 48),
+        const [candles1h, candles3m, candlesDaily, candles4h, candlesWeekly] = await Promise.all([
+            getCandles(symbol, '1h', 100),
             getCandles(symbol, '3m', 100),
-            getCandles(symbol, '1d', 50),  // Aumentado para 50 dias
-            getCandles(symbol, '1w', 30)   // Aumentado para 30 semanas
+            getCandles(symbol, '1d', 100),
+            getCandles(symbol, '4h', 100),
+            getCandles(symbol, '1w', 50)
         ]);
         
         // Calcular Bollinger Diário
@@ -254,7 +393,6 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
         if (candlesWeekly.length >= 20) {
             bbWeekly = calculateBollingerBands(candlesWeekly, 20, 2);
         } else if (candlesWeekly.length >= 10) {
-            // Se não tem 20 semanas, calcula com o que tem
             bbWeekly = calculateBollingerBands(candlesWeekly, candlesWeekly.length, 2);
         }
         
@@ -262,48 +400,54 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
         const volume1h = analyzeVolumeWithEMA(candles1h);
         const volume3m = analyzeVolumeWithEMA(candles3m);
         
-        // Calcular RSI 1h
-        let rsi = 50;
-        if (candles1h.length > 14) {
-            let gains = 0, losses = 0;
-            for (let i = candles1h.length - 14; i < candles1h.length; i++) {
-                const diff = candles1h[i].close - candles1h[i-1].close;
-                if (diff > 0) gains += diff;
-                else losses += Math.abs(diff);
-            }
-            const avgGain = gains / 14;
-            const avgLoss = losses / 14 || 0.001;
-            const rs = avgGain / avgLoss;
-            rsi = 100 - (100 / (1 + rs));
-        }
+        // Calcular RSI 1h oficial
+        const rsi = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
+        
+        // Calcular Estocástico Diário (períodos do TradingView)
+        const stochDaily = calculateStochastic(
+            candlesDaily, 
+            CONFIG.STOCHASTIC.DAILY.K_PERIOD,
+            CONFIG.STOCHASTIC.DAILY.K_SMOOTH,
+            CONFIG.STOCHASTIC.DAILY.D_PERIOD
+        );
+        
+        // Calcular Estocástico 4h (períodos do TradingView)
+        const stoch4h = calculateStochastic(
+            candles4h, 
+            CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD,
+            CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH,
+            CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD
+        );
+        
+        // Formatar Estocásticos para exibição
+        const stoch1dFormatted = formatStochastic(stochDaily, 'daily');
+        const stoch4hFormatted = formatStochastic(stoch4h, '4h');
         
         // Volume ratio 1h
         const volumes1h = candles1h.map(c => c.volume);
         const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
-        const currentVolume1h = volumes1h[volumes1h.length - 1];
+        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
         const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
         
         // Volume ratio 3m
         const volumes3m = candles3m.map(c => c.volume);
         const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const currentVolume3m = volumes3m[volumes3m.length - 1];
+        const currentVolume3m = volumes3m[volumes3m.length - 1] || 0;
         const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
         
-        // LSR e Funding
-        let lsr = null, funding = null;
+        // LSR (Long/Short Ratio) - MANTIDO IGUAL AO ORIGINAL
+        let lsr = null;
         try {
-            const lsrData = await rateLimiter.makeRequest(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`);
+            const lsrData = await rateLimiter.makeRequest(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`);
             lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
         } catch {}
         
+        // Funding Rate - MANTIDO IGUAL AO ORIGINAL
+        let funding = null;
         try {
             const fundingData = await rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`);
             funding = parseFloat(fundingData.lastFundingRate) || null;
         } catch {}
-        
-        // Stochastics simulados
-        const stoch1d = rsi < 30 ? 'K20⤵️D30 🟢' : rsi > 70 ? 'K80⤵️D70 🔴' : 'K50⤵️D55 🟡';
-        const stoch4h = rsi < 35 ? 'K25⤵️D30 🟢' : rsi > 65 ? 'K75⤵️D70 🟠' : 'K45⤵️D50 🟡';
         
         // Volume 24hs trend
         const volume24h = analyzeVolumeWithEMA(candles1h.slice(-24));
@@ -312,6 +456,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
         
         return {
             rsi,
+            stoch1d: stoch1dFormatted,
+            stoch4h: stoch4hFormatted,
             volume1h: {
                 ratio: volumeRatio1h,
                 percentage: volume1h.percentage,
@@ -332,34 +478,32 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 upper: bbDaily.upper,
                 lower: bbDaily.lower
             } : {
-                upper: currentPrice * 1.2,  // Fallback aproximado
+                upper: currentPrice * 1.2,
                 lower: currentPrice * 0.8
             },
             bbWeekly: bbWeekly ? {
                 upper: bbWeekly.upper,
                 lower: bbWeekly.lower
             } : {
-                upper: currentPrice * 1.3,  // Fallback mais largo
+                upper: currentPrice * 1.3,
                 lower: currentPrice * 0.7
             },
             lsr,
-            funding,
-            stoch1d,
-            stoch4h
+            funding
         };
     } catch (error) {
         console.log(`⚠️ Erro em getAdditionalData para ${symbol}:`, error.message);
         return {
             rsi: 50,
+            stoch1d: 'K50⤵️D55 🟡',
+            stoch4h: 'K50⤵️D55 🟡',
             volume1h: { ratio: 1, percentage: 50, text: '⚪Neutro', ratioFormatted: '1.00' },
             volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', ratioFormatted: '1.00' },
             volume24h: { pct: '0%', text: '⚪Neutro' },
             bbDaily: { upper: currentPrice * 1.2, lower: currentPrice * 0.8 },
             bbWeekly: { upper: currentPrice * 1.3, lower: currentPrice * 0.7 },
             lsr: null,
-            funding: null,
-            stoch1d: 'K50⤵️D55 🟡',
-            stoch4h: 'K45⤵️D50 🟡'
+            funding: null
         };
     }
 }
@@ -409,6 +553,7 @@ function registerAlert(symbol, direction, price) {
     const dailyCount = (dailyCounter.get(dailyKey) || 0) + 1;
     dailyCounter.set(dailyKey, dailyCount);
     
+    // Limpar cache antigo
     for (const [k, v] of alertCache) {
         if (now - v > 48 * 60 * 60 * 1000) {
             alertCache.delete(k);
@@ -516,7 +661,7 @@ function formatAlert(data) {
         bbLines = ` Bollinger Inferior Diário : $${bbDailyLower}\n Bollinger Inferior Semanal: $${bbWeeklyLower}`;
     }
     
-    return `${data.direction} Bollinger do Diário - ${symbolName}
+    return `${data.direction}  - ${symbolName}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
@@ -573,6 +718,7 @@ async function fetchSymbols() {
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol);
     } catch (error) {
+        // Fallback para símbolos populares se a API falhar
         return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 
                 'ADAUSDT', 'DOTUSDT', 'LINKUSDT', 'AVAXUSDT', 'MATICUSDT', 'NEARUSDT',
                 'AAVEUSDT', 'AXSUSDT', 'SANDUSDT', 'MANAUSDT', 'GALAUSDT', 'APEUSDT'];
@@ -584,14 +730,17 @@ async function fetchSymbols() {
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(60));
-    console.log('📊 BOLLINGER DIÁRIO SCANNER');
+    console.log('📊 BOLLINGER DIÁRIO SCANNER - RSI OFICIAL + ESTOCÁSTICO REAL');
     console.log('='.repeat(60));
     
     const symbols = await fetchSymbols();
     console.log(`📈 Monitorando ${symbols.length} símbolos`);
     console.log(`⏱️  Scan a cada ${CONFIG.SCAN.INTERVAL_MINUTES} minutos\n`);
+    console.log(`📊 RSI: Período ${CONFIG.RSI.PERIOD} (Wilder Smoothing)`);
+    console.log(`📊 Estocástico Diário: K${CONFIG.STOCHASTIC.DAILY.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.DAILY.K_SMOOTH}, D${CONFIG.STOCHASTIC.DAILY.D_PERIOD}`);
+    console.log(`📊 Estocástico 4H: K${CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH}, D${CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD}`);
     
-    await sendTelegramAlert(`🤖 Bollinger Diário Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min`);
+    await sendTelegramAlert(`🤖 Bollinger Diário Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min\nRSI: ${CONFIG.RSI.PERIOD} (Wilder)\nStoch Diário: K5/D3\nStoch 4H: K14/D3`);
     
     let scanCount = 0;
     
@@ -628,7 +777,7 @@ async function startScanner() {
                 if (sent) {
                     registerAlert(alert.symbol, alert.direction, alert.price);
                     sentCount++;
-                    console.log(`✅ ${alert.direction} ${alert.symbol}`);
+                    console.log(`✅ ${alert.direction} ${alert.symbol} - RSI: ${alert.rsi.toFixed(0)} | LSR: ${alert.lsr ? alert.lsr.toFixed(2) : 'N/A'} | Stoch D: ${alert.stoch1d}`);
                 }
                 
                 await new Promise(r => setTimeout(r, 2000));
@@ -649,5 +798,5 @@ async function startScanner() {
 // =====================================================================
 // === INICIAR ===
 // =====================================================================
-console.log('🚀 Iniciando Bollinger Diário Scanner...');
+console.log('🚀 Iniciando Bollinger Diário Scanner com RSI oficial, Estocástico real e LSR original...');
 startScanner().catch(console.error);
