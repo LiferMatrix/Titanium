@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '7708427979:AAF7vVx6AG8p
-        CHAT_ID: process.env.TELEGRAM_CHAT_ID || '-1002554
+        BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: process.env.TELEGRAM_CHAT_ID || '-1002554953979'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -579,7 +579,7 @@ async function analyzeSymbol(symbol) {
         if (!touchedLower && !touchedUpper) return null;
         
         const direction = touchedLower ? 'COMPRA' : 'VENDA';
-        const emoji = touchedLower ? '🟢' : '🔴';
+        const emoji = touchedLower ? '🟢🔍 Analisar' : '🔴🔍 Analisar';
         
         if (!canSendAlert(symbol, direction, currentPrice)) return null;
         
@@ -654,15 +654,15 @@ function formatAlert(data) {
     if (data.isGreenAlert) {
         const bbDailyUpper = formatPrice(data.bbDaily.upper);
         const bbWeeklyUpper = formatPrice(data.bbWeekly.upper);
-        bbLines = ` Bollinger Superior Diário : $${bbDailyUpper}\n Bollinger Superior Semanal: $${bbWeeklyUpper}`;
+        bbLines = ` Superior Diário : $${bbDailyUpper}\n Superior Semanal: $${bbWeeklyUpper}`;
     } else {
         const bbDailyLower = formatPrice(data.bbDaily.lower);
         const bbWeeklyLower = formatPrice(data.bbWeekly.lower);
-        bbLines = ` Bollinger Inferior Diário : $${bbDailyLower}\n Bollinger Inferior Semanal: $${bbWeeklyLower}`;
+        bbLines = ` Inferior Diário : $${bbDailyLower}\n Inferior Semanal: $${bbWeeklyLower}`;
     }
     
-    return `${data.direction}  - ${symbolName}
- Alerta:${data.dailyCount} | ${time.full}hs
+    return `${data.direction} Convergência - ${symbolName}
+ <i>Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
  #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} 
@@ -674,10 +674,10 @@ function formatAlert(data) {
  🔻Resist: ${formatPrice(data.resistance)} | ${formatPrice(data.bbUpper)}
  🔹Supt: ${formatPrice(data.support)} | ${formatPrice(data.bbLower)}
 ${bbLines}
- Alvos: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}
-❅──────✧❅🔹❅✧──────❅
- 🤖 IA Dica... ${data.direction === '🟢' ? 'Observar Zonas de 🔹Suporte de Compra' : 'Realizar Lucro ou Parcial perto da 🔻Resistência.'}
-Alerta Educativo, não é recomendação de investimento.
+ Alvos: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}</i>
+❅──────✧❅🔸❅✧──────❅
+ 🤖 IA Dica... <i>${data.direction === '🟢 Analisar' ? 'Observar Zonas de 🔹Suporte de Compra' : 'Realizar Lucro ou Parcial perto da 🔻Resistência.'}</i>
+<i>Alerta Educativo, não é recomendação de investimento.</i>
  Titanium Prime by @J4Rviz`;
 }
 
@@ -730,7 +730,7 @@ async function fetchSymbols() {
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(60));
-    console.log('📊 BOLLINGER DIÁRIO SCANNER - RSI OFICIAL + ESTOCÁSTICO REAL');
+    console.log('📊 Convergência');
     console.log('='.repeat(60));
     
     const symbols = await fetchSymbols();
@@ -740,7 +740,7 @@ async function startScanner() {
     console.log(`📊 Estocástico Diário: K${CONFIG.STOCHASTIC.DAILY.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.DAILY.K_SMOOTH}, D${CONFIG.STOCHASTIC.DAILY.D_PERIOD}`);
     console.log(`📊 Estocástico 4H: K${CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH}, D${CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD}`);
     
-    await sendTelegramAlert(`🤖 Bollinger Diário Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min\nRSI: ${CONFIG.RSI.PERIOD} (Wilder)\nStoch Diário: K5/D3\nStoch 4H: K14/D3`);
+    await sendTelegramAlert(`🤖 Titanium Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min\nRSI: ${CONFIG.RSI.PERIOD} (Wilder)\nStoch Diário: K5/D3\nStoch 4H: K14/D3`);
     
     let scanCount = 0;
     
@@ -798,5 +798,5 @@ async function startScanner() {
 // =====================================================================
 // === INICIAR ===
 // =====================================================================
-console.log('🚀 Iniciando Bollinger Diário Scanner com RSI oficial, Estocástico real e LSR original...');
+console.log('🚀 Iniciando ...');
 startScanner().catch(console.error);
