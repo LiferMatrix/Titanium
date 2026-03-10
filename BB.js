@@ -24,7 +24,7 @@ const CONFIG = {
         REQUEST_TIMEOUT: 10000
     },
     ALERTS: {
-        MAX_DAILY_PER_SYMBOL: 5,
+        MAX_DAILY_PER_SYMBOL: 30,
         COOLDOWN_HOURS: 24,
         PRICE_DEVIATION: 0.1
     },
