@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg', // Token direto no código
-        CHAT_ID: '-1002554953979' // Chat ID direto no código
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8
+        CHAT_ID: '-100255
     },
     BOLLINGER: {
         PERIOD: 20,
