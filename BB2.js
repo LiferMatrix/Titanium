@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6g',
-        CHAT_ID: '-10025
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -61,6 +61,11 @@ const CONFIG = {
         VOLUME_THRESHOLD: 1.2,
         STOCH_OVERSOLD: 25,
         STOCH_OVERBOUGHT: 75
+    },
+    LSR_PENALTY: {
+        BUY_MAX_RATIO: 3.5,      // Acima disso penaliza compra
+        SELL_MIN_RATIO: 1.0,      // Abaixo disso penaliza venda
+        PENALTY_POINTS: -2         // Pontos de penalidade
     }
 };
 
@@ -554,6 +559,31 @@ function checkStochasticReversal(stochK, stochD, isGreenAlert) {
 }
 
 // =====================================================================
+// === NOVA FUNÇÃO: VERIFICAR PENALIDADE LSR ===
+// =====================================================================
+function checkLSRPenalty(lsr, isGreenAlert) {
+    if (!lsr) return { hasPenalty: false, points: 0, message: '' };
+    
+    if (isGreenAlert && lsr > CONFIG.LSR_PENALTY.BUY_MAX_RATIO) {
+        return {
+            hasPenalty: true,
+            points: CONFIG.LSR_PENALTY.PENALTY_POINTS,
+            message: `⚠️ LSR alto (${lsr.toFixed(2)}) - Muitos comprados (-2)`
+        };
+    }
+    
+    if (!isGreenAlert && lsr < CONFIG.LSR_PENALTY.SELL_MIN_RATIO) {
+        return {
+            hasPenalty: true,
+            points: CONFIG.LSR_PENALTY.PENALTY_POINTS,
+            message: `⚠️ LSR baixo (${lsr.toFixed(2)}) - Muitos vendidos (-2)`
+        };
+    }
+    
+    return { hasPenalty: false, points: 0, message: '' };
+}
+
+// =====================================================================
 // === BUSCAR CANDLES ===
 // =====================================================================
 async function getCandles(symbol, interval, limit = 100) {
@@ -850,9 +880,13 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             additional.volume1h.ratio > CONFIG.REVERSAL.VOLUME_THRESHOLD : 
             additional.volume3m.ratio > CONFIG.REVERSAL.VOLUME_THRESHOLD - 0.2;
         
+        // VERIFICAR PENALIDADE LSR
+        const lsrPenalty = checkLSRPenalty(additional.lsr, touchedLower);
+        
         // CALCULAR PONTUAÇÃO DE CONFIRMAÇÃO
         let confirmationScore = 0;
         let confirmations = [];
+        let penaltyApplied = false;
         
         if (reversalCheck.score >= 5) {
             confirmationScore += 3;
@@ -885,6 +919,13 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         if (volumeConfirmation) {
             confirmationScore += 1;
             confirmations.push('💪 Volume forte');
+        }
+        
+        // APLICAR PENALIDADE LSR SE NECESSÁRIO
+        if (lsrPenalty.hasPenalty) {
+            confirmationScore += lsrPenalty.points; // -2 pontos
+            confirmations.push(lsrPenalty.message);
+            penaltyApplied = true;
         }
         
         // SÓ ENVIAR SE TIVER PONTUAÇÃO SUFICIENTE
@@ -942,6 +983,8 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             reversalScore: reversalCheck.score,
             reversalDetails: reversalCheck.details,
             divergences: divergenceMulti.divergences,
+            lsrPenalty: penaltyApplied,
+            lsrValue: additional.lsr,
             ...additional
         };
         
@@ -998,11 +1041,14 @@ function formatAlert(data) {
     const confirmationsLine = `🔍 Confirmações: ${data.confirmationScore} | ${data.confirmations}`;
     const reversalScoreLine = `📊 Score Reversão: ${data.reversalScore}/6`;
     
+    // Adicionar aviso de LSR se aplicável
+    const lsrWarning = data.lsrPenalty ? `\n ⚠️ LSR ${data.lsrValue.toFixed(2)} - Penalidade aplicada` : '';
+    
     return `${data.direction} - ${symbolName} ${data.timeframeEmoji} ${data.timeframeText}
  <i>Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ${confirmationsLine}
- ${reversalScoreLine}${divergenceLines}
+ ${reversalScoreLine}${divergenceLines}${lsrWarning}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
  #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} 
  ${volume3mLine}
@@ -1093,8 +1139,11 @@ async function startScanner() {
     console.log(`📊 Timeframes divergência: ${CONFIG.RSI_DIVERGENCE.TIMEFRAMES.join(', ')}`);
     console.log(`📊 Estocástico Diário: K${CONFIG.STOCHASTIC.DAILY.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.DAILY.K_SMOOTH}, D${CONFIG.STOCHASTIC.DAILY.D_PERIOD}`);
     console.log(`📊 Estocástico 4H: K${CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD}, Smooth${CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH}, D${CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD}`);
+    console.log(`⚠️ Penalidade LSR:`);
+    console.log(`   - Compra: LSR > ${CONFIG.LSR_PENALTY.BUY_MAX_RATIO} = -${Math.abs(CONFIG.LSR_PENALTY.PENALTY_POINTS)} pontos`);
+    console.log(`   - Venda: LSR < ${CONFIG.LSR_PENALTY.SELL_MIN_RATIO} = -${Math.abs(CONFIG.LSR_PENALTY.PENALTY_POINTS)} pontos`);
     
-    await sendTelegramAlert(`🤖 Titanium Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nTimeframes: 1D e 4H\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min\nScore mínimo reversão: ${CONFIG.REVERSAL.MIN_CONFIRMATION_SCORE}/6\nTimeframes divergência: ${CONFIG.RSI_DIVERGENCE.TIMEFRAMES.join(', ')}\nRSI: ${CONFIG.RSI.PERIOD}\nStoch Diário: K5/D3\nStoch 4H: K14/D3`);
+    await sendTelegramAlert(`🤖 Titanium Scanner Ativado!\nMonitorando ${symbols.length} símbolos\nTimeframes: 1D e 4H\nScan a cada ${CONFIG.SCAN.INTERVAL_MINUTES}min\nScore mínimo reversão: ${CONFIG.REVERSAL.MIN_CONFIRMATION_SCORE}/6\nTimeframes divergência: ${CONFIG.RSI_DIVERGENCE.TIMEFRAMES.join(', ')}\nRSI: ${CONFIG.RSI.PERIOD}\nStoch Diário: K5/D3\nStoch 4H: K14/D3\n⚠️ Penalidade LSR: Compra >3.5 (-2) | Venda <1.0 (-2)`);
     
     let scanCount = 0;
     
@@ -1136,7 +1185,8 @@ async function startScanner() {
                 if (sent) {
                     registerAlert(`${alert.symbol}_${alert.timeframe}`, alert.direction, alert.price);
                     sentCount++;
-                    console.log(`✅ ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | RSI: ${alert.rsi.toFixed(0)} | Divergências: ${alert.divergences?.length || 0}`);
+                    const penaltyIcon = alert.lsrPenalty ? '⚠️' : '✅';
+                    console.log(`${penaltyIcon} ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | LSR: ${alert.lsr?.toFixed(2) || 'N/A'} | RSI: ${alert.rsi.toFixed(0)}`);
                 }
                 
                 await new Promise(r => setTimeout(r, 2000));
