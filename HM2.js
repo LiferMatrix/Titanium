@@ -7,8 +7,8 @@ const path = require('path');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         DELAY_BETWEEN_MSGS: 3000
     },
     BINANCE: {
@@ -1437,6 +1437,9 @@ class HarmonicScanner {
         const targetEmoji = pattern.direction === 'BULLISH' ? '📈' : '📉';
         const stopEmoji = pattern.direction === 'BULLISH' ? '🛑' : '⛔';
         
+        // Link do TradingView para o gráfico de 1h
+        const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}PERP&interval=60`;
+        
         const volumeInfo = volumeData ? 
             `${hasValidAbnormalVolume ? '🔥' : ''} Volume: ${Utils.formatVolume(volumeData.currentVolume)} (${volumeData.multiple.toFixed(1)}x)` :
             ' Volume: ---';
@@ -1452,25 +1455,39 @@ class HarmonicScanner {
         
         let rsiInfo = ` RSI 1h: ---`;
         if (rsiValue !== null) {
-            rsiInfo = ` RSI 1h: ${rsiValue.toFixed(2)} (${rsiState})`;
+            rsiInfo = ` RSI 1h: ${rsiValue.toFixed(2)}`;
         }
         
         let liquidityInfo = '';
+        let entryValue = '';
+        let supportsList = [];
+        let resistancesList = [];
+        
         if (liquidityClusters && (liquidityClusters.supports.length > 0 || liquidityClusters.resistances.length > 0)) {
             liquidityInfo = '\n <b>Níveis Importantes:</b>';
             
             if (liquidityClusters.supports.length > 0) {
-                liquidityInfo += '\n   Suporte: ';
-                liquidityInfo += liquidityClusters.supports.map(s => 
+                supportsList = liquidityClusters.supports.map(s => 
                     `$${Utils.formatPrice(s.price)} (${s.strength}x)`
-                ).join(' | ');
+                );
+                liquidityInfo += '\n   Suporte: ' + supportsList.join(' | ');
+                
+                // Pega o valor do suporte para o alerta de compra (entrada mais baixa)
+                if (pattern.direction === 'BULLISH') {
+                    entryValue = `$${Utils.formatPrice(liquidityClusters.supports[0].price)}`;
+                }
             }
             
             if (liquidityClusters.resistances.length > 0) {
-                liquidityInfo += '\n   Resistência: ';
-                liquidityInfo += liquidityClusters.resistances.map(r => 
+                resistancesList = liquidityClusters.resistances.map(r => 
                     `$${Utils.formatPrice(r.price)} (${r.strength}x)`
-                ).join(' | ');
+                );
+                liquidityInfo += '\n   Resistência: ' + resistancesList.join(' | ');
+                
+                // Pega o valor da resistência para o alerta de venda
+                if (pattern.direction === 'BEARISH') {
+                    entryValue = `$${Utils.formatPrice(liquidityClusters.resistances[0].price)}`;
+                }
             }
         }
         
@@ -1478,23 +1495,19 @@ class HarmonicScanner {
         if (atrData && stopPrice) {
             const stopPercent = atrData.stopPercentage.toFixed(1);
             stopInfo = `\n ${stopEmoji} Stop: $${Utils.formatPrice(stopPrice)} (${stopPercent}%) `;
-            
-            if (atrData.percentage) {
-                stopInfo += `\n   Volatilidade (ATR): ${atrData.percentage.toFixed(1)}%`;
-            }
         }
         
         return `
-${emoji} <i>${pattern.type} ${this.timeframe} - Operação Ativada</i> ${emoji}
-
-<i> ${symbol}</i> | ${pattern.direction}
+${emoji} 🔍<i>Operação</i> ${emoji} <a href="${tradingViewLink}">🔗 TradingView</a>
+ 
+<i> ${symbol}</i> | ${pattern.direction} 🔹 ${lsrInfo}
  Preço: $${Utils.formatPrice(price)}
-<i> Operação:</i> ${Utils.getBrazilianTime()}
- Entrada: $${Utils.formatPrice(pattern.entryPrice)}
-${targetEmoji} Alvo: $${Utils.formatPrice(pattern.targetPrice)} (${targetDist}%)${stopInfo}
-<i> Análise:</i>
+<i> Alerta</i> ${Utils.getBrazilianTime()}
+ 🤖<i>IA Análise:</i>
+ Entrada: ${entryValue || `$${Utils.formatPrice(pattern.entry)}`}
+ ${targetEmoji} Alvo: $${Utils.formatPrice(pattern.targetPrice)} (${targetDist}%)${stopInfo}
+<i>Padrão: ${pattern.type} ${this.timeframe}</i>
  ${volumeInfo} | ${volumeType}
- ${lsrInfo}
  ${rsiInfo}${liquidityInfo}
 
 <i>Titanium by J4Rviz</i>`;
