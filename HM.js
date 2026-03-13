@@ -3,12 +3,12 @@ const fs = require('fs');
 const path = require('path');
 
 // =====================================================================
-// === CONFIGURAÇÕES MÍNIMAS ===
+// === CONFIGURAÇÕES OTIMIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         DELAY_BETWEEN_MSGS: 3000
     },
     BINANCE: {
@@ -21,43 +21,76 @@ const CONFIG = {
     ],
     SCAN_INTERVAL: 5 * 60 * 1000,
     PATTERNS: {
-        TOLERANCE: 0.03,
+        BASE_TOLERANCE: 0.02,
+        DYNAMIC_TOLERANCE: {
+            MIN: 0.015,
+            MAX: 0.06,
+            TIMEFRAME_MULTIPLIER: {
+                '1m': 2.2,
+                '5m': 2.0,
+                '15m': 1.7,
+                '30m': 1.4,
+                '1h': 1.0,
+                '4h': 0.8,
+                '1d': 0.5
+            },
+            VOLATILITY_MULTIPLIER: {
+                LOW: 0.7,
+                MEDIUM: 1.0,
+                HIGH: 1.6,
+                EXTREME: 2.2
+            }
+        },
         HARMONIC: {
             GARTLEY: { 
-                bull: { XA: 0.618, AB: [0.382, 0.886], BC: [1.130, 1.270] },
-                bear: { XA: 0.618, AB: [0.382, 0.886], BC: [1.130, 1.270] }
+                bull: { XA: 0.618, AB: [0.382, 0.886], BC: [1.130, 2.000] },
+                bear: { XA: 0.618, AB: [0.382, 0.886], BC: [1.130, 2.000] }
             },
             BAT: { 
-                bull: { XA: [0.382, 0.500], AB: [0.382, 0.886], BC: [1.618, 2.240] },
-                bear: { XA: [0.382, 0.500], AB: [0.382, 0.886], BC: [1.618, 2.240] }
+                bull: { XA: [0.382, 0.500], AB: [0.382, 0.886], BC: [1.618, 2.618] },
+                bear: { XA: [0.382, 0.500], AB: [0.382, 0.886], BC: [1.618, 2.618] }
             },
             BUTTERFLY: { 
-                bull: { XA: 0.786, AB: [0.382, 0.886], BC: [1.270, 1.414] },
-                bear: { XA: 0.786, AB: [0.382, 0.886], BC: [1.270, 1.414] }
+                bull: { XA: 0.786, AB: [0.382, 0.886], BC: [1.270, 1.618] },
+                bear: { XA: 0.786, AB: [0.382, 0.886], BC: [1.270, 1.618] }
             },
             CRAB: { 
-                bull: { XA: [0.382, 0.618], AB: [0.382, 0.886], BC: [2.240, 3.618] },
-                bear: { XA: [0.382, 0.618], AB: [0.382, 0.886], BC: [2.240, 3.618] }
+                bull: { XA: [0.382, 0.618], AB: [0.382, 0.886], BC: [2.240, 4.236] },
+                bear: { XA: [0.382, 0.618], AB: [0.382, 0.886], BC: [2.240, 4.236] }
             }
         }
     },
+    ZIGZAG: {
+        TYPE: 'PERCENTAGE',
+        PERCENTAGE: {
+            DEVIATION: 4,
+            MIN_PIPS: 15
+        },
+        WAVES: {
+            MAX_PRICE_PERCENT: 4,
+            MIN_TREND_PERCENT: 0.8
+        },
+        MAX_PIVOTS: 20
+    },
     VOLUME: {
-        ABNORMAL_THRESHOLD: 1.4,
+        ABNORMAL_THRESHOLD: 1.3,
         CHECK_MINUTES: 3
     },
     ATR: {
         PERIOD: 14,
-        MULTIPLIER: 2.5,
+        MULTIPLIER: 2.2,
         TIMEFRAME: '1h'
     },
     LIQUIDITY: {
-        LOOKBACK_CANDLES: 100,
-        CLUSTER_THRESHOLD: 0.01, 
-        MIN_CLUSTER_TOUCHES: 3
+        LOOKBACK_CANDLES: 150,
+        CLUSTER_THRESHOLD: 0.008,
+        MIN_CLUSTER_TOUCHES: 2
     },
     RSI: {
         PERIOD: 14,
-        TIMEFRAME: '1h'
+        TIMEFRAME: '1h',
+        OVERSOLD: 30,
+        OVERBOUGHT: 70
     },
     FILTERS: {
         SKIP_NON_ASCII: true
@@ -92,7 +125,8 @@ const Logger = {
     volume: (msg) => Logger.log('📊', msg),
     stop: (msg) => Logger.log('🛑', msg),
     liquidity: (msg) => Logger.log('💧', msg),
-    rsi: (msg) => Logger.log('📈', msg)
+    rsi: (msg) => Logger.log('📈', msg),
+    zigzag: (msg) => Logger.log('📐', msg)
 };
 
 // =====================================================================
@@ -158,6 +192,34 @@ const Utils = {
                 await Utils.sleep(1000 * Math.pow(2, i));
             }
         }
+    },
+
+    calculateDynamicTolerance(baseTolerance, atrPercentage, timeframe) {
+        let tolerance = baseTolerance || CONFIG.PATTERNS.BASE_TOLERANCE;
+        
+        const tfMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.TIMEFRAME_MULTIPLIER[timeframe] || 1.0;
+        tolerance *= tfMultiplier;
+        
+        if (atrPercentage) {
+            let volMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.VOLATILITY_MULTIPLIER.MEDIUM;
+            
+            if (atrPercentage < 1) {
+                volMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.VOLATILITY_MULTIPLIER.LOW;
+            } else if (atrPercentage >= 1 && atrPercentage < 3) {
+                volMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.VOLATILITY_MULTIPLIER.MEDIUM;
+            } else if (atrPercentage >= 3 && atrPercentage < 5) {
+                volMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.VOLATILITY_MULTIPLIER.HIGH;
+            } else if (atrPercentage >= 5) {
+                volMultiplier = CONFIG.PATTERNS.DYNAMIC_TOLERANCE.VOLATILITY_MULTIPLIER.EXTREME;
+            }
+            
+            tolerance *= volMultiplier;
+        }
+        
+        return Math.min(
+            Math.max(tolerance, CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MIN),
+            CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MAX
+        );
     }
 };
 
@@ -250,28 +312,24 @@ class TelegramSender {
 }
 
 // =====================================================================
-// === RSI CALCULATOR (Cálculo idêntico ao TradingView) ===
+// === RSI CALCULATOR ===
 // =====================================================================
 class RSICalculator {
     constructor() {
         this.rsiCache = new Map();
     }
 
-    // Implementação exata do RSI do TradingView/Pine Script
     calculateRSI(prices, period = CONFIG.RSI.PERIOD) {
         if (prices.length < period + 1) return null;
 
-        // Calcular mudanças (change)
         const changes = [];
         for (let i = 1; i < prices.length; i++) {
             changes.push(prices[i] - prices[i - 1]);
         }
 
-        // Inicializar médias
         let avgGain = 0;
         let avgLoss = 0;
         
-        // Primeiro cálculo SMA
         for (let i = 0; i < period; i++) {
             const change = changes[i];
             if (change > 0) {
@@ -284,15 +342,12 @@ class RSICalculator {
         avgGain = avgGain / period;
         avgLoss = avgLoss / period;
 
-        // RMA (Wilder's Smoothing) - igual ao TradingView
         const rma = (prev, current, period) => {
             return (prev * (period - 1) + current) / period;
         };
 
-        // Calcular para todos os valores
         const rsiValues = [];
         
-        // Primeiro RSI
         if (avgLoss === 0) {
             rsiValues.push(100);
         } else {
@@ -300,7 +355,6 @@ class RSICalculator {
             rsiValues.push(100 - (100 / (1 + rs)));
         }
 
-        // Calcular RMA para os períodos seguintes
         for (let i = period; i < changes.length; i++) {
             const change = changes[i];
             const currentGain = change > 0 ? change : 0;
@@ -325,11 +379,10 @@ class RSICalculator {
     async getRSI(symbol, fetcher, limiter) {
         try {
             const cached = this.rsiCache.get(symbol);
-            if (cached && Date.now() - cached.timestamp < 300000) { // Cache de 5 minutos
+            if (cached && Date.now() - cached.timestamp < 300000) {
                 return cached.value;
             }
 
-            // Buscar candles para o timeframe 1h
             const candles = await fetcher.getKlines(symbol, CONFIG.RSI.TIMEFRAME, CONFIG.RSI.PERIOD + 50);
             if (!candles || candles.length < CONFIG.RSI.PERIOD + 1) return null;
 
@@ -355,8 +408,8 @@ class RSICalculator {
 
     getRSIState(rsi) {
         if (rsi === null) return '---';
-        if (rsi > 70) return 'SOBRECOMPRADO 🔴';
-        if (rsi < 30) return 'SOBREVENDIDO 🟢';
+        if (rsi > CONFIG.RSI.OVERBOUGHT) return 'SOBRECOMPRADO 🔴';
+        if (rsi < CONFIG.RSI.OVERSOLD) return 'SOBREVENDIDO 🟢';
         if (rsi > 60) return 'COMPRADOR 📈';
         if (rsi < 40) return 'VENDEDOR 📉';
         return 'NEUTRO ⚪';
@@ -374,19 +427,16 @@ class LiquidityClusterDetector {
     async detectClusters(symbol, fetcher, limiter) {
         try {
             const cached = this.clusterCache.get(symbol);
-            if (cached && Date.now() - cached.timestamp < 3600000) { // Cache de 1 hora
+            if (cached && Date.now() - cached.timestamp < 3600000) {
                 return cached.value;
             }
 
-            // Buscar candles para identificar clusters de liquidez
             const candles = await fetcher.getKlines(symbol, '1h', CONFIG.LIQUIDITY.LOOKBACK_CANDLES);
             if (!candles || candles.length < 50) return null;
 
-            // Mapear pontos de liquidez (máximas e mínimas)
             const liquidityPoints = [];
             
             for (let i = 1; i < candles.length - 1; i++) {
-                // Máximas (resistência)
                 if (candles[i].high > candles[i-1].high && candles[i].high > candles[i+1].high) {
                     liquidityPoints.push({
                         price: candles[i].high,
@@ -395,7 +445,6 @@ class LiquidityClusterDetector {
                     });
                 }
                 
-                // Mínimas (suporte)
                 if (candles[i].low < candles[i-1].low && candles[i].low < candles[i+1].low) {
                     liquidityPoints.push({
                         price: candles[i].low,
@@ -405,7 +454,6 @@ class LiquidityClusterDetector {
                 }
             }
 
-            // Agrupar em clusters baseados em proximidade
             const clusters = [];
             const threshold = candles[candles.length - 1].close * CONFIG.LIQUIDITY.CLUSTER_THRESHOLD;
 
@@ -417,7 +465,7 @@ class LiquidityClusterDetector {
                         cluster.points.push(point);
                         cluster.avgPrice = cluster.points.reduce((sum, p) => sum + p.price, 0) / cluster.points.length;
                         cluster.strength++;
-                        cluster.type = point.type; // Atualiza com o tipo mais recente (pode ser refinado)
+                        cluster.type = point.type;
                         found = true;
                         break;
                     }
@@ -433,12 +481,10 @@ class LiquidityClusterDetector {
                 }
             }
 
-            // Filtrar clusters com força mínima e ordenar
             const significantClusters = clusters
                 .filter(c => c.strength >= CONFIG.LIQUIDITY.MIN_CLUSTER_TOUCHES)
                 .sort((a, b) => b.strength - a.strength);
 
-            // Separar suportes e resistências
             const currentPrice = candles[candles.length - 1].close;
             
             const supports = significantClusters
@@ -463,7 +509,6 @@ class LiquidityClusterDetector {
                 timestamp: Date.now()
             };
 
-            // Log dos clusters encontrados
             if (supports.length > 0 || resistances.length > 0) {
                 Logger.liquidity(`💧 ${symbol} Clusters: Sup ${supports.length} | Res ${resistances.length}`);
             }
@@ -790,20 +835,67 @@ class LSRCalculator {
 }
 
 // =====================================================================
-// === DETECTOR DE PADRÕES ===
+// === DETECTOR DE PADRÕES MELHORADO ===
 // =====================================================================
 class PatternDetector {
-    matchRatio(value, target) {
-        if (Array.isArray(target)) {
-            return value >= target[0] && value <= target[1];
-        }
-        return Math.abs(value - target) <= CONFIG.PATTERNS.TOLERANCE;
+    constructor() {
+        this.toleranceCache = new Map();
     }
 
-    detectHarmonic(pivots) {
+    getDynamicTolerance(atrPercentage, timeframe) {
+        const cacheKey = `${atrPercentage?.toFixed(2) || 'null'}_${timeframe}`;
+        
+        if (this.toleranceCache.has(cacheKey)) {
+            const cached = this.toleranceCache.get(cacheKey);
+            if (Date.now() - cached.timestamp < 300000) {
+                return cached.value;
+            }
+        }
+        
+        const tolerance = Utils.calculateDynamicTolerance(
+            CONFIG.PATTERNS.BASE_TOLERANCE,
+            atrPercentage,
+            timeframe
+        );
+        
+        this.toleranceCache.set(cacheKey, {
+            value: tolerance,
+            timestamp: Date.now()
+        });
+        
+        return tolerance;
+    }
+
+    debugPatternDetection(pivots, atrPercentage, timeframe) {
+        if (pivots.length < 5) {
+            Logger.debug(`📐 Poucos pivôs (${pivots.length}) para detectar padrões`);
+            return;
+        }
+        
+        const tolerance = this.getDynamicTolerance(atrPercentage, timeframe);
+        Logger.debug(`📐 Analisando ${pivots.length} pivôs com tolerância ${(tolerance*100).toFixed(1)}%`);
+        
+        const lastPivots = pivots.slice(-5);
+        Logger.debug(`📐 Últimos pivôs: ${lastPivots.map(p => 
+            `${p.type === 'high' ? '🔝' : '🔻'} $${Utils.formatPrice(p.price)}`
+        ).join(' → ')}`);
+    }
+
+    matchRatio(value, target, tolerance) {
+        if (Array.isArray(target)) {
+            const range = target[1] - target[0];
+            const expandedMin = target[0] - (range * tolerance);
+            const expandedMax = target[1] + (range * tolerance);
+            return value >= expandedMin && value <= expandedMax;
+        }
+        return Math.abs(value - target) <= target * tolerance;
+    }
+
+    detectHarmonic(pivots, atrPercentage, timeframe) {
         if (!pivots || pivots.length < 5) return [];
         
         const patterns = [];
+        const tolerance = this.getDynamicTolerance(atrPercentage, timeframe);
         
         for (let i = 0; i <= pivots.length - 5; i++) {
             const types = pivots.slice(i, i + 5).map(p => p.type);
@@ -821,9 +913,9 @@ class PatternDetector {
                 const pattern = config[key];
                 if (!pattern) continue;
                 
-                const matchXA = pattern.XA ? this.matchRatio(ratios.AB_XA, pattern.XA) : true;
-                const matchAB = pattern.AB ? this.matchRatio(ratios.BC_AB, pattern.AB) : true;
-                const matchBC = pattern.BC ? this.matchRatio(ratios.CD_BC, pattern.BC) : true;
+                const matchXA = pattern.XA ? this.matchRatio(ratios.AB_XA, pattern.XA, tolerance) : true;
+                const matchAB = pattern.AB ? this.matchRatio(ratios.BC_AB, pattern.AB, tolerance) : true;
+                const matchBC = pattern.BC ? this.matchRatio(ratios.CD_BC, pattern.BC, tolerance) : true;
                 
                 if (matchXA && matchAB && matchBC) {
                     const moveBC = Math.abs(c.price - b.price);
@@ -850,10 +942,11 @@ class PatternDetector {
         return patterns;
     }
 
-    detectABCD(pivots) {
+    detectABCD(pivots, atrPercentage, timeframe) {
         if (!pivots || pivots.length < 4) return [];
         
         const patterns = [];
+        const tolerance = this.getDynamicTolerance(atrPercentage, timeframe);
         
         for (let i = 0; i <= pivots.length - 4; i++) {
             const types = pivots.slice(i, i + 4).map(p => p.type);
@@ -878,7 +971,7 @@ class PatternDetector {
                 continue;
             }
             
-            if (ratioAB >= 0.382 && ratioAB <= 0.886) {
+            if (ratioAB >= 0.382 - (0.382 * tolerance) && ratioAB <= 0.886 + (0.886 * tolerance)) {
                 Logger.debug(`✅ ABCD ${direction} detectado - Entrada: $${c.price} | Target: $${d.price}`);
                 
                 patterns.push({
@@ -897,34 +990,170 @@ class PatternDetector {
 }
 
 // =====================================================================
-// === ZIGZAG SIMPLES ===
+// === ZIGZAG MELHORADO ===
 // =====================================================================
 class Zigzag {
-    constructor(period = 12) {
-        this.period = period;
+    constructor() {
         this.pivots = [];
+        this.type = CONFIG.ZIGZAG.TYPE;
+        this.percentage = CONFIG.ZIGZAG.PERCENTAGE;
+        this.waves = CONFIG.ZIGZAG.WAVES;
+        this.maxPivots = CONFIG.ZIGZAG.MAX_PIVOTS;
     }
 
-    findPivots(highs, lows) {
+    findPivotsPercentage(highs, lows) {
         this.pivots = [];
-        const half = Math.floor(this.period / 2);
         
-        for (let i = half; i < highs.length - half; i++) {
-            let isHigh = true, isLow = true;
-            
-            for (let j = i - half; j <= i + half; j++) {
-                if (highs[j] > highs[i]) isHigh = false;
-                if (lows[j] < lows[i]) isLow = false;
+        if (highs.length < 3) return this;
+        
+        const avgRange = (Math.max(...highs) - Math.min(...lows)) / highs.length;
+        const minMove = avgRange * (this.percentage.DEVIATION / 100);
+        
+        for (let i = 1; i < highs.length - 1; i++) {
+            if (highs[i] > highs[i-1] && highs[i] > highs[i+1]) {
+                const prevLow = Math.min(...lows.slice(Math.max(0, i-5), i));
+                const move = Math.abs(highs[i] - prevLow) / prevLow * 100;
+                
+                if (move >= this.percentage.DEVIATION) {
+                    this.pivots.push({
+                        price: highs[i],
+                        type: 'high',
+                        index: i,
+                        strength: move
+                    });
+                }
             }
             
-            if (isHigh) {
-                this.pivots.push({ price: highs[i], type: 'high' });
-            } else if (isLow) {
-                this.pivots.push({ price: lows[i], type: 'low' });
+            if (lows[i] < lows[i-1] && lows[i] < lows[i+1]) {
+                const prevHigh = Math.max(...highs.slice(Math.max(0, i-5), i));
+                const move = Math.abs(prevHigh - lows[i]) / prevHigh * 100;
+                
+                if (move >= this.percentage.DEVIATION) {
+                    this.pivots.push({
+                        price: lows[i],
+                        type: 'low',
+                        index: i,
+                        strength: move
+                    });
+                }
             }
         }
         
+        this.filterClosePivots();
+        
+        Logger.zigzag(`📐 Zigzag % encontrou ${this.pivots.length} pivôs (desvio ${this.percentage.DEVIATION}%)`);
+        
         return this;
+    }
+
+    findPivotsWaves(highs, lows) {
+        this.pivots = [];
+        
+        if (highs.length < 10) return this;
+        
+        let lastPivot = null;
+        
+        for (let i = 2; i < highs.length - 2; i++) {
+            const isHigherHigh = highs[i] > highs[i-1] && highs[i] > highs[i-2] && 
+                                highs[i] > highs[i+1] && highs[i] > highs[i+2];
+            
+            const isLowerLow = lows[i] < lows[i-1] && lows[i] < lows[i-2] && 
+                              lows[i] < lows[i+1] && lows[i] < lows[i+2];
+            
+            if (isHigherHigh) {
+                if (!lastPivot || lastPivot.type !== 'high') {
+                    const moveFromLow = lastPivot ? 
+                        Math.abs(highs[i] - lastPivot.price) / lastPivot.price * 100 : 100;
+                    
+                    if (moveFromLow >= this.waves.MIN_TREND_PERCENT) {
+                        this.pivots.push({
+                            price: highs[i],
+                            type: 'high',
+                            index: i,
+                            strength: moveFromLow
+                        });
+                        lastPivot = this.pivots[this.pivots.length - 1];
+                    }
+                }
+            } else if (isLowerLow) {
+                if (!lastPivot || lastPivot.type !== 'low') {
+                    const moveFromHigh = lastPivot ? 
+                        Math.abs(lastPivot.price - lows[i]) / lastPivot.price * 100 : 100;
+                    
+                    if (moveFromHigh >= this.waves.MIN_TREND_PERCENT) {
+                        this.pivots.push({
+                            price: lows[i],
+                            type: 'low',
+                            index: i,
+                            strength: moveFromHigh
+                        });
+                        lastPivot = this.pivots[this.pivots.length - 1];
+                    }
+                }
+            }
+        }
+        
+        this.filterLargeWaves();
+        
+        Logger.zigzag(`📐 Zigzag Waves encontrou ${this.pivots.length} pivôs`);
+        
+        return this;
+    }
+
+    filterClosePivots() {
+        if (this.pivots.length < 2) return;
+        
+        const filtered = [];
+        let lastPrice = null;
+        
+        for (const pivot of this.pivots) {
+            if (lastPrice === null) {
+                filtered.push(pivot);
+                lastPrice = pivot.price;
+                continue;
+            }
+            
+            const movePercent = Math.abs(pivot.price - lastPrice) / lastPrice * 100;
+            
+            if (movePercent >= this.percentage.DEVIATION / 2) {
+                filtered.push(pivot);
+                lastPrice = pivot.price;
+            }
+        }
+        
+        this.pivots = filtered;
+    }
+
+    filterLargeWaves() {
+        if (this.pivots.length < 2) return;
+        
+        const filtered = [];
+        let lastPivot = null;
+        
+        for (const pivot of this.pivots) {
+            if (lastPivot === null) {
+                filtered.push(pivot);
+                lastPivot = pivot;
+                continue;
+            }
+            
+            const movePercent = Math.abs(pivot.price - lastPivot.price) / lastPivot.price * 100;
+            
+            if (movePercent <= this.waves.MAX_PRICE_PERCENT * 3) {
+                filtered.push(pivot);
+                lastPivot = pivot;
+            }
+        }
+        
+        this.pivots = filtered;
+    }
+
+    findPivots(highs, lows) {
+        if (this.type === 'PERCENTAGE') {
+            return this.findPivotsPercentage(highs, lows);
+        } else {
+            return this.findPivotsWaves(highs, lows);
+        }
     }
 
     getLastPivots(n = 10) {
@@ -1025,7 +1254,7 @@ class HarmonicScanner {
         this.atrCalculator = atrCalculator;
         this.liquidityDetector = liquidityDetector;
         this.rsiCalculator = rsiCalculator;
-        this.zigzag = new Zigzag(12);
+        this.zigzag = new Zigzag();
         this.detector = new PatternDetector();
         
         this.patternsDetected = new Map();
@@ -1061,27 +1290,16 @@ class HarmonicScanner {
             const currentPrice = await this.fetcher.getPrice(symbol);
             if (!currentPrice) return;
 
-            // Análise de volume
             const volumeData = await this.volumeAnalyzer.analyzeVolume(symbol, this.fetcher, this.limiter);
-            
-            // Calcular LSR REAL da Binance
             const lsrData = await this.lsrCalculator.calculateLSR(symbol, this.fetcher, this.limiter);
-            
-            // Calcular ATR adaptativo para o símbolo
             const atrData = await this.atrCalculator.calculateATR(symbol, this.fetcher, this.limiter);
-            
-            // Detectar clusters de liquidez (Suporte/Resistência)
             const liquidityClusters = await this.liquidityDetector.detectClusters(symbol, this.fetcher, this.limiter);
-            
-            // Calcular RSI 1h (cálculo exato do TradingView)
             const rsiValue = await this.rsiCalculator.getRSI(symbol, this.fetcher, this.limiter);
             const rsiState = this.rsiCalculator.getRSIState(rsiValue);
             
-            // Determinar ação do preço
             const prevClose = candles[candles.length - 2]?.close;
             const priceAction = this.determinePriceAction(currentPrice, prevClose);
 
-            // Verificar volume anormal para alertas
             const isAbnormalBuyer = volumeData && 
                                     volumeData.isAbnormal && 
                                     priceAction === 'UP' &&
@@ -1094,7 +1312,6 @@ class HarmonicScanner {
                                      volumeData.direction === 'AUMENTANDO' &&
                                      volumeData.multiple >= CONFIG.VOLUME.ABNORMAL_THRESHOLD;
 
-            // Log de volume anormal
             if (volumeData?.isAbnormal) {
                 const direction = priceAction === 'UP' ? 'COMPRADOR' : priceAction === 'DOWN' ? 'VENDEDOR' : 'NEUTRO';
                 Logger.volume(`📊 ${symbol} Volume ${direction}: ${volumeData.multiple.toFixed(1)}x média (${Utils.formatVolume(volumeData.currentVolume)})`);
@@ -1105,11 +1322,14 @@ class HarmonicScanner {
                 candles.map(c => c.low)
             );
             
-            const pivots = this.zigzag.getLastPivots(15);
+            const pivots = this.zigzag.getLastPivots(CONFIG.ZIGZAG.MAX_PIVOTS);
+            
+            // Debug dos pivôs e tolerância
+            this.detector.debugPatternDetection(pivots, atrData?.percentage, this.timeframe);
             
             const patterns = [
-                ...this.detector.detectHarmonic(pivots),
-                ...this.detector.detectABCD(pivots)
+                ...this.detector.detectHarmonic(pivots, atrData?.percentage, this.timeframe),
+                ...this.detector.detectABCD(pivots, atrData?.percentage, this.timeframe)
             ];
             
             for (const pattern of patterns) {
@@ -1134,14 +1354,13 @@ class HarmonicScanner {
                 
                 const detected = this.patternsDetected.get(key);
                 const priceDiff = Math.abs(currentPrice - detected.entryPrice) / detected.entryPrice;
-                const isAtEntry = priceDiff <= 0.001;
+                const isAtEntry = priceDiff <= 0.005;
                 
                 if (isAtEntry) {
                     const targetDist = detected.direction === 'BULLISH'
                         ? ((detected.targetPrice - currentPrice) / currentPrice * 100).toFixed(1)
                         : ((currentPrice - detected.targetPrice) / currentPrice * 100).toFixed(1);
                     
-                    // VERIFICAÇÃO DE VOLUME - SÓ ALERTA SE VOLUME ANORMAL COMPATÍVEL COM A DIREÇÃO
                     let hasValidAbnormalVolume = false;
                     
                     if (detected.direction === 'BULLISH' && isAbnormalBuyer) {
@@ -1151,16 +1370,14 @@ class HarmonicScanner {
                         hasValidAbnormalVolume = true;
                         Logger.volume(`🔥 Volume VENDEDOR anormal confirmado para entrada BEARISH!`);
                     } else {
-                        // Volume normal ou anormal incompatível - NÃO ENVIA ALERTA
                         if (volumeData?.isAbnormal) {
                             Logger.volume(`⏭️ Ignorando alerta: Volume anormal mas direção incompatível (${detected.direction} vs ${priceAction === 'UP' ? 'COMPRADOR' : 'VENDEDOR'})`);
                         } else {
                             Logger.volume(`⏭️ Ignorando alerta: Volume normal (${volumeData?.multiple.toFixed(1) || '0'}x) - Necessário ${CONFIG.VOLUME.ABNORMAL_THRESHOLD}x`);
                         }
-                        continue; // PULA O ALERTA
+                        continue;
                     }
                     
-                    // Calcular stop baseado no ATR
                     let stopPrice = null;
                     let stopPercentage = null;
                     
@@ -1216,74 +1433,81 @@ class HarmonicScanner {
     }
 
     formatAlert(pattern, symbol, price, targetDist, volumeData, hasValidAbnormalVolume, lsrData, atrData, stopPrice, liquidityClusters, rsiValue, rsiState) {
-        const emoji = pattern.direction === 'BULLISH' ? '🟢' : '🔴';
-        const targetEmoji = pattern.direction === 'BULLISH' ? '📈' : '📉';
-        const stopEmoji = pattern.direction === 'BULLISH' ? '🛑' : '⛔';
+    const emoji = pattern.direction === 'BULLISH' ? '🟢' : '🔴';
+    const targetEmoji = pattern.direction === 'BULLISH' ? '📈' : '📉';
+    const stopEmoji = pattern.direction === 'BULLISH' ? '🛑' : '⛔';
+    
+    const volumeInfo = volumeData ? 
+        `${hasValidAbnormalVolume ? '🔥' : ''} Volume: ${Utils.formatVolume(volumeData.currentVolume)} (${volumeData.multiple.toFixed(1)}x)` :
+        ' Volume: ---';
+    
+    const volumeType = hasValidAbnormalVolume ? 
+        (pattern.direction === 'BULLISH' ? 'COMPRADOR' : 'VENDEDOR') : 
+        'NORMAL';
+    
+    let lsrInfo = ` LSR: ---`;
+    if (lsrData) {
+        lsrInfo = ` LSR: ${lsrData.rawRatio}`;
+    }
+    
+    let rsiInfo = ` RSI 1h: ---`;
+    if (rsiValue !== null) {
+        rsiInfo = ` RSI 1h: ${rsiValue.toFixed(2)}`;
+    }
+    
+    let liquidityInfo = '';
+    let clusterValue = '';
+    
+    if (liquidityClusters && (liquidityClusters.supports.length > 0 || liquidityClusters.resistances.length > 0)) {
+        liquidityInfo = '\n <b>Níveis Importantes:</b>';
         
-        // Volume info
-        const volumeInfo = volumeData ? 
-            `${hasValidAbnormalVolume ? '🔥' : ''} Volume: ${Utils.formatVolume(volumeData.currentVolume)} (${volumeData.multiple.toFixed(1)}x)` :
-            ' Volume: ---';
-        
-        const volumeType = hasValidAbnormalVolume ? 
-            (pattern.direction === 'BULLISH' ? 'COMPRADOR' : 'VENDEDOR') : 
-            'NORMAL';
-        
-        // LSR info
-        let lsrInfo = ` LSR: ---`;
-        if (lsrData) {
-            lsrInfo = ` LSR: ${lsrData.rawRatio}`;
-        }
-        
-        // RSI info
-        let rsiInfo = ` RSI 1h: ---`;
-        if (rsiValue !== null) {
-            rsiInfo = ` RSI 1h: ${rsiValue.toFixed(2)} (${rsiState})`;
-        }
-        
-        // Liquidity Clusters info
-        let liquidityInfo = '';
-        if (liquidityClusters && (liquidityClusters.supports.length > 0 || liquidityClusters.resistances.length > 0)) {
-            liquidityInfo = '\n <b>Níveis Importantes:</b>';
+        if (liquidityClusters.supports.length > 0) {
+            liquidityInfo += '\n   Suporte: ';
+            liquidityInfo += liquidityClusters.supports.map(s => 
+                `$${Utils.formatPrice(s.price)} (${s.strength}x)`
+            ).join(' | ');
             
-            if (liquidityClusters.supports.length > 0) {
-                liquidityInfo += '\n   Suporte: ';
-                liquidityInfo += liquidityClusters.supports.map(s => 
-                    `$${Utils.formatPrice(s.price)} (${s.strength}x)`
-                ).join(' | ');
-            }
-            
-            if (liquidityClusters.resistances.length > 0) {
-                liquidityInfo += '\n   Resistência: ';
-                liquidityInfo += liquidityClusters.resistances.map(r => 
-                    `$${Utils.formatPrice(r.price)} (${r.strength}x)`
-                ).join(' | ');
+            // Pega o valor do suporte para o alerta de compra
+            if (pattern.direction === 'BULLISH') {
+                clusterValue = `$${Utils.formatPrice(liquidityClusters.supports[0].price)}`;
             }
         }
         
-        // ATR / Stop info
-        let stopInfo = '';
-        if (atrData && stopPrice) {
-            const stopPercent = atrData.stopPercentage.toFixed(1);
-            const riskReward = (Math.abs(parseFloat(targetDist)) / stopPercent).toFixed(1);
-            stopInfo = `\n ${stopEmoji} Stop: $${Utils.formatPrice(stopPrice)} (${stopPercent}%) `;
+        if (liquidityClusters.resistances.length > 0) {
+            liquidityInfo += '\n   Resistência: ';
+            liquidityInfo += liquidityClusters.resistances.map(r => 
+                `$${Utils.formatPrice(r.price)} (${r.strength}x)`
+            ).join(' | ');
+            
+            // Pega o valor da resistência para o alerta de venda
+            if (pattern.direction === 'BEARISH') {
+                clusterValue = `$${Utils.formatPrice(liquidityClusters.resistances[0].price)}`;
+            }
         }
-        
-        return `
-${emoji} <i>${pattern.type} ${this.timeframe} - Operação Ativada</i> ${emoji}
-
-<i> ${symbol}</i> | ${pattern.direction}
+    }
+    
+    let stopInfo = '';
+    if (atrData && stopPrice) {
+        const stopPercent = atrData.stopPercentage.toFixed(1);
+        stopInfo = `\n ${stopEmoji} Stop: $${Utils.formatPrice(stopPrice)} (${stopPercent}%) `;
+    }
+    
+    return `
+${emoji} 🔍<i>Operação</i> ${emoji}
+ 
+<i> ${symbol}</i> | ${pattern.direction} 🔹 ${lsrInfo}
  Preço: $${Utils.formatPrice(price)}
-<i> Operação:</i> ${Utils.getBrazilianTime()}
- Entrada: $${Utils.formatPrice(pattern.entryPrice)}
-${targetEmoji} Alvo: $${Utils.formatPrice(pattern.targetPrice)} (${targetDist}%)${stopInfo}
-<i> Análise:</i>
+<i> Alerta</i> ${Utils.getBrazilianTime()}
+ Detectado: $${Utils.formatPrice(pattern.entryPrice)}
+ 🤖<i>IA Análise:</i>
+ Entrada: ${clusterValue}
+ ${targetEmoji} Alvo: $${Utils.formatPrice(pattern.targetPrice)} (${targetDist}%)${stopInfo}
+<i>Padrão: ${pattern.type} ${this.timeframe}</i>
  ${volumeInfo} | ${volumeType}
- ${lsrInfo}
  ${rsiInfo}${liquidityInfo}
 
 <i>Titanium by J4Rviz</i>`;
-    }
+}
 
     getStats() {
         return this.stats;
@@ -1294,7 +1518,13 @@ ${targetEmoji} Alvo: $${Utils.formatPrice(pattern.targetPrice)} (${targetDist}%)
 // === MAIN ===
 // =====================================================================
 async function main() {
-    console.log('\n🚀 SCANNER HARMÔNICO - COM CLUSTERS DE LIQUIDEZ E RSI 1h');
+    console.log('\n🚀 SCANNER HARMÔNICO OTIMIZADO - v2.0');
+    console.log('='.repeat(70));
+    console.log(`📊 Configurações:`);
+    console.log(`   • Zigzag: ${CONFIG.ZIGZAG.TYPE} (${CONFIG.ZIGZAG.PERCENTAGE.DEVIATION}% desvio)`);
+    console.log(`   • Tolerância dinâmica: ${(CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MIN*100).toFixed(0)}-${(CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MAX*100).toFixed(0)}%`);
+    console.log(`   • Volume anormal: ${CONFIG.VOLUME.ABNORMAL_THRESHOLD}x`);
+    console.log(`   • Stop ATR: ${CONFIG.ATR.MULTIPLIER}x`);
     console.log('='.repeat(70));
     
     const limiter = new RateLimiter(150);
@@ -1313,11 +1543,16 @@ async function main() {
     const scanner4h = new HarmonicScanner('4H', limiter, fetcher, symbolManager, telegram, volumeAnalyzer, lsrCalculator, atrCalculator, liquidityDetector, rsiCalculator);
     
     await telegram.send(`
-<b>🤖 Titanium  INICIADO</b>
+<b>🤖 Titanium </b>
 
- ${symbolManager.validSymbols.size} pares válidos
- 🔥 Volume  (${CONFIG.VOLUME.ABNORMAL_THRESHOLD}x)
-${Utils.getBrazilianTime()}
+ <b>Configurações:</b>
+ • ${symbolManager.validSymbols.size} pares válidos
+ • Zigzag: ${CONFIG.ZIGZAG.PERCENTAGE.DEVIATION}% desvio
+ • Tolerância: ${(CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MIN*100).toFixed(0)}-${(CONFIG.PATTERNS.DYNAMIC_TOLERANCE.MAX*100).toFixed(0)}%
+ • Volume: ${CONFIG.VOLUME.ABNORMAL_THRESHOLD}x
+ • Stop ATR: ${CONFIG.ATR.MULTIPLIER}x
+
+⏰ ${Utils.getBrazilianTime()}
     `);
     
     let scanCount = 0;
@@ -1329,7 +1564,6 @@ ${Utils.getBrazilianTime()}
         
         const allSymbols = Array.from(symbolManager.validSymbols);
         
-        // Scan 1H
         Logger.info(`\n⏰ 1H (${allSymbols.length} símbolos)...`);
         for (let i = 0; i < allSymbols.length; i += 5) {
             const batch = allSymbols.slice(i, i + 5);
@@ -1343,7 +1577,6 @@ ${Utils.getBrazilianTime()}
             await Utils.sleep(500);
         }
         
-        // Scan 4H
         Logger.info(`\n⏰ 4H (${allSymbols.length} símbolos)...`);
         for (let i = 0; i < allSymbols.length; i += 5) {
             const batch = allSymbols.slice(i, i + 5);
@@ -1357,7 +1590,6 @@ ${Utils.getBrazilianTime()}
             await Utils.sleep(500);
         }
         
-        // Estatísticas
         if (scanCount % 6 === 0) {
             const runtime = ((Date.now() - lastStatsTime) / 1000 / 60).toFixed(0);
             Logger.info(`\n📊 ESTATÍSTICAS (${runtime}min):`);
