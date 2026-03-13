@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfs
-        CHAT_ID: '-1001990
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -27,35 +27,46 @@ const CONFIG = {
     },
     // === CONFIGURAÇÕES ANTI-POLUIÇÃO ===
     ALERTS: {
-        // Cooldown adaptativo baseado no score (horas)
+        // Cooldown base para mesma moeda/mesmo lado (minutos)
+        COOLDOWN_MINUTES: 15,
+        
+        // Permitir alertas de direção oposta sem cooldown
+        ALLOW_OPPOSITE_DIRECTION: true,
+        
+        // Cooldown adaptativo baseado no score (horas) - para cooldown longo
         COOLDOWN_BY_SCORE: {
-           3: 1.5,    // Score 3: espera 1.5h (era 2h)
-           4: 2,      // Score 4: espera 2h (era 3h)
-           5: 3,      // Score 5: espera 3h (era 4h)
-           6: 4,      // Score 6: espera 4h (era 6h)
-           7: 6,      // Score 7: espera 6h (era 8h)
-           8: 8       // Score 8+: espera 8h (era 10h)
-
+           3: 1.5,    // Score 3: espera 1.5h
+           4: 2,      // Score 4: espera 2h
+           5: 3,      // Score 5: espera 3h
+           6: 4,      // Score 6: espera 4h
+           7: 6,      // Score 7: espera 6h
+           8: 8       // Score 8+: espera 8h
         },
         
         // Limites diários por categoria
         DAILY_LIMITS: {
-            TOP_10: 15,      // BTC, ETH: máximo 15 alertas/dia
-            TOP_50: 25,      // Altcoins principais: 25/dia
-            OTHER: 35,       // Outras: 35/dia
-            LOW_VOLUME: 10   // Baixo volume: só 10/dia
+            TOP_10: 25,      // BTC, ETH: máximo 15 alertas/dia
+            TOP_50: 40,      // Altcoins principais: 25/dia
+            OTHER: 55,       // Outras: 35/dia
+            LOW_VOLUME: 50   // Baixo volume: só 10/dia
         },
         
         // Filtros de volume
-        MIN_VOLUME_USDT: 50000,      // em volume 24h
-        MIN_VOLUME_RATIO: 1.2,        // Volume atual > 1.1x média
-        MIN_24H_VOLUME_USDT: 100000,  // Volume 24h mínimo 
+        MIN_VOLUME_USDT: 50000,      // Volume mínimo por hora em USDT
+        MIN_VOLUME_RATIO: 1.3,        // Volume atual > 1.3x média
+        MIN_24H_VOLUME_USDT: 100000,  // Volume 24h mínimo
         
         // Força da tendência mínima
-        MIN_TREND_STRENGTH: 0,        // 0-100, quanto maior mais forte
+        MIN_TREND_STRENGTH: 3,        // 0-100, quanto maior mais forte
         
         // Variação mínima de preço
-        PRICE_DEVIATION: 0.3,          // Precisa variar 0.5% desde último alerta
+        PRICE_DEVIATION: 0.4,          // Precisa variar 0.4% desde último alerta
+        
+        // RSI thresholds para COMPRA e VENDA
+        RSI: {
+            BUY_MAX: 64,      // RSI máximo para alerta de COMPRA
+            SELL_MIN: 66      // RSI mínimo para alerta de VENDA
+        },
         
         // Prioridades (scores mínimos)
         PRIORITY_LEVELS: {
@@ -205,7 +216,7 @@ function formatPrice(price) {
 }
 
 // Caches
-const alertCache = new Map();
+const alertCache = new Map(); // Guarda timestamp do último alerta por símbolo/direção
 const dailyCounter = new Map();
 const symbolMetadata = new Map(); // Cache para metadados dos símbolos
 
@@ -370,7 +381,7 @@ function getPriorityLevel(score) {
 }
 
 // =====================================================================
-// === FUNÇÕES DE ANÁLISE TÉCNICA (mantidas) ===
+// === FUNÇÕES DE ANÁLISE TÉCNICA ===
 // =====================================================================
 function calculateSMA(values, period) {
     if (!values || values.length < period) return 0;
@@ -991,30 +1002,51 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
 // =====================================================================
 // === VERIFICAR SE PODE ENVIAR ALERTA (VERSÃO INTELIGENTE) ===
 // =====================================================================
-function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT, trendStrength) {
+function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT, trendStrength, rsi) {
     const now = Date.now();
     const key = `${symbol}_${direction}`;
+    const oppositeKey = `${symbol}_${direction === 'COMPRA' ? 'VENDA' : 'COMPRA'}`;
     const priceKey = `${symbol}_price`;
     const dailyKey = `${symbol}_daily`;
     
-    // 1. SCORE MÍNIMO
+    // 1. VERIFICAÇÃO DO RSI
+    if (direction === 'COMPRA' && rsi > CONFIG.ALERTS.RSI.BUY_MAX) {
+        console.log(`⏭️ ${symbol} - RSI muito alto para COMPRA: ${rsi} > ${CONFIG.ALERTS.RSI.BUY_MAX}`);
+        return false;
+    }
+    
+    if (direction === 'VENDA' && rsi < CONFIG.ALERTS.RSI.SELL_MIN) {
+        console.log(`⏭️ ${symbol} - RSI muito baixo para VENDA: ${rsi} < ${CONFIG.ALERTS.RSI.SELL_MIN}`);
+        return false;
+    }
+    
+    // 2. SCORE MÍNIMO
     if (score < CONFIG.ALERTS.MIN_SCORE_TO_ALERT) {
         console.log(`⏭️ ${symbol} - Score baixo (${score})`);
         return false;
     }
     
-    // 2. COOLDOWN POR SCORE
-    const cooldownHours = getCooldownByScore(score);
+    // 3. COOLDOWN DE 15 MINUTOS PARA MESMA DIREÇÃO
     const lastAlert = alertCache.get(key);
     if (lastAlert) {
-        const hoursDiff = (now - lastAlert) / (1000 * 60 * 60);
-        if (hoursDiff < cooldownHours) {
-            console.log(`⏳ Cooldown ${symbol}: ${hoursDiff.toFixed(1)}h < ${cooldownHours}h necessários (score ${score})`);
+        const minutesDiff = (now - lastAlert) / (1000 * 60);
+        if (minutesDiff < CONFIG.ALERTS.COOLDOWN_MINUTES) {
+            console.log(`⏳ Cooldown ${symbol} ${direction}: ${minutesDiff.toFixed(1)}min < ${CONFIG.ALERTS.COOLDOWN_MINUTES}min necessários`);
             return false;
         }
     }
     
-    // 3. LIMITE DIÁRIO POR CATEGORIA
+    // 4. VERIFICAR DIREÇÃO OPOSTA - PODE ALERTAR SEM COOLDOWN
+    if (CONFIG.ALERTS.ALLOW_OPPOSITE_DIRECTION) {
+        const oppositeAlert = alertCache.get(oppositeKey);
+        if (oppositeAlert) {
+            const oppositeMinutesDiff = (now - oppositeAlert) / (1000 * 60);
+            console.log(`🔄 Direção oposta para ${symbol} - permitido (último alerta oposto há ${oppositeMinutesDiff.toFixed(1)}min)`);
+            // Permite o alerta, não bloqueia
+        }
+    }
+    
+    // 5. LIMITE DIÁRIO POR CATEGORIA
     const dailyLimit = getDailyLimit(symbol);
     const dailyCount = dailyCounter.get(dailyKey) || 0;
     if (dailyCount >= dailyLimit) {
@@ -1022,7 +1054,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         return false;
     }
     
-    // 4. FILTRO DE VOLUME
+    // 6. FILTRO DE VOLUME
     if (volumeRatio < CONFIG.ALERTS.MIN_VOLUME_RATIO) {
         console.log(`⏭️ ${symbol} - Volume ratio baixo (${volumeRatio.toFixed(2)}x)`);
         return false;
@@ -1038,13 +1070,13 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         return false;
     }
     
-    // 5. FORÇA DA TENDÊNCIA
+    // 7. FORÇA DA TENDÊNCIA
     if (trendStrength < CONFIG.ALERTS.MIN_TREND_STRENGTH) {
         console.log(`⏭️ ${symbol} - Tendência fraca (${trendStrength.toFixed(2)})`);
         return false;
     }
     
-    // 6. VARIAÇÃO DE PREÇO
+    // 8. VARIAÇÃO DE PREÇO
     const lastPrice = alertCache.get(priceKey);
     if (lastPrice) {
         const priceDiff = Math.abs((price - lastPrice) / lastPrice * 100);
@@ -1054,7 +1086,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         }
     }
     
-    // 7. LIMITE POR SCAN
+    // 9. LIMITE POR SCAN
     if (alertsSentThisScan >= CONFIG.ALERTS.MAX_ALERTS_PER_SCAN) {
         console.log(`⏭️ Limite de alertas deste scan atingido (${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN})`);
         return false;
@@ -1082,6 +1114,8 @@ function registerAlert(symbol, direction, price) {
             alertCache.delete(k);
         }
     }
+    
+    console.log(`📝 Registrado alerta ${symbol} ${direction} #${dailyCount} do dia`);
 }
 
 // =====================================================================
@@ -1148,7 +1182,7 @@ async function sendSingleAlert(alert) {
             const errorData = await response.text();
             console.log(`❌ Erro Telegram: ${response.status}`);
         } else {
-            registerAlert(`${alert.symbol}_${alert.timeframe}`, alert.direction, alert.price);
+            registerAlert(alert.symbol, alert.direction, alert.price);
             const penaltyIcon = alert.lsrPenalty ? '⚠️' : '✅';
             console.log(`${penaltyIcon} 📨 ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore}`);
         }
@@ -1305,16 +1339,20 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             penaltyApplied = true;
         }
         
+        // Determinar direção do alerta
+        const direction = touchedLower ? 'COMPRA' : 'VENDA';
+        
         // VERIFICAÇÕES ANTI-POLUIÇÃO
         if (!canSendAlert(
             symbol, 
-            touchedLower ? 'COMPRA' : 'VENDA', 
+            direction,
             currentPrice, 
             confirmationScore,
             additional.volume1h.ratio,
             additional.volume1h.usdt,
             additional.volume24h.usdt,
-            additional.trendStrength
+            additional.trendStrength,
+            additional.rsi  // Passar RSI para validação
         )) {
             return null;
         }
@@ -1341,7 +1379,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         
         const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
         
-        console.log(`🎯 ${symbol} [${timeframe}] - REVERSÃO CONFIRMADA! Score: ${confirmationScore} | ${confirmations.join(' | ')}`);
+        console.log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | ${confirmations.join(' | ')}`);
         
         const alert = {
             symbol,
@@ -1386,6 +1424,9 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
 function formatAlert(data) {
     const time = getBrazilianDateTime();
     const symbolName = data.symbol.replace('USDT', '');
+    
+    // Link do TradingView para o gráfico de 1h
+    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
     
     const fundingPct = data.funding ? (data.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = data.funding && data.funding > 0 ? '+' : '';
@@ -1435,7 +1476,7 @@ function formatAlert(data) {
  ${confirmationsLine}
  ${reversalScoreLine}${divergenceLines}${lsrWarning}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
- #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} 
+ #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TradingView</a>
  ${volume3mLine}
  ${volume1hLine}
  #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -1481,9 +1522,11 @@ async function startScanner() {
     const symbols = await fetchSymbols();
     console.log(`📈 Monitorando ${symbols.length} símbolos`);
     console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE_TO_ALERT}`);
-    console.log(`⏰ Cooldown por score: Score 3=2h, 4=3h, 5=4h, 6=6h, 7=8h, 8=10h`);
+    console.log(`⏰ Cooldown mesmo lado: ${CONFIG.ALERTS.COOLDOWN_MINUTES} minutos`);
+    console.log(`🔄 Direção oposta: ${CONFIG.ALERTS.ALLOW_OPPOSITE_DIRECTION ? 'Permitida sem cooldown' : 'Bloqueada'}`);
+    console.log(`📊 RSI Compra máx: ${CONFIG.ALERTS.RSI.BUY_MAX} | RSI Venda mín: ${CONFIG.ALERTS.RSI.SELL_MIN}`);
     console.log(`📊 Limites diários: Top10=15, Top50=25, Outras=35, BaixoVol=10`);
-    console.log(`💵 Volume mínimo: $500k/hora | $1M/dia`);
+    console.log(`💵 Volume mínimo: $50k/hora | $100k/dia`);
     console.log(`📊 Força tendência mínima: ${CONFIG.ALERTS.MIN_TREND_STRENGTH}`);
     console.log(`📦 Agrupamento: ${CONFIG.ALERTS.GROUP_WINDOW_MINUTES}min | máx ${CONFIG.ALERTS.MAX_GROUP_SIZE} alertas`);
     console.log('='.repeat(70));
