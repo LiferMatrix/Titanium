@@ -7,8 +7,8 @@ const path = require('path');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         DELAY_BETWEEN_MSGS: 3000
     },
     BINANCE: {
@@ -89,7 +89,7 @@ const CONFIG = {
         MAX_PIVOTS: 20
     },
     VOLUME: {
-        ABNORMAL_THRESHOLD: 1.3,
+        ABNORMAL_THRESHOLD: 1.8,
         CHECK_MINUTES: 3,
         MA_PERIOD: 9  // Média móvel para volume
     },
@@ -1561,13 +1561,18 @@ class HarmonicScanner {
         }
     }
 
-    formatAlert(pattern, symbol, price, targetDist, volumeData, hasValidVolume, lsrData, atrData, finalStop, liquidityClusters, rsiValue, rsiState, volumeType, toleranceUsed) {
+     formatAlert(pattern, symbol, price, targetDist, volumeData, hasValidVolume, lsrData, atrData, finalStop, liquidityClusters, rsiValue, rsiState, volumeType, toleranceUsed) {
         const emoji = pattern.direction === 'BULLISH' ? '🟢' : '🔴';
         const targetEmoji = pattern.direction === 'BULLISH' ? '📈' : '📉';
         const stopEmoji = pattern.direction === 'BULLISH' ? '🛑' : '⛔';
         
         // Link do TradingView (não aparece na mensagem, apenas como link clicável)
         const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${symbol}PERP&interval=60`;
+        
+        // Formata data e hora completas
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('pt-BR');
+        const timeStr = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         
         const volumeInfo = volumeData ? 
             ` Volume: ${Utils.formatVolume(volumeData.currentVolume)} (${volumeData.multiple.toFixed(1)}x)` :
@@ -1589,7 +1594,7 @@ class HarmonicScanner {
         let liquidityInfo = '';
         
         if (liquidityClusters && (liquidityClusters.supports.length > 0 || liquidityClusters.resistances.length > 0)) {
-            liquidityInfo = '\n <b>Níveis Importantes:</b>';
+            liquidityInfo = '\n <i>Níveis Importantes:</i>';
             
             if (liquidityClusters.supports.length > 0) {
                 const supportsList = liquidityClusters.supports.map(s => 
@@ -1613,31 +1618,32 @@ class HarmonicScanner {
             
             // Adiciona info sobre o tipo de stop
             if (liquidityClusters && (liquidityClusters.supports.length > 0 || liquidityClusters.resistances.length > 0)) {
-                stopInfo += ` [ATR+Liq]`;
+                stopInfo += ` `;
             }
         }
         
         // Link oculto - aparece apenas como texto clicável sem mostrar a URL
         return `
-${emoji} 🔍<b>Operação</b> ${emoji} <a href="${tradingViewLink}">🔗 TradingView</a>
+${emoji} 🔍<i>Operação</i> ${emoji} <a href="${tradingViewLink}">🔗 TradingView</a>
  
-<b>${symbol}</b> | ${pattern.direction} 🔹 ${lsrInfo}
- Preço: $${Utils.formatPrice(price)}
- <b>Alerta</b> ${Utils.getBrazilianTime()}
- 🤖<b>IA Análise:</b>
- Entrada: $${Utils.formatPrice(pattern.entry)} (tol. ${toleranceUsed.toFixed(1)}%)
- ${targetEmoji} Alvo: $${Utils.formatPrice(pattern.target)} (${targetDist}%)${stopInfo}
-<b>Padrão: ${pattern.type} ${this.timeframe}</b>
- ${volumeInfo} | ${volumeTypeText} ${volumeEmoji}
- ${rsiInfo}${liquidityInfo}
+<i>${symbol}</i> | ${pattern.direction} 🔹 ${lsrInfo}
+ <i>Preço: $${Utils.formatPrice(price)}</i>
+ <i>Alerta: ${dateStr} | ${timeStr}hs</i>
+ 🤖<i>IA Análise:</i>
+ <i>Entrada: $${Utils.formatPrice(pattern.entry)} (tol. ${toleranceUsed.toFixed(1)}%)</i>
+ <i>${targetEmoji} Alvo: $${Utils.formatPrice(pattern.target)} (${targetDist}%)${stopInfo}</i>
+<i>Padrão: ${pattern.type} ${this.timeframe}</i>
+ <i>${volumeInfo} | ${volumeTypeText} ${volumeEmoji}</i>
+ <i>${rsiInfo}${liquidityInfo}</i>
 
-<i>Titanium by J4Rviz</i>`;
+<i>Titanium Harmonic by J4Rviz</i>`;
     }
 
     getStats() {
         return this.stats;
     }
 }
+
 
 // =====================================================================
 // === MAIN ===
