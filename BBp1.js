@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_
-        CHAT_ID: '-1001990
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -45,16 +45,23 @@ const CONFIG = {
         
         // Limites diários por categoria
         DAILY_LIMITS: {
-            TOP_10: 25,      // BTC, ETH: máximo 15 alertas/dia
-            TOP_50: 40,      // Altcoins principais: 25/dia
-            OTHER: 55,       // Outras: 35/dia
-            LOW_VOLUME: 50   // Baixo volume: só 10/dia
+            TOP_10: 25,      // BTC, ETH: máximo 25 alertas/dia
+            TOP_50: 40,      // Altcoins principais: 40/dia
+            OTHER: 55,       // Outras: 55/dia
+            LOW_VOLUME: 50   // Baixo volume: 50/dia
         },
         
         // Filtros de volume
         MIN_VOLUME_USDT: 50000,      // Volume mínimo por hora em USDT
         MIN_VOLUME_RATIO: 1.3,        // Volume atual > 1.3x média
         MIN_24H_VOLUME_USDT: 100000,  // Volume 24h mínimo
+        
+        // NOVOS FILTROS - DIREÇÃO DO VOLUME OBRIGATÓRIA
+        VOLUME_DIRECTION: {
+            BUY_MIN_PERCENTAGE: 52,    // Mínimo 52% comprador para alerta de COMPRA
+            SELL_MAX_PERCENTAGE: 48,    // Máximo 48% comprador para alerta de VENDA (ou seja, >52% vendedor)
+            STRICT_MODE: true           // Se true, EXIGE direção correta do volume
+        },
         
         // Força da tendência mínima
         MIN_TREND_STRENGTH: 3,        // 0-100, quanto maior mais forte
@@ -927,6 +934,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 ratio: volumeRatio1h,
                 percentage: volume1h.percentage,
                 text: volume1h.text,
+                direction: volume1h.direction,
+                emoji: volume1h.emoji,
                 ratioFormatted: volumeRatio1h.toFixed(2),
                 usdt: volumeUSDT1h
             },
@@ -934,6 +943,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 ratio: volumeRatio3m,
                 percentage: volume3m.percentage,
                 text: volume3m.text,
+                direction: volume3m.direction,
+                emoji: volume3m.emoji,
                 ratioFormatted: volumeRatio3m.toFixed(2)
             },
             volume24h: {
@@ -980,8 +991,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
             stoch4h: 'K50⤵️D55 🟡',
             stochDailyValues: { k: 50, d: 55 },
             stoch4hValues: { k: 50, d: 55 },
-            volume1h: { ratio: 1, percentage: 50, text: '⚪Neutro', ratioFormatted: '1.00', usdt: 0 },
-            volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', ratioFormatted: '1.00' },
+            volume1h: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00', usdt: 0 },
+            volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00' },
             volume24h: { pct: '0%', text: '⚪Neutro', usdt: 0 },
             trendStrength: 0,
             bbDaily: { upper: currentPrice * 1.2, lower: currentPrice * 0.8 },
@@ -1002,7 +1013,7 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
 // =====================================================================
 // === VERIFICAR SE PODE ENVIAR ALERTA (VERSÃO INTELIGENTE) ===
 // =====================================================================
-function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT, trendStrength, rsi) {
+function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT, trendStrength, rsi, volumeDirection, volumePercentage) {
     const now = Date.now();
     const key = `${symbol}_${direction}`;
     const oppositeKey = `${symbol}_${direction === 'COMPRA' ? 'VENDA' : 'COMPRA'}`;
@@ -1026,7 +1037,26 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         return false;
     }
     
-    // 3. COOLDOWN DE 15 MINUTOS PARA MESMA DIREÇÃO
+    // 3. VERIFICAÇÃO DA DIREÇÃO DO VOLUME (NOVO)
+    if (CONFIG.ALERTS.VOLUME_DIRECTION.STRICT_MODE) {
+        if (direction === 'COMPRA') {
+            // Para COMPRA, volume precisa ser comprador (>52%)
+            if (volumePercentage < CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE) {
+                console.log(`⏭️ ${symbol} - Volume NÃO está comprador para COMPRA: ${volumePercentage.toFixed(1)}% < ${CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE}%`);
+                return false;
+            }
+            console.log(`✅ ${symbol} - Volume comprador confirmado: ${volumePercentage.toFixed(1)}%`);
+        } else if (direction === 'VENDA') {
+            // Para VENDA, volume precisa ser vendedor (<48% comprador = >52% vendedor)
+            if (volumePercentage > CONFIG.ALERTS.VOLUME_DIRECTION.SELL_MAX_PERCENTAGE) {
+                console.log(`⏭️ ${symbol} - Volume NÃO está vendedor para VENDA: ${volumePercentage.toFixed(1)}% > ${CONFIG.ALERTS.VOLUME_DIRECTION.SELL_MAX_PERCENTAGE}%`);
+                return false;
+            }
+            console.log(`✅ ${symbol} - Volume vendedor confirmado: ${(100 - volumePercentage).toFixed(1)}%`);
+        }
+    }
+    
+    // 4. COOLDOWN DE 15 MINUTOS PARA MESMA DIREÇÃO
     const lastAlert = alertCache.get(key);
     if (lastAlert) {
         const minutesDiff = (now - lastAlert) / (1000 * 60);
@@ -1036,7 +1066,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         }
     }
     
-    // 4. VERIFICAR DIREÇÃO OPOSTA - PODE ALERTAR SEM COOLDOWN
+    // 5. VERIFICAR DIREÇÃO OPOSTA - PODE ALERTAR SEM COOLDOWN
     if (CONFIG.ALERTS.ALLOW_OPPOSITE_DIRECTION) {
         const oppositeAlert = alertCache.get(oppositeKey);
         if (oppositeAlert) {
@@ -1046,7 +1076,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         }
     }
     
-    // 5. LIMITE DIÁRIO POR CATEGORIA
+    // 6. LIMITE DIÁRIO POR CATEGORIA
     const dailyLimit = getDailyLimit(symbol);
     const dailyCount = dailyCounter.get(dailyKey) || 0;
     if (dailyCount >= dailyLimit) {
@@ -1054,7 +1084,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         return false;
     }
     
-    // 6. FILTRO DE VOLUME
+    // 7. FILTRO DE VOLUME
     if (volumeRatio < CONFIG.ALERTS.MIN_VOLUME_RATIO) {
         console.log(`⏭️ ${symbol} - Volume ratio baixo (${volumeRatio.toFixed(2)}x)`);
         return false;
@@ -1070,13 +1100,13 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         return false;
     }
     
-    // 7. FORÇA DA TENDÊNCIA
+    // 8. FORÇA DA TENDÊNCIA
     if (trendStrength < CONFIG.ALERTS.MIN_TREND_STRENGTH) {
         console.log(`⏭️ ${symbol} - Tendência fraca (${trendStrength.toFixed(2)})`);
         return false;
     }
     
-    // 8. VARIAÇÃO DE PREÇO
+    // 9. VARIAÇÃO DE PREÇO
     const lastPrice = alertCache.get(priceKey);
     if (lastPrice) {
         const priceDiff = Math.abs((price - lastPrice) / lastPrice * 100);
@@ -1086,7 +1116,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
         }
     }
     
-    // 9. LIMITE POR SCAN
+    // 10. LIMITE POR SCAN
     if (alertsSentThisScan >= CONFIG.ALERTS.MAX_ALERTS_PER_SCAN) {
         console.log(`⏭️ Limite de alertas deste scan atingido (${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN})`);
         return false;
@@ -1184,7 +1214,7 @@ async function sendSingleAlert(alert) {
         } else {
             registerAlert(alert.symbol, alert.direction, alert.price);
             const penaltyIcon = alert.lsrPenalty ? '⚠️' : '✅';
-            console.log(`${penaltyIcon} 📨 ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore}`);
+            console.log(`${penaltyIcon} 📨 ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%)`);
         }
         
         return true;
@@ -1206,7 +1236,7 @@ async function sendGroupedAlerts(alerts, priority) {
     if (buyAlerts.length > 0) {
         message += `🟢 **COMPRA** (${buyAlerts.length})\n`;
         buyAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore}\n`;
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%)\n`;
         });
         if (buyAlerts.length > 5) message += `... e mais ${buyAlerts.length - 5}\n`;
         message += '\n';
@@ -1215,7 +1245,7 @@ async function sendGroupedAlerts(alerts, priority) {
     if (sellAlerts.length > 0) {
         message += `🔴 **VENDA** (${sellAlerts.length})\n`;
         sellAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore}\n`;
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${(100 - a.volume1h.percentage).toFixed(1)}% vendedor)\n`;
         });
         if (sellAlerts.length > 5) message += `... e mais ${sellAlerts.length - 5}\n`;
     }
@@ -1290,6 +1320,22 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         
         const additional = await getAdditionalData(symbol, currentPrice, touchedLower);
         
+        // NOVA VERIFICAÇÃO: Direção do volume para o timeframe
+        const volumeDirection = additional.volume1h.direction;
+        const volumePercentage = additional.volume1h.percentage;
+        
+        // Se for alerta de COMPRA mas volume NÃO está comprador, não prossegue
+        if (touchedLower && volumeDirection !== 'Comprador' && CONFIG.ALERTS.VOLUME_DIRECTION.STRICT_MODE) {
+            console.log(`⏭️ ${symbol} [${timeframe}] - ALERTA DE COMPRA BLOQUEADO: Volume não está comprador (${volumeDirection} - ${volumePercentage.toFixed(1)}%)`);
+            return null;
+        }
+        
+        // Se for alerta de VENDA mas volume NÃO está vendedor, não prossegue
+        if (touchedUpper && volumeDirection !== 'Vendedor' && CONFIG.ALERTS.VOLUME_DIRECTION.STRICT_MODE) {
+            console.log(`⏭️ ${symbol} [${timeframe}] - ALERTA DE VENDA BLOQUEADO: Volume não está vendedor (${volumeDirection} - ${(100 - volumePercentage).toFixed(1)}% vendedor)`);
+            return null;
+        }
+        
         const divergenceMulti = checkRSIDivergenceMultiTimeframe(additional.candlesByTimeframe);
         
         const stochValues = timeframe === '1d' ? additional.stochDailyValues : additional.stoch4hValues;
@@ -1342,7 +1388,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         // Determinar direção do alerta
         const direction = touchedLower ? 'COMPRA' : 'VENDA';
         
-        // VERIFICAÇÕES ANTI-POLUIÇÃO
+        // VERIFICAÇÕES ANTI-POLUIÇÃO (agora com direção do volume)
         if (!canSendAlert(
             symbol, 
             direction,
@@ -1352,7 +1398,9 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             additional.volume1h.usdt,
             additional.volume24h.usdt,
             additional.trendStrength,
-            additional.rsi  // Passar RSI para validação
+            additional.rsi,
+            volumeDirection,
+            volumePercentage
         )) {
             return null;
         }
@@ -1379,7 +1427,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         
         const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
         
-        console.log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | ${confirmations.join(' | ')}`);
+        console.log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | ${confirmations.join(' | ')}`);
         
         const alert = {
             symbol,
@@ -1425,6 +1473,9 @@ function formatAlert(data) {
     const time = getBrazilianDateTime();
     const symbolName = data.symbol.replace('USDT', '');
     
+    // Link do TradingView para o gráfico de 1h
+    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
+    
     const fundingPct = data.funding ? (data.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = data.funding && data.funding > 0 ? '+' : '';
     
@@ -1437,7 +1488,13 @@ function formatAlert(data) {
     
     const lsr = data.lsrValue ? data.lsrValue.toFixed(2) : 'N/A';
     
-    const volume1hLine = `#Vol 1h: ${data.volume1h.ratioFormatted}x (${data.volume1h.percentage.toFixed(0)}%) ${data.volume1h.text}`;
+    // Destaque visual para a direção do volume
+    const volumeEmoji = data.volume1h.emoji;
+    const volumeDirectionText = data.volume1h.direction !== 'Neutro' ? 
+        `${volumeEmoji} ${data.volume1h.direction}` : 
+        `⚪ Neutro`;
+    
+    const volume1hLine = `#Vol 1h: ${data.volume1h.ratioFormatted}x (${data.volume1h.percentage.toFixed(0)}%) ${volumeDirectionText}`;
     const volume3mLine = `#Vol 3m: ${data.volume3m.ratioFormatted}x (${data.volume3m.percentage.toFixed(0)}%) ${data.volume3m.text}`;
     
     let bbLines = '';
@@ -1473,7 +1530,7 @@ function formatAlert(data) {
  ${confirmationsLine}
  ${reversalScoreLine}${divergenceLines}${lsrWarning}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
- #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} 
+ #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TradingView</a>
  ${volume3mLine}
  ${volume1hLine}
  #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -1515,6 +1572,10 @@ async function startScanner() {
     console.log('\n' + '='.repeat(70));
     console.log('📊 TITANIUM PRIME SCANNER - VERSÃO ANTI-POLUIÇÃO');
     console.log('='.repeat(70));
+    console.log('🎯 NOVO FILTRO ATIVADO: DIREÇÃO DO VOLUME OBRIGATÓRIA');
+    console.log(`   • COMPRA: Volume precisa ser COMPRADOR (>${CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE}%)`);
+    console.log(`   • VENDA: Volume precisa ser VENDEDOR (<${CONFIG.ALERTS.VOLUME_DIRECTION.SELL_MAX_PERCENTAGE}% comprador)`);
+    console.log('='.repeat(70));
     
     const symbols = await fetchSymbols();
     console.log(`📈 Monitorando ${symbols.length} símbolos`);
@@ -1522,8 +1583,8 @@ async function startScanner() {
     console.log(`⏰ Cooldown mesmo lado: ${CONFIG.ALERTS.COOLDOWN_MINUTES} minutos`);
     console.log(`🔄 Direção oposta: ${CONFIG.ALERTS.ALLOW_OPPOSITE_DIRECTION ? 'Permitida sem cooldown' : 'Bloqueada'}`);
     console.log(`📊 RSI Compra máx: ${CONFIG.ALERTS.RSI.BUY_MAX} | RSI Venda mín: ${CONFIG.ALERTS.RSI.SELL_MIN}`);
-    console.log(`📊 Limites diários: Top10=15, Top50=25, Outras=35, BaixoVol=10`);
-    console.log(`💵 Volume mínimo: $50k/hora | $100k/dia`);
+    console.log(`📊 Limites diários: Top10=25, Top50=40, Outras=55`);
+    console.log(`💵 Volume mínimo: $50k/hora | $100k/dia | Ratio mínimo: ${CONFIG.ALERTS.MIN_VOLUME_RATIO}x`);
     console.log(`📊 Força tendência mínima: ${CONFIG.ALERTS.MIN_TREND_STRENGTH}`);
     console.log(`📦 Agrupamento: ${CONFIG.ALERTS.GROUP_WINDOW_MINUTES}min | máx ${CONFIG.ALERTS.MAX_GROUP_SIZE} alertas`);
     console.log('='.repeat(70));
@@ -1580,5 +1641,5 @@ async function startScanner() {
 // =====================================================================
 // === INICIAR ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium Prime Scanner - Modo Anti-Poluição...');
+console.log('🚀 Iniciando Titanium Prime Scanner - Modo Anti-Poluição com Filtro de Direção de Volume...');
 startScanner().catch(console.error);
