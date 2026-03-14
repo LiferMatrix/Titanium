@@ -12,8 +12,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
-        CHAT_ID: '-1001990889297'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_o
+        CHAT_ID: '-100199
     },
     PERFORMANCE: {
         SYMBOL_DELAY_MS: 250, // Reduzido de 500ms para 250ms (2x mais rápido)
