@@ -6,9 +6,8 @@ const { SMA, EMA, RSI, Stochastic, ATR } = require('technicalindicators');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURE AQUI SEU BOT E CHAT ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8p
-const TELEGRAM_CHAT_ID = '-1002554
-
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do estudo
 const FRACTAL_BARS = 3;
@@ -35,14 +34,15 @@ const SWEEP_CLEANUP_INTERVAL = 10;
 const RECENT_SWEEP_MINUTES = 60;
 const RECENT_SWEEP_MS = RECENT_SWEEP_MINUTES * 60 * 1000;
 
-// TIMEFRAMES PARA DETECÇÃO DE SWEEP
-const SWEEP_TIMEFRAMES = ['1h', '15m'];
+// TIMEFRAMES PARA DETECÇÃO DE SWEEP (APENAS 1h)
+const SWEEP_TIMEFRAMES = ['1h'];
 
 // === RATE LIMIT ===
 const MAX_REQUESTS_PER_MINUTE = 1200;
 const SAFE_REQUEST_LIMIT = 900;
 const REQUEST_WINDOW_MS = 60000;
 const BATCH_SIZE = 10;
+const CACHE_TTL = 45000;
 
 // === CIRCUIT BREAKER ===
 let panicMode = false;
@@ -150,7 +150,7 @@ function logRejection(symbol, reason, details = {}) {
 }
 
 // ============================================
-// FUNÇÃO DE ANÁLISE DE MERCADO (RESUMIDA)
+// FUNÇÃO DE ANÁLISE DE MERCADO
 // ============================================
 
 async function analyzeMarket(allData) {
@@ -163,7 +163,7 @@ async function analyzeMarket(allData) {
         buySweeps: 0,
         sellSweeps: 0,
         recentSweeps: 0,
-        sweepsByTimeframe: { '1h': 0, '15m': 0 },
+        sweepsByTimeframe: { '1h': 0 },
         totalVolumeRatio: 0,
         volumeSamples: 0,
         totalRSI: 0,
@@ -186,7 +186,6 @@ async function analyzeMarket(allData) {
         if (sweep.type === 'BUY') stats.buySweeps++;
         if (sweep.type === 'SELL') stats.sellSweeps++;
         if (sweep.timeframe === '1h') stats.sweepsByTimeframe['1h']++;
-        if (sweep.timeframe === '15m') stats.sweepsByTimeframe['15m']++;
         if (sweep.timestamp > recentThreshold) stats.recentSweeps++;
     }
     
@@ -262,7 +261,7 @@ async function analyzeMarket(allData) {
 }
 
 // ============================================
-// FUNÇÃO DE MENSAGEM DE ANÁLISE (RESUMIDA)
+// FUNÇÃO DE MENSAGEM DE ANÁLISE DE MERCADO
 // ============================================
 
 function buildMarketAnalysisMessage(stats) {
@@ -270,38 +269,73 @@ function buildMarketAnalysisMessage(stats) {
     
     // Condição do mercado
     let marketEmoji = '⚪';
-    if (stats.buySweeps > stats.sellSweeps * 1.5) marketEmoji = '🟢';
-    else if (stats.sellSweeps > stats.buySweeps * 1.5) marketEmoji = '🔴';
+    let marketCondition = 'LATERAL';
+    if (stats.buySweeps > stats.sellSweeps * 1.5) {
+        marketEmoji = '🟢';
+        marketCondition = 'COMPRA';
+    } else if (stats.sellSweeps > stats.buySweeps * 1.5) {
+        marketEmoji = '🔴';
+        marketCondition = 'VENDA';
+    }
     
     // Volume
-    let volumeEmoji = '📊';
-    if (stats.avgVolumeRatio < 1.0) volumeEmoji = '📉';
-    else if (stats.avgVolumeRatio > 1.3) volumeEmoji = '📈';
+    let volumeDesc = 'NORMAL';
+    if (stats.avgVolumeRatio < 1.0) volumeDesc = 'BAIXO';
+    else if (stats.avgVolumeRatio > 1.3) volumeDesc = 'ALTO';
     
     // RSI
-    let rsiEmoji = '⚖️';
-    if (stats.avgRSI > 65) rsiEmoji = '🔥';
-    else if (stats.avgRSI < 35) rsiEmoji = '❄️';
+    let rsiDesc = 'NEUTRO';
+    if (stats.avgRSI > 65) rsiDesc = 'SOBRECOMPRADO';
+    else if (stats.avgRSI < 35) rsiDesc = 'SOBREVENDIDO';
     
     // Sweeps recentes %
     const recentPct = stats.activeSweeps > 0 ? 
         ((stats.recentSweeps / stats.activeSweeps) * 100).toFixed(0) : 0;
     
-    const message = 
-        `📊<b>ANÁLISE ${brDateTime.time}</b>\n` +
-        `🎯${stats.totalSymbols} | 💾${stats.activeSweeps} ` +
-        `🟢${stats.buySweeps} 🔴${stats.sellSweeps} ` +
-        `⏱️${recentPct}% recente\n` +
-        `📊1h:${stats.sweepsByTimeframe['1h']} ⚡15m:${stats.sweepsByTimeframe['15m']}\n` +
-        `${volumeEmoji}Vol ${stats.avgVolumeRatio.toFixed(2)}x ` +
-        `${rsiEmoji}RSI ${stats.avgRSI.toFixed(1)} ` +
-        `🔥${stats.rsiOverbought} ❄️${stats.rsiOversold}\n` +
-        `📈EMA55: ${stats.emaAlignments.above55}/${stats.emaAlignments.below55} ` +
-        `⚡X:${stats.emaAlignments.crossingUp}/${stats.emaAlignments.crossingDown}\n` +
-        `⬆️Vol: ${stats.topVolume.join(' ')}\n` +
-        `⬇️Vol: ${stats.bottomVolume.join(' ')}\n` +
-        `❌Rej: ${stats.topRejections.join(' ')}\n` +
-        `✅by @J4Rviz`;
+    let message = 
+        `📊 <b>ANÁLISE DE MERCADO</b> ${marketEmoji}\n` +
+        `<b>📅 Data:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+        `<b>🎯 Ativos monitorados:</b> ${stats.totalSymbols}\n` +
+        `\n` +
+        `<b>🔍 SWEEPS ATIVOS (${stats.activeSweeps}):</b>\n` +
+        `   🟢 Compras: ${stats.buySweeps}\n` +
+        `   🔴 Vendas: ${stats.sellSweeps}\n` +
+        `   ⏱️ Recentes (${RECENT_SWEEP_MINUTES}min): ${stats.recentSweeps} (${recentPct}%)\n` +
+        `   📊 Timeframe: 1h\n` +
+        `\n` +
+        `<b>📈 CONDIÇÃO DO MERCADO:</b>\n` +
+        `   ${marketEmoji} Tendência: ${marketCondition}\n` +
+        `   📊 Volume médio: ${stats.avgVolumeRatio.toFixed(2)}x (${volumeDesc})\n` +
+        `   📊 RSI médio: ${stats.avgRSI.toFixed(1)} (${rsiDesc})\n` +
+        `   🔥 RSI >70: ${stats.rsiOverbought} ativos\n` +
+        `   ❄️ RSI <30: ${stats.rsiOversold} ativos\n` +
+        `\n` +
+        `<b>📊 ANÁLISE TÉCNICA:</b>\n` +
+        `   📈 Acima EMA55: ${stats.emaAlignments.above55}\n` +
+        `   📉 Abaixo EMA55: ${stats.emaAlignments.below55}\n` +
+        `   🟢 Cruzamentos COMPRA: ${stats.emaAlignments.crossingUp}\n` +
+        `   🔴 Cruzamentos VENDA: ${stats.emaAlignments.crossingDown}\n` +
+        `\n`;
+    
+    if (stats.topVolume.length > 0) {
+        message += `<b>📊 TOP 5 MAIORES VOLUMES:</b>\n`;
+        stats.topVolume.forEach(s => message += `   ${s}\n`);
+        message += `\n`;
+    }
+    
+    if (stats.bottomVolume.length > 0) {
+        message += `<b>📊 TOP 5 MENORES VOLUMES:</b>\n`;
+        stats.bottomVolume.forEach(s => message += `   ${s}\n`);
+        message += `\n`;
+    }
+    
+    if (stats.topRejections.length > 0) {
+        message += `<b>❌ TOP REJEIÇÕES:</b>\n`;
+        stats.topRejections.forEach(r => message += `   ${r}\n`);
+        message += `\n`;
+    }
+    
+    message += `<b>✅ SMC3 Analysis by @J4Rviz</b>`;
     
     return message;
 }
@@ -311,7 +345,7 @@ function buildMarketAnalysisMessage(stats) {
 // ============================================
 
 async function fetchAllCycleData(symbols) {
-    console.log('📥 Buscando dados...');
+    console.log('📥 Buscando dados de todos os símbolos...');
     const now = Date.now();
     const dataMap = new Map();
     let successCount = 0;
@@ -371,7 +405,7 @@ async function fetchAllCycleData(symbols) {
 }
 
 // ============================================
-// FUNÇÃO DE DETECÇÃO DE SWEEP
+// FUNÇÃO DE DETECÇÃO DE SWEEP (APENAS 1h)
 // ============================================
 
 function detectSweep(candles, timeframe) {
@@ -383,6 +417,7 @@ function detectSweep(candles, timeframe) {
     const currentIndex = closes.length - 1;
     const currentPrice = closes[currentIndex];
     
+    // Detectar sweep de venda (bear) - quebra de fractal de alta
     if (isDnFractal(highs, currentIndex - N)) {
         const fractalLevel = highs[currentIndex - N];
         if (currentPrice > fractalLevel) {
@@ -396,6 +431,7 @@ function detectSweep(candles, timeframe) {
         }
     }
     
+    // Detectar sweep de compra (bull) - quebra de fractal de baixa
     if (isUpFractal(lows, currentIndex - N)) {
         const fractalLevel = lows[currentIndex - N];
         if (currentPrice < fractalLevel) {
@@ -473,7 +509,7 @@ function updateSweepMemory(symbol, newSweep, volumeAtSweep) {
 // FUNÇÃO DE DADOS OPCIONAIS
 // ============================================
 
-async function fetchOptionalDataIfNeeded(symbol) {
+async function fetchOptionalData(symbol) {
     const results = {
         taker: null,
         lsr: { lsrRatio: "N/A", raw: null },
@@ -481,24 +517,20 @@ async function fetchOptionalDataIfNeeded(symbol) {
         orderbook: { bidVolume: "N/A", askVolume: "N/A" }
     };
     
-    const currentUsage = requestCount / SAFE_REQUEST_LIMIT;
-    
-    if (currentUsage < 0.5) {
-        try {
-            const [taker, lsr, funding, orderbook] = await Promise.allSettled([
-                getTakerVolume(symbol).catch(() => null),
-                getLSR(symbol).catch(() => null),
-                getFundingRate(symbol).catch(() => null),
-                getOrderBook(symbol).catch(() => null)
-            ]);
-            
-            if (taker.status === 'fulfilled' && taker.value) results.taker = taker.value;
-            if (lsr.status === 'fulfilled' && lsr.value) results.lsr = lsr.value;
-            if (funding.status === 'fulfilled' && funding.value) results.funding = funding.value;
-            if (orderbook.status === 'fulfilled' && orderbook.value) results.orderbook = orderbook.value;
-            
-        } catch (e) {}
-    }
+    try {
+        const [taker, lsr, funding, orderbook] = await Promise.allSettled([
+            getTakerVolume(symbol).catch(() => null),
+            getLSR(symbol).catch(() => null),
+            getFundingRate(symbol).catch(() => null),
+            getOrderBook(symbol).catch(() => null)
+        ]);
+        
+        if (taker.status === 'fulfilled' && taker.value) results.taker = taker.value;
+        if (lsr.status === 'fulfilled' && lsr.value) results.lsr = lsr.value;
+        if (funding.status === 'fulfilled' && funding.value) results.funding = funding.value;
+        if (orderbook.status === 'fulfilled' && orderbook.value) results.orderbook = orderbook.value;
+        
+    } catch (e) {}
     
     return results;
 }
@@ -514,12 +546,12 @@ async function monitorSymbols() {
     
     const allData = await fetchAllCycleData(ALL_SYMBOLS);
     
-    console.log('🔍 Detectando novos sweeps...');
+    console.log('🔍 Detectando novos sweeps no timeframe 1h...');
     let newSweepsCount = 0;
     
     for (const [symbol, data] of allData) {
         try {
-            for (const tf of SWEEP_TIMEFRAMES) {
+            for (const tf of SWEEP_TIMEFRAMES) { // Apenas '1h'
                 const candles = data[tf];
                 if (!candles || candles.length < 100) continue;
                 
@@ -529,9 +561,9 @@ async function monitorSymbols() {
                     const volumeData = calculateVolumeAtSweep(data['3m']);
                     
                     if (!volumeData.isValid) {
-                        logRejection(symbol, 'vol_insuf', {
-                            tf: tf,
-                            vol: volumeData.ratio.toFixed(2)
+                        logRejection(symbol, 'volume_insuficiente_sweep', {
+                            timeframe: tf,
+                            volume: volumeData.ratio.toFixed(2)
                         });
                         continue;
                     }
@@ -541,12 +573,12 @@ async function monitorSymbols() {
                 }
             }
         } catch (error) {
-            logRejection(symbol, 'erro_detect', { error: error.message });
+            logRejection(symbol, 'erro_deteccao', { error: error.message });
         }
     }
     
-    console.log(`✅ ${newSweepsCount} novos sweeps`);
-    console.log(`💾 Memória: ${sweepMemory.size} sweeps`);
+    console.log(`✅ ${newSweepsCount} novos sweeps detectados (1h)`);
+    console.log(`💾 Memória atual: ${sweepMemory.size} sweeps ativos`);
     
     console.log('🔍 Verificando confirmações...');
     let confirmationsChecked = 0;
@@ -556,8 +588,8 @@ async function monitorSymbols() {
             confirmationsChecked++;
             
             if (sweep.timestamp < sixHoursAgo) {
-                logRejection(symbol, 'sweep_exp', { 
-                    min: Math.round((now - sweep.timestamp) / 60000) 
+                logRejection(symbol, 'sweep_expirado', { 
+                    idade_min: Math.round((now - sweep.timestamp) / 60000) 
                 });
                 sweepMemory.delete(symbol);
                 continue;
@@ -576,13 +608,13 @@ async function monitorSymbols() {
             const candles15m = data['15m'];
             
             if (!candles3m || candles3m.length < 55) {
-                logRejection(symbol, 'dados_insuf');
+                logRejection(symbol, 'dados_3m_insuficientes');
                 continue;
             }
             
             const emasData = calculateEMAsFromData(candles3m);
             if (!emasData.currentPrice) {
-                logRejection(symbol, 'erro_ema');
+                logRejection(symbol, 'erro_calculo_emas');
                 continue;
             }
             
@@ -594,35 +626,36 @@ async function monitorSymbols() {
             if (sweep.type === 'BUY') {
                 if (!emasData.isAboveEMA55) {
                     isConfirmed = false;
-                    rejectReason.push('abaixo55');
+                    rejectReason.push('preco_abaixo_ema55');
                 }
                 if (!emasData.isEMA13CrossingUp) {
                     isConfirmed = false;
-                    rejectReason.push('sem_cross_up');
+                    rejectReason.push('ema13_nao_cruzou_cima');
                 }
                 if (rsi1h.raw && rsi1h.raw >= 60) {
                     isConfirmed = false;
-                    rejectReason.push(`rsi${rsi1h.raw.toFixed(0)}`);
+                    rejectReason.push(`rsi_alto_${rsi1h.raw.toFixed(2)}`);
                 }
             } else {
                 if (!emasData.isBelowEMA55) {
                     isConfirmed = false;
-                    rejectReason.push('acima55');
+                    rejectReason.push('preco_acima_ema55');
                 }
                 if (!emasData.isEMA13CrossingDown) {
                     isConfirmed = false;
-                    rejectReason.push('sem_cross_down');
+                    rejectReason.push('ema13_nao_cruzou_baixo');
                 }
                 if (rsi1h.raw && rsi1h.raw <= 60) {
                     isConfirmed = false;
-                    rejectReason.push(`rsi${rsi1h.raw.toFixed(0)}`);
+                    rejectReason.push(`rsi_baixo_${rsi1h.raw.toFixed(2)}`);
                 }
             }
             
             if (!isConfirmed) {
-                logRejection(symbol, 'condicoes', {
-                    motivo: rejectReason.join(','),
-                    tipo: sweep.type
+                logRejection(symbol, 'condicoes_nao_atendidas', {
+                    motivo: rejectReason.join(', '),
+                    tipo: sweep.type,
+                    rsi: rsi1h.value || 'N/A'
                 });
                 continue;
             }
@@ -630,7 +663,7 @@ async function monitorSymbols() {
             const lastAlert = alertsCooldown[symbol]?.[sweep.type === 'BUY' ? 'lastBuyConfirmation' : 'lastSellConfirmation'] || 0;
             if (now - lastAlert < COOLDOWN) {
                 const minutosRestantes = Math.round((COOLDOWN - (now - lastAlert)) / 60000);
-                logRejection(symbol, 'cooldown', { rest: minutosRestantes });
+                logRejection(symbol, 'cooldown', { minutos_restantes: minutosRestantes });
                 continue;
             }
             
@@ -639,11 +672,43 @@ async function monitorSymbols() {
             const avgVolume = prevVolumes.reduce((s, v) => s + v, 0) / prevVolumes.length;
             const currentVolumeRatio = avgVolume > 0 ? (lastCandle3m.volume / avgVolume).toFixed(2) : "0";
             
-            const optionalData = await fetchOptionalDataIfNeeded(symbol);
+            const optionalData = await fetchOptionalData(symbol);
             const srData = await getSupportResistance(symbol, candles1h);
             const atrData = calculateATRFromData(candles15m);
             const stoch4h = calculateStochFromData(candles4h);
             const stoch1d = calculateStochFromData(candles1d);
+            
+            // Calcular stop com ATR adaptativo
+            let stopPrice, stopPercentage;
+            if (atrData.atr) {
+                stopPercentage = Math.min(
+                    Math.max(atrData.atrPercent * ATR_MULTIPLIER, MIN_ATR_PERCENTAGE),
+                    MAX_ATR_PERCENTAGE
+                );
+                stopPrice = sweep.type === 'BUY' 
+                    ? emasData.currentPrice * (1 - stopPercentage/100)
+                    : emasData.currentPrice * (1 + stopPercentage/100);
+            } else {
+                stopPercentage = 3.0;
+                stopPrice = sweep.type === 'BUY'
+                    ? emasData.currentPrice * 0.97
+                    : emasData.currentPrice * 1.03;
+            }
+            
+            // Calcular alvos
+            const targets = [];
+            for (const pct of TARGET_PERCENTAGES) {
+                const targetPrice = sweep.type === 'BUY'
+                    ? emasData.currentPrice * (1 + pct/100)
+                    : emasData.currentPrice * (1 - pct/100);
+                const rr = (pct / stopPercentage).toFixed(2);
+                targets.push({
+                    percentage: pct,
+                    price: targetPrice,
+                    formatted: formatNumber(targetPrice, symbol, true),
+                    rr: rr
+                });
+            }
             
             const message = buildAlertMessage(
                 sweep.type === 'BUY',
@@ -671,7 +736,10 @@ async function monitorSymbols() {
                     price: sweep.price,
                     fractalLevel: sweep.fractalLevel,
                     timeframe: sweep.timeframe
-                }
+                },
+                stopPrice,
+                stopPercentage.toFixed(2),
+                targets
             );
             
             alerts.push({
@@ -693,11 +761,11 @@ async function monitorSymbols() {
             logToFile(`✅ CONFIRMAÇÃO ${sweep.type} ${symbol} - Sweep ${sweep.timeframe} há ${Math.round((now - sweep.timestamp) / 60000)}min`);
             
         } catch (error) {
-            logRejection(symbol, 'erro_conf', { error: error.message });
+            logRejection(symbol, 'erro_confirmacao', { error: error.message });
         }
     }
     
-    console.log(`✅ ${alerts.length} confirmações de ${confirmationsChecked} sweeps`);
+    console.log(`✅ ${alerts.length} confirmações de ${confirmationsChecked} sweeps verificados`);
     
     const marketAnalysis = await analyzeMarket(allData);
     
@@ -705,37 +773,84 @@ async function monitorSymbols() {
 }
 
 // ============================================
-// CONSTRUIR MENSAGEM DE ALERTA
+// CONSTRUIR MENSAGEM DE ALERTA (COMPLETA)
 // ============================================
 
 function buildAlertMessage(isBullish, symbol, price, brDateTime, atrData, 
                           rsi1h, stoch4h, stoch1d, lsr, funding, 
-                          volumeData, orderBook, srData, emasData, sweepInfo) {
+                          volumeData, orderBook, srData, emasData, sweepInfo,
+                          stopPrice, stopPercentage, targets) {
     
-    const title = isBullish ? '🟢<b>COMPRA</b>' : '🔴<b>VENDA</b>';
+    const title = isBullish ? '🟢<i>🤖🔍 Analisar Compra</i>' : '🔴<i>🤖🔍 Analisar Correção</i>';
     const priceFormatted = formatNumber(price, symbol, true);
-    const tfEmoji = sweepInfo.timeframe === '15m' ? '⚡' : '📊';
     
-    let message = `${title} #${symbol}\n`;
-    message += `${brDateTime.time} | $${priceFormatted}\n`;
-    message += `${tfEmoji}Sweep ${sweepInfo.type} ${sweepInfo.minutesAgo}min\n`;
+    let message = `${title}\n`;
+    message += `<i> Data:</i> ${brDateTime.date} - ${brDateTime.time}\n`;
+    message += `<i> Ativo:</i> #${symbol}\n`;
+    message += `<i> Preço atual:</i> $${priceFormatted}\n`;
+    message += `<i> Liquidez cap:</i> ${sweepInfo.type} há ${sweepInfo.minutesAgo}min\n`;
+    //message += `<i> Nível do fractal:</i> $${formatNumber(sweepInfo.fractalLevel, symbol, true)}\n\n`;
     
+    // Suportes e Resistências
     if (srData.supportLevels.length > 0) {
-        message += `🛡️S1:$${srData.supportLevels[0].formatted} `;
-        if (srData.resistanceLevels.length > 0) {
-            message += `🧱R1:$${srData.resistanceLevels[0].formatted}\n`;
-        } else {
-            message += `\n`;
-        }
+        message += `<i> Suporte:</i>\n`;
+        srData.supportLevels.slice(0, 3).forEach((s, i) => {
+            message += `   S${i+1}: $${s.formatted} (${s.touches} toques)\n`;
+        });
     }
     
-    const entryImmediate = isBullish ? price * 0.995 : price * 1.005;
-    message += `🎯E:$${formatNumber(entryImmediate, symbol, true)} `;
-    message += `⛔S:$${formatNumber(atrData.atr ? (isBullish ? price*(1-Math.min(Math.max(atrData.atrPercent*ATR_MULTIPLIER,MIN_ATR_PERCENTAGE),MAX_ATR_PERCENTAGE)/100) : price*(1+Math.min(Math.max(atrData.atrPercent*ATR_MULTIPLIER,MIN_ATR_PERCENTAGE),MAX_ATR_PERCENTAGE)/100)) : 0, symbol, true)}\n`;
+    if (srData.resistanceLevels.length > 0) {
+        message += `<i> Resistência:</i>\n`;
+        srData.resistanceLevels.slice(0, 3).forEach((r, i) => {
+            message += `   R${i+1}: $${r.formatted} (${r.touches} toques)\n`;
+        });
+    }
+    //message += `\n`;
     
-    message += `📊RSI${rsi1h.value||'N/A'} V${volumeData.currentRatio}x(SW${volumeData.sweepRatio}x)`;
-    if (volumeData.buyRatio) message += ` C${volumeData.buyRatio}%`;
-    message += `\n✅by @J4Rviz`;
+    // Entradas sugeridas
+    const entryImmediate = isBullish ? price * 0.995 : price * 1.005;
+    const entryAggressive = isBullish ? price * 0.985 : price * 1.015;
+    
+    message += `<i> Entradas:</i>\n`;
+    message += ` <i>  1. $${formatNumber(entryImmediate, symbol, true)}</i> \n`;
+    message += ` <i>  2. $${formatNumber(price, symbol, true)}</i> \n`;
+    message += ` <i>  3. $${formatNumber(entryAggressive, symbol, true)} (Agressiva)</i>\n\n`;
+    
+    // Stop ATR
+    message += `<i>⛔ Stop:</i>\n`;
+    message += `  <i> Preço: $${formatNumber(stopPrice, symbol, true)}<i>\n`;
+    message += `  <i> Distância: ${stopPercentage}%<i>\n`;
+    if (atrData.atr) {
+        //message += `  <i> ATR(${ATR_PERIOD}, ${ATR_TIMEFRAME}): ${atrData.atrFormatted} (${atrData.atrPercentFormatted}%)<i>\n`;
+        //message += `  <i> Multiplicador: ${ATR_MULTIPLIER}x<i>\n`;
+    }
+    message += `\n`;
+    
+    // Alvos com Risk/Reward
+    message += `<i> Alvos:</i>\n`;
+    targets.forEach((target, index) => {
+        message += `  <i> T${index+1} (${target.percentage}%): $${target.formatted}</i> \n`;
+    });
+    message += `\n`;
+    
+    // Indicadores
+    message += `<i> Indicadores:</i>\n`;
+    message += `<i>RSI 1h: ${rsi1h.value || 'N/A'}</i>\n`;
+    message += `<i>Stoch 4h: K=${stoch4h.k || 'N/A'} ${stoch4h.kDirection} D=${stoch4h.d || 'N/A'} ${stoch4h.dDirection}\n`;
+    message += `<i>Stoch 1D: K=${stoch1d.k || 'N/A'} ${stoch1d.kDirection} D=${stoch1d.d || 'N/A'} ${stoch1d.dDirection}\n`;
+    message += `<i>LSR (${LSR_TIMEFRAME}): ${lsr.lsrRatio}</i>\n`;
+    message += `<i>Funding Rate: ${funding.emoji} ${funding.rate}%</i>\n`;
+    message += ` <i> Vol 3m: ${volumeData.currentRatio}x (sweep: ${volumeData.sweepRatio}x)</i>\n`;
+    
+    if (volumeData.buyRatio) {
+        message += `   <i>Compras: ${volumeData.buyRatio}%<i>\n`;
+    }
+    if (volumeData.sellRatio) {
+        message += `   <i>Vendas: ${volumeData.sellRatio}%<i>\n`;
+    }
+    
+    message += `<i>Bid Volume: <i>${orderBook.bidVolume}</i> | <i>Ask Volume: <i>${orderBook.askVolume}</i>\n`;
+    message += `\n<i>Titanium SMC by @J4Rviz</i>`;
     
     return message;
 }
@@ -1168,18 +1283,27 @@ function getBrazilianDateTime() {
     
     return {
         date: `${String(brasiliaTime.getDate()).padStart(2,'0')}/${String(brasiliaTime.getMonth()+1).padStart(2,'0')}/${brasiliaTime.getFullYear()}`,
-        time: `${String(brasiliaTime.getHours()).padStart(2,'0')}:${String(brasiliaTime.getMinutes()).padStart(2,'0')}`
+        time: `${String(brasiliaTime.getHours()).padStart(2,'0')}:${String(brasiliaTime.getMinutes()).padStart(2,'0')}:${String(brasiliaTime.getSeconds()).padStart(2,'0')}`
     };
 }
 
 function formatNumber(num, symbol = null) {
     if (num === null || num === undefined || isNaN(num)) return "N/A";
+    
+    // Se for preço e tiver configuração de casas decimais
+    if (symbol && DECIMALS_CONFIG && DECIMALS_CONFIG[symbol]) {
+        return num.toFixed(DECIMALS_CONFIG[symbol]);
+    }
+    
     if (num > 1000) return num.toFixed(2);
     if (num > 1) return num.toFixed(3);
     if (num > 0.1) return num.toFixed(4);
     if (num > 0.01) return num.toFixed(5);
     return num.toFixed(6);
 }
+
+// Configuração de casas decimais (será preenchida depois)
+const DECIMALS_CONFIG = {};
 
 function logToFile(message) {
     try {
@@ -1209,7 +1333,8 @@ async function sendAlert(text) {
             console.log(`✅ Alerta enviado`);
             return true;
         } else {
-            console.log(`❌ Falha ao enviar alerta: ${response.status}`);
+            const errorText = await response.text();
+            console.log(`❌ Falha ao enviar alerta: ${response.status} - ${errorText}`);
             return false;
         }
     } catch (e) {
@@ -1227,11 +1352,23 @@ async function fetchAllSymbols() {
         
         const data = await res.json();
         
+        // Configurar casas decimais
+        data.symbols.forEach(s => {
+            if (s.symbol.endsWith('USDT')) {
+                const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+                if (priceFilter && priceFilter.tickSize) {
+                    const tickSize = parseFloat(priceFilter.tickSize);
+                    DECIMALS_CONFIG[s.symbol] = Math.abs(Math.log10(tickSize)) || 4;
+                }
+            }
+        });
+        
         return data.symbols
             .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
             .map(s => s.symbol)
             .sort();
     } catch (error) {
+        console.log(`❌ Erro ao buscar símbolos: ${error.message}`);
         return [];
     }
 }
@@ -1243,15 +1380,17 @@ async function fetchAllSymbols() {
 async function sendStartupMessage() {
     const brDateTime = getBrazilianDateTime();
     const message = 
-        `🤖<b>SMC BOT INICIADO</b>\n` +
-        `📅${brDateTime.date} ${brDateTime.time}\n` +
-        `📊${ALL_SYMBOLS.length} ativos\n` +
-        `⚡Sweep:1h+15m(6h) Vol>${VOLUME_RELATIVE_THRESHOLD}x\n` +
-        `🔴Stop ATR:${ATR_MULTIPLIER}x(${MIN_ATR_PERCENTAGE}-${MAX_ATR_PERCENTAGE}%)\n` +
-        `✅by @J4Rviz`;
+        `🤖 <b>SMC CONFIRMATION BOT INICIADO</b>\n` +
+        `<b>📅 Data:</b> ${brDateTime.date} - ${brDateTime.time}\n` +
+        `<b>📊 Ativos monitorados:</b> ${ALL_SYMBOLS.length}\n` +
+        `<b>⚡ Sweep detection:</b> 1h (memória ${SWEEP_MEMORY_HOURS}h)\n` +
+        `<b>📈 Volume threshold:</b> ${VOLUME_RELATIVE_THRESHOLD}x\n` +
+        `<b>🔴 Stop ATR:</b> ${ATR_MULTIPLIER}x (${MIN_ATR_PERCENTAGE}% - ${MAX_ATR_PERCENTAGE}%)\n` +
+        `<b>🎯 Alvos:</b> ${TARGET_PERCENTAGES.map(p => p + '%').join(', ')}\n` +
+        `<b>✅ by @J4Rviz</b>`;
     
     await sendAlert(message);
-    console.log('📱 Mensagem de inicialização enviada');
+    console.log('📱 Mensagem de inicialização enviada ao Telegram');
 }
 
 // ============================================
@@ -1273,7 +1412,7 @@ function cleanupCycleCache() {
     }
     
     if (removed > 0) {
-        logToFile(`🧹 Cache: ${removed} entradas removidas`);
+        logToFile(`🧹 Cache de ciclo: ${removed} entradas sem sweep removidas`);
     }
 }
 
@@ -1286,6 +1425,7 @@ let lastMarketAnalysisTime = 0;
 const MARKET_ANALYSIS_INTERVAL = 60 * 60 * 1000; // 1 hora
 
 async function mainLoop() {
+    // Buscar símbolos
     ALL_SYMBOLS = await fetchAllSymbols();
     if (ALL_SYMBOLS.length === 0) {
         console.log('❌ Nenhum símbolo carregado');
@@ -1293,9 +1433,12 @@ async function mainLoop() {
     }
     
     console.log(`\n🤖 Monitorando ${ALL_SYMBOLS.length} ativos`);
-    console.log(`⚡ Sweep: 1h+15m (memória ${SWEEP_MEMORY_HOURS}h)`);
-    console.log(`📊 Análise de mercado a cada 1h\n`);
+    console.log(`⚡ Sweep detection: 1h (memória ${SWEEP_MEMORY_HOURS}h)`);
+    console.log(`📊 Log de rejeições ativo`);
+    console.log(`📈 Análise de mercado a cada 1h`);
+    console.log(`💾 Cache inteligente: apenas símbolos com sweep\n`);
     
+    // Enviar mensagem de inicialização
     await sendStartupMessage();
     
     let cycleCount = 0;
@@ -1305,15 +1448,17 @@ async function mainLoop() {
             cycleCount++;
             console.log(`\n🔄 Ciclo ${cycleCount} - ${new Date().toLocaleTimeString()}`);
             
+            // Executar monitoramento
             const { alerts, marketAnalysis } = await monitorSymbols();
             
+            // Enviar alertas de confirmação
             for (const alert of alerts) {
-                const tfIcon = alert.sweepTf === '15m' ? '⚡' : '📊';
-                console.log(`✅ ${alert.type} ${alert.symbol} ${tfIcon} (${alert.sweepAge}min)`);
+                console.log(`✅ ${alert.type} ${alert.symbol} (sweep há ${alert.sweepAge}min)`);
                 await sendAlert(alert.message);
                 await new Promise(r => setTimeout(r, 1000));
             }
             
+            // Verificar se é hora de enviar análise de mercado (1h em 1h)
             const now = Date.now();
             if (now - lastMarketAnalysisTime >= MARKET_ANALYSIS_INTERVAL || cycleCount === 1) {
                 const marketMessage = buildMarketAnalysisMessage(marketAnalysis);
@@ -1322,6 +1467,7 @@ async function mainLoop() {
                 lastMarketAnalysisTime = now;
             }
             
+            // Limpeza periódica
             if (cycleCount % SWEEP_CLEANUP_INTERVAL === 0) {
                 let removed = 0;
                 const sixHoursAgo = Date.now() - SWEEP_MEMORY_MS;
@@ -1340,19 +1486,34 @@ async function mainLoop() {
                 cleanupCycleCache();
             }
             
+            // Estatísticas
             const usage = (requestCount / SAFE_REQUEST_LIMIT * 100).toFixed(1);
-            console.log(`\n📊 Rate: ${requestCount}/${SAFE_REQUEST_LIMIT} (${usage}%)`);
-            console.log(`💾 Sweeps: ${sweepMemory.size}`);
+            console.log(`\n📊 Rate limit: ${requestCount}/${SAFE_REQUEST_LIMIT} (${usage}%)`);
+            console.log(`💾 Memória ativa: ${sweepMemory.size} sweeps`);
+            
+            if (rejectionStats.total > 0) {
+                console.log(`📊 Rejeições totais: ${rejectionStats.total}`);
+            }
+            
             console.log(`⏱️ Próximo ciclo em 60s...`);
             
             await new Promise(r => setTimeout(r, 60000));
             
         } catch (error) {
-            console.log(`❌ Erro: ${error.message}`);
+            console.log(`❌ Erro no loop principal: ${error.message}`);
+            logToFile(`❌ Erro no loop principal: ${error.message}`);
             await new Promise(r => setTimeout(r, 30000));
         }
     }
 }
 
-// Iniciar
+// Iniciar o bot
+console.log('\n' + '='.repeat(60));
+console.log('🤖 SMC CONFIRMATION BOT - SWEEP 1h');
+console.log('✅ Sweep detection: 1h apenas');
+console.log('✅ Stop ATR adaptativo');
+console.log('✅ LSR e Funding Rate');
+console.log('✅ Análise de mercado a cada 1h');
+console.log('='.repeat(60) + '\n');
+
 mainLoop().catch(console.error);
