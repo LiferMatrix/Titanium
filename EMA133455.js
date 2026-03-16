@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-100255495
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -428,14 +428,14 @@ async function getCandles(symbol, interval, limit = 100) {
 }
 
 // =====================================================================
-// === DADOS ADICIONAIS (AGORA COM CCI DIÁRIO) ===
+// === DADOS ADICIONAIS ===
 // =====================================================================
 async function getAdditionalData(symbol, currentPrice) {
     try {
         const [candles1h, candles4h, candlesDaily, ticker24h] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '4h', 100),
-            getCandles(symbol, '1d', 60), // Precisa de mais candles para o CCI
+            getCandles(symbol, '1d', 60),
             rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, `ticker_${symbol}`)
         ]);
         
@@ -451,7 +451,7 @@ async function getAdditionalData(symbol, currentPrice) {
         const stoch4h = calculateStochastic(candles4h);
         const stoch1h = calculateStochastic(candles1h);
         
-        // === CALCULAR CCI DIÁRIO COM EMA 5 ===
+        // Calcular CCI Diário com EMA 5
         const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
         
         let cciText = 'CCI Diário: ⚪NEUTRO';
@@ -518,7 +518,8 @@ async function getAdditionalData(symbol, currentPrice) {
             stoch1h: formatStochastic(stoch1h),
             lsr,
             funding,
-            cciText  // ← NOVO: Texto formatado do CCI Diário
+            cciText,
+            symbolFull: symbol
         };
     } catch (error) {
         return {
@@ -531,7 +532,8 @@ async function getAdditionalData(symbol, currentPrice) {
             stoch1h: 'K50⤵️D50',
             lsr: null,
             funding: null,
-            cciText: 'CCI Diário: ⚪NEUTRO'  // ← NOVO: Valor padrão
+            cciText: 'CCI Diário: ⚪NEUTRO',
+            symbolFull: symbol
         };
     }
 }
@@ -653,7 +655,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA (AGORA COM CCI DIÁRIO) ===
+// === ENVIAR ALERTA (CORRIGIDO: LINK CLICÁVEL + TUDO EM ITÁLICO) ===
 // =====================================================================
 async function sendAlert(data) {
     const time = getBrazilianDateTime();
@@ -668,19 +670,22 @@ async function sendAlert(data) {
     
     const lsr = data.lsr ? data.lsr.toFixed(2) : 'N/A';
     
-    // Calculando resistências e suportes baseados na EMA55
+    // Link clicável do TradingView (CORRIGIDO)
+    const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbolFull}`;
+    
+    // Resistências e suportes baseados na EMA55
     const resist1 = formatPrice(data.ema55 * 1.1);
     const resist2 = formatPrice(data.ema55 * 1.05);
     const supt1 = formatPrice(data.ema55 * 0.95);
     const supt2 = formatPrice(data.ema55 * 0.9);
     
-    // Mensagem completa com CCI Diário na posição solicitada
-    const message = `${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
+    // Mensagem COMPLETA em itálico
+    const message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
- #RSI 1h: ${data.rsi} ${rsiEmoji} | 🔗 TradingView
+ #RSI 1h: ${data.rsi} ${rsiEmoji} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
  #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
  #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -689,12 +694,12 @@ async function sendAlert(data) {
  🔻Resist: ${resist1} | ${resist2}
  🔹Supt: ${supt1} | ${supt2}
  
- Titanium Prime by @J4Rviz`;
+ Titanium Prime by @J4Rviz</i>`;
 
     try {
         const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
         
-        await fetch(url, {
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -705,7 +710,13 @@ async function sendAlert(data) {
             })
         });
         
-        log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.directionText} [${data.timeframe}] | CCI: ${data.cciText}`, 'success');
+        if (!response.ok) {
+            const errorText = await response.text();
+            log(`Erro Telegram: ${response.status} - ${errorText}`, 'error');
+        } else {
+            log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.directionText} [${data.timeframe}] | CCI: ${data.cciText}`, 'success');
+        }
+        
         return true;
     } catch (error) {
         log(`Erro ao enviar Telegram: ${error.message}`, 'error');
