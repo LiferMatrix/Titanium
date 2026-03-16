@@ -9,14 +9,14 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_o
-        CHAT_ID: '-10019908
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
         STD_DEV: 2,
         TIMEFRAME: '1d',
-        MIN_BANDWIDTH: 2.2
+        MIN_BANDWIDTH: 2.5
     },
     SCAN: {
         BATCH_SIZE: 15,
@@ -50,7 +50,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
@@ -125,25 +125,46 @@ const CONFIG = {
     },
     REVERSAL: {
         MIN_CONFIRMATION_SCORE: 3,
-        VOLUME_THRESHOLD: 1.1,
+        VOLUME_THRESHOLD: 1.2,
         STOCH_OVERSOLD: 25,
         STOCH_OVERBOUGHT: 75
     },
     LSR_PENALTY: {
         BUY_MAX_RATIO: 3.5,
         SELL_MIN_RATIO: 1.0,
-        PENALTY_POINTS: -4
+        PENALTY_POINTS: -5
     },
-    // NOVA CONFIGURAÇÃO PARA STOP LOSS BASEADO EM ATR
+    // NOVA CONFIGURAÇÃO PARA FUNDING RATE PENALTY
+    FUNDING_PENALTY: {
+        ENABLED: true,
+        LEVELS: {
+            LOW: {
+                THRESHOLD: 0.0015, // 0.01% (positivo ou negativo)
+                POINTS: -2
+            },
+            MEDIUM: {
+                THRESHOLD: 0.003, // 0.025%
+                POINTS: -3
+            },
+            HIGH: {
+                THRESHOLD: 0.006, // 0.05%
+                POINTS: -4
+            }
+        },
+        // Penalidade específica por direção
+        BUY_PENALTY_FOR_POSITIVE: true,  // Funding positivo é ruim para COMPRA
+        SELL_PENALTY_FOR_NEGATIVE: true, // Funding negativo é ruim para VENDA
+        MAX_TOTAL_PENALTY: -9 // Penalidade máxima combinada (LSR + Funding)
+    },
     STOP_LOSS: {
         ATR_MULTIPLIER: {
             '1h': 2.5,
             '4h': 3.0,
             '1d': 3.5
         },
-        STRUCTURE_MULTIPLIER: 0.15, // % da estrutura para adicionar proteção
-        USE_CLUSTER_ZONE: true, // Usar zona de liquidez de cluster
-        CLUSTER_ZONE_MULTIPLIER: 0.1, // % além da estrutura para zona de cluster
+        STRUCTURE_MULTIPLIER: 0.15,
+        USE_CLUSTER_ZONE: true,
+        CLUSTER_ZONE_MULTIPLIER: 0.1,
         MIN_STOP_DISTANCE_PERCENT: {
             '1h': 1.5,
             '4h': 2.5,
@@ -957,7 +978,7 @@ function checkLSRPenalty(lsr, isGreenAlert) {
         return {
             hasPenalty: true,
             points: CONFIG.LSR_PENALTY.PENALTY_POINTS,
-            message: `⚠️ LSR alto (${lsr.toFixed(2)}) - Muitos comprados (-2)`
+            message: `⚠️ LSR alto (${lsr.toFixed(2)}) - Muitos comprados (${CONFIG.LSR_PENALTY.PENALTY_POINTS})`
         };
     }
     
@@ -965,7 +986,7 @@ function checkLSRPenalty(lsr, isGreenAlert) {
         return {
             hasPenalty: true,
             points: CONFIG.LSR_PENALTY.PENALTY_POINTS,
-            message: `⚠️ LSR baixo (${lsr.toFixed(2)}) - Muitos vendidos (-2)`
+            message: `⚠️ LSR baixo (${lsr.toFixed(2)}) - Muitos vendidos (${CONFIG.LSR_PENALTY.PENALTY_POINTS})`
         };
     }
     
@@ -973,17 +994,70 @@ function checkLSRPenalty(lsr, isGreenAlert) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA CALCULAR STOP LOSS PROTEGIDO (NOVA) ===
+// === NOVA FUNÇÃO PARA PENALIDADE DE FUNDING RATE ===
+// =====================================================================
+function checkFundingPenalty(funding, isGreenAlert) {
+    if (!CONFIG.FUNDING_PENALTY.ENABLED || funding === null || funding === undefined) {
+        return { hasPenalty: false, points: 0, message: '' };
+    }
+    
+    const fundingPercent = funding * 100; // Converter para percentual
+    const absFunding = Math.abs(funding);
+    
+    let penaltyPoints = 0;
+    let penaltyLevel = '';
+    
+    // Determinar nível da penalidade baseado no valor absoluto
+    if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.HIGH.THRESHOLD) {
+        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.HIGH.POINTS;
+        penaltyLevel = 'ALTO';
+    } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.MEDIUM.THRESHOLD) {
+        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.MEDIUM.POINTS;
+        penaltyLevel = 'MÉDIO';
+    } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.LOW.THRESHOLD) {
+        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.LOW.POINTS;
+        penaltyLevel = 'BAIXO';
+    }
+    
+    // Aplicar penalidade apenas se for na direção errada
+    let applyPenalty = false;
+    let direction = '';
+    
+    if (isGreenAlert && funding > 0 && CONFIG.FUNDING_PENALTY.BUY_PENALTY_FOR_POSITIVE) {
+        // COMPRA com funding positivo (ruim - pagando para manter comprado)
+        applyPenalty = true;
+        direction = 'positivo';
+    } else if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
+        // VENDA com funding negativo (ruim - pagando para manter vendido)
+        applyPenalty = true;
+        direction = 'negativo';
+    }
+    
+    if (applyPenalty && penaltyPoints !== 0) {
+        const fundingSign = funding > 0 ? '+' : '';
+        const message = `⚠️ Funding ${direction} (${fundingSign}${fundingPercent.toFixed(4)}%) - Nível ${penaltyLevel} (${penaltyPoints})`;
+        
+        return {
+            hasPenalty: true,
+            points: penaltyPoints,
+            level: penaltyLevel,
+            message: message
+        };
+    }
+    
+    return { hasPenalty: false, points: 0, message: '' };
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOP LOSS PROTEGIDO ===
 // =====================================================================
 function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candles, bb) {
     if (!candles || candles.length < 20) {
-        // Fallback para ATR simples
         const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.0;
         const atr = (bb.upper - bb.lower) * 0.1;
         return isGreenAlert ? currentPrice - atr * atrMultiplier : currentPrice + atr * atrMultiplier;
     }
 
-    // Calcular ATR verdadeiro
     const trValues = [];
     for (let i = 1; i < candles.length; i++) {
         const high = candles[i].high;
@@ -997,15 +1071,12 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         trValues.push(Math.max(tr1, tr2, tr3));
     }
     
-    // Média dos últimos 14 TR para ATR
     const atrPeriod = 14;
     const recentTR = trValues.slice(-atrPeriod);
     const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
     
-    // Multiplicador baseado no timeframe
     const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5;
     
-    // Stop baseado em ATR
     let stopPrice;
     if (isGreenAlert) {
         stopPrice = currentPrice - (atr * atrMultiplier);
@@ -1013,14 +1084,12 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         stopPrice = currentPrice + (atr * atrMultiplier);
     }
     
-    // Identificar zonas de liquidez (swings recentes)
     const lookback = timeframe === '1d' ? 20 : (timeframe === '4h' ? 30 : 40);
     const relevantCandles = candles.slice(-lookback);
     
     let structureLow = Math.min(...relevantCandles.map(c => c.low));
     let structureHigh = Math.max(...relevantCandles.map(c => c.high));
     
-    // Identificar clusters de liquidez (múltiplos toques)
     const touchCount = {};
     relevantCandles.forEach(c => {
         const lowKey = Math.round(c.low * 1000) / 1000;
@@ -1030,7 +1099,6 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         touchCount[highKey] = (touchCount[highKey] || 0) + 1;
     });
     
-    // Encontrar zonas com mais toques
     let clusterZone = isGreenAlert ? structureLow : structureHigh;
     let maxTouches = 0;
     
@@ -1049,26 +1117,17 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         }
     });
     
-    // Ajustar stop para ficar abaixo da zona de cluster
     const clusterZoneDistance = Math.abs(currentPrice - clusterZone) / currentPrice * 100;
-    const structureDistance = isGreenAlert ? 
-        (currentPrice - structureLow) / currentPrice * 100 :
-        (structureHigh - currentPrice) / currentPrice * 100;
-    
-    // Adicionar buffer para proteger zona de cluster
     const clusterBuffer = clusterZoneDistance * CONFIG.STOP_LOSS.CLUSTER_ZONE_MULTIPLIER;
     
     if (isGreenAlert) {
-        // Para compra: stop abaixo da zona de cluster
         const clusterAdjustedStop = Math.min(stopPrice, clusterZone - (clusterZone * 0.002));
         
-        // Usar o mais protetivo (menor stop)
         if (clusterZone < currentPrice) {
             stopPrice = Math.min(stopPrice, clusterAdjustedStop);
             log(`Stop ajustado para zona de cluster: ${formatPrice(clusterZone)}`, 'info');
         }
         
-        // Verificar distância mínima/máxima
         const stopDistance = (currentPrice - stopPrice) / currentPrice * 100;
         const minDistance = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 1.5;
         const maxDistance = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 5.0;
@@ -1079,7 +1138,6 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
             stopPrice = currentPrice * (1 - maxDistance / 100);
         }
     } else {
-        // Para venda: stop acima da zona de cluster
         const clusterAdjustedStop = Math.max(stopPrice, clusterZone + (clusterZone * 0.002));
         
         if (clusterZone > currentPrice) {
@@ -1087,7 +1145,6 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
             log(`Stop ajustado para zona de cluster: ${formatPrice(clusterZone)}`, 'info');
         }
         
-        // Verificar distância mínima/máxima
         const stopDistance = (stopPrice - currentPrice) / currentPrice * 100;
         const minDistance = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 1.5;
         const maxDistance = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 5.0;
@@ -1288,7 +1345,6 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 '2h': candles2h.slice(-50),
                 '4h': candles4h.slice(-50)
             },
-            // NOVO: Adicionar candles para cálculo de stop loss
             candles4h: candles4h,
             candles1h: candles1h,
             candlesDaily: candlesDaily
@@ -1538,8 +1594,8 @@ async function sendSingleAlert(alert) {
             log(`Erro Telegram: ${response.status}`, 'error');
         } else {
             registerAlert(alert.symbol, alert.direction, alert.price, alert.timeframe);
-            const penaltyIcon = alert.lsrPenalty ? '⚠️' : '✅';
-            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%)`, 'success');
+            const penaltyIcon = alert.totalPenalty < 0 ? '⚠️' : '✅';
+            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
         }
         
         return true;
@@ -1560,7 +1616,7 @@ async function sendGroupedAlerts(alerts, priority) {
     if (buyAlerts.length > 0) {
         message += `🟢 **COMPRA** (${buyAlerts.length})\n`;
         buyAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%)\n`;
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%) | Penal: ${a.totalPenalty}\n`;
         });
         if (buyAlerts.length > 5) message += `... e mais ${buyAlerts.length - 5}\n`;
         message += '\n';
@@ -1569,7 +1625,7 @@ async function sendGroupedAlerts(alerts, priority) {
     if (sellAlerts.length > 0) {
         message += `🔴 **VENDA** (${sellAlerts.length})\n`;
         sellAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${(100 - a.volume1h.percentage).toFixed(1)}% vendedor)\n`;
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${(100 - a.volume1h.percentage).toFixed(1)}% vendedor) | Penal: ${a.totalPenalty}\n`;
         });
         if (sellAlerts.length > 5) message += `... e mais ${sellAlerts.length - 5}\n`;
     }
@@ -1635,7 +1691,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME (MODIFICADO) ===
+// === ANALISAR TIMEFRAME (MODIFICADO COM FUNDING PENALTY) ===
 // =====================================================================
 async function analyzeTimeframe(symbol, candles, timeframe) {
     try {
@@ -1691,10 +1747,12 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
                 additional.volume3m.ratio > CONFIG.REVERSAL.VOLUME_THRESHOLD - 0.2);
        
         const lsrPenalty = checkLSRPenalty(additional.lsr, touchedLower);
+        const fundingPenalty = checkFundingPenalty(additional.funding, touchedLower);
        
         let confirmationScore = reversalCheck.score;
         let confirmations = [];
         let penaltyApplied = false;
+        let totalPenalty = 0;
        
         if (reversalCheck.score >= 5) {
             confirmations.push('🔥 Reversão muito forte');
@@ -1726,10 +1784,27 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             confirmations.push('🔥 Volume forte');
         }
        
+        // Aplicar penalidades
         if (lsrPenalty.hasPenalty) {
             confirmationScore += lsrPenalty.points;
+            totalPenalty += lsrPenalty.points;
             confirmations.push(lsrPenalty.message);
             penaltyApplied = true;
+        }
+        
+        if (fundingPenalty.hasPenalty) {
+            confirmationScore += fundingPenalty.points;
+            totalPenalty += fundingPenalty.points;
+            confirmations.push(fundingPenalty.message);
+            penaltyApplied = true;
+        }
+        
+        // Verificar limite máximo de penalidade
+        if (totalPenalty < CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY) {
+            const excess = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY - totalPenalty;
+            confirmationScore -= excess; // Remover excesso
+            totalPenalty = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
+            log(`Penalidade total limitada a ${CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY}`, 'warning');
         }
        
         const direction = touchedLower ? 'COMPRA' : 'VENDA';
@@ -1754,7 +1829,6 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         const support = touchedLower ? bb.lower * 0.98 : bb.lower;
         const resistance = touchedUpper ? bb.upper * 1.02 : bb.upper;
        
-        // NOVO: Usar a função avançada de stop loss
         let candlesForStop;
         if (timeframe === '1d') {
             candlesForStop = additional.candlesDaily;
@@ -1766,7 +1840,6 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         
         const stopLoss = calculateProtectedStopLoss(currentPrice, touchedLower, timeframe, candlesForStop, bb);
         
-        // Calcular ATR para os alvos
         const trValues = [];
         for (let i = 1; i < candlesForStop.length; i++) {
             const high = candlesForStop[i].high;
@@ -1776,7 +1849,6 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         }
         const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
        
-        // Calcular alvos baseados no ATR
         let tp1, tp2, tp3;
         const atrMultiplier = timeframe === '1d' ? 2.5 : (timeframe === '4h' ? 2.0 : 1.5);
         
@@ -1792,7 +1864,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
        
         const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
        
-        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | Stop: ${formatPrice(stopLoss)}`, 'success');
+        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | Stop: ${formatPrice(stopLoss)} | Penalidades: ${totalPenalty}`, 'success');
        
         const alert = {
             symbol,
@@ -1816,8 +1888,11 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             reversalScore: reversalCheck.score,
             reversalDetails: reversalCheck.details,
             divergences: divergenceMulti.divergences,
-            lsrPenalty: penaltyApplied,
+            lsrPenalty: lsrPenalty.hasPenalty,
+            fundingPenalty: fundingPenalty.hasPenalty,
+            totalPenalty: totalPenalty,
             lsrValue: additional.lsr,
+            fundingValue: additional.funding,
             bandwidth: bandwidth,
             ...additional
         };
@@ -1832,7 +1907,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM ===
+// === FORMATAR MENSAGEM (MODIFICADO) ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -1840,8 +1915,8 @@ function formatAlert(data) {
     
     const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
     
-    const fundingPct = data.funding ? (data.funding * 100).toFixed(4) : '0.0000';
-    const fundingSign = data.funding && data.funding > 0 ? '+' : '';
+    const fundingPct = data.fundingValue ? (data.fundingValue * 100).toFixed(4) : '0.0000';
+    const fundingSign = data.fundingValue && data.fundingValue > 0 ? '+' : '';
     
     const rsiEmoji = data.rsi < 40 ? '🟢' : data.rsi > 60 ? '🔴' : '⚪';
     
@@ -1889,13 +1964,15 @@ function formatAlert(data) {
     const confirmationsLine = `🔍 Confirmações: ${data.confirmationScore} | ${data.confirmations}`;
     const reversalScoreLine = ` Score Reversão: ${data.reversalScore}/6`;
     
-    const lsrWarning = data.lsrPenalty ? `\n ⚠️ LSR ${data.lsrValue.toFixed(2)} - Penalidade aplicada` : '';
+    const lsrWarning = data.lsrPenalty ? `\n ⚠️ LSR ${data.lsrValue.toFixed(2)}` : '';
+    const fundingWarning = data.fundingPenalty ? `\n ⚠️ Funding ${fundingSign}${fundingPct}%` : '';
+    const totalPenaltyLine = data.totalPenalty < 0 ? `\n ⚠️ Penalidade total: ${data.totalPenalty} pontos` : '';
     
     return `<i>${data.direction} - ${symbolName} ${data.timeframeEmoji} ${data.timeframeText}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ${confirmationsLine}
- ${reversalScoreLine}${divergenceLines}${lsrWarning}
+ ${reversalScoreLine}${divergenceLines}${lsrWarning}${fundingWarning}${totalPenaltyLine}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
  #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TradingView</a>
  ${volume3mLine}
@@ -1928,11 +2005,12 @@ async function startScanner() {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
         
-        const initMessage = `🚀 Titanium Prime Ativado (300 MOEDAS)\n\n` +
+        const initMessage = `🚀 Titanium Prime Ativado\n\n` +
             `📊 Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `⏱️ Timeframes: 1H, 4H, DIÁRIO\n` +
             `🎯 Filtros: Volume + Divergências + Bandwidth ${CONFIG.BOLLINGER.MIN_BANDWIDTH}%\n` +
             `🛡️ Stop Loss: ATR Protegido com Zonas de Cluster\n` +
+            `💰 Funding Penalty: 3 Níveis (Baixo: -1, Médio: -2, Alto: -3)\n` +
             `📈 Cooldown: 1H=30min | 4H=60min | DIÁRIO=120min\n` +
             `🕐 ${getBrazilianDateTime().full}`;
         
