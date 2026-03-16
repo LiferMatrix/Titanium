@@ -9,14 +9,14 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS,
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     BOLLINGER: {
         PERIOD: 20,
         STD_DEV: 2,
         TIMEFRAME: '1d',
-        MIN_BANDWIDTH: 2.2
+        MIN_BANDWIDTH: 2.4
     },
     SCAN: {
         BATCH_SIZE: 15,
@@ -139,15 +139,15 @@ const CONFIG = {
         ENABLED: true,
         LEVELS: {
             LOW: {
-                THRESHOLD: 0.001, // 0.01% (positivo ou negativo)
+                THRESHOLD: 0.0015, // 0.01% (positivo ou negativo)
                 POINTS: -1
             },
             MEDIUM: {
-                THRESHOLD: 0.0025, // 0.025%
+                THRESHOLD: 0.003, // 0.025%
                 POINTS: -2
             },
             HIGH: {
-                THRESHOLD: 0.005, // 0.05%
+                THRESHOLD: 0.006, // 0.05%
                 POINTS: -3
             }
         },
