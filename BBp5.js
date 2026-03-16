@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -19,46 +19,46 @@ const CONFIG = {
         MIN_BANDWIDTH: 2.2
     },
     SCAN: {
-        BATCH_SIZE: 15, // Aumentado para processar mais moedas
-        SYMBOL_DELAY_MS: 80, // Reduzido para ser mais rápido
+        BATCH_SIZE: 15,
+        SYMBOL_DELAY_MS: 100,
         REQUEST_TIMEOUT: 10000,
         COOLDOWN_AFTER_BATCH_MS: 800,
         MAX_REQUESTS_PER_MINUTE: 1200,
         CACHE_DURATION_SECONDS: 30,
-        TOP_SYMBOLS_LIMIT: 400 // ALTERADO: Agora analisa 300 moedas
+        TOP_SYMBOLS_LIMIT: 350
     },
     ALERTS: {
-        COOLDOWN_MINUTES: 30, // Aumentado para 60 minutos base
-        ALLOW_OPPOSITE_DIRECTION: false, // Desabilitado para evitar alternância
+        COOLDOWN_MINUTES: 60,
+        ALLOW_OPPOSITE_DIRECTION: false,
         COOLDOWN_BY_SCORE: {
-           3: 30,  // Score 3 → 30 minutos
-           4: 45,  // Score 4 → 45 minutos
-           5: 60,  // Score 5 → 60 minutos
-           6: 90,  // Score 6 → 90 minutos
-           7: 120, // Score 7 → 2 horas
-           8: 180  // Score 8 → 3 horas
+           3: 30,
+           4: 45,
+           5: 60,
+           6: 90,
+           7: 120,
+           8: 180
         },
         COOLDOWN_BY_TIMEFRAME: {
-            '1h': 15,  // Timeframe 1h: 30 minutos entre alertas
-            '4h': 15,  // Timeframe 4h: 60 minutos entre alertas
-            '1d': 15  // Timeframe 1d: 120 minutos entre alertas
+            '1h': 30,
+            '4h': 60,
+            '1d': 120
         },
         DAILY_LIMITS: {
-            TOP_10: 35,
-            TOP_50: 45,
-            OTHER: 65,
+            TOP_10: 25,
+            TOP_50: 40,
+            OTHER: 55,
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
         MIN_VOLUME_RATIO: 1.5,
-        MIN_24H_VOLUME_USDT: 50000,
+        MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
             SELL_MAX_PERCENTAGE: 48,
             STRICT_MODE: true
         },
         MIN_TREND_STRENGTH: 3,
-        PRICE_DEVIATION: 1.0, // Aumentado para 1%
+        PRICE_DEVIATION: 1.0,
         RSI: {
             BUY_MAX: 64,
             SELL_MIN: 66
@@ -74,7 +74,7 @@ const CONFIG = {
         MAX_GROUP_SIZE: 3,
         SIMILAR_PRICE_DIFF: 1.0,
         MIN_SCORE_TO_ALERT: 3,
-        MAX_ALERTS_PER_SCAN: 100, // Aumentado para 300 moedas
+        MAX_ALERTS_PER_SCAN: 100,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
         TELEGRAM_DELAY_MS: 1500
     },
@@ -132,7 +132,28 @@ const CONFIG = {
     LSR_PENALTY: {
         BUY_MAX_RATIO: 3.5,
         SELL_MIN_RATIO: 1.0,
-        PENALTY_POINTS: -2
+        PENALTY_POINTS: -4
+    },
+    // NOVA CONFIGURAÇÃO PARA STOP LOSS BASEADO EM ATR
+    STOP_LOSS: {
+        ATR_MULTIPLIER: {
+            '1h': 2.5,
+            '4h': 3.0,
+            '1d': 3.5
+        },
+        STRUCTURE_MULTIPLIER: 0.15, // % da estrutura para adicionar proteção
+        USE_CLUSTER_ZONE: true, // Usar zona de liquidez de cluster
+        CLUSTER_ZONE_MULTIPLIER: 0.1, // % além da estrutura para zona de cluster
+        MIN_STOP_DISTANCE_PERCENT: {
+            '1h': 1.5,
+            '4h': 2.5,
+            '1d': 4.0
+        },
+        MAX_STOP_DISTANCE_PERCENT: {
+            '1h': 5.0,
+            '4h': 8.0,
+            '1d': 12.0
+        }
     }
 };
 
@@ -239,7 +260,7 @@ function log(message, type = 'info') {
 }
 
 // Caches
-const alertCache = new Map(); // Agora armazena { timestamp, timeframe }
+const alertCache = new Map();
 const dailyCounter = new Map();
 const symbolMetadata = new Map();
 let currentTopSymbols = [];
@@ -386,7 +407,6 @@ async function getTopSymbols() {
         return topSymbols;
     } catch (e) {
         log('Falha ao buscar top symbols, usando lista estática expandida', 'warning');
-        // Lista expandida para fallback
         return [
             'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
             'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
@@ -406,7 +426,7 @@ function getSymbolCategory(symbol, topSymbols = []) {
     if (topSymbols.length > 0) {
         const rank = topSymbols.indexOf(symbol);
         if (rank !== -1 && rank < 50) return 'TOP_50';
-        if (rank !== -1 && rank < 150) return 'TOP_150'; // NOVA categoria
+        if (rank !== -1 && rank < 150) return 'TOP_150';
     }
 
     return 'OTHER';
@@ -953,6 +973,138 @@ function checkLSRPenalty(lsr, isGreenAlert) {
 }
 
 // =====================================================================
+// === FUNÇÃO PARA CALCULAR STOP LOSS PROTEGIDO (NOVA) ===
+// =====================================================================
+function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candles, bb) {
+    if (!candles || candles.length < 20) {
+        // Fallback para ATR simples
+        const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.0;
+        const atr = (bb.upper - bb.lower) * 0.1;
+        return isGreenAlert ? currentPrice - atr * atrMultiplier : currentPrice + atr * atrMultiplier;
+    }
+
+    // Calcular ATR verdadeiro
+    const trValues = [];
+    for (let i = 1; i < candles.length; i++) {
+        const high = candles[i].high;
+        const low = candles[i].low;
+        const prevClose = candles[i-1].close;
+        
+        const tr1 = high - low;
+        const tr2 = Math.abs(high - prevClose);
+        const tr3 = Math.abs(low - prevClose);
+        
+        trValues.push(Math.max(tr1, tr2, tr3));
+    }
+    
+    // Média dos últimos 14 TR para ATR
+    const atrPeriod = 14;
+    const recentTR = trValues.slice(-atrPeriod);
+    const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
+    
+    // Multiplicador baseado no timeframe
+    const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5;
+    
+    // Stop baseado em ATR
+    let stopPrice;
+    if (isGreenAlert) {
+        stopPrice = currentPrice - (atr * atrMultiplier);
+    } else {
+        stopPrice = currentPrice + (atr * atrMultiplier);
+    }
+    
+    // Identificar zonas de liquidez (swings recentes)
+    const lookback = timeframe === '1d' ? 20 : (timeframe === '4h' ? 30 : 40);
+    const relevantCandles = candles.slice(-lookback);
+    
+    let structureLow = Math.min(...relevantCandles.map(c => c.low));
+    let structureHigh = Math.max(...relevantCandles.map(c => c.high));
+    
+    // Identificar clusters de liquidez (múltiplos toques)
+    const touchCount = {};
+    relevantCandles.forEach(c => {
+        const lowKey = Math.round(c.low * 1000) / 1000;
+        const highKey = Math.round(c.high * 1000) / 1000;
+        
+        touchCount[lowKey] = (touchCount[lowKey] || 0) + 1;
+        touchCount[highKey] = (touchCount[highKey] || 0) + 1;
+    });
+    
+    // Encontrar zonas com mais toques
+    let clusterZone = isGreenAlert ? structureLow : structureHigh;
+    let maxTouches = 0;
+    
+    Object.entries(touchCount).forEach(([price, touches]) => {
+        const priceNum = parseFloat(price);
+        if (isGreenAlert && priceNum < currentPrice && priceNum > structureLow * 0.95) {
+            if (touches > maxTouches) {
+                maxTouches = touches;
+                clusterZone = priceNum;
+            }
+        } else if (!isGreenAlert && priceNum > currentPrice && priceNum < structureHigh * 1.05) {
+            if (touches > maxTouches) {
+                maxTouches = touches;
+                clusterZone = priceNum;
+            }
+        }
+    });
+    
+    // Ajustar stop para ficar abaixo da zona de cluster
+    const clusterZoneDistance = Math.abs(currentPrice - clusterZone) / currentPrice * 100;
+    const structureDistance = isGreenAlert ? 
+        (currentPrice - structureLow) / currentPrice * 100 :
+        (structureHigh - currentPrice) / currentPrice * 100;
+    
+    // Adicionar buffer para proteger zona de cluster
+    const clusterBuffer = clusterZoneDistance * CONFIG.STOP_LOSS.CLUSTER_ZONE_MULTIPLIER;
+    
+    if (isGreenAlert) {
+        // Para compra: stop abaixo da zona de cluster
+        const clusterAdjustedStop = Math.min(stopPrice, clusterZone - (clusterZone * 0.002));
+        
+        // Usar o mais protetivo (menor stop)
+        if (clusterZone < currentPrice) {
+            stopPrice = Math.min(stopPrice, clusterAdjustedStop);
+            log(`Stop ajustado para zona de cluster: ${formatPrice(clusterZone)}`, 'info');
+        }
+        
+        // Verificar distância mínima/máxima
+        const stopDistance = (currentPrice - stopPrice) / currentPrice * 100;
+        const minDistance = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 1.5;
+        const maxDistance = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 5.0;
+        
+        if (stopDistance < minDistance) {
+            stopPrice = currentPrice * (1 - minDistance / 100);
+        } else if (stopDistance > maxDistance) {
+            stopPrice = currentPrice * (1 - maxDistance / 100);
+        }
+    } else {
+        // Para venda: stop acima da zona de cluster
+        const clusterAdjustedStop = Math.max(stopPrice, clusterZone + (clusterZone * 0.002));
+        
+        if (clusterZone > currentPrice) {
+            stopPrice = Math.max(stopPrice, clusterAdjustedStop);
+            log(`Stop ajustado para zona de cluster: ${formatPrice(clusterZone)}`, 'info');
+        }
+        
+        // Verificar distância mínima/máxima
+        const stopDistance = (stopPrice - currentPrice) / currentPrice * 100;
+        const minDistance = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 1.5;
+        const maxDistance = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 5.0;
+        
+        if (stopDistance < minDistance) {
+            stopPrice = currentPrice * (1 + minDistance / 100);
+        } else if (stopDistance > maxDistance) {
+            stopPrice = currentPrice * (1 + maxDistance / 100);
+        }
+    }
+    
+    log(`Stop Loss calculado: ATR=${formatPrice(atr)} Multiplier=${atrMultiplier} Distância=${Math.abs(currentPrice - stopPrice) / currentPrice * 100}%`, 'info');
+    
+    return stopPrice;
+}
+
+// =====================================================================
 // === BUSCAR CANDLES COM CACHE ===
 // =====================================================================
 async function getCandles(symbol, interval, limit = 100) {
@@ -1135,7 +1287,11 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 '1h': candles1h.slice(-50),
                 '2h': candles2h.slice(-50),
                 '4h': candles4h.slice(-50)
-            }
+            },
+            // NOVO: Adicionar candles para cálculo de stop loss
+            candles4h: candles4h,
+            candles1h: candles1h,
+            candlesDaily: candlesDaily
         };
     } catch (error) {
         log(`Erro em getAdditionalData para ${symbol}: ${error.message}`, 'error');
@@ -1162,35 +1318,35 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                 '1h': [],
                 '2h': [],
                 '4h': []
-            }
+            },
+            candles4h: [],
+            candles1h: [],
+            candlesDaily: []
         };
     }
 }
 
 // =====================================================================
-// === VERIFICAR SE PODE ENVIAR ALERTA (MODIFICADO) ===
+// === VERIFICAR SE PODE ENVIAR ALERTA ===
 // =====================================================================
 function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT, trendStrength, rsi, volumeDirection, volumePercentage, timeframe) {
     const now = Date.now();
-    const key = `${symbol}_${direction}_${timeframe}`; // NOVO: chave inclui timeframe
-    const symbolKey = `${symbol}_ANY`; // Cooldown global por moeda
+    const key = `${symbol}_${direction}_${timeframe}`;
+    const symbolKey = `${symbol}_ANY`;
     const priceKey = `${symbol}_price`;
     const dailyKey = `${symbol}_daily`;
     
-    // NOVO: Verificar cooldown global da moeda (qualquer direção/timeframe)
     const lastAnyAlert = alertCache.get(symbolKey);
     if (lastAnyAlert) {
         const lastAlertData = lastAnyAlert;
         const minutesDiff = (now - lastAlertData.timestamp) / (1000 * 60);
         
-        // Se já passou 30 minutos, pode alertar novamente (qualquer direção)
         if (minutesDiff < 30) {
             log(`${symbol} - Cooldown global: ${minutesDiff.toFixed(1)}min < 30min necessários`, 'warning');
             return false;
         }
     }
     
-    // Verificar cooldown específico do timeframe
     const lastAlert = alertCache.get(key);
     if (lastAlert) {
         const lastAlertData = lastAlert;
@@ -1280,7 +1436,7 @@ function canSendAlert(symbol, direction, price, score, volumeRatio, volumeUSDT, 
 }
 
 // =====================================================================
-// === REGISTRAR ALERTA (MODIFICADO) ===
+// === REGISTRAR ALERTA ===
 // =====================================================================
 function registerAlert(symbol, direction, price, timeframe) {
     const now = Date.now();
@@ -1289,21 +1445,18 @@ function registerAlert(symbol, direction, price, timeframe) {
     const priceKey = `${symbol}_price`;
     const dailyKey = `${symbol}_daily`;
     
-    // Armazenar com timestamp e timeframe
     alertCache.set(key, {
         timestamp: now,
         timeframe: timeframe,
         direction: direction
     });
     
-    // Registrar alerta global
     alertCache.set(symbolKey, {
         timestamp: now,
         timeframe: 'ANY',
         direction: direction
     });
     
-    // Registrar preço
     alertCache.set(priceKey, {
         price: price,
         timestamp: now
@@ -1313,7 +1466,6 @@ function registerAlert(symbol, direction, price, timeframe) {
     dailyCounter.set(dailyKey, dailyCount);
     alertsSentThisScan++;
     
-    // Limpar cache antigo (48 horas)
     for (const [k, v] of alertCache) {
         if (now - v.timestamp > 48 * 60 * 60 * 1000) {
             alertCache.delete(k);
@@ -1483,7 +1635,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME ===
+// === ANALISAR TIMEFRAME (MODIFICADO) ===
 // =====================================================================
 async function analyzeTimeframe(symbol, candles, timeframe) {
     try {
@@ -1602,26 +1754,45 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         const support = touchedLower ? bb.lower * 0.98 : bb.lower;
         const resistance = touchedUpper ? bb.upper * 1.02 : bb.upper;
        
-        const atrMultiplier = timeframe === '1d' ? 1 : (timeframe === '4h' ? 0.5 : 0.3);
-        const atr = (bb.upper - bb.lower) * 0.1 * atrMultiplier;
-       
-        let stopLoss, tp1, tp2, tp3;
-       
-        if (touchedLower) {
-            stopLoss = currentPrice - atr * 1.5;
-            tp1 = currentPrice + atr * 2;
-            tp2 = currentPrice + atr * 3;
-            tp3 = currentPrice + atr * 4;
+        // NOVO: Usar a função avançada de stop loss
+        let candlesForStop;
+        if (timeframe === '1d') {
+            candlesForStop = additional.candlesDaily;
+        } else if (timeframe === '4h') {
+            candlesForStop = additional.candles4h;
         } else {
-            stopLoss = currentPrice + atr * 1.5;
-            tp1 = currentPrice - atr * 2;
-            tp2 = currentPrice - atr * 3;
-            tp3 = currentPrice - atr * 4;
+            candlesForStop = additional.candles1h;
+        }
+        
+        const stopLoss = calculateProtectedStopLoss(currentPrice, touchedLower, timeframe, candlesForStop, bb);
+        
+        // Calcular ATR para os alvos
+        const trValues = [];
+        for (let i = 1; i < candlesForStop.length; i++) {
+            const high = candlesForStop[i].high;
+            const low = candlesForStop[i].low;
+            const prevClose = candlesForStop[i-1].close;
+            trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+        }
+        const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
+       
+        // Calcular alvos baseados no ATR
+        let tp1, tp2, tp3;
+        const atrMultiplier = timeframe === '1d' ? 2.5 : (timeframe === '4h' ? 2.0 : 1.5);
+        
+        if (touchedLower) {
+            tp1 = currentPrice + atr * atrMultiplier;
+            tp2 = currentPrice + atr * (atrMultiplier * 1.5);
+            tp3 = currentPrice + atr * (atrMultiplier * 2);
+        } else {
+            tp1 = currentPrice - atr * atrMultiplier;
+            tp2 = currentPrice - atr * (atrMultiplier * 1.5);
+            tp3 = currentPrice - atr * (atrMultiplier * 2);
         }
        
         const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
        
-        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%)`, 'success');
+        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | Stop: ${formatPrice(stopLoss)}`, 'success');
        
         const alert = {
             symbol,
@@ -1747,14 +1918,12 @@ ${bbLines}
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME - ATIVADO (300 MOEDAS)');
+    console.log('🚀 TITANIUM PRIME - ATIVADO ');
     console.log('='.repeat(70));
     
-    // Buscar top symbols
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
     
-    // Enviar mensagem de inicialização
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
@@ -1763,6 +1932,7 @@ async function startScanner() {
             `📊 Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `⏱️ Timeframes: 1H, 4H, DIÁRIO\n` +
             `🎯 Filtros: Volume + Divergências + Bandwidth ${CONFIG.BOLLINGER.MIN_BANDWIDTH}%\n` +
+            `🛡️ Stop Loss: ATR Protegido com Zonas de Cluster\n` +
             `📈 Cooldown: 1H=30min | 4H=60min | DIÁRIO=120min\n` +
             `🕐 ${getBrazilianDateTime().full}`;
         
@@ -1786,7 +1956,6 @@ async function startScanner() {
         log(`Erro ao enviar mensagem de inicialização: ${e.message}`, 'warning');
     }
     
-    // Reset contador diário à meia-noite
     setInterval(() => {
         const now = new Date();
         if (now.getHours() === 0 && now.getMinutes() === 0) {
@@ -1795,7 +1964,6 @@ async function startScanner() {
         }
     }, 60000);
     
-    // Processar fila a cada 5 segundos
     setInterval(() => {
         processPriorityQueue();
     }, 5000);
