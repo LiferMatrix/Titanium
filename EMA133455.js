@@ -9,13 +9,17 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8p
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
         SLOW: 34,
         TREND: 55
+    },
+    CCI: {
+        PERIOD: 20,
+        EMA_PERIOD: 5
     },
     TIMEFRAMES: ['1h', '4h'],
     SCAN: {
@@ -184,8 +188,14 @@ class RateLimiter {
 const rateLimiter = new RateLimiter();
 
 // =====================================================================
-// === FUNÇÕES DE ANÁLISE EMA ===
+// === FUNÇÕES DE ANÁLISE TÉCNICA ===
 // =====================================================================
+function calculateSMA(values, period) {
+    if (!values || values.length < period) return 0;
+    const sum = values.slice(-period).reduce((a, b) => a + b, 0);
+    return sum / period;
+}
+
 function calculateEMA(values, period) {
     if (!values || values.length === 0) return 0;
     if (values.length < period) {
@@ -199,12 +209,64 @@ function calculateEMA(values, period) {
     return ema;
 }
 
+function calculateCCI(candles, period = 20) {
+    if (!candles || candles.length < period) return 0;
+    
+    const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
+    const sma = calculateSMA(typicalPrices, period);
+    
+    const meanDeviation = typicalPrices.slice(-period).reduce((sum, tp) => {
+        return sum + Math.abs(tp - sma);
+    }, 0) / period;
+    
+    if (meanDeviation === 0) return 0;
+    
+    const currentTP = typicalPrices[typicalPrices.length - 1];
+    const cci = (currentTP - sma) / (0.015 * meanDeviation);
+    
+    return cci;
+}
+
+function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
+    if (!candles || candles.length < cciPeriod + emaPeriod) {
+        return { cci: 0, ema: 0, crossover: null };
+    }
+    
+    const cciValues = [];
+    for (let i = cciPeriod - 1; i < candles.length; i++) {
+        const periodCandles = candles.slice(i - cciPeriod + 1, i + 1);
+        const cci = calculateCCI(periodCandles, cciPeriod);
+        cciValues.push(cci);
+    }
+    
+    const currentCCI = cciValues[cciValues.length - 1];
+    const previousCCI = cciValues.length > 1 ? cciValues[cciValues.length - 2] : currentCCI;
+    
+    const emaCCI = calculateEMA(cciValues, emaPeriod);
+    const previousEMA = cciValues.length > 1 ? 
+        calculateEMA(cciValues.slice(0, -1), emaPeriod) : emaCCI;
+    
+    let crossover = null;
+    if (previousCCI <= previousEMA && currentCCI > emaCCI) {
+        crossover = 'ALTA'; // Cruzou para cima
+    } else if (previousCCI >= previousEMA && currentCCI < emaCCI) {
+        crossover = 'BAIXA'; // Cruzou para baixo
+    }
+    
+    return {
+        cci: currentCCI,
+        ema: emaCCI,
+        previousCCI,
+        previousEMA,
+        crossover
+    };
+}
+
 function calculateVolumeEMA(candles, period = 9) {
     if (!candles || candles.length < period) {
         return { bullish: 50, bearish: 50 };
     }
     
-    const volumes = candles.map(c => c.volume);
     const closes = candles.map(c => c.close);
     const emaPrice = calculateEMA(closes, period);
     
@@ -229,112 +291,6 @@ function calculateVolumeEMA(candles, period = 9) {
         bullish: bullishPct,
         bearish: 100 - bullishPct
     };
-}
-
-// =====================================================================
-// === BUSCAR CANDLES ===
-// =====================================================================
-async function getCandles(symbol, interval, limit = 100) {
-    try {
-        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-        
-        const data = await rateLimiter.makeRequest(url, cacheKey);
-        
-        return data.map(candle => ({
-            open: parseFloat(candle[1]),
-            high: parseFloat(candle[2]),
-            low: parseFloat(candle[3]),
-            close: parseFloat(candle[4]),
-            volume: parseFloat(candle[5]),
-            time: candle[0]
-        }));
-    } catch (error) {
-        log(`Erro ao buscar candles ${symbol} ${interval}: ${error.message}`, 'error');
-        return [];
-    }
-}
-
-// =====================================================================
-// === DADOS ADICIONAIS ===
-// =====================================================================
-async function getAdditionalData(symbol, currentPrice) {
-    try {
-        const [candles1h, candles4h, candlesDaily, ticker24h] = await Promise.all([
-            getCandles(symbol, '1h', 100),
-            getCandles(symbol, '4h', 100),
-            getCandles(symbol, '1d', 50),
-            rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, `ticker_${symbol}`)
-        ]);
-        
-        const volume24hUSDT = parseFloat(ticker24h?.quoteVolume || 0);
-        const priceChange24h = parseFloat(ticker24h?.priceChangePercent || 0);
-        
-        const volume1h = calculateVolumeEMA(candles1h);
-        const volume4h = calculateVolumeEMA(candles4h);
-        
-        const rsi = calculateRSI(candles1h);
-        
-        const stochDaily = calculateStochastic(candlesDaily);
-        const stoch4h = calculateStochastic(candles4h);
-        const stoch1h = calculateStochastic(candles1h);
-        
-        let lsr = null;
-        try {
-            const lsrData = await rateLimiter.makeRequest(
-                `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`,
-                `lsr_${symbol}`
-            );
-            lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
-        } catch {}
-        
-        let funding = null;
-        try {
-            const fundingData = await rateLimiter.makeRequest(
-                `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`,
-                `funding_${symbol}`
-            );
-            funding = parseFloat(fundingData.lastFundingRate) || null;
-        } catch {}
-        
-        const volumes1h = candles1h.map(c => c.volume);
-        const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
-        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
-        const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
-        const volumeUSDT1h = currentVolume1h * currentPrice;
-        
-        return {
-            volume24h: {
-                usdt: volume24hUSDT,
-                change: priceChange24h,
-                pct: priceChange24h > 0 ? `+${priceChange24h.toFixed(0)}%` : `${priceChange24h.toFixed(0)}%`
-            },
-            volume1h: {
-                ratio: volumeRatio1h,
-                bullish: volume1h.bullish,
-                bearish: volume1h.bearish,
-                direction: volume1h.bullish > 52 ? 'Comprador' : (volume1h.bearish > 52 ? 'Vendedor' : 'Neutro'),
-                usdt: volumeUSDT1h
-            },
-            rsi: Math.round(rsi),
-            stoch1d: formatStochastic(stochDaily),
-            stoch4h: formatStochastic(stoch4h),
-            stoch1h: formatStochastic(stoch1h),
-            lsr,
-            funding
-        };
-    } catch (error) {
-        return {
-            volume24h: { usdt: 0, change: 0, pct: '0%' },
-            volume1h: { ratio: 1, bullish: 50, bearish: 50, direction: 'Neutro', usdt: 0 },
-            rsi: 50,
-            stoch1d: 'K50⤵️D50',
-            stoch4h: 'K50⤵️D50',
-            stoch1h: 'K50⤵️D50',
-            lsr: null,
-            funding: null
-        };
-    }
 }
 
 function calculateRSI(candles, period = 14) {
@@ -448,6 +404,139 @@ function checkEMACriteria(candles) {
 }
 
 // =====================================================================
+// === BUSCAR CANDLES ===
+// =====================================================================
+async function getCandles(symbol, interval, limit = 100) {
+    try {
+        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        
+        const data = await rateLimiter.makeRequest(url, cacheKey);
+        
+        return data.map(candle => ({
+            open: parseFloat(candle[1]),
+            high: parseFloat(candle[2]),
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]),
+            volume: parseFloat(candle[5]),
+            time: candle[0]
+        }));
+    } catch (error) {
+        log(`Erro ao buscar candles ${symbol} ${interval}: ${error.message}`, 'error');
+        return [];
+    }
+}
+
+// =====================================================================
+// === DADOS ADICIONAIS (AGORA COM CCI DIÁRIO) ===
+// =====================================================================
+async function getAdditionalData(symbol, currentPrice) {
+    try {
+        const [candles1h, candles4h, candlesDaily, ticker24h] = await Promise.all([
+            getCandles(symbol, '1h', 100),
+            getCandles(symbol, '4h', 100),
+            getCandles(symbol, '1d', 60), // Precisa de mais candles para o CCI
+            rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, `ticker_${symbol}`)
+        ]);
+        
+        const volume24hUSDT = parseFloat(ticker24h?.quoteVolume || 0);
+        const priceChange24h = parseFloat(ticker24h?.priceChangePercent || 0);
+        
+        const volume1h = calculateVolumeEMA(candles1h);
+        const volume4h = calculateVolumeEMA(candles4h);
+        
+        const rsi = calculateRSI(candles1h);
+        
+        const stochDaily = calculateStochastic(candlesDaily);
+        const stoch4h = calculateStochastic(candles4h);
+        const stoch1h = calculateStochastic(candles1h);
+        
+        // === CALCULAR CCI DIÁRIO COM EMA 5 ===
+        const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
+        
+        let cciText = 'CCI Diário: ⚪NEUTRO';
+        if (cciDaily.crossover === 'ALTA') {
+            cciText = 'CCI Diário: 💹ALTA';
+        } else if (cciDaily.crossover === 'BAIXA') {
+            cciText = 'CCI Diário: 🔴BAIXA';
+        }
+        
+        let lsr = null;
+        try {
+            const lsrData = await rateLimiter.makeRequest(
+                `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`,
+                `lsr_${symbol}`
+            );
+            lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
+        } catch {}
+        
+        let funding = null;
+        try {
+            const fundingData = await rateLimiter.makeRequest(
+                `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`,
+                `funding_${symbol}`
+            );
+            funding = parseFloat(fundingData.lastFundingRate) || null;
+        } catch {}
+        
+        const volumes1h = candles1h.map(c => c.volume);
+        const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
+        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
+        const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
+        const volumeUSDT1h = currentVolume1h * currentPrice;
+        
+        const volumes3m = await getCandles(symbol, '3m', 20);
+        const volume3m = calculateVolumeEMA(volumes3m);
+        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b.volume, 0) / 20;
+        const currentVolume3m = volumes3m[volumes3m.length - 1]?.volume || 0;
+        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
+        
+        return {
+            volume24h: {
+                usdt: volume24hUSDT,
+                change: priceChange24h,
+                pct: priceChange24h > 0 ? `+${priceChange24h.toFixed(0)}%` : `${priceChange24h.toFixed(0)}%`
+            },
+            volume1h: {
+                ratio: volumeRatio1h,
+                bullish: volume1h.bullish,
+                bearish: volume1h.bearish,
+                direction: volume1h.bullish > 52 ? 'Comprador' : (volume1h.bearish > 52 ? 'Vendedor' : 'Neutro'),
+                usdt: volumeUSDT1h,
+                pct: volume1h.bullish.toFixed(0)
+            },
+            volume3m: {
+                ratio: volumeRatio3m,
+                bullish: volume3m.bullish,
+                bearish: volume3m.bearish,
+                direction: volume3m.bullish > 52 ? 'Comprador' : (volume3m.bearish > 52 ? 'Vendedor' : 'Neutro'),
+                pct: volume3m.bullish.toFixed(0)
+            },
+            rsi: Math.round(rsi),
+            stoch1d: formatStochastic(stochDaily),
+            stoch4h: formatStochastic(stoch4h),
+            stoch1h: formatStochastic(stoch1h),
+            lsr,
+            funding,
+            cciText  // ← NOVO: Texto formatado do CCI Diário
+        };
+    } catch (error) {
+        return {
+            volume24h: { usdt: 0, change: 0, pct: '0%' },
+            volume1h: { ratio: 1, bullish: 50, bearish: 50, direction: 'Neutro', usdt: 0, pct: '50' },
+            volume3m: { ratio: 1, bullish: 50, bearish: 50, direction: 'Neutro', pct: '50' },
+            rsi: 50,
+            stoch1d: 'K50⤵️D50',
+            stoch4h: 'K50⤵️D50',
+            stoch1h: 'K50⤵️D50',
+            lsr: null,
+            funding: null,
+            cciText: 'CCI Diário: ⚪NEUTRO'  // ← NOVO: Valor padrão
+        };
+    }
+}
+
+// =====================================================================
 // === ALERTAS ===
 // =====================================================================
 const alertCache = new Map();
@@ -528,20 +617,19 @@ async function analyzeSymbol(symbol) {
             if (emaAnalysis.signal) {
                 const currentPrice = emaAnalysis.currentClose;
                 const direction = emaAnalysis.signal === 'ALTA' ? 'COMPRA' : 'VENDA';
+                const directionEmoji = emaAnalysis.signal === 'ALTA' ? '🟢🔍' : '🔴🔍';
+                const directionText = emaAnalysis.signal === 'ALTA' ? 'Tendência de Alta' : 'Tendência de Baixa';
                 
                 if (!canSendAlert(symbol, timeframe, direction)) continue;
                 
                 const additional = await getAdditionalData(symbol, currentPrice);
                 
-                const volumeOk = direction === 'COMPRA' 
-                    ? additional.volume1h.bullish > 52 
-                    : additional.volume1h.bearish > 52;
-                
                 const alert = {
                     symbol: symbol.replace('USDT', ''),
                     symbolFull: symbol,
                     timeframe,
-                    direction: emaAnalysis.signal === 'ALTA' ? '🟢🔍 Tendência de Alta' : '🔴🔍 Tendência de Baixa',
+                    directionEmoji,
+                    directionText,
                     price: currentPrice,
                     ema13: emaAnalysis.ema13,
                     ema34: emaAnalysis.ema34,
@@ -565,7 +653,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA ===
+// === ENVIAR ALERTA (AGORA COM CCI DIÁRIO) ===
 // =====================================================================
 async function sendAlert(data) {
     const time = getBrazilianDateTime();
@@ -580,18 +668,26 @@ async function sendAlert(data) {
     
     const lsr = data.lsr ? data.lsr.toFixed(2) : 'N/A';
     
-    const message = `🟢🔍 ${data.symbol} ${data.direction} #${data.timeframe}
+    // Calculando resistências e suportes baseados na EMA55
+    const resist1 = formatPrice(data.ema55 * 1.1);
+    const resist2 = formatPrice(data.ema55 * 1.05);
+    const supt1 = formatPrice(data.ema55 * 0.95);
+    const supt2 = formatPrice(data.ema55 * 0.9);
+    
+    // Mensagem completa com CCI Diário na posição solicitada
+    const message = `${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
+ ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  #RSI 1h: ${data.rsi} ${rsiEmoji} | 🔗 TradingView
- #Vol 3m: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.bullish.toFixed(0)}%) ${volumeEmoji}${volumeDirection}
- #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.bullish.toFixed(0)}%) ${volumeEmoji}${volumeDirection}
+ #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
+ #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
  #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${formatPrice(data.ema55 * 1.1)} | ${formatPrice(data.ema55 * 1.05)}
- 🔹Supt: ${formatPrice(data.ema55 * 0.95)} | ${formatPrice(data.ema55 * 0.9)}
+ 🔻Resist: ${resist1} | ${resist2}
+ 🔹Supt: ${supt1} | ${supt2}
  
  Titanium Prime by @J4Rviz`;
 
@@ -609,7 +705,7 @@ async function sendAlert(data) {
             })
         });
         
-        log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.direction} [${data.timeframe}]`, 'success');
+        log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.directionText} [${data.timeframe}] | CCI: ${data.cciText}`, 'success');
         return true;
     } catch (error) {
         log(`Erro ao enviar Telegram: ${error.message}`, 'error');
@@ -621,12 +717,13 @@ async function sendAlert(data) {
 // === SCANNER PRINCIPAL ===
 // =====================================================================
 async function startScanner() {
-    console.log('\n' + '='.repeat(60));
-    console.log('🚀 SCANNER EMA 13/34/55 - ATIVADO');
-    console.log('='.repeat(60));
+    console.log('\n' + '='.repeat(70));
+    console.log('🚀 SCANNER EMA 13/34/55 + CCI DIÁRIO - ATIVADO');
+    console.log('='.repeat(70));
     
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos nos timeframes: ${CONFIG.TIMEFRAMES.join(', ')}`, 'success');
+    log(`CCI Diário: Monitorando cruzamento da EMA5 no período ${CONFIG.CCI.PERIOD}`, 'success');
     
     // Reset diário dos contadores
     setInterval(() => {
