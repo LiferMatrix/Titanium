@@ -5,12 +5,12 @@ require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
-// === CONFIGURAÇÕES ===
+// === CONFIGURAÇÕES ACELERADAS COM SEGURANÇA ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-10025
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -20,20 +20,25 @@ const CONFIG = {
         SUPER1: 610,
         SUPER2: 890
     },
+    RSI: {
+        PERIOD: 14,
+        OVERBOUGHT: 70,
+        OVERSOLD: 30
+    },
     CCI: {
         PERIOD: 20,
         EMA_PERIOD: 5
     },
     TIMEFRAMES: ['1h', '4h'],
     SCAN: {
-        BATCH_SIZE: 15,
-        SYMBOL_DELAY_MS: 100,
-        REQUEST_TIMEOUT: 10000,
-        COOLDOWN_AFTER_BATCH_MS: 800,
-        TOP_SYMBOLS_LIMIT: 350
+        BATCH_SIZE: 5,
+        SYMBOL_DELAY_MS: 1200,
+        REQUEST_TIMEOUT: 25000,
+        COOLDOWN_AFTER_BATCH_MS: 3000,
+        TOP_SYMBOLS_LIMIT: 300
     },
     ALERTS: {
-        COOLDOWN_MINUTES: 30,
+        COOLDOWN_MINUTES: 50,
         DAILY_LIMITS: {
             TOP_10: 25,
             TOP_50: 40,
@@ -44,8 +49,20 @@ const CONFIG = {
             MIN_VOLUME_RATIO: 1.2
         },
         SUPER: {
-            TOUCH_TOLERANCE: 0.005 // 0.5% de tolerância para tocar EMAs muito longas
+            TOUCH_TOLERANCE: 0.005
         }
+    },
+    RATE_LIMIT: {
+        MAX_REQUESTS_PER_MINUTE: 800,
+        MAX_REQUESTS_PER_SECOND: 7,
+        BACKOFF_MULTIPLIER: 1.5,
+        MAX_BACKOFF: 20000,
+        INITIAL_BACKOFF: 1000
+    },
+    WARMUP: {
+        ENABLED: true,
+        SYMBOLS: 30,
+        DELAY_MS: 500
     }
 };
 
@@ -56,22 +73,45 @@ const LOG_DIR = './logs';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 // =====================================================================
-// === CACHE ===
+// === CACHE MELHORADO ===
 // =====================================================================
 class Cache {
     constructor() {
         this.cache = new Map();
-        this.requestTimestamps = [];
+        this.requestTimestamps = {
+            perMinute: [],
+            perSecond: []
+        };
+        this.warmupMode = false;
+    }
+
+    enableWarmupMode() {
+        this.warmupMode = true;
+    }
+
+    disableWarmupMode() {
+        this.warmupMode = false;
     }
 
     get(key) {
         const item = this.cache.get(key);
         if (!item) return null;
-        if (Date.now() - item.timestamp > 30 * 1000) {
+        
+        const ttl = this.getTTL(key);
+        if (Date.now() - item.timestamp > ttl) {
             this.cache.delete(key);
             return null;
         }
         return item.data;
+    }
+
+    getTTL(key) {
+        if (key.includes('candles_1h')) return 45 * 1000;
+        if (key.includes('candles_4h')) return 3 * 60 * 1000;
+        if (key.includes('candles_1d')) return 10 * 60 * 1000;
+        if (key.includes('ticker_24hr')) return 20 * 1000;
+        if (key.includes('top_symbols')) return 3 * 60 * 1000;
+        return 20 * 1000;
     }
 
     set(key, data) {
@@ -80,12 +120,46 @@ class Cache {
 
     canMakeRequest() {
         const now = Date.now();
-        this.requestTimestamps = this.requestTimestamps.filter(ts => ts > now - 60000);
-        return this.requestTimestamps.length < 1200;
+        
+        this.requestTimestamps.perMinute = this.requestTimestamps.perMinute
+            .filter(ts => ts > now - 60000);
+        this.requestTimestamps.perSecond = this.requestTimestamps.perSecond
+            .filter(ts => ts > now - 1000);
+        
+        const maxPerMinute = this.warmupMode ? 1000 : CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE;
+        const maxPerSecond = this.warmupMode ? 10 : CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_SECOND;
+        
+        return this.requestTimestamps.perMinute.length < maxPerMinute &&
+               this.requestTimestamps.perSecond.length < maxPerSecond;
     }
 
     addRequest() {
-        this.requestTimestamps.push(Date.now());
+        const now = Date.now();
+        this.requestTimestamps.perMinute.push(now);
+        this.requestTimestamps.perSecond.push(now);
+    }
+
+    async warmup(symbols) {
+        log(`🔥 Aquecendo cache com ${symbols.length} símbolos...`, 'info');
+        this.enableWarmupMode();
+        
+        let count = 0;
+        for (const symbol of symbols) {
+            count++;
+            await Promise.all([
+                getCandles(symbol, '4h', 200, 'high').catch(() => {}),
+                getCandles(symbol, '1h', 100, 'high').catch(() => {})
+            ]);
+            
+            if (count % 10 === 0) {
+                log(`🔥 Warmup: ${count}/${symbols.length} símbolos processados`, 'info');
+            }
+            
+            await new Promise(r => setTimeout(r, CONFIG.WARMUP.DELAY_MS));
+        }
+        
+        this.disableWarmupMode();
+        log(`✅ Cache aquecido com sucesso!`, 'success');
     }
 }
 
@@ -127,71 +201,223 @@ function log(message, type = 'info') {
 }
 
 // =====================================================================
-// === RATE LIMITER ===
+// === NOVAS FUNÇÕES PARA EMOJIS PERSONALIZADOS ===
+// =====================================================================
+function getRSIEmojiCustom(rsi) {
+    if (rsi < 25) return '🔵';
+    if (rsi >= 26 && rsi <= 38) return '🟢';
+    if (rsi >= 39 && rsi <= 45) return '🟡';
+    if (rsi >= 46 && rsi <= 64) return '🟠';
+    if (rsi >= 65 && rsi <= 70) return '🔴';
+    if (rsi >= 71 && rsi <= 80) return '💥';
+    if (rsi > 80) return '🔥🔥';
+    return '⚪';
+}
+
+function getLSREmoji(lsr) {
+    if (lsr < 1) return '🔵';
+    if (lsr >= 1 && lsr <= 1.5) return '🟢';
+    if (lsr >= 1.6 && lsr <= 2) return '🟡';
+    if (lsr >= 2.1 && lsr <= 2.5) return '🟠';
+    if (lsr >= 2.6 && lsr <= 2.8) return '🔴';
+    if (lsr >= 2.9 && lsr <= 3.5) return '💥';
+    if (lsr > 3.6) return '🔥🔥';
+    return '⚪';
+}
+
+// =====================================================================
+// === RATE LIMITER ACELERADO ===
 // =====================================================================
 class RateLimiter {
     constructor() {
         this.lastRequestTime = 0;
         this.consecutiveErrors = 0;
-        this.errorBackoff = 1000;
+        this.errorBackoff = CONFIG.RATE_LIMIT.INITIAL_BACKOFF;
+        this.requestQueue = [];
+        this.processing = false;
+        this.stats = {
+            totalRequests: 0,
+            cacheHits: 0,
+            errors: 0
+        };
     }
 
-    async wait() {
+    async wait(priority = 'normal') {
+        const isWarmup = cache.warmupMode;
+        
+        while (!cache.canMakeRequest()) {
+            await new Promise(r => setTimeout(r, 50));
+        }
+        
         const now = Date.now();
         const timeSinceLast = now - this.lastRequestTime;
-        const baseDelay = CONFIG.SCAN.SYMBOL_DELAY_MS;
+        
+        let baseDelay;
+        if (isWarmup) {
+            baseDelay = CONFIG.WARMUP.DELAY_MS;
+        } else {
+            baseDelay = priority === 'high' ? 800 : 
+                       priority === 'low' ? 1500 : 
+                       CONFIG.SCAN.SYMBOL_DELAY_MS;
+        }
         
         if (timeSinceLast < baseDelay) {
             await new Promise(r => setTimeout(r, baseDelay - timeSinceLast));
         }
         
         this.lastRequestTime = Date.now();
+        cache.addRequest();
+        this.stats.totalRequests++;
     }
 
-    async makeRequest(url, cacheKey = null) {
+    async makeRequest(url, cacheKey = null, priority = 'normal') {
         if (cacheKey) {
             const cached = cache.get(cacheKey);
-            if (cached) return cached;
+            if (cached) {
+                this.stats.cacheHits++;
+                return cached;
+            }
         }
 
+        return new Promise((resolve, reject) => {
+            this.requestQueue.push({
+                url,
+                cacheKey,
+                resolve,
+                reject,
+                priority,
+                timestamp: Date.now(),
+                attempts: 0
+            });
+            
+            if (!this.processing) {
+                this.processQueue();
+            }
+        });
+    }
+
+    async processQueue() {
+        if (this.processing) return;
+        this.processing = true;
+
+        while (this.requestQueue.length > 0) {
+            this.requestQueue.sort((a, b) => {
+                const priorityOrder = { 'high': 0, 'normal': 1, 'low': 2 };
+                return priorityOrder[a.priority] - priorityOrder[b.priority];
+            });
+
+            const request = this.requestQueue.shift();
+            
+            try {
+                const result = await this.executeRequest(request);
+                request.resolve(result);
+            } catch (error) {
+                this.stats.errors++;
+                
+                if (request.attempts < 2 && this.isRetryableError(error)) {
+                    request.attempts++;
+                    const backoff = this.errorBackoff * Math.pow(CONFIG.RATE_LIMIT.BACKOFF_MULTIPLIER, request.attempts - 1);
+                    log(`🔄 Reagendando ${request.url} (tentativa ${request.attempts}/2) após ${backoff}ms`, 'warning');
+                    
+                    setTimeout(() => {
+                        this.requestQueue.push(request);
+                    }, backoff);
+                } else {
+                    request.reject(error);
+                }
+            }
+
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        this.processing = false;
+    }
+
+    async executeRequest(request) {
         let attempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 2;
         
         while (attempts < maxAttempts) {
             try {
-                await this.wait();
+                await this.wait(request.priority);
                 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), CONFIG.SCAN.REQUEST_TIMEOUT);
                 
-                cache.addRequest();
-                const response = await fetch(url, { signal: controller.signal });
+                const response = await fetch(request.url, { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
                 if (response.status === 429) {
                     this.consecutiveErrors++;
-                    await new Promise(r => setTimeout(r, this.errorBackoff * Math.pow(2, attempts)));
+                    const backoff = Math.min(
+                        this.errorBackoff * Math.pow(CONFIG.RATE_LIMIT.BACKOFF_MULTIPLIER, attempts),
+                        CONFIG.RATE_LIMIT.MAX_BACKOFF
+                    );
+                    
+                    log(`⏳ Rate limit (429) para ${request.url}. Aguardando ${backoff}ms`, 'warning');
+                    await new Promise(r => setTimeout(r, backoff));
                     attempts++;
                     continue;
                 }
                 
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (response.status === 418) {
+                    log(`⚠️ IP BANIDO! Aguardando 2 minutos...`, 'error');
+                    await new Promise(r => setTimeout(r, 120000));
+                    throw new Error('IP temporarily banned');
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
                 
                 const data = await response.json();
-                this.consecutiveErrors = 0;
                 
-                if (cacheKey) cache.set(cacheKey, data);
+                this.consecutiveErrors = 0;
+                this.errorBackoff = CONFIG.RATE_LIMIT.INITIAL_BACKOFF;
+                
+                if (request.cacheKey) {
+                    cache.set(request.cacheKey, data);
+                }
+                
                 return data;
                 
             } catch (error) {
+                if (error.name === 'AbortError') {
+                    log(`⏰ Timeout ${request.url}`, 'warning');
+                }
+                
                 this.consecutiveErrors++;
                 attempts++;
+                
                 if (attempts < maxAttempts) {
-                    await new Promise(r => setTimeout(r, this.errorBackoff * attempts));
+                    const backoff = Math.min(
+                        this.errorBackoff * attempts,
+                        CONFIG.RATE_LIMIT.MAX_BACKOFF
+                    );
+                    await new Promise(r => setTimeout(r, backoff));
                 }
             }
         }
-        throw new Error(`Falha após ${maxAttempts} tentativas`);
+        
+        throw new Error(`Falha após ${maxAttempts} tentativas para ${request.url}`);
+    }
+
+    isRetryableError(error) {
+        const retryableMessages = [
+            '429',
+            'timeout',
+            'ECONNRESET',
+            'ETIMEDOUT',
+            'socket hang up'
+        ];
+        
+        return retryableMessages.some(msg => 
+            error.message.includes(msg) || error.code?.includes(msg)
+        );
+    }
+
+    showStats() {
+        log(`📊 Stats: ${this.stats.totalRequests} req | ${this.stats.cacheHits} cache | ${this.stats.errors} erros`, 'info');
     }
 }
 
@@ -219,6 +445,49 @@ function calculateEMA(values, period) {
     return ema;
 }
 
+function calculateRSI(candles, period = 14) {
+    if (!candles || candles.length <= period) return 50;
+    
+    const changes = [];
+    for (let i = 1; i < candles.length; i++) {
+        changes.push(candles[i].close - candles[i-1].close);
+    }
+    
+    if (changes.length < period) return 50;
+    
+    let avgGain = 0;
+    let avgLoss = 0;
+    
+    for (let i = 0; i < period; i++) {
+        const change = changes[i];
+        if (change > 0) {
+            avgGain += change;
+        } else {
+            avgLoss -= change;
+        }
+    }
+    
+    avgGain /= period;
+    avgLoss /= period;
+    
+    for (let i = period; i < changes.length; i++) {
+        const change = changes[i];
+        const gain = change > 0 ? change : 0;
+        const loss = change < 0 ? -change : 0;
+        
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+    }
+    
+    if (avgLoss === 0) return 100;
+    if (avgGain === 0) return 0;
+    
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return Math.round(rsi * 100) / 100;
+}
+
 function calculateCCI(candles, period = 20) {
     if (!candles || candles.length < period) return 0;
     
@@ -239,7 +508,13 @@ function calculateCCI(candles, period = 20) {
 
 function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
     if (!candles || candles.length < cciPeriod + emaPeriod) {
-        return { cci: 0, ema: 0, crossover: null };
+        return { 
+            cci: 0, 
+            ema: 0, 
+            direction: 'NEUTRO',
+            emoji: '⚪',
+            text: 'CCI Diário: ⚪NEUTRO'
+        };
     }
     
     const cciValues = [];
@@ -256,6 +531,17 @@ function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
     const previousEMA = cciValues.length > 1 ? 
         calculateEMA(cciValues.slice(0, -1), emaPeriod) : emaCCI;
     
+    let direction = 'NEUTRO';
+    let emoji = '⚪';
+    
+    if (currentCCI > emaCCI) {
+        direction = 'ALTA';
+        emoji = '💹';
+    } else if (currentCCI < emaCCI) {
+        direction = 'BAIXA';
+        emoji = '🔴';
+    }
+    
     let crossover = null;
     if (previousCCI <= previousEMA && currentCCI > emaCCI) {
         crossover = 'ALTA';
@@ -263,12 +549,17 @@ function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
         crossover = 'BAIXA';
     }
     
+    const text = `CCI Diário: ${emoji}${direction}`;
+    
     return {
         cci: currentCCI,
         ema: emaCCI,
         previousCCI,
         previousEMA,
-        crossover
+        crossover,
+        direction,
+        emoji,
+        text
     };
 }
 
@@ -301,27 +592,6 @@ function calculateVolumeEMA(candles, period = 9) {
         bullish: bullishPct,
         bearish: 100 - bullishPct
     };
-}
-
-function calculateRSI(candles, period = 14) {
-    if (!candles || candles.length <= period) return 50;
-    
-    const changes = [];
-    for (let i = 1; i < candles.length; i++) {
-        changes.push(candles[i].close - candles[i-1].close);
-    }
-    
-    const gains = changes.map(c => c > 0 ? c : 0);
-    const losses = changes.map(c => c < 0 ? -c : 0);
-    
-    const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;
-    const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;
-    
-    if (avgLoss === 0) return 100;
-    if (avgGain === 0) return 0;
-    
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
 }
 
 function calculateStochastic(candles, kPeriod = 14, kSmooth = 3, dPeriod = 3) {
@@ -372,9 +642,6 @@ function formatStochastic(stoch) {
     }
 }
 
-// =====================================================================
-// === VERIFICAR CRITÉRIO DE TENDÊNCIA FORTE (EMA144) ===
-// =====================================================================
 function checkStrongTrend(candles) {
     if (!candles || candles.length < CONFIG.EMA.STRONG + 10) {
         return { signal: null };
@@ -390,13 +657,11 @@ function checkStrongTrend(candles) {
     let signal = null;
     let type = null;
     
-    // ALTA FORTE: subindo e fechou acima da EMA144
     if (lastCandle.close > prevCandle.close && currentClose > ema144) {
         signal = 'ALTA_FORTE';
         type = 'ALTA_FORTE_4H';
     }
     
-    // BAIXA FORTE: caindo e fechou abaixo da EMA144
     if (lastCandle.close < prevCandle.close && currentClose < ema144) {
         signal = 'BAIXA_FORTE';
         type = 'BAIXA_FORTE_4H';
@@ -410,9 +675,6 @@ function checkStrongTrend(candles) {
     };
 }
 
-// =====================================================================
-// === VERIFICAR CRITÉRIO DE SUPER TENDÊNCIA (EMA610/890) ===
-// =====================================================================
 function checkSuperTrend(candles) {
     if (!candles || candles.length < CONFIG.EMA.SUPER2 + 10) {
         return { signal: null };
@@ -433,13 +695,9 @@ function checkSuperTrend(candles) {
     let touchedEMA = null;
     let emaValue = null;
     
-    // Verificar se está subindo
     const isRising = lastCandle.close > prevCandle.close;
-    
-    // Verificar se está descendo
     const isFalling = lastCandle.close < prevCandle.close;
     
-    // SUPER ALTA: subindo e tocou EMA610 ou EMA890
     if (isRising) {
         const touchingEMA610 = Math.abs(lastCandle.low - ema610) <= tolerance || 
                                (lastCandle.low <= ema610 && lastCandle.close >= ema610);
@@ -459,7 +717,6 @@ function checkSuperTrend(candles) {
         }
     }
     
-    // SUPER BAIXA: descendo e tocou EMA610 ou EMA890
     if (isFalling) {
         const touchingEMA610 = Math.abs(lastCandle.high - ema610) <= tolerance || 
                                (lastCandle.high >= ema610 && lastCandle.close <= ema610);
@@ -492,9 +749,6 @@ function checkSuperTrend(candles) {
     };
 }
 
-// =====================================================================
-// === VERIFICAR CRITÉRIO EMA (CRUZAMENTO) ===
-// =====================================================================
 function checkEMACriteria(candles) {
     if (!candles || candles.length < CONFIG.EMA.TREND + 10) {
         return { signal: null };
@@ -531,9 +785,6 @@ function checkEMACriteria(candles) {
     };
 }
 
-// =====================================================================
-// === VERIFICAR CRITÉRIO DE RETESTE ===
-// =====================================================================
 function checkRetestCriteria(candles, timeframe) {
     if (!candles || candles.length < CONFIG.EMA.SUPER2 + 10) {
         return { signal: null, type: null };
@@ -547,7 +798,7 @@ function checkRetestCriteria(candles, timeframe) {
     const ema13 = calculateEMA(closes, CONFIG.EMA.FAST);
     const ema55 = calculateEMA(closes, CONFIG.EMA.TREND);
     const ema144 = calculateEMA(closes, CONFIG.EMA.STRONG);
-    const ema233 = calculateEMA(closes, CONFIG.EMA.SUPER1 - 377); // Aproximadamente 233
+    const ema233 = calculateEMA(closes, 233);
     
     const tolerance = currentClose * CONFIG.ALERTS.RETEST.TOUCH_TOLERANCE;
     
@@ -555,7 +806,6 @@ function checkRetestCriteria(candles, timeframe) {
     let type = null;
     let touchedEMA = null;
     
-    // ===== RETESTE DE ALTA =====
     if (currentClose > ema55 && lastCandle.close < prevCandle.close) {
         const touchingEMA13 = Math.abs(lastCandle.low - ema13) <= tolerance || (lastCandle.low <= ema13 && lastCandle.close >= ema13);
         const touchingEMA144 = Math.abs(lastCandle.low - ema144) <= tolerance || (lastCandle.low <= ema144 && lastCandle.close >= ema144);
@@ -576,7 +826,6 @@ function checkRetestCriteria(candles, timeframe) {
         }
     }
     
-    // ===== RETESTE DE BAIXA =====
     if (currentClose < ema55 && lastCandle.close > prevCandle.close) {
         if (timeframe === '1h') {
             const touchingEMA55 = Math.abs(lastCandle.high - ema55) <= tolerance || (lastCandle.high >= ema55 && lastCandle.close <= ema55);
@@ -621,14 +870,14 @@ function checkRetestCriteria(candles, timeframe) {
 }
 
 // =====================================================================
-// === BUSCAR CANDLES ===
+// === BUSCAR CANDLES (COM PRIORIDADE) ===
 // =====================================================================
-async function getCandles(symbol, interval, limit = 1000) {
+async function getCandles(symbol, interval, limit = 1000, priority = 'normal') {
     try {
         const cacheKey = `candles_${symbol}_${interval}_${limit}`;
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         
-        const data = await rateLimiter.makeRequest(url, cacheKey);
+        const data = await rateLimiter.makeRequest(url, cacheKey, priority);
         
         return data.map(candle => ({
             open: parseFloat(candle[1]),
@@ -645,43 +894,40 @@ async function getCandles(symbol, interval, limit = 1000) {
 }
 
 // =====================================================================
-// === DADOS ADICIONAIS ===
+// === DADOS ADICIONAIS (COM PRIORIDADE) ===
 // =====================================================================
 async function getAdditionalData(symbol, currentPrice) {
     try {
-        const [candles1h, candles4h, candlesDaily, ticker24h] = await Promise.all([
-            getCandles(symbol, '1h', 100),
-            getCandles(symbol, '4h', 100),
-            getCandles(symbol, '1d', 60),
-            rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, `ticker_${symbol}`)
+        const [candles1h, candles4h, candlesDaily, ticker24h] = await Promise.allSettled([
+            getCandles(symbol, '1h', 100, 'high'),
+            getCandles(symbol, '4h', 100, 'high'),
+            getCandles(symbol, '1d', 60, 'high'),
+            rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`, `ticker_${symbol}`, 'high')
         ]);
         
-        const volume24hUSDT = parseFloat(ticker24h?.quoteVolume || 0);
-        const priceChange24h = parseFloat(ticker24h?.priceChangePercent || 0);
+        const volume24hUSDT = ticker24h.status === 'fulfilled' ? parseFloat(ticker24h.value?.quoteVolume || 0) : 0;
+        const priceChange24h = ticker24h.status === 'fulfilled' ? parseFloat(ticker24h.value?.priceChangePercent || 0) : 0;
         
-        const volume1h = calculateVolumeEMA(candles1h);
-        const volume4h = calculateVolumeEMA(candles4h);
+        const volume1h = candles1h.status === 'fulfilled' ? calculateVolumeEMA(candles1h.value) : { bullish: 50, bearish: 50 };
+        const volume4h = candles4h.status === 'fulfilled' ? calculateVolumeEMA(candles4h.value) : { bullish: 50, bearish: 50 };
         
-        const rsi = calculateRSI(candles1h);
+        const rsi = candles1h.status === 'fulfilled' ? calculateRSI(candles1h.value, CONFIG.RSI.PERIOD) : 50;
+        const rsiEmoji = getRSIEmojiCustom(rsi);
         
-        const stochDaily = calculateStochastic(candlesDaily);
-        const stoch4h = calculateStochastic(candles4h);
-        const stoch1h = calculateStochastic(candles1h);
+        const stochDaily = candlesDaily.status === 'fulfilled' ? calculateStochastic(candlesDaily.value) : { k: 50, d: 50 };
+        const stoch4h = candles4h.status === 'fulfilled' ? calculateStochastic(candles4h.value) : { k: 50, d: 50 };
+        const stoch1h = candles1h.status === 'fulfilled' ? calculateStochastic(candles1h.value) : { k: 50, d: 50 };
         
-        const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
-        
-        let cciText = 'CCI Diário: ⚪NEUTRO';
-        if (cciDaily.crossover === 'ALTA') {
-            cciText = 'CCI Diário: 💹ALTA';
-        } else if (cciDaily.crossover === 'BAIXA') {
-            cciText = 'CCI Diário: 🔴BAIXA';
-        }
+        const cciDaily = candlesDaily.status === 'fulfilled' ? 
+            calculateCCIWithEMA(candlesDaily.value, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD) : 
+            { text: 'CCI Diário: ⚪NEUTRO' };
         
         let lsr = null;
         try {
             const lsrData = await rateLimiter.makeRequest(
                 `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`,
-                `lsr_${symbol}`
+                `lsr_${symbol}`,
+                'low'
             );
             lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
         } catch {}
@@ -690,22 +936,32 @@ async function getAdditionalData(symbol, currentPrice) {
         try {
             const fundingData = await rateLimiter.makeRequest(
                 `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`,
-                `funding_${symbol}`
+                `funding_${symbol}`,
+                'low'
             );
             funding = parseFloat(fundingData.lastFundingRate) || null;
         } catch {}
         
-        const volumes1h = candles1h.map(c => c.volume);
-        const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
-        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
-        const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
-        const volumeUSDT1h = currentVolume1h * currentPrice;
+        let volumeRatio1h = 1;
+        let volumeUSDT1h = 0;
+        let volumeRatio3m = 1;
+        let volume3mData = { bullish: 50, bearish: 50 };
         
-        const volumes3m = await getCandles(symbol, '3m', 20);
-        const volume3m = calculateVolumeEMA(volumes3m);
-        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b.volume, 0) / 20;
-        const currentVolume3m = volumes3m[volumes3m.length - 1]?.volume || 0;
-        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
+        if (candles1h.status === 'fulfilled') {
+            const volumes1h = candles1h.value.map(c => c.volume);
+            const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
+            const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
+            volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
+            volumeUSDT1h = currentVolume1h * currentPrice;
+        }
+        
+        try {
+            const volumes3m = await getCandles(symbol, '3m', 20, 'low');
+            volume3mData = calculateVolumeEMA(volumes3m);
+            const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b.volume, 0) / 20;
+            const currentVolume3m = volumes3m[volumes3m.length - 1]?.volume || 0;
+            volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
+        } catch {}
         
         return {
             volume24h: {
@@ -723,26 +979,29 @@ async function getAdditionalData(symbol, currentPrice) {
             },
             volume3m: {
                 ratio: volumeRatio3m,
-                bullish: volume3m.bullish,
-                bearish: volume3m.bearish,
-                direction: volume3m.bullish > 52 ? 'Comprador' : (volume3m.bearish > 52 ? 'Vendedor' : 'Neutro'),
-                pct: volume3m.bullish.toFixed(0)
+                bullish: volume3mData.bullish,
+                bearish: volume3mData.bearish,
+                direction: volume3mData.bullish > 52 ? 'Comprador' : (volume3mData.bearish > 52 ? 'Vendedor' : 'Neutro'),
+                pct: volume3mData.bullish.toFixed(0)
             },
             rsi: Math.round(rsi),
+            rsiEmoji,
             stoch1d: formatStochastic(stochDaily),
             stoch4h: formatStochastic(stoch4h),
             stoch1h: formatStochastic(stoch1h),
             lsr,
             funding,
-            cciText,
+            cciText: cciDaily.text,
             symbolFull: symbol
         };
     } catch (error) {
+        log(`Erro ao buscar dados adicionais para ${symbol}: ${error.message}`, 'error');
         return {
             volume24h: { usdt: 0, change: 0, pct: '0%' },
             volume1h: { ratio: 1, bullish: 50, bearish: 50, direction: 'Neutro', usdt: 0, pct: '50' },
             volume3m: { ratio: 1, bullish: 50, bearish: 50, direction: 'Neutro', pct: '50' },
             rsi: 50,
+            rsiEmoji: '⚪',
             stoch1d: 'K50⤵️D50',
             stoch4h: 'K50⤵️D50',
             stoch1h: 'K50⤵️D50',
@@ -765,7 +1024,8 @@ async function getTopSymbols() {
     try {
         const data = await rateLimiter.makeRequest(
             'https://fapi.binance.com/fapi/v1/ticker/24hr',
-            'top_symbols_24h'
+            'top_symbols_24h',
+            'high'
         );
         
         return data
@@ -774,6 +1034,7 @@ async function getTopSymbols() {
             .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
             .map(s => s.symbol);
     } catch (e) {
+        log('Erro ao buscar top symbols, usando lista padrão', 'warning');
         return ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT'];
     }
 }
@@ -819,19 +1080,19 @@ function registerAlert(symbol, timeframe, type) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO (AGORA COM TODOS OS ALERTAS) ===
+// === ANALISAR SÍMBOLO ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
         const results = [];
         
         for (const timeframe of CONFIG.TIMEFRAMES) {
-            // Precisa de muitos candles para EMAs muito longas (890)
-            const candles = await getCandles(symbol, timeframe, 1000);
+            await new Promise(r => setTimeout(r, 300));
+            
+            const candles = await getCandles(symbol, timeframe, 1000, 'normal');
             
             if (candles.length < CONFIG.EMA.SUPER2 + 10) continue;
             
-            // 1. Verificar critério de cruzamento (EMA13/34)
             const emaAnalysis = checkEMACriteria(candles);
             
             if (emaAnalysis.signal) {
@@ -864,7 +1125,6 @@ async function analyzeSymbol(symbol) {
                 }
             }
             
-            // 2. Verificar critério de reteste
             const retestAnalysis = checkRetestCriteria(candles, timeframe);
             
             if (retestAnalysis.signal) {
@@ -907,7 +1167,6 @@ async function analyzeSymbol(symbol) {
                 }
             }
             
-            // 3. Verificar TENDÊNCIA FORTE (EMA144) - apenas 4H
             if (timeframe === '4h') {
                 const strongTrend = checkStrongTrend(candles);
                 
@@ -947,7 +1206,6 @@ async function analyzeSymbol(symbol) {
                     }
                 }
                 
-                // 4. Verificar SUPER TENDÊNCIA (EMA610/890) - apenas 4H
                 const superTrend = checkSuperTrend(candles);
                 
                 if (superTrend.signal) {
@@ -1000,7 +1258,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA (AGORA COM TODOS OS TIPOS) ===
+// === ENVIAR ALERTA ===
 // =====================================================================
 async function sendAlert(data) {
     const time = getBrazilianDateTime();
@@ -1008,16 +1266,15 @@ async function sendAlert(data) {
     const volumeDirection = data.volume1h.direction;
     const volumeEmoji = volumeDirection === 'Comprador' ? '🟢' : (volumeDirection === 'Vendedor' ? '🔴' : '⚪');
     
-    const rsiEmoji = data.rsi < 40 ? '🟢' : data.rsi > 60 ? '🔴' : '⚪';
+    const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbolFull}`;
     
     const fundingPct = data.funding ? (data.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = data.funding && data.funding > 0 ? '+' : '';
-    
     const lsr = data.lsr ? data.lsr.toFixed(2) : 'N/A';
+    const lsrEmoji = data.lsr ? getLSREmoji(data.lsr) : '⚪';
     
-    const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbolFull}`;
+    const rsiLine = `#RSI 1h: ${data.rsi} ${getRSIEmojiCustom(data.rsi)}`;
     
-    // Mensagem diferente para cada tipo de alerta
     let message;
     
     if (data.type === 'CRUZAMENTO') {
@@ -1031,10 +1288,10 @@ async function sendAlert(data) {
  💲Preço: $${formatPrice(data.price)}
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
- #RSI 1h: ${data.rsi} ${rsiEmoji} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
  #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
- #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
  🔻Resist: ${resist1} | ${resist2}
@@ -1047,50 +1304,71 @@ async function sendAlert(data) {
                         (data.touchedEMA === 'EMA55' ? data.ema55 :
                         (data.touchedEMA === 'EMA144' ? data.ema144 : data.ema233));
         
+        const resist1 = formatPrice(emaValue * 1.1);
+        const resist2 = formatPrice(emaValue * 1.05);
+        const supt1 = formatPrice(emaValue * 0.95);
+        const supt2 = formatPrice(emaValue * 0.9);
+        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(emaValue)})
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
- #RSI 1h: ${data.rsi} ${rsiEmoji} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
  #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
- #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
+ 🔻Resist: ${resist1} | ${resist2}
+ 🔹Supt: ${supt1} | ${supt2}
  
  Titanium Prime by @J4Rviz</i>`;
     
     } else if (data.type === 'STRONG_TREND') {
+        const resist1 = formatPrice(data.ema144 * 1.1);
+        const resist2 = formatPrice(data.ema144 * 1.05);
+        const supt1 = formatPrice(data.ema144 * 0.95);
+        const supt2 = formatPrice(data.ema144 * 0.9);
+        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  📊 EMA144: $${formatPrice(data.ema144)}
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
- #RSI 1h: ${data.rsi} ${rsiEmoji} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
  #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
- #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
+ 🔻Resist: ${resist1} | ${resist2}
+ 🔹Supt: ${supt1} | ${supt2}
  
  Titanium Prime by @J4Rviz</i>`;
     
     } else if (data.type === 'SUPER_TREND') {
+        const resist1 = formatPrice(data.emaValue * 1.1);
+        const resist2 = formatPrice(data.emaValue * 1.05);
+        const supt1 = formatPrice(data.emaValue * 0.95);
+        const supt2 = formatPrice(data.emaValue * 0.9);
+        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(data.emaValue)})
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
- #RSI 1h: ${data.rsi} ${rsiEmoji} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
  #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
- #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
+ 🔻Resist: ${resist1} | ${resist2}
+ 🔹Supt: ${supt1} | ${supt2}
  
  Titanium Prime by @J4Rviz</i>`;
     }
@@ -1113,7 +1391,7 @@ async function sendAlert(data) {
             const errorText = await response.text();
             log(`Erro Telegram: ${response.status} - ${errorText}`, 'error');
         } else {
-            log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.directionText} [${data.timeframe}]`, 'success');
+            log(`✅ ALERTA ENVIADO: ${data.symbol} ${data.directionText} [${data.timeframe}] | RSI: ${data.rsi}${getRSIEmojiCustom(data.rsi)} | LSR: ${lsr}${lsrEmoji}`, 'success');
         }
         
         return true;
@@ -1124,23 +1402,23 @@ async function sendAlert(data) {
 }
 
 // =====================================================================
-// === SCANNER PRINCIPAL ===
+// === SCANNER PRINCIPAL ACELERADO ===
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(100));
-    console.log('🚀 SCANNER COMPLETO - CRUZAMENTOS | RETESTES | TENDÊNCIA FORTE | SUPER TENDÊNCIA');
+    console.log('🚀 SCANNER ACELERADO - MANTENDO SEGURANÇA');
     console.log('='.repeat(100));
     
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
-    log(`Timeframes: 1H e 4H`, 'success');
-    log(`Alertas:`, 'info');
-    log(`  • 🟢🔍/🔴🔍 Cruzamento EMA13/34`, 'info');
-    log(`  • 🟢🔄/🔴🔄 Reteste (13/55/144/233)`, 'info');
-    log(`  • 🟢⚡/🔴⚡ Tendência Forte (EMA144)`, 'info');
-    log(`  • 🟢🔥/🔴🔥 Super Tendência (EMA610/890)`, 'info');
+    log(`Rate Limit: ${CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE}/minuto, ${CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_SECOND}/segundo`, 'success');
+    log(`Batch Size: ${CONFIG.SCAN.BATCH_SIZE} | Delay: ${CONFIG.SCAN.SYMBOL_DELAY_MS}ms`, 'success');
     
-    // Reset diário dos contadores
+    if (CONFIG.WARMUP.ENABLED) {
+        const warmupSymbols = currentTopSymbols.slice(0, CONFIG.WARMUP.SYMBOLS);
+        await cache.warmup(warmupSymbols);
+    }
+    
     setInterval(() => {
         const now = new Date();
         if (now.getHours() === 0 && now.getMinutes() === 0) {
@@ -1148,6 +1426,19 @@ async function startScanner() {
             log('Contadores diários resetados', 'info');
         }
     }, 60000);
+    
+    setInterval(async () => {
+        log('Atualizando lista de top symbols...', 'info');
+        const newSymbols = await getTopSymbols();
+        if (newSymbols.length > 0) {
+            currentTopSymbols = newSymbols;
+            log(`Lista atualizada: ${currentTopSymbols.length} símbolos`, 'success');
+        }
+    }, 30 * 60 * 1000);
+    
+    setInterval(() => {
+        rateLimiter.showStats();
+    }, 10 * 60 * 1000);
     
     let scanCount = 0;
     
@@ -1159,20 +1450,24 @@ async function startScanner() {
             for (let i = 0; i < currentTopSymbols.length; i += CONFIG.SCAN.BATCH_SIZE) {
                 const batch = currentTopSymbols.slice(i, i + CONFIG.SCAN.BATCH_SIZE);
                 
-                log(`Processando batch ${Math.floor(i/CONFIG.SCAN.BATCH_SIZE) + 1}/${Math.ceil(currentTopSymbols.length/CONFIG.SCAN.BATCH_SIZE)}`, 'info');
+                log(`Processando batch ${Math.floor(i/CONFIG.SCAN.BATCH_SIZE) + 1}/${Math.ceil(currentTopSymbols.length/CONFIG.SCAN.BATCH_SIZE)} (${batch.length} símbolos)`, 'info');
                 
-                await Promise.allSettled(batch.map(symbol => analyzeSymbol(symbol)));
+                await Promise.all(batch.map(async (symbol) => {
+                    await analyzeSymbol(symbol);
+                    await new Promise(r => setTimeout(r, CONFIG.SCAN.SYMBOL_DELAY_MS / 2));
+                }));
                 
                 if (i + CONFIG.SCAN.BATCH_SIZE < currentTopSymbols.length) {
+                    log(`Aguardando ${CONFIG.SCAN.COOLDOWN_AFTER_BATCH_MS}ms...`, 'info');
                     await new Promise(r => setTimeout(r, CONFIG.SCAN.COOLDOWN_AFTER_BATCH_MS));
                 }
             }
             
-            log(`Scan #${scanCount} concluído. Aguardando 30s...`, 'success');
-            await new Promise(r => setTimeout(r, 30000));
+            log(`✅ Scan #${scanCount} concluído. Aguardando 20s...`, 'success');
+            await new Promise(r => setTimeout(r, 20000));
             
         } catch (error) {
-            log(`Erro no scan: ${error.message}`, 'error');
+            log(`❌ Erro no scan: ${error.message}`, 'error');
             await new Promise(r => setTimeout(r, 30000));
         }
     }
@@ -1181,4 +1476,8 @@ async function startScanner() {
 // =====================================================================
 // === INICIAR ===
 // =====================================================================
+process.on('unhandledRejection', (error) => {
+    log(`Erro não tratado: ${error.message}`, 'error');
+});
+
 startScanner().catch(console.error);
