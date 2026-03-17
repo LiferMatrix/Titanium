@@ -9,14 +9,14 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQ
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
         STD_DEV: 2,
         TIMEFRAME: '1d',
-        MIN_BANDWIDTH: 2.4
+        MIN_BANDWIDTH: 2.5
     },
     SCAN: {
         BATCH_SIZE: 15,
@@ -50,7 +50,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
@@ -76,7 +76,14 @@ const CONFIG = {
         MIN_SCORE_TO_ALERT: 3,
         MAX_ALERTS_PER_SCAN: 100,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
-        TELEGRAM_DELAY_MS: 1500
+        TELEGRAM_DELAY_MS: 1500,
+        // NOVO: Configuração para volatilidade mínima em 15 minutos
+        MIN_15M_VOLATILITY: {
+            ENABLED: true,
+            MIN_ATR_PERCENT: 0.8, // ATR mínimo de 0.8% em 15 minutos
+            MIN_BB_WIDTH_PERCENT: 1.2, // Largura mínima das Bandas em 15 minutos
+            CHECK_TIMEFRAMES: ['1h', '4h', '1d'] // Timeframes que exigem a verificação
+        }
     },
     VOLUME: {
         EMA_PERIOD: 9
@@ -125,36 +132,34 @@ const CONFIG = {
     },
     REVERSAL: {
         MIN_CONFIRMATION_SCORE: 3,
-        VOLUME_THRESHOLD: 1.1,
+        VOLUME_THRESHOLD: 1.2,
         STOCH_OVERSOLD: 25,
         STOCH_OVERBOUGHT: 75
     },
     LSR_PENALTY: {
         BUY_MAX_RATIO: 3.5,
         SELL_MIN_RATIO: 1.0,
-        PENALTY_POINTS: -4
+        PENALTY_POINTS: -5
     },
-    // NOVA CONFIGURAÇÃO PARA FUNDING RATE PENALTY
     FUNDING_PENALTY: {
         ENABLED: true,
         LEVELS: {
             LOW: {
-                THRESHOLD: 0.0015, // 0.01% (positivo ou negativo)
-                POINTS: -1
-            },
-            MEDIUM: {
-                THRESHOLD: 0.003, // 0.025%
+                THRESHOLD: 0.0015,
                 POINTS: -2
             },
-            HIGH: {
-                THRESHOLD: 0.006, // 0.05%
+            MEDIUM: {
+                THRESHOLD: 0.003,
                 POINTS: -3
+            },
+            HIGH: {
+                THRESHOLD: 0.006,
+                POINTS: -4
             }
         },
-        // Penalidade específica por direção
-        BUY_PENALTY_FOR_POSITIVE: true,  // Funding positivo é ruim para COMPRA
-        SELL_PENALTY_FOR_NEGATIVE: true, // Funding negativo é ruim para VENDA
-        MAX_TOTAL_PENALTY: -5 // Penalidade máxima combinada (LSR + Funding)
+        BUY_PENALTY_FOR_POSITIVE: true,
+        SELL_PENALTY_FOR_NEGATIVE: true,
+        MAX_TOTAL_PENALTY: -9
     },
     STOP_LOSS: {
         ATR_MULTIPLIER: {
@@ -993,21 +998,17 @@ function checkLSRPenalty(lsr, isGreenAlert) {
     return { hasPenalty: false, points: 0, message: '' };
 }
 
-// =====================================================================
-// === NOVA FUNÇÃO PARA PENALIDADE DE FUNDING RATE ===
-// =====================================================================
 function checkFundingPenalty(funding, isGreenAlert) {
     if (!CONFIG.FUNDING_PENALTY.ENABLED || funding === null || funding === undefined) {
         return { hasPenalty: false, points: 0, message: '' };
     }
     
-    const fundingPercent = funding * 100; // Converter para percentual
+    const fundingPercent = funding * 100;
     const absFunding = Math.abs(funding);
     
     let penaltyPoints = 0;
     let penaltyLevel = '';
     
-    // Determinar nível da penalidade baseado no valor absoluto
     if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.HIGH.THRESHOLD) {
         penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.HIGH.POINTS;
         penaltyLevel = 'ALTO';
@@ -1019,16 +1020,13 @@ function checkFundingPenalty(funding, isGreenAlert) {
         penaltyLevel = 'BAIXO';
     }
     
-    // Aplicar penalidade apenas se for na direção errada
     let applyPenalty = false;
     let direction = '';
     
     if (isGreenAlert && funding > 0 && CONFIG.FUNDING_PENALTY.BUY_PENALTY_FOR_POSITIVE) {
-        // COMPRA com funding positivo (ruim - pagando para manter comprado)
         applyPenalty = true;
         direction = 'positivo';
     } else if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
-        // VENDA com funding negativo (ruim - pagando para manter vendido)
         applyPenalty = true;
         direction = 'negativo';
     }
@@ -1049,8 +1047,82 @@ function checkFundingPenalty(funding, isGreenAlert) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA CALCULAR STOP LOSS PROTEGIDO ===
+// === NOVA FUNÇÃO PARA VERIFICAR VOLATILIDADE EM 15 MINUTOS ===
 // =====================================================================
+async function check15MinVolatility(symbol) {
+    if (!CONFIG.ALERTS.MIN_15M_VOLATILITY.ENABLED) return { passed: true, message: '', metrics: {} };
+    
+    try {
+        const candles15m = await getCandles(symbol, '15m', 30);
+        
+        if (!candles15m || candles15m.length < 20) {
+            log(`${symbol} - Dados insuficientes para análise de volatilidade 15m`, 'warning');
+            return { passed: false, message: 'Dados insuficientes 15m', metrics: {} };
+        }
+        
+        // Calcular ATR em percentual para 15 minutos
+        const trValues = [];
+        for (let i = 1; i < candles15m.length; i++) {
+            const high = candles15m[i].high;
+            const low = candles15m[i].low;
+            const prevClose = candles15m[i-1].close;
+            
+            const tr1 = high - low;
+            const tr2 = Math.abs(high - prevClose);
+            const tr3 = Math.abs(low - prevClose);
+            
+            trValues.push(Math.max(tr1, tr2, tr3));
+        }
+        
+        const recentTR = trValues.slice(-14);
+        const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
+        const currentPrice = candles15m[candles15m.length - 1].close;
+        const atrPercent = (atr / currentPrice) * 100;
+        
+        // Calcular largura das Bandas de Bollinger em percentual para 15 minutos
+        const bb15m = calculateBollingerBands(candles15m, 20, 2);
+        let bbWidthPercent = 0;
+        
+        if (bb15m) {
+            bbWidthPercent = ((bb15m.upper - bb15m.lower) / bb15m.middle) * 100;
+        }
+        
+        const minATR = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_ATR_PERCENT;
+        const minBBWidth = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_BB_WIDTH_PERCENT;
+        
+        const atrPassed = atrPercent >= minATR;
+        const bbPassed = bbWidthPercent >= minBBWidth;
+        
+        const passed = atrPassed && bbPassed;
+        
+        let message = '';
+        if (!passed) {
+            const failures = [];
+            if (!atrPassed) failures.push(`ATR15m ${atrPercent.toFixed(2)}% < ${minATR}%`);
+            if (!bbPassed) failures.push(`BB15m ${bbWidthPercent.toFixed(2)}% < ${minBBWidth}%`);
+            message = `⚠️ Baixa volatilidade 15m: ${failures.join(' • ')}`;
+            log(`${symbol} - ${message}`, 'warning');
+        } else {
+            log(`${symbol} - Volatilidade 15m OK: ATR=${atrPercent.toFixed(2)}% BB=${bbWidthPercent.toFixed(2)}%`, 'info');
+        }
+        
+        return {
+            passed,
+            message,
+            metrics: {
+                atrPercent,
+                bbWidthPercent,
+                atrPassed,
+                bbPassed
+            }
+        };
+        
+    } catch (error) {
+        log(`Erro ao verificar volatilidade 15m para ${symbol}: ${error.message}`, 'error');
+        return { passed: false, message: 'Erro na verificação 15m', metrics: {} };
+    }
+}
+
 function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candles, bb) {
     if (!candles || candles.length < 20) {
         const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.0;
@@ -1347,7 +1419,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
             },
             candles4h: candles4h,
             candles1h: candles1h,
-            candlesDaily: candlesDaily
+            candlesDaily: candlesDaily,
+            candles15m: candles15m
         };
     } catch (error) {
         log(`Erro em getAdditionalData para ${symbol}: ${error.message}`, 'error');
@@ -1377,7 +1450,8 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
             },
             candles4h: [],
             candles1h: [],
-            candlesDaily: []
+            candlesDaily: [],
+            candles15m: []
         };
     }
 }
@@ -1656,7 +1730,7 @@ async function sendGroupedAlerts(alerts, priority) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO ===
+// === ANALISAR SÍMBOLO (MODIFICADO COM VERIFICAÇÃO 15M) ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
@@ -1691,7 +1765,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME (MODIFICADO COM FUNDING PENALTY) ===
+// === ANALISAR TIMEFRAME (MODIFICADO COM FUNDING PENALTY E VOLATILIDADE 15M) ===
 // =====================================================================
 async function analyzeTimeframe(symbol, candles, timeframe) {
     try {
@@ -1720,6 +1794,16 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         }
        
         const additional = await getAdditionalData(symbol, currentPrice, touchedLower);
+       
+        // NOVO: Verificar volatilidade em 15 minutos para todos os timeframes
+        const timeframeCheck = CONFIG.ALERTS.MIN_15M_VOLATILITY.CHECK_TIMEFRAMES.includes(timeframe);
+        if (timeframeCheck) {
+            const volatilityCheck = await check15MinVolatility(symbol);
+            if (!volatilityCheck.passed) {
+                log(`${symbol} [${timeframe}] - Bloqueado por baixa volatilidade 15m: ${volatilityCheck.message}`, 'warning');
+                return null;
+            }
+        }
        
         const volumeDirection = additional.volume1h.direction;
         const volumePercentage = additional.volume1h.percentage;
@@ -1784,7 +1868,6 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             confirmations.push('🔥 Volume forte');
         }
        
-        // Aplicar penalidades
         if (lsrPenalty.hasPenalty) {
             confirmationScore += lsrPenalty.points;
             totalPenalty += lsrPenalty.points;
@@ -1799,10 +1882,9 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             penaltyApplied = true;
         }
         
-        // Verificar limite máximo de penalidade
         if (totalPenalty < CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY) {
             const excess = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY - totalPenalty;
-            confirmationScore -= excess; // Remover excesso
+            confirmationScore -= excess;
             totalPenalty = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
             log(`Penalidade total limitada a ${CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY}`, 'warning');
         }
@@ -2010,7 +2092,8 @@ async function startScanner() {
             `⏱️ Timeframes: 1H, 4H, DIÁRIO\n` +
             `🎯 Filtros: Volume + Divergências + Bandwidth ${CONFIG.BOLLINGER.MIN_BANDWIDTH}%\n` +
             `🛡️ Stop Loss: ATR Protegido com Zonas de Cluster\n` +
-            `💰 Funding Penalty: 3 Níveis (Baixo: -1, Médio: -2, Alto: -3)\n` +
+            `💰 Funding Penalty: 3 Níveis (Baixo: -2, Médio: -3, Alto: -4)\n` +
+            `📈 Volatilidade Mínima 15m: ATR ${CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_ATR_PERCENT}% / BB ${CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_BB_WIDTH_PERCENT}%\n` +
             `📈 Cooldown: 1H=30min | 4H=60min | DIÁRIO=120min\n` +
             `🕐 ${getBrazilianDateTime().full}`;
         
