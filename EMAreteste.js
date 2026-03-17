@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -28,6 +28,11 @@ const CONFIG = {
     CCI: {
         PERIOD: 20,
         EMA_PERIOD: 5
+    },
+    VOLUME: {
+        EMA_PERIOD: 9,
+        MIN_BULLISH_PCT: 58,
+        MIN_BEARISH_PCT: 58
     },
     TIMEFRAMES: ['1h', '4h'],
     SCAN: {
@@ -506,14 +511,14 @@ function calculateCCI(candles, period = 20) {
     return cci;
 }
 
-function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
+// ===== NOVA FUNÇÃO: CCI com EMA para 4h =====
+function calculateCCIWithEMA4h(candles, cciPeriod = 20, emaPeriod = 5) {
     if (!candles || candles.length < cciPeriod + emaPeriod) {
         return { 
             cci: 0, 
             ema: 0, 
             direction: 'NEUTRO',
-            emoji: '⚪',
-            text: 'CCI Diário: ⚪NEUTRO'
+            emoji: '⚪'
         };
     }
     
@@ -525,11 +530,7 @@ function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
     }
     
     const currentCCI = cciValues[cciValues.length - 1];
-    const previousCCI = cciValues.length > 1 ? cciValues[cciValues.length - 2] : currentCCI;
-    
     const emaCCI = calculateEMA(cciValues, emaPeriod);
-    const previousEMA = cciValues.length > 1 ? 
-        calculateEMA(cciValues.slice(0, -1), emaPeriod) : emaCCI;
     
     let direction = 'NEUTRO';
     let emoji = '⚪';
@@ -542,38 +543,31 @@ function calculateCCIWithEMA(candles, cciPeriod = 20, emaPeriod = 5) {
         emoji = '🔴';
     }
     
-    let crossover = null;
-    if (previousCCI <= previousEMA && currentCCI > emaCCI) {
-        crossover = 'ALTA';
-    } else if (previousCCI >= previousEMA && currentCCI < emaCCI) {
-        crossover = 'BAIXA';
-    }
-    
-    const text = `CCI Diário: ${emoji}${direction}`;
-    
     return {
         cci: currentCCI,
         ema: emaCCI,
-        previousCCI,
-        previousEMA,
-        crossover,
         direction,
         emoji,
-        text
+        cciValue: currentCCI.toFixed(2),
+        emaValue: emaCCI.toFixed(2)
     };
 }
 
 function calculateVolumeEMA(candles, period = 9) {
     if (!candles || candles.length < period) {
-        return { bullish: 50, bearish: 50 };
+        return { bullish: 50, bearish: 50, emaVolume: 0, currentVolume: 0, ratio: 1 };
     }
     
-    const closes = candles.map(c => c.close);
-    const emaPrice = calculateEMA(closes, period);
+    const volumes = candles.map(c => c.volume);
+    const currentVolume = volumes[volumes.length - 1] || 0;
+    const emaVolume = calculateEMA(volumes, period);
     
     let bullishVolume = 0;
     let bearishVolume = 0;
     let totalVolume = 0;
+    
+    const closes = candles.map(c => c.close);
+    const emaPrice = calculateEMA(closes, period);
     
     for (let i = 0; i < candles.length; i++) {
         const volume = candles[i].volume;
@@ -587,10 +581,14 @@ function calculateVolumeEMA(candles, period = 9) {
     }
     
     const bullishPct = totalVolume > 0 ? (bullishVolume / totalVolume) * 100 : 50;
+    const volumeRatio = emaVolume > 0 ? currentVolume / emaVolume : 1;
     
     return {
         bullish: bullishPct,
-        bearish: 100 - bullishPct
+        bearish: 100 - bullishPct,
+        emaVolume,
+        currentVolume,
+        ratio: volumeRatio
     };
 }
 
@@ -908,8 +906,8 @@ async function getAdditionalData(symbol, currentPrice) {
         const volume24hUSDT = ticker24h.status === 'fulfilled' ? parseFloat(ticker24h.value?.quoteVolume || 0) : 0;
         const priceChange24h = ticker24h.status === 'fulfilled' ? parseFloat(ticker24h.value?.priceChangePercent || 0) : 0;
         
-        const volume1h = candles1h.status === 'fulfilled' ? calculateVolumeEMA(candles1h.value) : { bullish: 50, bearish: 50 };
-        const volume4h = candles4h.status === 'fulfilled' ? calculateVolumeEMA(candles4h.value) : { bullish: 50, bearish: 50 };
+        const volume1h = candles1h.status === 'fulfilled' ? calculateVolumeEMA(candles1h.value, CONFIG.VOLUME.EMA_PERIOD) : { bullish: 50, bearish: 50, ratio: 1 };
+        const volume4h = candles4h.status === 'fulfilled' ? calculateVolumeEMA(candles4h.value, CONFIG.VOLUME.EMA_PERIOD) : { bullish: 50, bearish: 50, ratio: 1 };
         
         const rsi = candles1h.status === 'fulfilled' ? calculateRSI(candles1h.value, CONFIG.RSI.PERIOD) : 50;
         const rsiEmoji = getRSIEmojiCustom(rsi);
@@ -917,10 +915,6 @@ async function getAdditionalData(symbol, currentPrice) {
         const stochDaily = candlesDaily.status === 'fulfilled' ? calculateStochastic(candlesDaily.value) : { k: 50, d: 50 };
         const stoch4h = candles4h.status === 'fulfilled' ? calculateStochastic(candles4h.value) : { k: 50, d: 50 };
         const stoch1h = candles1h.status === 'fulfilled' ? calculateStochastic(candles1h.value) : { k: 50, d: 50 };
-        
-        const cciDaily = candlesDaily.status === 'fulfilled' ? 
-            calculateCCIWithEMA(candlesDaily.value, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD) : 
-            { text: 'CCI Diário: ⚪NEUTRO' };
         
         let lsr = null;
         try {
@@ -942,10 +936,10 @@ async function getAdditionalData(symbol, currentPrice) {
             funding = parseFloat(fundingData.lastFundingRate) || null;
         } catch {}
         
-        let volumeRatio1h = 1;
+        let volumeRatio1h = volume1h.ratio;
         let volumeUSDT1h = 0;
         let volumeRatio3m = 1;
-        let volume3mData = { bullish: 50, bearish: 50 };
+        let volume3mData = { bullish: 50, bearish: 50, ratio: 1 };
         
         if (candles1h.status === 'fulfilled') {
             const volumes1h = candles1h.value.map(c => c.volume);
@@ -957,7 +951,7 @@ async function getAdditionalData(symbol, currentPrice) {
         
         try {
             const volumes3m = await getCandles(symbol, '3m', 20, 'low');
-            volume3mData = calculateVolumeEMA(volumes3m);
+            volume3mData = calculateVolumeEMA(volumes3m, CONFIG.VOLUME.EMA_PERIOD);
             const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b.volume, 0) / 20;
             const currentVolume3m = volumes3m[volumes3m.length - 1]?.volume || 0;
             volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
@@ -973,7 +967,7 @@ async function getAdditionalData(symbol, currentPrice) {
                 ratio: volumeRatio1h,
                 bullish: volume1h.bullish,
                 bearish: volume1h.bearish,
-                direction: volume1h.bullish > 52 ? 'Comprador' : (volume1h.bearish > 52 ? 'Vendedor' : 'Neutro'),
+                direction: volume1h.bullish > CONFIG.VOLUME.MIN_BULLISH_PCT ? 'Comprador' : (volume1h.bearish > CONFIG.VOLUME.MIN_BEARISH_PCT ? 'Vendedor' : 'Neutro'),
                 usdt: volumeUSDT1h,
                 pct: volume1h.bullish.toFixed(0)
             },
@@ -981,7 +975,7 @@ async function getAdditionalData(symbol, currentPrice) {
                 ratio: volumeRatio3m,
                 bullish: volume3mData.bullish,
                 bearish: volume3mData.bearish,
-                direction: volume3mData.bullish > 52 ? 'Comprador' : (volume3mData.bearish > 52 ? 'Vendedor' : 'Neutro'),
+                direction: volume3mData.bullish > CONFIG.VOLUME.MIN_BULLISH_PCT ? 'Comprador' : (volume3mData.bearish > CONFIG.VOLUME.MIN_BEARISH_PCT ? 'Vendedor' : 'Neutro'),
                 pct: volume3mData.bullish.toFixed(0)
             },
             rsi: Math.round(rsi),
@@ -991,7 +985,6 @@ async function getAdditionalData(symbol, currentPrice) {
             stoch1h: formatStochastic(stoch1h),
             lsr,
             funding,
-            cciText: cciDaily.text,
             symbolFull: symbol
         };
     } catch (error) {
@@ -1007,7 +1000,6 @@ async function getAdditionalData(symbol, currentPrice) {
             stoch1h: 'K50⤵️D50',
             lsr: null,
             funding: null,
-            cciText: 'CCI Diário: ⚪NEUTRO',
             symbolFull: symbol
         };
     }
@@ -1093,15 +1085,41 @@ async function analyzeSymbol(symbol) {
             
             if (candles.length < CONFIG.EMA.SUPER2 + 10) continue;
             
+            // Buscar dados de volume primeiro para filtrar
+            const candles1h = await getCandles(symbol, '1h', 100, 'high');
+            const volumeData = calculateVolumeEMA(candles1h, CONFIG.VOLUME.EMA_PERIOD);
+            const volumeDirection = volumeData.bullish > CONFIG.VOLUME.MIN_BULLISH_PCT ? 'COMPRADOR' : 
+                                   (volumeData.bearish > CONFIG.VOLUME.MIN_BEARISH_PCT ? 'VENDEDOR' : 'NEUTRO');
+            
+            // ===== NOVO: Análise CCI 4h =====
+            let cciDirection = null;
+            let cciEmoji = '';
+            
+            if (timeframe === '1h') {  // ← Mudou de 4h para 1h
+                const candles1h = await getCandles(symbol, '1h', 100, 'high');  // ← Mudou para 1h
+                const cciAnalysis = calculateCCIWithEMA4h(candles1h, 20, 5);  // ← A função continua a mesma EMA4h fica
+                cciDirection = cciAnalysis.direction;
+                cciEmoji = cciAnalysis.emoji;
+}
+            
             const emaAnalysis = checkEMACriteria(candles);
             
+            // CRUZAMENTOS - Agora com filtro CCI
             if (emaAnalysis.signal) {
                 const currentPrice = emaAnalysis.currentClose;
                 const direction = emaAnalysis.signal === 'ALTA' ? 'COMPRA' : 'VENDA';
                 const directionEmoji = emaAnalysis.signal === 'ALTA' ? '🟢🔍' : '🔴🔍';
                 const directionText = emaAnalysis.signal === 'ALTA' ? 'Tendência de Alta' : 'Tendência de Baixa';
                 
-                if (canSendAlert(symbol, timeframe, `CRUZAMENTO_${direction}`)) {
+                // FILTRO DE VOLUME: Alertas de alta só com volume COMPRADOR, baixa só com volume VENDEDOR
+                const volumeOk = (emaAnalysis.signal === 'ALTA' && volumeDirection === 'COMPRADOR') ||
+                                 (emaAnalysis.signal === 'BAIXA' && volumeDirection === 'VENDEDOR');
+                
+                // FILTRO CCI: Alta só com CCI em ALTA, Baixa só com CCI em BAIXA
+                const cciOk = (emaAnalysis.signal === 'ALTA' && cciDirection === 'ALTA') ||
+                              (emaAnalysis.signal === 'BAIXA' && cciDirection === 'BAIXA');
+                
+                if (volumeOk && cciOk && canSendAlert(symbol, timeframe, `CRUZAMENTO_${direction}`)) {
                     const additional = await getAdditionalData(symbol, currentPrice);
                     
                     const alert = {
@@ -1115,6 +1133,7 @@ async function analyzeSymbol(symbol) {
                         ema13: emaAnalysis.ema13,
                         ema34: emaAnalysis.ema34,
                         ema55: emaAnalysis.ema55,
+                        cciEmoji,
                         dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
                         ...additional
                     };
@@ -1127,11 +1146,25 @@ async function analyzeSymbol(symbol) {
             
             const retestAnalysis = checkRetestCriteria(candles, timeframe);
             
+            // RETESTES - Agora com filtro CCI
             if (retestAnalysis.signal) {
                 const currentPrice = retestAnalysis.currentClose;
                 let directionEmoji, directionText, alertType;
                 
-                if (retestAnalysis.type.includes('ALTA')) {
+                const isAlta = retestAnalysis.type.includes('ALTA');
+                const isBaixa = retestAnalysis.type.includes('BAIXA');
+                
+                // FILTRO DE VOLUME: Reteste de alta só com volume COMPRADOR, baixa só com volume VENDEDOR
+                const volumeOk = (isAlta && volumeDirection === 'COMPRADOR') ||
+                                 (isBaixa && volumeDirection === 'VENDEDOR');
+                
+                // FILTRO CCI: Alta só com CCI em ALTA, Baixa só com CCI em BAIXA
+                const cciOk = (isAlta && cciDirection === 'ALTA') ||
+                              (isBaixa && cciDirection === 'BAIXA');
+                
+                if (!volumeOk || !cciOk) continue;
+                
+                if (isAlta) {
                     directionEmoji = '🟢🔄';
                     directionText = `Reteste de Alta ${timeframe} (${retestAnalysis.touchedEMA})`;
                     alertType = retestAnalysis.type;
@@ -1157,6 +1190,7 @@ async function analyzeSymbol(symbol) {
                         ema55: retestAnalysis.ema55,
                         ema144: retestAnalysis.ema144,
                         ema233: retestAnalysis.ema233,
+                        cciEmoji,
                         dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
                         ...additional
                     };
@@ -1170,11 +1204,24 @@ async function analyzeSymbol(symbol) {
             if (timeframe === '4h') {
                 const strongTrend = checkStrongTrend(candles);
                 
+                // STRONG TREND - Agora com filtro CCI
                 if (strongTrend.signal) {
                     const currentPrice = strongTrend.currentClose;
                     let directionEmoji, directionText, alertType;
                     
-                    if (strongTrend.signal === 'ALTA_FORTE') {
+                    const isAlta = strongTrend.signal === 'ALTA_FORTE';
+                    
+                    // FILTRO DE VOLUME: Strong trend de alta só com volume COMPRADOR, baixa só com volume VENDEDOR
+                    const volumeOk = (isAlta && volumeDirection === 'COMPRADOR') ||
+                                     (!isAlta && volumeDirection === 'VENDEDOR');
+                    
+                    // FILTRO CCI: Alta só com CCI em ALTA, Baixa só com CCI em BAIXA
+                    const cciOk = (isAlta && cciDirection === 'ALTA') ||
+                                  (!isAlta && cciDirection === 'BAIXA');
+                    
+                    if (!volumeOk || !cciOk) continue;
+                    
+                    if (isAlta) {
                         directionEmoji = '🟢⚡';
                         directionText = `ALTA FORTE (acima EMA144)`;
                         alertType = 'ALTA_FORTE_4H';
@@ -1196,6 +1243,7 @@ async function analyzeSymbol(symbol) {
                             directionText,
                             price: currentPrice,
                             ema144: strongTrend.ema144,
+                            cciEmoji,
                             dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
                             ...additional
                         };
@@ -1208,11 +1256,24 @@ async function analyzeSymbol(symbol) {
                 
                 const superTrend = checkSuperTrend(candles);
                 
+                // SUPER TREND - Agora com filtro CCI
                 if (superTrend.signal) {
                     const currentPrice = superTrend.currentClose;
                     let directionEmoji, directionText, alertType;
                     
-                    if (superTrend.signal === 'SUPER_ALTA') {
+                    const isAlta = superTrend.signal === 'SUPER_ALTA';
+                    
+                    // FILTRO DE VOLUME: Super trend de alta só com volume COMPRADOR, baixa só com volume VENDEDOR
+                    const volumeOk = (isAlta && volumeDirection === 'COMPRADOR') ||
+                                     (!isAlta && volumeDirection === 'VENDEDOR');
+                    
+                    // FILTRO CCI: Alta só com CCI em ALTA, Baixa só com CCI em BAIXA
+                    const cciOk = (isAlta && cciDirection === 'ALTA') ||
+                                  (!isAlta && cciDirection === 'BAIXA');
+                    
+                    if (!volumeOk || !cciOk) continue;
+                    
+                    if (isAlta) {
                         directionEmoji = '🟢🔥';
                         directionText = `SUPER ALTA (tocou ${superTrend.touchedEMA})`;
                         alertType = 'SUPER_ALTA_4H';
@@ -1237,6 +1298,7 @@ async function analyzeSymbol(symbol) {
                             emaValue: superTrend.emaValue,
                             ema610: superTrend.ema610,
                             ema890: superTrend.ema890,
+                            cciEmoji,
                             dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
                             ...additional
                         };
@@ -1286,7 +1348,7 @@ async function sendAlert(data) {
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
- ${data.cciText}
+ ${data.cciEmoji} CCI 4h: alinhado
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
@@ -1313,7 +1375,7 @@ async function sendAlert(data) {
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(emaValue)})
- ${data.cciText}
+ ${data.cciEmoji} CCI 4h: alinhado
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
@@ -1336,7 +1398,7 @@ async function sendAlert(data) {
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  📊 EMA144: $${formatPrice(data.ema144)}
- ${data.cciText}
+ ${data.cciEmoji} CCI 4h: alinhado
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
@@ -1359,7 +1421,7 @@ async function sendAlert(data) {
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(data.emaValue)})
- ${data.cciText}
+ ${data.cciEmoji} CCI 4h: alinhado
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
  #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
@@ -1405,14 +1467,19 @@ async function sendAlert(data) {
 // === SCANNER PRINCIPAL ACELERADO ===
 // =====================================================================
 async function startScanner() {
-    console.log('\n' + '='.repeat(100));
-    console.log('🚀 SCANNER ACELERADO - MANTENDO SEGURANÇA');
-    console.log('='.repeat(100));
+    console.log('\n' + '='.repeat(60));
+    console.log('🚀 SCANNER INICIADO - CCI 20/5 COMO FILTRO');
+    console.log('='.repeat(60));
+    console.log(`📊 Monitorando top ${CONFIG.SCAN.TOP_SYMBOLS_LIMIT} símbolos`);
+    console.log(`📈 Timeframes: ${CONFIG.TIMEFRAMES.join(', ')}`);
+    console.log(`📊 CCI: Período 20 com EMA 5 no 4h (filtro obrigatório)`);
+    console.log(`📊 Volume EMA9: ${CONFIG.VOLUME.EMA_PERIOD} períodos`);
+    console.log(`🟢 Mínimo volume comprador: ${CONFIG.VOLUME.MIN_BULLISH_PCT}%`);
+    console.log(`🔴 Mínimo volume vendedor: ${CONFIG.VOLUME.MIN_BEARISH_PCT}%`);
+    console.log('='.repeat(60) + '\n');
     
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
-    log(`Rate Limit: ${CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE}/minuto, ${CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_SECOND}/segundo`, 'success');
-    log(`Batch Size: ${CONFIG.SCAN.BATCH_SIZE} | Delay: ${CONFIG.SCAN.SYMBOL_DELAY_MS}ms`, 'success');
     
     if (CONFIG.WARMUP.ENABLED) {
         const warmupSymbols = currentTopSymbols.slice(0, CONFIG.WARMUP.SYMBOLS);
