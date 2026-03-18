@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -43,11 +43,11 @@ const CONFIG = {
         TOP_SYMBOLS_LIMIT: 300
     },
     ALERTS: {
-        COOLDOWN_MINUTES: 50,
+        COOLDOWN_MINUTES: 15,
         DAILY_LIMITS: {
-            TOP_10: 25,
-            TOP_50: 40,
-            OTHER: 55
+            TOP_10: 35,
+            TOP_50: 50,
+            OTHER: 65
         },
         RETEST: {
             TOUCH_TOLERANCE: 0.003,
