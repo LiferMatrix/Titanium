@@ -10,8 +10,8 @@ const NodeCache = require('node-cache');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
-        CHAT_ID: '-1002554953979'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
+        CHAT_ID: '-100255
     },
     TRADING: {
         TIMEFRAME: '3m',
