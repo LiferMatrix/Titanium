@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZ
-        CHAT_ID: '-10019
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -53,8 +53,8 @@ const CONFIG = {
         MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
-            BUY_MIN_PERCENTAGE: 58,
-            SELL_MAX_PERCENTAGE: 35,
+            BUY_MIN_PERCENTAGE: 54,
+            SELL_MAX_PERCENTAGE: 40,
             STRICT_MODE: true
         },
         MIN_TREND_STRENGTH: 3,
