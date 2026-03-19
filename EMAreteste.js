@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -19,6 +19,10 @@ const CONFIG = {
         STRONG: 144,
         SUPER1: 610,
         SUPER2: 890
+    },
+    MA: {
+        MEDIUM: 50,
+        LONG: 200
     },
     RSI: {
         PERIOD: 14,
@@ -31,16 +35,16 @@ const CONFIG = {
     },
     VOLUME: {
         EMA_PERIOD: 9,
-        MIN_BULLISH_PCT: 52,
-        MIN_BEARISH_PCT: 52
+        MIN_BULLISH_PCT: 54,
+        MIN_BEARISH_PCT: 54
     },
-    TIMEFRAMES: ['1h', '4h'],
+    TIMEFRAMES: ['1h', '4h', '1d'],
     SCAN: {
         BATCH_SIZE: 5,
         SYMBOL_DELAY_MS: 1200,
         REQUEST_TIMEOUT: 25000,
         COOLDOWN_AFTER_BATCH_MS: 3000,
-        TOP_SYMBOLS_LIMIT: 300
+        TOP_SYMBOLS_LIMIT: 350
     },
     ALERTS: {
         COOLDOWN_MINUTES: 15,
@@ -162,7 +166,8 @@ class Cache {
             count++;
             await Promise.all([
                 getCandles(symbol, '4h', 200, 'high').catch(() => {}),
-                getCandles(symbol, '1h', 100, 'high').catch(() => {})
+                getCandles(symbol, '1h', 100, 'high').catch(() => {}),
+                getCandles(symbol, '1d', 100, 'high').catch(() => {})
             ]);
             
             if (count % 10 === 0) {
@@ -702,7 +707,6 @@ function checkMultipleEMARetest(candles) {
     emas.forEach(ema => {
         if (ema.value === 0) return;
         
-        // Reteste de alta
         if (lastCandle.close > ema.value) {
             const touching = Math.abs(lastCandle.low - ema.value) <= tolerance ||
                             (lastCandle.low <= ema.value && lastCandle.close >= ema.value);
@@ -716,7 +720,6 @@ function checkMultipleEMARetest(candles) {
             }
         }
         
-        // Reteste de baixa
         if (lastCandle.close < ema.value) {
             const touching = Math.abs(lastCandle.high - ema.value) <= tolerance ||
                             (lastCandle.high >= ema.value && lastCandle.close <= ema.value);
@@ -761,7 +764,6 @@ function checkMultipleEMARetest(candles) {
             strength,
             emoji,
             directionEmoji: direction === 'ALTA' ? '🟢🔄' : '🔴🔄',
-            // Incluir todas as EMAs para referência
             ema13,
             ema34,
             ema55,
@@ -801,7 +803,6 @@ function checkHiddenDivergenceRetest(candles) {
     
     const tolerance = lastCandle.close * CONFIG.ALERTS.RETEST.TOUCH_TOLERANCE;
     
-    // Divergência oculta de alta
     if (lastCandle.low > recentLows[0] * 0.98) {
         const touchingEMA55 = Math.abs(lastCandle.low - ema55) <= tolerance ||
                              (lastCandle.low <= ema55 && lastCandle.close >= ema55);
@@ -825,7 +826,6 @@ function checkHiddenDivergenceRetest(candles) {
         }
     }
     
-    // Divergência oculta de baixa
     if (lastCandle.high < recentHighs[0] * 1.02) {
         const touchingEMA144 = Math.abs(lastCandle.high - ema144) <= tolerance ||
                               (lastCandle.high >= ema144 && lastCandle.close <= ema144);
@@ -889,7 +889,6 @@ function checkVolumeDeltaRetest(candles) {
     const tolerance = lastCandle.close * CONFIG.ALERTS.RETEST.TOUCH_TOLERANCE;
     
     if (volumeRatio20 > CONFIG.ALERTS.RETEST.MIN_VOLUME_RATIO) {
-        // Volume delta de alta
         if (lastCandle.close > ema55) {
             const touchingEMA = Math.abs(lastCandle.low - ema55) <= tolerance ||
                                (lastCandle.low <= ema55 && lastCandle.close >= ema55);
@@ -913,7 +912,6 @@ function checkVolumeDeltaRetest(candles) {
             }
         }
         
-        // Volume delta de baixa
         if (lastCandle.close < ema144) {
             const touchingEMA = Math.abs(lastCandle.high - ema144) <= tolerance ||
                                (lastCandle.high >= ema144 && lastCandle.close <= ema144);
@@ -973,7 +971,6 @@ function checkExhaustionRetest(candles) {
     
     const strongPrevTrend = trendCount >= 4 ? 'ALTA' : (trendCount <= -4 ? 'BAIXA' : null);
     
-    // Exaustão de alta
     if (strongPrevTrend === 'ALTA' && isSmallCandle && rsi > 70) {
         const touchingEMA13 = Math.abs(lastCandle.low - ema13) <= tolerance ||
                              (lastCandle.low <= ema13 && lastCandle.close >= ema13);
@@ -997,7 +994,6 @@ function checkExhaustionRetest(candles) {
         }
     }
     
-    // Exaustão de baixa
     if (strongPrevTrend === 'BAIXA' && isSmallCandle && rsi < 30) {
         const touchingEMA13 = Math.abs(lastCandle.high - ema13) <= tolerance ||
                              (lastCandle.high >= ema13 && lastCandle.close <= ema13);
@@ -1155,17 +1151,17 @@ function checkRetestCriteria(candles, timeframe) {
         
         if (touchingEMA13) {
             signal = 'RETESTE_ALTA';
-            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : 'RETESTE_ALTA_1H';
+            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : (timeframe === '1d' ? 'RETESTE_ALTA_1D' : 'RETESTE_ALTA_1H');
             touchedEMA = 'EMA13';
             emaValue = ema13;
         } else if (touchingEMA144) {
             signal = 'RETESTE_ALTA';
-            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : 'RETESTE_ALTA_1H';
+            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : (timeframe === '1d' ? 'RETESTE_ALTA_1D' : 'RETESTE_ALTA_1H');
             touchedEMA = 'EMA144';
             emaValue = ema144;
         } else if (touchingEMA233) {
             signal = 'RETESTE_ALTA';
-            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : 'RETESTE_ALTA_1H';
+            type = timeframe === '4h' ? 'RETESTE_ALTA_4H' : (timeframe === '1d' ? 'RETESTE_ALTA_1D' : 'RETESTE_ALTA_1H');
             touchedEMA = 'EMA233';
             emaValue = ema233;
         }
@@ -1187,17 +1183,17 @@ function checkRetestCriteria(candles, timeframe) {
             
             if (touchingEMA13) {
                 signal = 'RETESTE_BAIXA';
-                type = 'RETESTE_BAIXA_4H';
+                type = timeframe === '4h' ? 'RETESTE_BAIXA_4H' : (timeframe === '1d' ? 'RETESTE_BAIXA_1D' : 'RETESTE_BAIXA_1H');
                 touchedEMA = 'EMA13';
                 emaValue = ema13;
             } else if (touchingEMA144) {
                 signal = 'RETESTE_BAIXA';
-                type = 'RETESTE_BAIXA_4H';
+                type = timeframe === '4h' ? 'RETESTE_BAIXA_4H' : (timeframe === '1d' ? 'RETESTE_BAIXA_1D' : 'RETESTE_BAIXA_1H');
                 touchedEMA = 'EMA144';
                 emaValue = ema144;
             } else if (touchingEMA233) {
                 signal = 'RETESTE_BAIXA';
-                type = 'RETESTE_BAIXA_4H';
+                type = timeframe === '4h' ? 'RETESTE_BAIXA_4H' : (timeframe === '1d' ? 'RETESTE_BAIXA_1D' : 'RETESTE_BAIXA_1H');
                 touchedEMA = 'EMA233';
                 emaValue = ema233;
             }
@@ -1220,19 +1216,159 @@ function checkRetestCriteria(candles, timeframe) {
 }
 
 // =====================================================================
+// === ESTRATÉGIAS MA50 E MA200 ===
+// =====================================================================
+
+// 7. RETESTE DA MA50
+function checkMA50Retest(candles) {
+    if (!candles || candles.length < 100) return { signal: null };
+    
+    const closes = candles.map(c => c.close);
+    const lastCandle = candles[candles.length - 1];
+    
+    const ma50 = calculateSMA(closes, 50);
+    const ema55 = calculateEMA(closes, 55);
+    
+    const tolerance = lastCandle.close * CONFIG.ALERTS.RETEST.TOUCH_TOLERANCE;
+    
+    const alinhado = Math.abs(ma50 - ema55) / ma50 < 0.01;
+    
+    if (lastCandle.close > ma50) {
+        const touchingMA50 = Math.abs(lastCandle.low - ma50) <= tolerance ||
+                             (lastCandle.low <= ma50 && lastCandle.close >= ma50);
+        
+        if (touchingMA50) {
+            return {
+                signal: 'RETESTE_MA50',
+                type: 'MA50_ALTA',
+                ma50: ma50,
+                ema55: ema55,
+                alinhado: alinhado,
+                direction: 'ALTA',
+                directionEmoji: '🔷🟢',
+                description: alinhado ? 
+                    'Reteste da MA50 alinhada com EMA55' : 
+                    'Reteste da MA50 (divergente da EMA55)',
+                strength: alinhado ? 'FORTE' : 'MÉDIO',
+                emoji: alinhado ? '🔷' : '📊'
+            };
+        }
+    }
+    
+    if (lastCandle.close < ma50) {
+        const touchingMA50 = Math.abs(lastCandle.high - ma50) <= tolerance ||
+                             (lastCandle.high >= ma50 && lastCandle.close <= ma50);
+        
+        if (touchingMA50) {
+            return {
+                signal: 'RETESTE_MA50',
+                type: 'MA50_BAIXA',
+                ma50: ma50,
+                ema55: ema55,
+                alinhado: alinhado,
+                direction: 'BAIXA',
+                directionEmoji: '🔷🔴',
+                description: alinhado ? 
+                    'Reteste da MA50 alinhada com EMA55' : 
+                    'Reteste da MA50 (divergente da EMA55)',
+                strength: alinhado ? 'FORTE' : 'MÉDIO',
+                emoji: alinhado ? '🔷' : '📊'
+            };
+        }
+    }
+    
+    return { signal: null };
+}
+
+// 8. RETESTE DA MA200 (INSTITUCIONAL)
+function checkMA200Retest(candles) {
+    if (!candles || candles.length < 250) return { signal: null };
+    
+    const closes = candles.map(c => c.close);
+    const lastCandle = candles[candles.length - 1];
+    
+    const ma200 = calculateSMA(closes, 200);
+    const ema55 = calculateEMA(closes, 55);
+    const ema144 = calculateEMA(closes, 144);
+    const ema233 = calculateEMA(closes, 233);
+    
+    const tolerance = lastCandle.close * CONFIG.ALERTS.RETEST.TOUCH_TOLERANCE;
+    
+    const tendenciaLP = lastCandle.close > ma200 ? 'ALTA' : 'BAIXA';
+    
+    let emasAlinhadas = 0;
+    if (ema55 > ma200) emasAlinhadas++;
+    if (ema144 > ma200) emasAlinhadas++;
+    if (ema233 > ma200) emasAlinhadas++;
+    
+    const alinhamentoEMAs = emasAlinhadas >= 2 ? 'ALINHADAS' : 'DIVERGENTES';
+    
+    if (lastCandle.close > ma200) {
+        const touchingMA200 = Math.abs(lastCandle.low - ma200) <= tolerance ||
+                              (lastCandle.low <= ma200 && lastCandle.close >= ma200);
+        
+        if (touchingMA200) {
+            return {
+                signal: 'RETESTE_MA200',
+                type: 'MA200_ALTA',
+                ma200: ma200,
+                ema55: ema55,
+                ema144: ema144,
+                ema233: ema233,
+                tendenciaLP: tendenciaLP,
+                emasAlinhadas: alinhamentoEMAs,
+                qtdEMAsAlinhadas: emasAlinhadas,
+                direction: 'ALTA',
+                directionEmoji: '🏦🟢',
+                description: `RETESTE DA MA200 - SUPORTE INSTITUCIONAL`,
+                strength: 'INSTITUCIONAL',
+                emoji: '🏦'
+            };
+        }
+    }
+    
+    if (lastCandle.close < ma200) {
+        const touchingMA200 = Math.abs(lastCandle.high - ma200) <= tolerance ||
+                              (lastCandle.high >= ma200 && lastCandle.close <= ma200);
+        
+        if (touchingMA200) {
+            return {
+                signal: 'RETESTE_MA200',
+                type: 'MA200_BAIXA',
+                ma200: ma200,
+                ema55: ema55,
+                ema144: ema144,
+                ema233: ema233,
+                tendenciaLP: tendenciaLP,
+                emasAlinhadas: alinhamentoEMAs,
+                qtdEMAsAlinhadas: emasAlinhadas,
+                direction: 'BAIXA',
+                directionEmoji: '🏦🔴',
+                description: `RETESTE DA MA200 - RESISTÊNCIA INSTITUCIONAL`,
+                strength: 'INSTITUCIONAL',
+                emoji: '🏦'
+            };
+        }
+    }
+    
+    return { signal: null };
+}
+
+// =====================================================================
 // === ANÁLISE MULTI-TIMEFRAME ===
 // =====================================================================
 async function checkMultiTimeframeAlignment(symbol, currentPrice) {
     try {
-        const [candles15m, candles1h, candles4h] = await Promise.allSettled([
+        const [candles15m, candles1h, candles4h, candles1d] = await Promise.allSettled([
             getCandles(symbol, '15m', 100, 'low'),
             getCandles(symbol, '1h', 100, 'low'),
-            getCandles(symbol, '4h', 100, 'low')
+            getCandles(symbol, '4h', 100, 'low'),
+            getCandles(symbol, '1d', 100, 'low')
         ]);
         
         let alignment = 'MISTO';
         let score = 3;
-        let trends = ['NEUTRO', 'NEUTRO', 'NEUTRO'];
+        let trends = ['NEUTRO', 'NEUTRO', 'NEUTRO', 'NEUTRO'];
         
         if (candles15m.status === 'fulfilled' && candles15m.value.length > 30) {
             const closes15m = candles15m.value.map(c => c.close);
@@ -1255,14 +1391,24 @@ async function checkMultiTimeframeAlignment(symbol, currentPrice) {
             trends[2] = currentClose4h > ema20_4h ? 'ALTA' : 'BAIXA';
         }
         
+        if (candles1d.status === 'fulfilled' && candles1d.value.length > 30) {
+            const closes1d = candles1d.value.map(c => c.close);
+            const ema20_1d = calculateEMA(closes1d, 20);
+            const currentClose1d = closes1d[closes1d.length - 1];
+            trends[3] = currentClose1d > ema20_1d ? 'ALTA' : 'BAIXA';
+        }
+        
         const allSameTrend = trends.every(t => t === 'ALTA') || trends.every(t => t === 'BAIXA');
         
         if (allSameTrend) {
             alignment = trends[0] === 'ALTA' ? 'ALTA_FORTE' : 'BAIXA_FORTE';
-            score = 8;
+            score = 9;
         } else {
             const altaCount = trends.filter(t => t === 'ALTA').length;
-            if (altaCount >= 2) {
+            if (altaCount >= 3) {
+                alignment = 'ALTA_FORTE';
+                score = 8;
+            } else if (altaCount >= 2) {
                 alignment = 'ALTA_MEDIA';
                 score = 6;
             } else if (altaCount <= 1) {
@@ -1282,7 +1428,7 @@ async function checkMultiTimeframeAlignment(symbol, currentPrice) {
         return {
             alignment: 'MISTO',
             score: 3,
-            trends: ['NEUTRO', 'NEUTRO', 'NEUTRO'],
+            trends: ['NEUTRO', 'NEUTRO', 'NEUTRO', 'NEUTRO'],
             mtfBar: '███░░░░░░░'
         };
     }
@@ -1328,14 +1474,12 @@ async function getAdditionalData(symbol, currentPrice) {
         const priceChange24h = ticker24h.status === 'fulfilled' ? parseFloat(ticker24h.value?.priceChangePercent || 0) : 0;
         
         const volume1h = candles1h.status === 'fulfilled' ? calculateVolumeEMA(candles1h.value, CONFIG.VOLUME.EMA_PERIOD) : { bullish: 50, bearish: 50, ratio: 1 };
-        const volume4h = candles4h.status === 'fulfilled' ? calculateVolumeEMA(candles4h.value, CONFIG.VOLUME.EMA_PERIOD) : { bullish: 50, bearish: 50, ratio: 1 };
         
         const rsi = candles1h.status === 'fulfilled' ? calculateRSI(candles1h.value, CONFIG.RSI.PERIOD) : 50;
         const rsiEmoji = getRSIEmojiCustom(rsi);
         
         const stochDaily = candlesDaily.status === 'fulfilled' ? calculateStochastic(candlesDaily.value) : { k: 50, d: 50 };
         const stoch4h = candles4h.status === 'fulfilled' ? calculateStochastic(candles4h.value) : { k: 50, d: 50 };
-        const stoch1h = candles1h.status === 'fulfilled' ? calculateStochastic(candles1h.value) : { k: 50, d: 50 };
         
         const cciDaily = candlesDaily.status === 'fulfilled' ? 
             calculateCCIWithEMA(candlesDaily.value, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD) : 
@@ -1407,7 +1551,6 @@ async function getAdditionalData(symbol, currentPrice) {
             rsiEmoji,
             stoch1d: formatStochastic(stochDaily),
             stoch4h: formatStochastic(stoch4h),
-            stoch1h: formatStochastic(stoch1h),
             lsr,
             funding,
             cciText: cciDaily.text,
@@ -1424,7 +1567,6 @@ async function getAdditionalData(symbol, currentPrice) {
             rsiEmoji: '⚪',
             stoch1d: 'K50⤵️D50',
             stoch4h: 'K50⤵️D50',
-            stoch1h: 'K50⤵️D50',
             lsr: null,
             funding: null,
             cciText: 'CCI: ⚪NEUTRO',
@@ -1521,7 +1663,7 @@ async function analyzeSymbol(symbol) {
             
             const candles = await getCandles(symbol, timeframe, 1000, 'normal');
             
-            if (candles.length < CONFIG.EMA.SUPER2 + 10) continue;
+            if (candles.length < 250) continue;
             
             const candles1h = await getCandles(symbol, '1h', 100, 'high');
             const volumeData = calculateVolumeEMA(candles1h, CONFIG.VOLUME.EMA_PERIOD);
@@ -1534,6 +1676,10 @@ async function analyzeSymbol(symbol) {
             if (timeframe === '1h') {
                 const candles1h = await getCandles(symbol, '1h', 100, 'high');
                 const cciAnalysis = calculateCCIWithEMA(candles1h, 20, 5);
+                cciDirection = cciAnalysis.direction;
+                cciEmoji = cciAnalysis.emoji;
+            } else {
+                const cciAnalysis = calculateCCIWithEMA(candles, 20, 5);
                 cciDirection = cciAnalysis.direction;
                 cciEmoji = cciAnalysis.emoji;
             }
@@ -1567,7 +1713,6 @@ async function analyzeSymbol(symbol) {
                         mtfBar: mtfAnalysis.mtfBar,
                         mtfAlignment: mtfAnalysis.alignment,
                         dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
-                        // Incluir todas as EMAs para cálculos de SR
                         ema13: multipleRetest.ema13,
                         ema34: multipleRetest.ema34,
                         ema55: multipleRetest.ema55,
@@ -1751,7 +1896,7 @@ async function analyzeSymbol(symbol) {
                 }
             }
             
-            // 6. Reteste Clássico Original
+            // 6. Reteste Clássico
             const retestAnalysis = checkRetestCriteria(candles, timeframe);
             if (retestAnalysis.signal) {
                 let directionEmoji, directionText, alertType;
@@ -1806,6 +1951,90 @@ async function analyzeSymbol(symbol) {
                     results.push(alert);
                 }
             }
+            
+            // 7. Reteste MA50
+            const ma50Retest = checkMA50Retest(candles);
+            if (ma50Retest.signal) {
+                const volumeOk = (ma50Retest.direction === 'ALTA' && volumeDirection === 'COMPRADOR') ||
+                                 (ma50Retest.direction === 'BAIXA' && volumeDirection === 'VENDEDOR');
+                
+                const cciOk = (ma50Retest.direction === 'ALTA' && cciDirection === 'ALTA') ||
+                              (ma50Retest.direction === 'BAIXA' && cciDirection === 'BAIXA');
+                
+                if (volumeOk && cciOk && canSendAlert(symbol, timeframe, ma50Retest.type)) {
+                    const additional = await getAdditionalData(symbol, currentPrice);
+                    
+                    const alert = {
+                        type: 'RETESTE_MA50',
+                        symbol: symbol.replace('USDT', ''),
+                        symbolFull: symbol,
+                        timeframe,
+                        directionEmoji: ma50Retest.directionEmoji,
+                        directionText: `RETESTE MA50`,
+                        price: currentPrice,
+                        ma50: ma50Retest.ma50,
+                        ema55: ma50Retest.ema55,
+                        alinhado: ma50Retest.alinhado,
+                        description: ma50Retest.description,
+                        strength: ma50Retest.strength,
+                        strategyEmoji: ma50Retest.emoji,
+                        cciEmoji,
+                        mtfScore: mtfAnalysis.score,
+                        mtfBar: mtfAnalysis.mtfBar,
+                        mtfAlignment: mtfAnalysis.alignment,
+                        dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
+                        ...additional
+                    };
+                    
+                    await sendAlert(alert);
+                    registerAlert(symbol, timeframe, ma50Retest.type);
+                    results.push(alert);
+                }
+            }
+            
+            // 8. Reteste MA200
+            const ma200Retest = checkMA200Retest(candles);
+            if (ma200Retest.signal) {
+                const volumeOk = (ma200Retest.direction === 'ALTA' && volumeDirection === 'COMPRADOR') ||
+                                 (ma200Retest.direction === 'BAIXA' && volumeDirection === 'VENDEDOR');
+                
+                const cciOk = (ma200Retest.direction === 'ALTA' && cciDirection === 'ALTA') ||
+                              (ma200Retest.direction === 'BAIXA' && cciDirection === 'BAIXA');
+                
+                if (volumeOk && cciOk && canSendAlert(symbol, timeframe, ma200Retest.type)) {
+                    const additional = await getAdditionalData(symbol, currentPrice);
+                    
+                    const alert = {
+                        type: 'RETESTE_MA200',
+                        symbol: symbol.replace('USDT', ''),
+                        symbolFull: symbol,
+                        timeframe,
+                        directionEmoji: ma200Retest.directionEmoji,
+                        directionText: `RETESTE MA200`,
+                        price: currentPrice,
+                        ma200: ma200Retest.ma200,
+                        ema55: ma200Retest.ema55,
+                        ema144: ma200Retest.ema144,
+                        ema233: ma200Retest.ema233,
+                        tendenciaLP: ma200Retest.tendenciaLP,
+                        emasAlinhadas: ma200Retest.emasAlinhadas,
+                        qtdEMAsAlinhadas: ma200Retest.qtdEMAsAlinhadas,
+                        description: ma200Retest.description,
+                        strength: ma200Retest.strength,
+                        strategyEmoji: ma200Retest.emoji,
+                        cciEmoji,
+                        mtfScore: mtfAnalysis.score,
+                        mtfBar: mtfAnalysis.mtfBar,
+                        mtfAlignment: mtfAnalysis.alignment,
+                        dailyCount: (dailyCounter.get(`${symbol}_daily`) || 0) + 1,
+                        ...additional
+                    };
+                    
+                    await sendAlert(alert);
+                    registerAlert(symbol, timeframe, ma200Retest.type);
+                    results.push(alert);
+                }
+            }
         }
         
         return results;
@@ -1817,7 +2046,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA ===
+// === ENVIAR ALERTA COM ANÁLISE COMPLETA (ALVOS CORRIGIDOS) ===
 // =====================================================================
 async function sendAlert(data) {
     const time = getBrazilianDateTime();
@@ -1834,33 +2063,155 @@ async function sendAlert(data) {
     
     const rsiLine = `#RSI 1h: ${data.rsi} ${getRSIEmojiCustom(data.rsi)}`;
     
+    // ===== ANÁLISE AUTOMÁTICA =====
+    const isAlta = data.directionEmoji.includes('🟢') || data.directionEmoji.includes('💧') || data.directionEmoji.includes('📊🟢');
+    const isBaixa = data.directionEmoji.includes('🔴') || data.directionEmoji.includes('🔥') || data.directionEmoji.includes('📊🔴');
+    
+    let forcasFavoraveis = [];
+    let forcasContrarias = [];
+    
+    if (data.cciEmoji === '💹') forcasFavoraveis.push('CCI em ALTA');
+    else if (data.cciEmoji === '🔴') forcasFavoraveis.push('CCI em BAIXA');
+    else forcasContrarias.push('CCI NEUTRO');
+    
+    if (data.volume1h.direction === 'Comprador') {
+        if (isAlta) forcasFavoraveis.push('Volume Comprador');
+        else forcasContrarias.push('Volume Comprador (contrário)');
+    } else if (data.volume1h.direction === 'Vendedor') {
+        if (isBaixa) forcasFavoraveis.push('Volume Vendedor');
+        else forcasContrarias.push('Volume Vendedor (contrário)');
+    }
+    
+    if (data.volume3m.ratio > 1.5) {
+        forcasFavoraveis.push(`Volume 3m ${data.volume3m.ratio.toFixed(1)}x`);
+    } else if (data.volume3m.ratio < 0.5) {
+        forcasContrarias.push(`Volume 3m baixo`);
+    }
+    
+    if (data.lsr) {
+        if (data.lsr > 1.5 && isAlta) forcasFavoraveis.push('LSR alto (otimismo)');
+        else if (data.lsr < 0.7 && isBaixa) forcasFavoraveis.push('LSR baixo (pessimismo)');
+        else if (data.lsr > 1.5 && isBaixa) forcasContrarias.push('LSR alto (contrário)');
+        else if (data.lsr < 0.7 && isAlta) forcasContrarias.push('LSR baixo (contrário)');
+    }
+    
+    if (data.rsi > 70 && isBaixa) forcasFavoraveis.push('RSI sobrecomprado');
+    else if (data.rsi < 30 && isAlta) forcasFavoraveis.push('RSI sobrevendido');
+    else if (data.rsi > 70 && isAlta) forcasContrarias.push('RSI sobrecomprado');
+    else if (data.rsi < 30 && isBaixa) forcasContrarias.push('RSI sobrevendido');
+    
+    if (data.stoch4h.includes('⤴️') && isAlta) forcasFavoraveis.push('Stoch 4h subindo');
+    else if (data.stoch4h.includes('⤵️') && isBaixa) forcasFavoraveis.push('Stoch 4h caindo');
+    else if (data.stoch4h.includes('⤴️') && isBaixa) forcasContrarias.push('Stoch 4h subindo');
+    else if (data.stoch4h.includes('⤵️') && isAlta) forcasContrarias.push('Stoch 4h caindo');
+    
+    let forcaSetup = Math.min(10, forcasFavoraveis.length * 2 + 2);
+    const barraForca = '█'.repeat(Math.floor(forcaSetup/2)) + '░'.repeat(5 - Math.floor(forcaSetup/2));
+    
+    const analise = `📊 **ANÁLISE RÁPIDA:**
+✅ **Favorável:** ${forcasFavoraveis.slice(0, 3).join(' • ') || 'Nenhum'}
+${forcasContrarias.length > 0 ? `⚠️ **Contrário:** ${forcasContrarias.slice(0, 2).join(' • ')}` : ''}
+💪 **Força Setup:** ${barraForca} ${forcaSetup}/10
+📊 **MTF:** ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10`;
+
+    // ===== EXTRAIR NÍVEIS NUMÉRICOS =====
+    let resist1, resist2, supt1, supt2;
+    
+    if (data.type === 'RETESTE_MULTIPLO') {
+        const emaRef = data.ema55 || data.ema144 || data.ema233;
+        resist1 = emaRef * 1.1;
+        resist2 = emaRef * 1.05;
+        supt1 = emaRef * 0.95;
+        supt2 = emaRef * 0.9;
+    } else if (data.type === 'RETESTE_DIVERGENCIA_OCULTA' || data.type === 'RETESTE_VOLUME_DELTA') {
+        resist1 = data.emaValue * 1.1;
+        resist2 = data.emaValue * 1.05;
+        supt1 = data.emaValue * 0.95;
+        supt2 = data.emaValue * 0.9;
+    } else if (data.type === 'RETESTE_EXAUSTAO') {
+        resist1 = data.ema55 * 1.1;
+        resist2 = data.ema55 * 1.05;
+        supt1 = data.ema55 * 0.95;
+        supt2 = data.ema55 * 0.9;
+    } else if (data.type === 'RETESTE_LIQUIDEZ') {
+        resist1 = data.emaValue * 1.1;
+        resist2 = data.emaValue * 1.05;
+        supt1 = data.emaValue * 0.95;
+        supt2 = data.emaValue * 0.9;
+    } else if (data.type === 'RETESTE_CLASSICO') {
+        resist1 = data.emaValue * 1.1;
+        resist2 = data.emaValue * 1.05;
+        supt1 = data.emaValue * 0.95;
+        supt2 = data.emaValue * 0.9;
+    } else if (data.type === 'RETESTE_MA50') {
+        resist1 = data.ma50 * 1.1;
+        resist2 = data.ma50 * 1.05;
+        supt1 = data.ma50 * 0.95;
+        supt2 = data.ma50 * 0.9;
+    } else if (data.type === 'RETESTE_MA200') {
+        resist1 = data.ma200 * 1.1;
+        resist2 = data.ma200 * 1.05;
+        supt1 = data.ma200 * 0.95;
+        supt2 = data.ma200 * 0.9;
+    }
+    
+    // ===== TRADE SUGERIDO COM ALVOS CORRIGIDOS =====
+    let tradeSugerido = '';
+    const preco = data.price;
+    
+    if (isAlta) {
+        // Para ALTA: 
+        // - Stop abaixo do primeiro suporte (supt2 é o mais próximo)
+        // - Alvo 1 é resist2 (mais próximo)
+        // - Alvo 2 é resist1 (mais distante)
+        const stop = supt2 * 0.98; // 2% abaixo do primeiro suporte
+        const alvo1 = resist2; // Primeiro alvo (mais próximo)
+        const alvo2 = resist1; // Segundo alvo (mais distante)
+        
+        const risco = preco - stop;
+        const retorno1 = alvo1 - preco;
+        const retorno2 = alvo2 - preco;
+        
+        tradeSugerido = `🎯 **TRADE SUGERIDO (ALTA):**
+· ✅ **Entrada:** $${formatPrice(preco)} (atual)
+· 🛑 **Stop:** Abaixo de $${formatPrice(stop)} (-${((preco-stop)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (+${((alvo1-preco)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (+${((alvo2-preco)/preco*100).toFixed(1)}%)
+· ⚖️ **R:R (Alvo 1):** 1:${(retorno1/risco).toFixed(1)}
+${forcaSetup >= 7 ? '· 🔥 **CONFIANÇA ALTA**' : forcaSetup >= 4 ? '· ⚡ **CONFIANÇA MÉDIA**' : '· ⚠️ **CONFIANÇA BAIXA**'}`;
+        
+    } else if (isBaixa) {
+        // Para BAIXA:
+        // - Stop acima da primeira resistência (resist2 é a mais próxima)
+        // - Alvo 1 é supt2 (mais próximo)
+        // - Alvo 2 é supt1 (mais distante)
+        const stop = resist2 * 1.02; // 2% acima da primeira resistência
+        const alvo1 = supt2; // Primeiro alvo (mais próximo)
+        const alvo2 = supt1; // Segundo alvo (mais distante)
+        
+        const risco = stop - preco;
+        const retorno1 = preco - alvo1;
+        const retorno2 = preco - alvo2;
+        
+        tradeSugerido = `🎯 **TRADE SUGERIDO (BAIXA):**
+· ✅ **Entrada:** $${formatPrice(preco)} (atual)
+· 🛑 **Stop:** Acima de $${formatPrice(stop)} (+${((stop-preco)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (-${((preco-alvo1)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (-${((preco-alvo2)/preco*100).toFixed(1)}%)
+· ⚖️ **R:R (Alvo 1):** 1:${(retorno1/risco).toFixed(1)}
+${forcaSetup >= 7 ? '· 🔥 **CONFIANÇA ALTA**' : forcaSetup >= 4 ? '· ⚡ **CONFIANÇA MÉDIA**' : '· ⚠️ **CONFIANÇA BAIXA**'}`;
+    }
+
+    // ===== MENSAGEM PRINCIPAL =====
     let message;
     
-    // RETESTE MÚLTIPLO
     if (data.type === 'RETESTE_MULTIPLO') {
-        // Determinar a EMA correta para cálculo de suporte/resistência baseado na direção
-        let emaReferencia;
-        
-        if (data.directionEmoji.includes('🔴')) {
-            // Alerta de BAIXA - usar EMA144 ou EMA233 como referência (mais forte)
-            emaReferencia = data.ema144 || data.ema233 || data.ema55;
-        } else {
-            // Alerta de ALTA - usar EMA55 como referência
-            emaReferencia = data.ema55 || data.ema144;
-        }
-        
-        const resist1 = formatPrice(emaReferencia * 1.1);
-        const resist2 = formatPrice(emaReferencia * 1.05);
-        const supt1 = formatPrice(emaReferencia * 0.95);
-        const supt2 = formatPrice(emaReferencia * 0.9);
-        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou: ${data.emaNames}
  📊 Confluência: ${data.count} EMAs
  💪 Força: ${data.strength} ${data.strategyEmoji}
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -1869,29 +2220,21 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
  
+${analise}
+${tradeSugerido}
  Titanium Prime by @J4Rviz</i>`;
     }
     
-    // DIVERGÊNCIA OCULTA
     else if (data.type === 'RETESTE_DIVERGENCIA_OCULTA') {
-        // Usar a EMA relevante para o tipo de divergência
-        const emaReferencia = data.ema === 'EMA55' ? data.ema55 : data.ema144;
-        
-        const resist1 = formatPrice(emaReferencia * 1.1);
-        const resist2 = formatPrice(emaReferencia * 1.05);
-        const supt1 = formatPrice(emaReferencia * 0.95);
-        const supt2 = formatPrice(emaReferencia * 0.9);
-        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  🎯 Tocou: ${data.ema} ($${formatPrice(data.emaValue)})
  🔄 ${data.description}
  💪 Força: FORTE ${data.strategyEmoji}
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -1900,22 +2243,15 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
  
+${analise}
+${tradeSugerido}
  Titanium Prime by @J4Rviz</i>`;
     }
     
-    // VOLUME DELTA
     else if (data.type === 'RETESTE_VOLUME_DELTA') {
-        // Usar a EMA relevante baseado na direção
-        const emaReferencia = data.direction === 'ALTA' ? data.ema55 : data.ema144;
-        
-        const resist1 = formatPrice(emaReferencia * 1.1);
-        const resist2 = formatPrice(emaReferencia * 1.05);
-        const supt1 = formatPrice(emaReferencia * 0.95);
-        const supt2 = formatPrice(emaReferencia * 0.9);
-        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
@@ -1923,7 +2259,6 @@ async function sendAlert(data) {
  📊 Volume: ${data.volumeRatio}x acima da média
  📈 Delta: ${data.deltaRatio}% do volume
  💪 Força: ${data.strength} ${data.strategyEmoji}
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -1932,19 +2267,15 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
  
+${analise}
+${tradeSugerido}
  Titanium Prime by @J4Rviz</i>`;
     }
     
-    // EXAUSTÃO
     else if (data.type === 'RETESTE_EXAUSTAO') {
-        const resist1 = formatPrice(data.ema55 * 1.1);
-        const resist2 = formatPrice(data.ema55 * 1.05);
-        const supt1 = formatPrice(data.ema55 * 0.95);
-        const supt2 = formatPrice(data.ema55 * 0.9);
-        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
@@ -1952,7 +2283,6 @@ async function sendAlert(data) {
  📊 RSI: ${data.rsi} ${getRSIEmojiCustom(data.rsi)}
  ⚠️ ${data.description}
  💪 Força: ${data.strength} ${data.strategyEmoji}
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -1961,26 +2291,19 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
  
+${analise}
+${tradeSugerido}
  ⚠️ Atenção: Possível reversão - aguardar confirmação
  
  Titanium Prime by @J4Rviz</i>`;
     }
     
-    // LIQUIDEZ
     else if (data.type === 'RETESTE_LIQUIDEZ') {
         const liquidityText = data.liquidityLevel === 'EXTREMO' ? 'EXTREMA' : 'ALTA';
         const zoneText = data.zone === 'OVERSOLD' ? 'COMPRA' : 'VENDA';
-        
-        // Usar a EMA prioritária do reteste
-        const emaReferencia = data.emaValue;
-        
-        const resist1 = formatPrice(emaReferencia * 1.1);
-        const resist2 = formatPrice(emaReferencia * 1.05);
-        const supt1 = formatPrice(emaReferencia * 0.95);
-        const supt2 = formatPrice(emaReferencia * 0.9);
         
         message = `<i>${data.directionEmoji} ${data.symbol} LIQUIDEZ ${liquidityText} - ZONA DE ${zoneText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
@@ -1989,7 +2312,6 @@ async function sendAlert(data) {
  📊 Stoch RSI: ${data.stochRSI}% (${data.zone} ${data.liquidityLevel})
  🌊 Zona: ${data.strategyEmoji} Liquidez ${data.liquidityLevel}
  💪 Força: ${data.strength}
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -1998,28 +2320,21 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
  
+${analise}
+${tradeSugerido}
  🎯 Setup: Liquidez ${data.liquidityLevel} + Reteste ${data.ema}
  
  Titanium Prime by @J4Rviz</i>`;
     }
     
-    // RETESTE CLÁSSICO
     else if (data.type === 'RETESTE_CLASSICO') {
-        const emaValue = data.emaValue || data.ema55;
-        
-        const resist1 = formatPrice(emaValue * 1.1);
-        const resist2 = formatPrice(emaValue * 1.05);
-        const supt1 = formatPrice(emaValue * 0.95);
-        const supt2 = formatPrice(emaValue * 0.9);
-        
         message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
- 🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(emaValue)})
- 📊 MTF: ${data.mtfAlignment} [${data.mtfBar}] ${data.mtfScore}/10
+ 🎯 Tocou em: ${data.touchedEMA} ($${formatPrice(data.emaValue)})
  ${data.cciText}
  ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
  ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
@@ -2028,8 +2343,72 @@ async function sendAlert(data) {
  #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
  Stoch 1D: ${data.stoch1d}
  Stoch 4H: ${data.stoch4h}
- 🔻Resist: ${resist1} | ${resist2}
- 🔹Supt: ${supt1} | ${supt2}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
+ 
+${analise}
+${tradeSugerido}
+ Titanium Prime by @J4Rviz</i>`;
+    }
+    
+    else if (data.type === 'RETESTE_MA50') {
+        const alinhadoText = data.alinhado ? '✅ ALINHADA COM EMA55' : '⚠️ DIVERGENTE DA EMA55';
+        
+        message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
+ Alerta:${data.dailyCount} | ${time.full}hs
+ 💲Preço: $${formatPrice(data.price)}
+ 🎯 Tocou: MA50 ($${formatPrice(data.ma50)})
+ 📊 EMA55: $${formatPrice(data.ema55)}
+ 🔄 ${alinhadoText}
+ 📊 ${data.description}
+ 💪 Força: ${data.strength} ${data.strategyEmoji}
+ ${data.cciText}
+ ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
+ #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
+ Stoch 1D: ${data.stoch1d}
+ Stoch 4H: ${data.stoch4h}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
+ 
+${analise}
+${tradeSugerido}
+ Titanium Prime by @J4Rviz</i>`;
+    }
+    
+    else if (data.type === 'RETESTE_MA200') {
+        const alinhamentoText = data.emasAlinhadas === 'ALINHADAS' ? 
+            `✅ ${data.qtdEMAsAlinhadas}/3 EMAs alinhadas` : 
+            `⚠️ Apenas ${data.qtdEMAsAlinhadas}/3 EMAs alinhadas`;
+        
+        message = `<i>${data.directionEmoji} ${data.symbol} ${data.directionText} #${data.timeframe}
+ Alerta:${data.dailyCount} | ${time.full}hs
+ 💲Preço: $${formatPrice(data.price)}
+ 🎯 Tocou: MA200 ($${formatPrice(data.ma200)})
+ 🏦 ZONA INSTITUCIONAL - ${data.description}
+ 📊 Contexto:
+   ├─ EMA55: $${formatPrice(data.ema55)} ${data.ema55 > data.ma200 ? '⬆️' : '⬇️'}
+   ├─ EMA144: $${formatPrice(data.ema144)} ${data.ema144 > data.ma200 ? '⬆️' : '⬇️'}
+   └─ EMA233: $${formatPrice(data.ema233)} ${data.ema233 > data.ma200 ? '⬆️' : '⬇️'}
+ 🔄 ${alinhamentoText}
+ 📈 Tendência LP: ${data.tendenciaLP === 'ALTA' ? '🟢 BULL' : '🔴 BEAR'}
+ 💪 Força: ${data.strength} ${data.strategyEmoji}
+ ${data.cciText}
+ ▫️Vol 24hs: ${data.volume24h.pct} ${volumeEmoji}${volumeDirection}
+ ${rsiLine} | <a href="${tradingViewUrl}">🔗 TradingView</a>
+ #Vol 3m: ${data.volume3m.ratio.toFixed(2)}x (${data.volume3m.pct}%) ${data.volume3m.direction === 'Comprador' ? '🟢Comprador' : (data.volume3m.direction === 'Vendedor' ? '🔴Vendedor' : '⚪Neutro')}
+ #Vol 1h: ${data.volume1h.ratio.toFixed(2)}x (${data.volume1h.pct}%) ${volumeEmoji}${volumeDirection}
+ #LSR: ${lsr} ${lsrEmoji} | #Fund: ${fundingSign}${fundingPct}%
+ Stoch 1D: ${data.stoch1d}
+ Stoch 4H: ${data.stoch4h}
+ 🔻Resist: $${formatPrice(resist1)} | $${formatPrice(resist2)}
+ 🔹Supt: $${formatPrice(supt1)} | $${formatPrice(supt2)}
+ 
+${analise}
+${tradeSugerido}
+ ⚠️ ZONA INSTITUCIONAL - GRANDES PLAYERS
  
  Titanium Prime by @J4Rviz</i>`;
     }
@@ -2067,17 +2446,26 @@ async function sendAlert(data) {
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(60));
-    console.log('🚀 SCANNER INICIADO - 6 ESTRATÉGIAS DE RETESTE');
+    console.log('🚀 SCANNER INICIADO - 8 ESTRATÉGIAS DE RETESTE');
     console.log('='.repeat(60));
     console.log(`📊 Monitorando top ${CONFIG.SCAN.TOP_SYMBOLS_LIMIT} símbolos`);
     console.log(`📈 Timeframes: ${CONFIG.TIMEFRAMES.join(', ')}`);
     console.log(`🔄 Estratégias:`);
-    console.log(`   1. Reteste Múltiplo (2+ EMAs)`);
+    console.log(`   1. Reteste Múltiplo (EMAs Fibonacci)`);
     console.log(`   2. Divergência Oculta`);
     console.log(`   3. Volume Delta`);
     console.log(`   4. Exaustão`);
     console.log(`   5. Liquidez Stoch RSI`);
     console.log(`   6. Reteste Clássico`);
+    console.log(`   7. 🔷 RETESTE MA50`);
+    console.log(`   8. 🏦 RETESTE MA200 - INSTITUCIONAL`);
+    console.log('='.repeat(60) + '\n');
+    console.log('📱 ALERTAS AGORA INCLUEM:');
+    console.log('   ✅ Análise Rápida Automática');
+    console.log('   ✅ Trade Sugerido com Alvos CORRIGIDOS');
+    console.log('   ✅ Força do Setup (0-10)');
+    console.log('   ✅ Percentuais de Gain/Perda');
+    console.log('   ✅ Nível de Confiança');
     console.log('='.repeat(60) + '\n');
     
     currentTopSymbols = await getTopSymbols();
