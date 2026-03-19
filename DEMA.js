@@ -10,8 +10,8 @@ const NodeCache = require('node-cache');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     TRADING: {
         TIMEFRAME: '3m',
@@ -916,18 +916,18 @@ async function analyzeSymbol(symbol) {
             const alertsLeft = CONFIG.TRADING.MAX_ALERTS_PER_DAY_PER_SYMBOL - alertInfo.signalsToday;
             
             const message = 
-                `_🔍 ${signal} - ${symbol}_\n\n` +
+                `_🔍 ${signal} - ${symbol}_\n` +
                 `_Preço:_ _$${currentPrice.toFixed(8)}_\n` +
-                `_Hora:_ _${currentTime}_\n\n` +
+                `_Hora:_ _${currentTime}_\n` +
                 `_ VOL: ${CONFIG.TRADING.VOLUME_MA_PERIOD}_\n` +
-                `_${volumeAnalysis.message}_\n\n` +
-                `_ ALVOS (${targets.length}/3):_\n${targetsMessage}\n` +
-                `_🛑 STOP (${stopDistance.toFixed(2)}%):_ _$${stopLoss.toFixed(8)}_\n` +
+                `_${volumeAnalysis.message}_\n` +
+                `_ Alvos (${targets.length}/3):_\n${targetsMessage}\n`+ 
+                `_🛑 Stop (${stopDistance.toFixed(2)}%):_ _$${stopLoss.toFixed(8)}_\n` +
                 `${noClustersWarning}\n` +
-                `_ RESISTÊNCIAS:_\n${clustersAboveMsg}\n\n` +
-                `_ SUPORTES:_\n${clustersBelowMsg}\n\n` +
-                `_ Alertas hoje: ${alertInfo.signalsToday}/${CONFIG.TRADING.MAX_ALERTS_PER_DAY_PER_SYMBOL}_\n` +
-                `_🤖 Titanium Trade 3m_`;
+                `_ Resistência:_\n${clustersAboveMsg}\n` +
+                `_ Suporte:_\n${clustersBelowMsg}\n\n` +
+                `_ Alerta: ${alertInfo.signalsToday}/${CONFIG.TRADING.MAX_ALERTS_PER_DAY_PER_SYMBOL}_\n` +
+                `_🤖 Titanium _`;
             
             if (telegram) {
                 await telegram.sendMessage(CONFIG.TELEGRAM.CHAT_ID, message, { parse_mode: 'Markdown' });
