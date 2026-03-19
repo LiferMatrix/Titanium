@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     EMA: {
         FAST: 13,
@@ -35,8 +35,8 @@ const CONFIG = {
     },
     VOLUME: {
         EMA_PERIOD: 9,
-        MIN_BULLISH_PCT: 54,
-        MIN_BEARISH_PCT: 54
+        MIN_BULLISH_PCT: 52,
+        MIN_BEARISH_PCT: 52
     },
     TIMEFRAMES: ['1h', '4h', '1d'],
     SCAN: {
@@ -2161,12 +2161,12 @@ ${forcasContrarias.length > 0 ? `⚠️ **Contrário:** ${forcasContrarias.slice
     
     if (isAlta) {
         // Para ALTA: 
-        // - Stop abaixo do primeiro suporte (supt2 é o mais próximo)
-        // - Alvo 1 é resist2 (mais próximo)
-        // - Alvo 2 é resist1 (mais distante)
+        // - Stop abaixo do primeiro suporte (supt2 é o MAIS PRÓXIMO do preço, valor MAIOR)
+        // - Alvo 1 é resist2 (MAIS PRÓXIMO, valor MENOR)
+        // - Alvo 2 é resist1 (MAIS DISTANTE, valor MAIOR)
         const stop = supt2 * 0.98; // 2% abaixo do primeiro suporte
-        const alvo1 = resist2; // Primeiro alvo (mais próximo)
-        const alvo2 = resist1; // Segundo alvo (mais distante)
+        const alvo1 = resist2; // Primeiro alvo (MAIS PRÓXIMO)
+        const alvo2 = resist1; // Segundo alvo (MAIS DISTANTE)
         
         const risco = preco - stop;
         const retorno1 = alvo1 - preco;
@@ -2175,19 +2175,19 @@ ${forcasContrarias.length > 0 ? `⚠️ **Contrário:** ${forcasContrarias.slice
         tradeSugerido = `🎯 **TRADE SUGERIDO (ALTA):**
 · ✅ **Entrada:** $${formatPrice(preco)} (atual)
 · 🛑 **Stop:** Abaixo de $${formatPrice(stop)} (-${((preco-stop)/preco*100).toFixed(1)}%)
-· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (+${((alvo1-preco)/preco*100).toFixed(1)}%)
-· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (+${((alvo2-preco)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (+${((alvo1-preco)/preco*100).toFixed(1)}%)  ← MAIS PRÓXIMO
+· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (+${((alvo2-preco)/preco*100).toFixed(1)}%)  ← MAIS DISTANTE
 · ⚖️ **R:R (Alvo 1):** 1:${(retorno1/risco).toFixed(1)}
 ${forcaSetup >= 7 ? '· 🔥 **CONFIANÇA ALTA**' : forcaSetup >= 4 ? '· ⚡ **CONFIANÇA MÉDIA**' : '· ⚠️ **CONFIANÇA BAIXA**'}`;
         
     } else if (isBaixa) {
-        // Para BAIXA:
-        // - Stop acima da primeira resistência (resist2 é a mais próxima)
-        // - Alvo 1 é supt2 (mais próximo)
-        // - Alvo 2 é supt1 (mais distante)
-        const stop = resist2 * 1.02; // 2% acima da primeira resistência
-        const alvo1 = supt2; // Primeiro alvo (mais próximo)
-        const alvo2 = supt1; // Segundo alvo (mais distante)
+        // Para BAIXA: (CORRIGIDO!)
+        // - Stop acima da primeira resistência (resist2 é a MAIS PRÓXIMA do preço, valor MENOR)
+        // - Alvo 1 é supt2 (MAIS PRÓXIMO do preço, valor MAIOR)
+        // - Alvo 2 é supt1 (MAIS DISTANTE do preço, valor MENOR)
+        const stop = resist2 * 1.02; // Stop acima da resistência mais próxima
+        const alvo1 = supt2; // Primeiro alvo = MAIOR valor (mais próximo do preço)
+        const alvo2 = supt1; // Segundo alvo = MENOR valor (mais distante)
         
         const risco = stop - preco;
         const retorno1 = preco - alvo1;
@@ -2196,8 +2196,8 @@ ${forcaSetup >= 7 ? '· 🔥 **CONFIANÇA ALTA**' : forcaSetup >= 4 ? '· ⚡ **
         tradeSugerido = `🎯 **TRADE SUGERIDO (BAIXA):**
 · ✅ **Entrada:** $${formatPrice(preco)} (atual)
 · 🛑 **Stop:** Acima de $${formatPrice(stop)} (+${((stop-preco)/preco*100).toFixed(1)}%)
-· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (-${((preco-alvo1)/preco*100).toFixed(1)}%)
-· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (-${((preco-alvo2)/preco*100).toFixed(1)}%)
+· 🎯 **Alvo 1:** $${formatPrice(alvo1)} (-${((preco-alvo1)/preco*100).toFixed(1)}%)  ← MAIS PRÓXIMO (MAIOR valor)
+· 🎯 **Alvo 2:** $${formatPrice(alvo2)} (-${((preco-alvo2)/preco*100).toFixed(1)}%)  ← MAIS DISTANTE (MENOR valor)
 · ⚖️ **R:R (Alvo 1):** 1:${(retorno1/risco).toFixed(1)}
 ${forcaSetup >= 7 ? '· 🔥 **CONFIANÇA ALTA**' : forcaSetup >= 4 ? '· ⚡ **CONFIANÇA MÉDIA**' : '· ⚠️ **CONFIANÇA BAIXA**'}`;
     }
