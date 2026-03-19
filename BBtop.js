@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZ
-        CHAT_ID: '-100199
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     BOLLINGER: {
         PERIOD: 20,
@@ -19,7 +19,7 @@ const CONFIG = {
         MIN_BANDWIDTH: 2.5
     },
     SCAN: {
-        BATCH_SIZE: 15,
+        BATCH_SIZE: 10,
         SYMBOL_DELAY_MS: 100,
         REQUEST_TIMEOUT: 10000,
         COOLDOWN_AFTER_BATCH_MS: 800,
@@ -77,12 +77,11 @@ const CONFIG = {
         MAX_ALERTS_PER_SCAN: 100,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
         TELEGRAM_DELAY_MS: 1500,
-        // NOVO: Configuração para volatilidade mínima em 15 minutos
         MIN_15M_VOLATILITY: {
             ENABLED: true,
-            MIN_ATR_PERCENT: 0.8, // ATR mínimo de 0.8% em 15 minutos
-            MIN_BB_WIDTH_PERCENT: 1.2, // Largura mínima das Bandas em 15 minutos
-            CHECK_TIMEFRAMES: ['1h', '4h', '1d'] // Timeframes que exigem a verificação
+            MIN_ATR_PERCENT: 0.5,
+            MIN_BB_WIDTH_PERCENT: 1.2,
+            CHECK_TIMEFRAMES: ['1h', '4h', '1d']
         }
     },
     VOLUME: {
@@ -1963,7 +1962,7 @@ async function sendGroupedAlerts(alerts, priority) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO (MODIFICADO COM VERIFICAÇÃO 15M) ===
+// === ANALISAR SÍMBOLO ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
@@ -1998,7 +1997,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME (MODIFICADO COM FUNDING PENALTY E VOLATILIDADE 15M) ===
+// === ANALISAR TIMEFRAME (COM ANÁLISE DE REVERSÃO EM 3 MINUTOS) ===
 // =====================================================================
 async function analyzeTimeframe(symbol, candles, timeframe) {
     try {
@@ -2019,16 +2018,34 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             return null;
         }
 
-        const reversalCheck = isTrueReversal(candles.slice(-10), bb, touchedLower, touchedUpper);
+        // === ANÁLISE DE REVERSÃO EM 3 MINUTOS (ENTRADA ANTECIPADA) ===
+        let reversalCandles = candles.slice(-10);
+        let usedTimeframe = timeframe;
+
+        if (timeframe === '1h' || timeframe === '4h' || timeframe === '1d') {
+            try {
+                const candles3m = await getCandles(symbol, '3m', 30);
+                if (candles3m && candles3m.length >= 15) {
+                    reversalCandles = candles3m.slice(-15);
+                    usedTimeframe = '3m';
+                    log(`${symbol} [${timeframe}] - Análise de reversão em 3m para entrada antecipada`, 'info');
+                }
+            } catch (error) {
+                log(`${symbol} - Erro ao buscar candles 3m, usando ${timeframe}`, 'warning');
+                reversalCandles = candles.slice(-10);
+            }
+        }
+
+        const reversalCheck = isTrueReversal(reversalCandles, bb, touchedLower, touchedUpper);
        
         if (!reversalCheck.isReversal) {
-            log(`${symbol} [${timeframe}] - tocou na banda mas SEM reversão (score: ${reversalCheck.score}/6)`, 'warning');
+            log(`${symbol} [${timeframe}] - tocou na banda mas SEM reversão (score: ${reversalCheck.score}/12 em ${usedTimeframe})`, 'warning');
             return null;
         }
        
         const additional = await getAdditionalData(symbol, currentPrice, touchedLower);
        
-        // NOVO: Verificar volatilidade em 15 minutos para todos os timeframes
+        // Verificar volatilidade em 15 minutos
         const timeframeCheck = CONFIG.ALERTS.MIN_15M_VOLATILITY.CHECK_TIMEFRAMES.includes(timeframe);
         if (timeframeCheck) {
             const volatilityCheck = await check15MinVolatility(symbol);
@@ -2071,12 +2088,12 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
         let penaltyApplied = false;
         let totalPenalty = 0;
        
-        if (reversalCheck.score >= 5) {
+        if (reversalCheck.score >= 8) {
+            confirmations.push('🔥🔥 Reversão EXTREMA');
+        } else if (reversalCheck.score >= 6) {
             confirmations.push('🔥 Reversão muito forte');
         } else if (reversalCheck.score >= 4) {
             confirmations.push('✅ Reversão forte');
-        } else if (reversalCheck.score >= 3) {
-            confirmations.push('✓ Reversão moderada');
         }
        
         if (divergenceMulti.hasDivergence) {
@@ -2179,7 +2196,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
        
         const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
        
-        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | Stop: ${formatPrice(stopLoss)} | Penalidades: ${totalPenalty}`, 'success');
+        log(`🎯 ${symbol} [${timeframe}] - ${direction} CONFIRMADA! Score: ${confirmationScore} (reversão em ${usedTimeframe}) | RSI: ${additional.rsi} | Bandwidth: ${bandwidth.toFixed(2)}% | Volume: ${additional.volume1h.direction} (${additional.volume1h.percentage.toFixed(1)}%) | Stop: ${formatPrice(stopLoss)} | Penalidades: ${totalPenalty}`, 'success');
        
         const alert = {
             symbol,
@@ -2202,6 +2219,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             confirmations: confirmations.join(' • '),
             reversalScore: reversalCheck.score,
             reversalDetails: reversalCheck.details,
+            reversalPatterns: reversalCheck.patterns,
             divergences: divergenceMulti.divergences,
             lsrPenalty: lsrPenalty.hasPenalty,
             fundingPenalty: fundingPenalty.hasPenalty,
@@ -2209,6 +2227,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
             lsrValue: additional.lsr,
             fundingValue: additional.funding,
             bandwidth: bandwidth,
+            usedTimeframe: usedTimeframe,
             ...additional
         };
        
@@ -2222,7 +2241,7 @@ async function analyzeTimeframe(symbol, candles, timeframe) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM (MODIFICADO) ===
+// === FORMATAR MENSAGEM ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -2276,8 +2295,13 @@ function formatAlert(data) {
         divergenceLines = `\n ⚠️ Divergências: ${divergenceTexts.join(' • ')}`;
     }
     
+    let patternsLine = '';
+    if (data.reversalPatterns && data.reversalPatterns.length > 0) {
+        patternsLine = `\n 📊 Padrões: ${data.reversalPatterns.join(' • ')}`;
+    }
+    
     const confirmationsLine = `🔍 Confirmações: ${data.confirmationScore} | ${data.confirmations}`;
-    const reversalScoreLine = ` Score Reversão: ${data.reversalScore}/6`;
+    const reversalScoreLine = ` Score Reversão: ${data.reversalScore}/12 (em ${data.usedTimeframe || data.timeframe})`;
     
     const lsrWarning = data.lsrPenalty ? `\n ⚠️ LSR ${data.lsrValue.toFixed(2)}` : '';
     const fundingWarning = data.fundingPenalty ? `\n ⚠️ Funding ${fundingSign}${fundingPct}%` : '';
@@ -2287,7 +2311,7 @@ function formatAlert(data) {
  Alerta:${data.dailyCount} | ${time.full}hs
  💲Preço: $${formatPrice(data.price)}
  ${confirmationsLine}
- ${reversalScoreLine}${divergenceLines}${lsrWarning}${fundingWarning}${totalPenaltyLine}
+ ${reversalScoreLine}${patternsLine}${divergenceLines}${lsrWarning}${fundingWarning}${totalPenaltyLine}
  ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
  #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TradingView</a>
  ${volume3mLine}
@@ -2323,6 +2347,7 @@ async function startScanner() {
         const initMessage = `🚀 Titanium Prime Ativado\n\n` +
             `📊 Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `⏱️ Timeframes: 1H, 4H, DIÁRIO\n` +
+            `🎯 Análise de reversão em 3 MINUTOS para entradas antecipadas\n` +
             `🎯 Filtros: Volume + Divergências + Bandwidth ${CONFIG.BOLLINGER.MIN_BANDWIDTH}%\n` +
             `🛡️ Stop Loss: ATR Protegido com Zonas de Cluster\n` +
             `💰 Funding Penalty: 3 Níveis (Baixo: -2, Médio: -3, Alto: -4)\n` +
