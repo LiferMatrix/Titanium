@@ -10,8 +10,8 @@ const NodeCache = require('node-cache');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     TRADING: {
         TIMEFRAME: '3m',
@@ -1011,33 +1011,49 @@ async function runBot() {
 }
 
 // =====================================================================
-// INICIALIZAÇÃO
+// INICIALIZAÇÃO - VERSÃO CORRIGIDA PARA TERMUX
 // =====================================================================
 (async () => {
     try {
-        console.log('🔧 Verificando conexões...');
+        console.log('🔧 Iniciando bot no Termux...');
+        console.log('📱 Data/Hora:', new Date().toLocaleString());
         
-        await exchange.fetchTime();
-        console.log('✅ Conectado à Binance Futures');
+        console.log('1️⃣ Verificando conexão com Binance...');
+        try {
+            await exchange.fetchTime();
+            console.log('✅ Conectado à Binance Futures');
+        } catch (error) {
+            console.error('❌ Erro conexão Binance:', error.message);
+            console.log('⏳ Tentando novamente em 5 segundos...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            await exchange.fetchTime();
+        }
         
+        console.log('2️⃣ Carregando markets...');
+        await getMarkets();
+        
+        console.log('3️⃣ Configurando Telegram...');
         if (telegram) {
             try {
-                await telegram.sendMessage(
+                // Teste simples sem await para não travar
+                telegram.sendMessage(
                     CONFIG.TELEGRAM.CHAT_ID,
-                    `_🟢 Bot conectado - ${getCurrentTime()}_`,
+                    `_🟢 Bot iniciado no Termux - ${getCurrentTime()}_`,
                     { parse_mode: 'Markdown' }
-                );
-                console.log('✅ Conectado ao Telegram');
+                ).catch(e => console.log('⚠️ Erro Telegram (não crítico):', e.message));
+                console.log('✅ Telegram configurado');
             } catch (error) {
-                console.log('⚠️ Telegram não configurado');
+                console.log('⚠️ Telegram não disponível');
             }
         }
         
+        console.log('4️⃣ Iniciando loop principal...');
         await runBot();
         
     } catch (error) {
         console.error('❌ Erro fatal:', error);
-        process.exit(1);
+        console.log('⏳ Reiniciando em 10 segundos...');
+        setTimeout(() => process.exit(1), 10000);
     }
 })();
 
