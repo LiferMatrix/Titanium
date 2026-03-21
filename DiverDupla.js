@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     SCAN: {
         BATCH_SIZE: 8,
@@ -131,20 +131,31 @@ const CONFIG = {
         STOCH_OVERBOUGHT: 75
     },
     LSR_PENALTY: {
-        BUY_MAX_RATIO: 3.5,
-        SELL_MIN_RATIO: 1.0,
-        PENALTY_POINTS: -5
+        BUY_MAX_RATIO: 3.0,
+        SELL_MIN_RATIO: 1.3,
+        PENALTY_POINTS: -4
     },
     FUNDING_PENALTY: {
         ENABLED: true,
         LEVELS: {
-            LOW: { THRESHOLD: 0.0015, POINTS: -2 },
-            MEDIUM: { THRESHOLD: 0.003, POINTS: -3 },
-            HIGH: { THRESHOLD: 0.006, POINTS: -4 }
+            // Patamares para FUNDING POSITIVO (penaliza COMPRA)
+            POSITIVE: {
+                VERY_LOW: { THRESHOLD: 0.001, POINTS: -1 },    // 0.10% → penalidade leve
+                LOW: { THRESHOLD: 0.002, POINTS: -2 },         // 0.20% → penalidade moderada
+                MEDIUM: { THRESHOLD: 0.004, POINTS: -4 },      // 0.40% → penalidade forte
+                HIGH: { THRESHOLD: 0.008, POINTS: -6 }         // 0.80% → penalidade muito forte
+            },
+            // Patamares para FUNDING NEGATIVO (penaliza VENDA)
+            NEGATIVE: {
+                VERY_LOW: { THRESHOLD: -0.001, POINTS: -1 },   // -0.10% → penalidade leve
+                LOW: { THRESHOLD: -0.002, POINTS: -2 },        // -0.20% → penalidade moderada
+                MEDIUM: { THRESHOLD: -0.004, POINTS: -4 },     // -0.40% → penalidade forte
+                HIGH: { THRESHOLD: -0.008, POINTS: -6 }        // -0.80% → penalidade muito forte
+            }
         },
-        BUY_PENALTY_FOR_POSITIVE: true,
-        SELL_PENALTY_FOR_NEGATIVE: true,
-        MAX_TOTAL_PENALTY: -9
+        BUY_PENALTY_FOR_POSITIVE: true,   // COMPRA com funding positivo → penaliza
+        SELL_PENALTY_FOR_NEGATIVE: true,  // VENDA com funding negativo → penaliza
+        MAX_TOTAL_PENALTY: -12
     },
     STOP_LOSS: {
         ATR_MULTIPLIER: {
@@ -744,32 +755,57 @@ function checkFundingPenalty(funding, isGreenAlert) {
         return { hasPenalty: false, points: 0, message: '' };
     }
     const fundingPercent = funding * 100;
-    const absFunding = Math.abs(funding);
-    let penaltyPoints = 0, penaltyLevel = '';
-    if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.HIGH.THRESHOLD) {
-        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.HIGH.POINTS;
-        penaltyLevel = 'ALTO';
-    } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.MEDIUM.THRESHOLD) {
-        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.MEDIUM.POINTS;
-        penaltyLevel = 'MÉDIO';
-    } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.LOW.THRESHOLD) {
-        penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.LOW.POINTS;
-        penaltyLevel = 'BAIXO';
-    }
-    let applyPenalty = false;
-    let direction = '';
+    let penaltyPoints = 0;
+    let penaltyLevel = '';
+    
+    // PENALIDADE PARA COMPRA (funding positivo)
     if (isGreenAlert && funding > 0 && CONFIG.FUNDING_PENALTY.BUY_PENALTY_FOR_POSITIVE) {
-        applyPenalty = true;
-        direction = 'positivo';
-    } else if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
-        applyPenalty = true;
-        direction = 'negativo';
+        const absFunding = funding;
+        if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.HIGH.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.HIGH.POINTS;
+            penaltyLevel = 'ALTO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.MEDIUM.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.MEDIUM.POINTS;
+            penaltyLevel = 'MÉDIO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.LOW.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.LOW.POINTS;
+            penaltyLevel = 'BAIXO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.VERY_LOW.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.VERY_LOW.POINTS;
+            penaltyLevel = 'MUITO BAIXO';
+        }
+        
+        if (penaltyPoints !== 0) {
+            const fundingSign = funding > 0 ? '+' : '';
+            const message = `⚠️ Funding positivo (${fundingSign}${fundingPercent.toFixed(4)}%) - Nível ${penaltyLevel} (${penaltyPoints})`;
+            return { hasPenalty: true, points: penaltyPoints, level: penaltyLevel, message };
+        }
     }
-    if (applyPenalty && penaltyPoints !== 0) {
-        const fundingSign = funding > 0 ? '+' : '';
-        const message = `⚠️ Funding ${direction} (${fundingSign}${fundingPercent.toFixed(4)}%) - Nível ${penaltyLevel} (${penaltyPoints})`;
-        return { hasPenalty: true, points: penaltyPoints, level: penaltyLevel, message };
+    
+    // PENALIDADE PARA VENDA (funding negativo)
+    if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
+        const absFunding = Math.abs(funding);
+        if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.HIGH.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.HIGH.POINTS;
+            penaltyLevel = 'ALTO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.MEDIUM.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.MEDIUM.POINTS;
+            penaltyLevel = 'MÉDIO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.LOW.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.LOW.POINTS;
+            penaltyLevel = 'BAIXO';
+        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.VERY_LOW.THRESHOLD) {
+            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.VERY_LOW.POINTS;
+            penaltyLevel = 'MUITO BAIXO';
+        }
+        
+        if (penaltyPoints !== 0) {
+            const fundingSign = funding > 0 ? '+' : '';
+            const message = `⚠️ Funding negativo (${fundingSign}${fundingPercent.toFixed(4)}%) - Nível ${penaltyLevel} (${penaltyPoints})`;
+            return { hasPenalty: true, points: penaltyPoints, level: penaltyLevel, message };
+        }
     }
+    
     return { hasPenalty: false, points: 0, message: '' };
 }
 
@@ -1319,15 +1355,15 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
         // === CCI SCORE ADJUSTMENT ===
         let cciScoreAdjustment = 0;
         // 4h CCI
-        if (isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment += 0.5;
-        if (isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment -= 0.5;
-        if (!isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment += 0.5;
-        if (!isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment -= 0.5;
+        if (isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment += 1.5;
+        if (isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment -= 1.5;
+        if (!isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment += 1.5;
+        if (!isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment -= 1.5;
         // Daily CCI
-        if (isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment += 0.5;
-        if (isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment -= 0.5;
-        if (!isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment += 0.5;
-        if (!isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment -= 0.5;
+        if (isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment += 1.5;
+        if (isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment -= 1.5;
+        if (!isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment += 1.5;
+        if (!isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment -= 1.5;
 
         confirmationScore += cciScoreAdjustment;
         totalPenalty += cciScoreAdjustment;
@@ -1408,7 +1444,7 @@ async function analyzeSymbol(symbol) {
 
         // Encontrar a divergência com maior score para usar seus dados gerais (como preço, indicadores)
         const bestDivergence = divergences.reduce((a, b) => a.confirmationScore > b.confirmationScore ? a : b);
-        const maxScore = bestDivergence.confirmationScore;
+        let maxScore = bestDivergence.confirmationScore;
         
         const bullishCount = divergences.filter(d => d.isGreenAlert).length;
         const bearishCount = divergences.filter(d => !d.isGreenAlert).length;
@@ -1450,6 +1486,43 @@ async function analyzeSymbol(symbol) {
             return [];
         }
         
+        // =====================================================================
+        // === PONTUAÇÃO DOS CLUSTERS (BÔNUS POR FORÇA) ===
+        // =====================================================================
+        let clusterScoreBonus = 0;
+        let clusterInfo = '';
+
+        // Calcula bônus para suporte (se estiver perto)
+        if (isNearSupport && supports.length > 0) {
+            const strongestSupport = supports.reduce((a, b) => a.touches > b.touches ? a : b);
+            // Bônus base: 0.3 por toque, máximo 2.0 pontos
+            let bonus = Math.min(2.0, strongestSupport.touches * 0.3);
+            clusterScoreBonus += bonus;
+            clusterInfo += ` 📈 Suporte +${bonus.toFixed(1)} (${strongestSupport.touches} toques)`;
+            log(`Cluster bonus SUPPORT: +${bonus} para ${symbol} (${strongestSupport.touches} toques)`, 'info');
+        }
+
+        // Calcula bônus para resistência (se estiver perto)
+        if (isNearResistance && resistances.length > 0) {
+            const strongestResistance = resistances.reduce((a, b) => a.touches > b.touches ? a : b);
+            // Bônus base: 0.3 por toque, máximo 2.0 pontos
+            let bonus = Math.min(2.0, strongestResistance.touches * 0.3);
+            clusterScoreBonus += bonus;
+            clusterInfo += ` 📉 Resistência +${bonus.toFixed(1)} (${strongestResistance.touches} toques)`;
+            log(`Cluster bonus RESISTANCE: +${bonus} para ${symbol} (${strongestResistance.touches} toques)`, 'info');
+        }
+
+        // Bônus adicional se houver MÚLTIPLOS clusters (mais confirmação)
+        if ((isNearSupport && supports.length >= 2) || (isNearResistance && resistances.length >= 2)) {
+            const multiBonus = 0.5;
+            clusterScoreBonus += multiBonus;
+            clusterInfo += ` 🔥 Multi-cluster +${multiBonus}`;
+            log(`Multi-cluster bonus: +${multiBonus} para ${symbol}`, 'info');
+        }
+
+        // Adiciona o bônus ao score final
+        maxScore += clusterScoreBonus;
+        
         // Verifica Bollinger
         const bollingerCheck = await checkBollingerCondition(symbol, isGreenAlert);
         if (!bollingerCheck.passed) {
@@ -1482,7 +1555,9 @@ async function analyzeSymbol(symbol) {
             timeframeEmoji: '✨',
             timeframeText: '#MULTI',
             direction: finalDirection,
-            confirmationScore: maxScore,
+            confirmationScore: maxScore,  // Score com bônus dos clusters
+            clusterBonus: clusterScoreBonus,  // Guarda o valor do bônus
+            clusterInfo: clusterInfo,  // Informação do bônus para log
             divergencesList: divergences.map(d => ({
                 timeframe: d.timeframe,
                 type: d.direction,
