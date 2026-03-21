@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8p
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     SCAN: {
         BATCH_SIZE: 8,
@@ -34,17 +34,17 @@ const CONFIG = {
         },
         COOLDOWN_BY_TIMEFRAME: {
             '15m': 30,
-            '30m': 45,
-            '1h': 60,
-            '2h': 90,
-            '4h': 120,
-            '12h': 180,
-            '1d': 240
+            '30m': 30,
+            '1h': 30,
+            '2h': 30,
+            '4h': 30,
+            '12h': 30,
+            '1d': 30
         },
         DAILY_LIMITS: {
-            TOP_10: 25,
-            TOP_50: 40,
-            OTHER: 55,
+            TOP_10: 35,
+            TOP_50: 50,
+            OTHER: 65,
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
@@ -148,8 +148,8 @@ const CONFIG = {
     },
     STOP_LOSS: {
         ATR_MULTIPLIER: {
-            '15m': 1.5, '30m': 1.8, '1h': 2.5, '2h': 2.8,
-            '4h': 3.0, '12h': 3.2, '1d': 3.5
+            '15m': 2.0, '30m': 2.3, '1h': 3.0, '2h': 3.3,
+            '4h': 3.5, '12h': 3.7, '1d': 4.0
         },
         STRUCTURE_MULTIPLIER: 0.15,
         USE_CLUSTER_ZONE: true,
@@ -175,6 +175,35 @@ const CONFIG = {
 // =====================================================================
 const LOG_DIR = './logs';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+
+// =====================================================================
+// === PERSISTÊNCIA DOS CONTADORES DIÁRIOS ===
+// =====================================================================
+const DAILY_COUNTER_FILE = path.join(__dirname, 'dailyCounters.json');
+
+function loadDailyCounters() {
+    try {
+        if (fs.existsSync(DAILY_COUNTER_FILE)) {
+            const data = fs.readFileSync(DAILY_COUNTER_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            for (const [key, value] of Object.entries(loaded)) {
+                dailyCounter.set(key, value);
+            }
+            log(`Carregados ${dailyCounter.size} contadores diários do arquivo`, 'info');
+        }
+    } catch (error) {
+        log(`Erro ao carregar contadores diários: ${error.message}`, 'error');
+    }
+}
+
+function saveDailyCounters() {
+    try {
+        const obj = Object.fromEntries(dailyCounter);
+        fs.writeFileSync(DAILY_COUNTER_FILE, JSON.stringify(obj, null, 2));
+    } catch (error) {
+        log(`Erro ao salvar contadores diários: ${error.message}`, 'error');
+    }
+}
 
 // =====================================================================
 // === CACHE INTELIGENTE ===
@@ -1068,6 +1097,7 @@ function registerAlert(symbol, direction, price, timeframe) {
     alertCache.set(priceKey, { price, timestamp: now });
     const newCount = (dailyCounter.get(dailyKey) || 0) + 1;
     dailyCounter.set(dailyKey, newCount);
+    saveDailyCounters(); // Persistência
     alertsSentThisScan++;
     for (const [k, v] of alertCache) {
         if (now - v.timestamp > 48 * 60 * 60 * 1000) alertCache.delete(k);
@@ -1285,6 +1315,22 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
             confirmationScore -= excess;
             totalPenalty = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
         }
+
+        // === CCI SCORE ADJUSTMENT ===
+        let cciScoreAdjustment = 0;
+        // 4h CCI
+        if (isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment += 0.5;
+        if (isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment -= 0.5;
+        if (!isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment += 0.5;
+        if (!isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment -= 0.5;
+        // Daily CCI
+        if (isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment += 0.5;
+        if (isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment -= 0.5;
+        if (!isGreenAlert && additional.cciDaily.trend === 'BAIXA') cciScoreAdjustment += 0.5;
+        if (!isGreenAlert && additional.cciDaily.trend === 'ALTA') cciScoreAdjustment -= 0.5;
+
+        confirmationScore += cciScoreAdjustment;
+        totalPenalty += cciScoreAdjustment;
 
         return {
             symbol,
@@ -1533,7 +1579,7 @@ function formatAlert(data) {
     const dailyCount = data.displayDailyCount || (dailyCounter.get(`${data.symbol}_daily`) || 0);
     
     return `<i>${data.direction} - ${symbolName} | ${time.time}
-💲 ${formatPrice(data.price)}
+💲 ${formatPrice(data.price)} | Score: ${data.confirmationScore.toFixed(1)}
 🔍 ${divergencesText}
 ${targets}
 ${stop}
@@ -1549,7 +1595,8 @@ CCI 1D:${cciDailyText}
 ${supportLine ? supportLine : ''}
 ${resistanceLine ? resistanceLine : ''}
 ${data.lsrPenalty ? `⚠️ LSR ${data.lsrValue.toFixed(2)}` : ''}${data.fundingPenalty ? ` ⚠️ Funding ${fundingSign}${fundingPct}%` : ''}${data.totalPenalty < 0 ? ` ⚠️ Penal: ${data.totalPenalty}` : ''}
-
+ 
+🤖...Alerta Educativo, não é recomendação de investimento.
 Titanium Prime by @J4Rviz</i>`;
 }
 
@@ -1582,6 +1629,7 @@ async function startScanner() {
         const now = new Date();
         if (now.getHours() === 0 && now.getMinutes() === 0) {
             dailyCounter.clear();
+            saveDailyCounters(); // Limpa arquivo ao resetar
             log('Contadores diários resetados', 'info');
         }
     }, 60000);
@@ -1609,5 +1657,8 @@ async function startScanner() {
         }
     }
 }
+
+// Carrega contadores diários do arquivo antes de iniciar o scanner
+loadDailyCounters();
 
 startScanner().catch(console.error);
