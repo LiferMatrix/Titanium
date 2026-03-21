@@ -5,15 +5,15 @@ require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS (AJUSTADAS PARA MAIOR LENTIDÃO) ===
+// === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSy
-        CHAT_ID: '-10025549
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     SCAN: {
-        BATCH_SIZE: 3,
+        BATCH_SIZE: 8,
         SYMBOL_DELAY_MS: 5000,
         REQUEST_TIMEOUT: 10000,
         COOLDOWN_AFTER_BATCH_MS: 2000,
@@ -81,12 +81,15 @@ const CONFIG = {
             MIN_BB_WIDTH_PERCENT: 1.2,
             CHECK_TIMEFRAMES: ['1h', '4h', '1d']
         },
-        // Configuração para proximidade de suporte/resistência
-        PROXIMITY_THRESHOLD_PERCENT: 1.5  // distância máxima em % para considerar "perto"
+        PROXIMITY_THRESHOLD_PERCENT: 1.5,
+        BOLLINGER: {
+            ENABLED: true,
+            PERIOD: 20,
+            STD_DEV: 2.0,
+            TIMEFRAME: '15m'
+        }
     },
-    VOLUME: {
-        EMA_PERIOD: 9
-    },
+    VOLUME: { EMA_PERIOD: 9 },
     RSI: {
         PERIOD: 14,
         OVERSOLD: 30,
@@ -116,26 +119,11 @@ const CONFIG = {
         }
     },
     STOCHASTIC: {
-        DAILY: {
-            K_PERIOD: 5,
-            K_SMOOTH: 3,
-            D_PERIOD: 3
-        },
-        FOUR_HOUR: {
-            K_PERIOD: 14,
-            K_SMOOTH: 3,
-            D_PERIOD: 3
-        },
-        ONE_HOUR: {
-            K_PERIOD: 14,
-            K_SMOOTH: 3,
-            D_PERIOD: 3
-        }
+        DAILY: { K_PERIOD: 5, K_SMOOTH: 3, D_PERIOD: 3 },
+        FOUR_HOUR: { K_PERIOD: 14, K_SMOOTH: 3, D_PERIOD: 3 },
+        ONE_HOUR: { K_PERIOD: 14, K_SMOOTH: 3, D_PERIOD: 3 }
     },
-    CCI: {
-        PERIOD: 20,
-        EMA_PERIOD: 5
-    },
+    CCI: { PERIOD: 20, EMA_PERIOD: 5 },
     REVERSAL: {
         MIN_CONFIRMATION_SCORE: 3,
         VOLUME_THRESHOLD: 1.2,
@@ -150,18 +138,9 @@ const CONFIG = {
     FUNDING_PENALTY: {
         ENABLED: true,
         LEVELS: {
-            LOW: {
-                THRESHOLD: 0.0015,
-                POINTS: -2
-            },
-            MEDIUM: {
-                THRESHOLD: 0.003,
-                POINTS: -3
-            },
-            HIGH: {
-                THRESHOLD: 0.006,
-                POINTS: -4
-            }
+            LOW: { THRESHOLD: 0.0015, POINTS: -2 },
+            MEDIUM: { THRESHOLD: 0.003, POINTS: -3 },
+            HIGH: { THRESHOLD: 0.006, POINTS: -4 }
         },
         BUY_PENALTY_FOR_POSITIVE: true,
         SELL_PENALTY_FOR_NEGATIVE: true,
@@ -169,35 +148,25 @@ const CONFIG = {
     },
     STOP_LOSS: {
         ATR_MULTIPLIER: {
-            '15m': 1.5,
-            '30m': 1.8,
-            '1h': 2.5,
-            '2h': 2.8,
-            '4h': 3.0,
-            '12h': 3.2,
-            '1d': 3.5
+            '15m': 1.5, '30m': 1.8, '1h': 2.5, '2h': 2.8,
+            '4h': 3.0, '12h': 3.2, '1d': 3.5
         },
         STRUCTURE_MULTIPLIER: 0.15,
         USE_CLUSTER_ZONE: true,
         CLUSTER_ZONE_MULTIPLIER: 0.1,
         MIN_STOP_DISTANCE_PERCENT: {
-            '15m': 1.0,
-            '30m': 1.2,
-            '1h': 1.5,
-            '2h': 2.0,
-            '4h': 2.5,
-            '12h': 3.0,
-            '1d': 4.0
+            '15m': 1.0, '30m': 1.2, '1h': 1.5, '2h': 2.0,
+            '4h': 2.5, '12h': 3.0, '1d': 4.0
         },
         MAX_STOP_DISTANCE_PERCENT: {
-            '15m': 3.0,
-            '30m': 3.5,
-            '1h': 5.0,
-            '2h': 6.0,
-            '4h': 8.0,
-            '12h': 10.0,
-            '1d': 12.0
+            '15m': 3.0, '30m': 3.5, '1h': 5.0, '2h': 6.0,
+            '4h': 8.0, '12h': 10.0, '1d': 12.0
         }
+    },
+    TARGETS: {
+        TP1_MULTIPLIER: 1.0,
+        TP2_MULTIPLIER: 1.5,
+        TP3_MULTIPLIER: 2.0
     }
 };
 
@@ -290,11 +259,9 @@ function log(message, type = 'info') {
 // Caches
 const alertCache = new Map();
 const dailyCounter = new Map();
-const symbolMetadata = new Map();
 let currentTopSymbols = [];
 
 // Filas
-const telegramQueue = [];
 const priorityQueue = { critical: [], high: [], medium: [], low: [] };
 let isSendingTelegram = false;
 let alertsSentThisScan = 0;
@@ -523,30 +490,20 @@ function formatStochastic(stoch) {
     return `K${Math.round(k)}${k > d ? '⤴️' : '⤵️'}D${Math.round(d)} ${emoji}`;
 }
 
-// =====================================================================
-// === FUNÇÃO CCI COM EMA ===
-// =====================================================================
 function calculateCCIWithEMA(candles, period = 20, emaPeriod = 5) {
     if (!candles || candles.length < period + emaPeriod) {
         return { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' };
     }
-    
-    // Calcular Typical Price (TP) = (High + Low + Close) / 3
     const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
-    
-    // Calcular SMA do Typical Price
     const cciValues = [];
     for (let i = period - 1; i < typicalPrices.length; i++) {
         const tpSlice = typicalPrices.slice(i - period + 1, i + 1);
         const sma = tpSlice.reduce((a, b) => a + b, 0) / period;
-        
-        // Calcular Mean Deviation
         let meanDeviation = 0;
         for (let j = 0; j < tpSlice.length; j++) {
             meanDeviation += Math.abs(tpSlice[j] - sma);
         }
         meanDeviation = meanDeviation / period;
-        
         if (meanDeviation === 0) {
             cciValues.push(0);
         } else {
@@ -554,12 +511,8 @@ function calculateCCIWithEMA(candles, period = 20, emaPeriod = 5) {
             cciValues.push(cci);
         }
     }
-    
     if (cciValues.length === 0) return { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' };
-    
     const currentCCI = cciValues[cciValues.length - 1];
-    
-    // Calcular EMA do CCI
     const emaValues = [];
     if (cciValues.length >= emaPeriod) {
         let ema = cciValues.slice(0, emaPeriod).reduce((a, b) => a + b, 0) / emaPeriod;
@@ -570,53 +523,34 @@ function calculateCCIWithEMA(candles, period = 20, emaPeriod = 5) {
             emaValues.push(ema);
         }
         const currentEMA = emaValues[emaValues.length - 1];
-        
-        // Determinar tendência baseada no cruzamento
         let trend = 'Neutro';
         let emoji = '⚪';
         let text = '';
-        
         if (cciValues.length >= 2) {
             const prevCCI = cciValues[cciValues.length - 2];
             const prevEMA = emaValues.length >= 2 ? emaValues[emaValues.length - 2] : currentEMA;
-            
-            // Cruzamento para cima
             if (prevCCI <= prevEMA && currentCCI > currentEMA) {
                 trend = 'ALTA';
                 emoji = '💹';
                 text = `CCI ${trend} ${emoji}`;
-            }
-            // Cruzamento para baixo
-            else if (prevCCI >= prevEMA && currentCCI < currentEMA) {
+            } else if (prevCCI >= prevEMA && currentCCI < currentEMA) {
                 trend = 'BAIXA';
                 emoji = '🔴';
                 text = `CCI ${trend} ${emoji}`;
-            }
-            // Mantendo tendência
-            else if (currentCCI > currentEMA) {
+            } else if (currentCCI > currentEMA) {
                 trend = 'ALTA';
                 emoji = '💹';
                 text = `CCI ${trend} ${emoji}`;
-            }
-            else if (currentCCI < currentEMA) {
+            } else if (currentCCI < currentEMA) {
                 trend = 'BAIXA';
                 emoji = '🔴';
                 text = `CCI ${trend} ${emoji}`;
-            }
-            else {
+            } else {
                 text = `CCI Neutro ⚪`;
             }
         }
-        
-        return {
-            cci: currentCCI,
-            ema: currentEMA,
-            trend,
-            emoji,
-            text: text || `CCI ${currentCCI.toFixed(0)} | EMA ${currentEMA.toFixed(0)}`
-        };
+        return { cci: currentCCI, ema: currentEMA, trend, emoji, text: text || `CCI ${currentCCI.toFixed(0)} | EMA ${currentEMA.toFixed(0)}` };
     }
-    
     return { cci: currentCCI, ema: 0, trend: 'Neutro', emoji: '⚪', text: `CCI ${currentCCI.toFixed(0)}` };
 }
 
@@ -760,30 +694,6 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
     return divergences;
 }
 
-function checkRSIDivergenceMultiTimeframe(candlesByTimeframe) {
-    const allDivergences = [];
-    let totalScore = 0;
-    for (const tf of CONFIG.RSI_DIVERGENCE.TIMEFRAMES) {
-        const candles = candlesByTimeframe[tf];
-        if (!candles || candles.length < 40) continue;
-        const rsiValues = [];
-        const prices = [];
-        for (let i = CONFIG.RSI.PERIOD; i < candles.length; i++) {
-            rsiValues.push(calculateRSI(candles.slice(0, i + 1), CONFIG.RSI.PERIOD));
-            prices.push(candles[i].close);
-        }
-        if (rsiValues.length < 25) continue;
-        const divergences = detectAdvancedDivergences(prices, rsiValues, tf);
-        for (const div of divergences) {
-            allDivergences.push(div);
-            totalScore += div.score;
-        }
-    }
-    allDivergences.sort((a, b) => b.score - a.score);
-    return { hasDivergence: allDivergences.length > 0, divergences: allDivergences,
-             totalScore: Math.round(totalScore * 10) / 10 };
-}
-
 // =====================================================================
 // === FUNÇÕES ADICIONAIS (LSR, Funding, Stop Loss, etc.) ===
 // =====================================================================
@@ -866,12 +776,27 @@ async function check15MinVolatility(symbol) {
     }
 }
 
-function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candles) {
+// Função auxiliar para calcular stop e alvos
+function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
     if (!candles || candles.length < 20) {
         const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.0;
         const defaultAtr = currentPrice * 0.02;
-        return isGreenAlert ? currentPrice - defaultAtr * atrMultiplier : currentPrice + defaultAtr * atrMultiplier;
+        const stop = isGreenAlert ? currentPrice - defaultAtr * atrMultiplier : currentPrice + defaultAtr * atrMultiplier;
+        const atr = defaultAtr;
+        let tp1, tp2, tp3;
+        if (isGreenAlert) {
+            tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+        } else {
+            tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+        }
+        return { stop, tp1, tp2, tp3 };
     }
+
+    // Calcula ATR
     const trValues = [];
     for (let i = 1; i < candles.length; i++) {
         const high = candles[i].high;
@@ -879,11 +804,12 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         const prevClose = candles[i-1].close;
         trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
     }
-    const atrPeriod = 14;
-    const recentTR = trValues.slice(-atrPeriod);
-    const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
-    const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5;
-    let stopPrice = isGreenAlert ? currentPrice - (atr * atrMultiplier) : currentPrice + (atr * atrMultiplier);
+    const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
+
+    // Stop loss com ajuste por estrutura
+    let stopPrice = isGreenAlert ? currentPrice - (atr * (CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5))
+                                 : currentPrice + (atr * (CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5));
+
     const lookback = timeframe === '1d' ? 20 : (timeframe === '4h' ? 30 : 40);
     const relevantCandles = candles.slice(-lookback);
     let structureLow = Math.min(...relevantCandles.map(c => c.low));
@@ -905,8 +831,7 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
             if (touches > maxTouches) { maxTouches = touches; clusterZone = priceNum; }
         }
     });
-    const clusterZoneDistance = Math.abs(currentPrice - clusterZone) / currentPrice * 100;
-    const clusterBuffer = clusterZoneDistance * CONFIG.STOP_LOSS.CLUSTER_ZONE_MULTIPLIER;
+
     if (isGreenAlert) {
         const clusterAdjustedStop = Math.min(stopPrice, clusterZone - (clusterZone * 0.002));
         if (clusterZone < currentPrice) stopPrice = Math.min(stopPrice, clusterAdjustedStop);
@@ -924,7 +849,74 @@ function calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candl
         if (stopDistance < minDistance) stopPrice = currentPrice * (1 + minDistance / 100);
         else if (stopDistance > maxDistance) stopPrice = currentPrice * (1 + maxDistance / 100);
     }
-    return stopPrice;
+
+    // Alvos baseados no ATR (agora com a direção correta)
+    let tp1, tp2, tp3;
+    if (isGreenAlert) {
+        tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+    } else {
+        tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+    }
+
+    return { stop: stopPrice, tp1, tp2, tp3 };
+}
+
+// =====================================================================
+// === BOLLINGER BANDS (15m) ===
+// =====================================================================
+function calculateBollingerBands(candles, period, stdDev) {
+    if (!candles || candles.length < period) {
+        return { upper: null, middle: null, lower: null };
+    }
+    const closes = candles.map(c => c.close);
+    const sma = closes.slice(-period).reduce((a, b) => a + b, 0) / period;
+    const variance = closes.slice(-period).reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) / period;
+    const sd = Math.sqrt(variance);
+    const upper = sma + (stdDev * sd);
+    const lower = sma - (stdDev * sd);
+    return { upper, middle: sma, lower };
+}
+
+async function checkBollingerCondition(symbol, isGreenAlert) {
+    if (!CONFIG.ALERTS.BOLLINGER.ENABLED) return { passed: true, message: '' };
+    try {
+        const candles = await getCandles(symbol, CONFIG.ALERTS.BOLLINGER.TIMEFRAME, CONFIG.ALERTS.BOLLINGER.PERIOD + 5);
+        if (!candles || candles.length < CONFIG.ALERTS.BOLLINGER.PERIOD) {
+            return { passed: false, message: 'Dados insuficientes para Bollinger Bands' };
+        }
+        const bb = calculateBollingerBands(candles, CONFIG.ALERTS.BOLLINGER.PERIOD, CONFIG.ALERTS.BOLLINGER.STD_DEV);
+        if (bb.upper === null || bb.lower === null) {
+            return { passed: false, message: 'Falha no cálculo das Bollinger Bands' };
+        }
+        const currentPrice = candles[candles.length - 1].close;
+        let passed = false;
+        let message = '';
+        if (isGreenAlert) {
+            passed = currentPrice <= bb.lower;
+            if (!passed) {
+                const diffPercent = ((currentPrice - bb.lower) / bb.lower) * 100;
+                message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)}) - distância +${diffPercent.toFixed(2)}%`;
+            } else {
+                message = `✅ Preço abaixo da banda inferior ($${formatPrice(currentPrice)} < $${formatPrice(bb.lower)})`;
+            }
+        } else {
+            passed = currentPrice >= bb.upper;
+            if (!passed) {
+                const diffPercent = ((bb.upper - currentPrice) / currentPrice) * 100;
+                message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)}) - distância -${diffPercent.toFixed(2)}%`;
+            } else {
+                message = `✅ Preço acima da banda superior ($${formatPrice(currentPrice)} > $${formatPrice(bb.upper)})`;
+            }
+        }
+        return { passed, message, bands: bb };
+    } catch (error) {
+        log(`Erro ao verificar Bollinger para ${symbol}: ${error.message}`, 'error');
+        return { passed: false, message: 'Erro na verificação Bollinger' };
+    }
 }
 
 // =====================================================================
@@ -949,22 +941,10 @@ async function getCandles(symbol, interval, limit = 100) {
 }
 
 // =====================================================================
-// === DADOS ADICIONAIS ===
+// === DADOS ADICIONAIS (recebe os candles já buscados) ===
 // =====================================================================
-async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
+async function getAdditionalData(symbol, currentPrice, candles1h, candles3m, candlesDaily, candles4h, candles15m) {
     try {
-        const [candles1h, candles3m, candlesDaily, candles4h, candlesWeekly, candles15m, candles2h,
-               candles30m, candles12h] = await Promise.all([
-            getCandles(symbol, '1h', 100),
-            getCandles(symbol, '3m', 100),
-            getCandles(symbol, '1d', 100),
-            getCandles(symbol, '4h', 100),
-            getCandles(symbol, '1w', 50),
-            getCandles(symbol, '15m', 100),
-            getCandles(symbol, '2h', 100),
-            getCandles(symbol, '30m', 100),
-            getCandles(symbol, '12h', 100)
-        ]);
         const volume1h = analyzeVolumeWithEMA(candles1h);
         const volume3m = analyzeVolumeWithEMA(candles3m);
         const rsi = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
@@ -978,7 +958,6 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
         const stoch4hFormatted = formatStochastic(stoch4h);
         const stoch1hFormatted = formatStochastic(stoch1h);
         
-        // CCI para 4h e Daily
         const cci4h = calculateCCIWithEMA(candles4h, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
         const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
         
@@ -1016,16 +995,7 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
                         direction: volume3m.direction, emoji: volume3m.emoji, ratioFormatted: volumeRatio3m.toFixed(2) },
             volume24h: { pct: volume24hPct, text: volume1h.text, usdt: volume24hUSDT },
             trendStrength, lsr, funding,
-            candlesByTimeframe: {
-                '15m': candles15m.slice(-50),
-                '30m': candles30m.slice(-50),
-                '1h': candles1h.slice(-50),
-                '2h': candles2h.slice(-50),
-                '4h': candles4h.slice(-50),
-                '12h': candles12h.slice(-50),
-                '1d': candlesDaily.slice(-50)
-            },
-            candles4h, candles1h, candlesDaily, candles15m
+            candles1h, candles4h, candlesDaily, candles15m
         };
     } catch (error) {
         log(`Erro em getAdditionalData para ${symbol}: ${error.message}`, 'error');
@@ -1038,117 +1008,54 @@ async function getAdditionalData(symbol, currentPrice, isGreenAlert) {
             volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00' },
             volume24h: { pct: '0%', text: '⚪Neutro', usdt: 0 },
             trendStrength: 0, lsr: null, funding: null,
-            candlesByTimeframe: { '15m': [], '30m': [], '1h': [], '2h': [], '4h': [], '12h': [], '1d': [] },
-            candles4h: [], candles1h: [], candlesDaily: [], candles15m: []
+            candles1h: [], candles4h: [], candlesDaily: [], candles15m: []
         };
     }
 }
 
 // =====================================================================
-// === VERIFICAÇÃO DE AVISOS (apenas coleta, não bloqueia) ===
+// === VERIFICAÇÃO DE COOLDOWN (BLOQUEIA) ===
 // =====================================================================
-function checkAlertWarnings(symbol, direction, price, score, volumeRatio, volumeUSDT, volume24hUSDT,
-                            trendStrength, rsi, volumePercentage, timeframe, additional) {
+function isCooldownActive(symbol, direction, timeframe) {
     const now = Date.now();
-    const warnings = [];
-
-    const symbolKey = `${symbol}_ANY`;
-    const lastAnyAlert = alertCache.get(symbolKey);
-    if (lastAnyAlert) {
-        const minutesDiff = (now - lastAnyAlert.timestamp) / (1000 * 60);
+    const globalKey = `${symbol}_ANY`;
+    const lastGlobal = alertCache.get(globalKey);
+    if (lastGlobal) {
+        const minutesDiff = (now - lastGlobal.timestamp) / (1000 * 60);
         if (minutesDiff < 30) {
-            warnings.push(`⏱️ Cooldown global: ${minutesDiff.toFixed(1)}min < 30min`);
+            log(`⏱️ Cooldown global ativo para ${symbol} (${minutesDiff.toFixed(1)}min < 30min)`, 'warning');
+            return true;
         }
     }
-
-    const key = `${symbol}_${direction}_${timeframe}`;
-    const lastAlert = alertCache.get(key);
-    if (lastAlert) {
-        const minutesDiff = (now - lastAlert.timestamp) / (1000 * 60);
-        const requiredCooldown = CONFIG.ALERTS.COOLDOWN_BY_TIMEFRAME[timeframe] || 30;
-        if (minutesDiff < requiredCooldown) {
-            warnings.push(`⏱️ Cooldown ${timeframe}: ${minutesDiff.toFixed(1)}min < ${requiredCooldown}min`);
+    const specificKey = `${symbol}_${direction}_${timeframe}`;
+    const lastSpecific = alertCache.get(specificKey);
+    if (lastSpecific) {
+        const minutesDiff = (now - lastSpecific.timestamp) / (1000 * 60);
+        const required = CONFIG.ALERTS.COOLDOWN_BY_TIMEFRAME[timeframe] || 30;
+        if (minutesDiff < required) {
+            log(`⏱️ Cooldown ${timeframe} ativo para ${symbol} ${direction} (${minutesDiff.toFixed(1)}min < ${required}min)`, 'warning');
+            return true;
         }
     }
-
-    // Se direction for null (alerta múltiplo), não faz verificações de direção
-    if (direction) {
-        if (direction === 'COMPRA' && rsi > CONFIG.ALERTS.RSI.BUY_MAX) {
-            warnings.push(`📊 RSI alto para compra: ${rsi} > ${CONFIG.ALERTS.RSI.BUY_MAX}`);
-        }
-        if (direction === 'VENDA' && rsi < CONFIG.ALERTS.RSI.SELL_MIN) {
-            warnings.push(`📊 RSI baixo para venda: ${rsi} < ${CONFIG.ALERTS.RSI.SELL_MIN}`);
-        }
-
-        if (direction === 'COMPRA') {
-            if (volumePercentage < CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE) {
-                warnings.push(`📉 Volume NÃO está comprador: ${volumePercentage.toFixed(1)}% < ${CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE}%`);
-            }
-        } else if (direction === 'VENDA') {
-            if (volumePercentage > CONFIG.ALERTS.VOLUME_DIRECTION.SELL_MAX_PERCENTAGE) {
-                warnings.push(`📉 Volume NÃO está vendedor: ${(100 - volumePercentage).toFixed(1)}% vendedor < ${100 - CONFIG.ALERTS.VOLUME_DIRECTION.SELL_MAX_PERCENTAGE}%`);
-            }
-        }
-    }
-
-    if (score < CONFIG.ALERTS.MIN_SCORE_TO_ALERT) {
-        warnings.push(`⚠️ Score baixo: ${score} < ${CONFIG.ALERTS.MIN_SCORE_TO_ALERT}`);
-    }
-
-    const dailyKey = `${symbol}_daily`;
-    const dailyCount = (dailyCounter.get(dailyKey) || 0);
-    const dailyLimit = getDailyLimit(symbol);
-    if (dailyCount >= dailyLimit) {
-        warnings.push(`📅 Limite diário atingido: ${dailyCount}/${dailyLimit}`);
-    } else {
-        warnings.push(`📅 Alertas hoje: ${dailyCount}/${dailyLimit}`);
-    }
-
-    if (volumeRatio < CONFIG.ALERTS.MIN_VOLUME_RATIO) {
-        warnings.push(`📊 Volume ratio baixo: ${volumeRatio.toFixed(2)}x < ${CONFIG.ALERTS.MIN_VOLUME_RATIO}x`);
-    }
-
-    if (volumeUSDT < CONFIG.ALERTS.MIN_VOLUME_USDT) {
-        warnings.push(`💰 Volume USDT baixo: $${formatPrice(volumeUSDT)} < $${CONFIG.ALERTS.MIN_VOLUME_USDT}`);
-    }
-
-    if (volume24hUSDT < CONFIG.ALERTS.MIN_24H_VOLUME_USDT) {
-        warnings.push(`💰 Volume 24h baixo: $${formatPrice(volume24hUSDT)} < $${CONFIG.ALERTS.MIN_24H_VOLUME_USDT}`);
-    }
-
-    if (trendStrength < CONFIG.ALERTS.MIN_TREND_STRENGTH) {
-        warnings.push(`📈 Tendência fraca: ${trendStrength.toFixed(2)} < ${CONFIG.ALERTS.MIN_TREND_STRENGTH}`);
-    }
-
-    const priceKey = `${symbol}_price`;
-    const lastPriceData = alertCache.get(priceKey);
-    if (lastPriceData) {
-        const priceDiff = Math.abs((price - lastPriceData.price) / lastPriceData.price * 100);
-        if (priceDiff < CONFIG.ALERTS.PRICE_DEVIATION) {
-            warnings.push(`💰 Variação de preço pequena: ${priceDiff.toFixed(2)}% < ${CONFIG.ALERTS.PRICE_DEVIATION}%`);
-        }
-    }
-
-    if (alertsSentThisScan >= CONFIG.ALERTS.MAX_ALERTS_PER_SCAN) {
-        warnings.push(`🚫 Limite de alertas deste scan atingido: ${alertsSentThisScan}/${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
-    }
-
-    if (additional && additional.volatilityWarning) {
-        warnings.push(additional.volatilityWarning);
-    }
-
-    if (additional && additional.lsrPenalty && additional.lsrPenalty.hasPenalty) {
-        warnings.push(additional.lsrPenalty.message);
-    }
-    if (additional && additional.fundingPenalty && additional.fundingPenalty.hasPenalty) {
-        warnings.push(additional.fundingPenalty.message);
-    }
-
-    return warnings;
+    return false;
 }
 
 // =====================================================================
-// === REGISTRAR ALERTA ===
+// === VERIFICAÇÃO DE LIMITE DIÁRIO (BLOQUEIA) ===
+// =====================================================================
+function isDailyLimitReached(symbol) {
+    const dailyKey = `${symbol}_daily`;
+    const count = dailyCounter.get(dailyKey) || 0;
+    const limit = getDailyLimit(symbol);
+    if (count >= limit) {
+        log(`📅 Limite diário atingido para ${symbol}: ${count}/${limit}`, 'warning');
+        return true;
+    }
+    return false;
+}
+
+// =====================================================================
+// === REGISTRAR ALERTA (INCREMENTA CONTADOR) ===
 // =====================================================================
 function registerAlert(symbol, direction, price, timeframe) {
     const now = Date.now();
@@ -1159,13 +1066,14 @@ function registerAlert(symbol, direction, price, timeframe) {
     alertCache.set(key, { timestamp: now, timeframe, direction });
     alertCache.set(symbolKey, { timestamp: now, timeframe: 'ANY', direction });
     alertCache.set(priceKey, { price, timestamp: now });
-    const dailyCount = (dailyCounter.get(dailyKey) || 0) + 1;
-    dailyCounter.set(dailyKey, dailyCount);
+    const newCount = (dailyCounter.get(dailyKey) || 0) + 1;
+    dailyCounter.set(dailyKey, newCount);
     alertsSentThisScan++;
     for (const [k, v] of alertCache) {
         if (now - v.timestamp > 48 * 60 * 60 * 1000) alertCache.delete(k);
     }
-    log(`Registrado alerta ${symbol} ${direction} [${timeframe}] #${dailyCount} do dia`, 'success');
+    log(`Registrado alerta ${symbol} ${direction} [${timeframe}] #${newCount} do dia`, 'success');
+    return newCount;
 }
 
 // =====================================================================
@@ -1213,10 +1121,10 @@ async function sendSingleAlert(alert) {
             const errorData = await response.text();
             log(`Erro Telegram: ${response.status}`, 'error');
         } else {
-            // Usar direção e timeframe apropriados
-            let dir = alert.direction.includes('ALTA') ? 'COMPRA' : (alert.direction.includes('BAIXA') ? 'VENDA' : 'MULTI');
-            let tf = alert.timeframe === 'MULTI' ? 'MULTI' : alert.timeframe;
-            registerAlert(alert.symbol, dir, alert.price, tf);
+            const direction = alert.direction.includes('COMPRA') ? 'COMPRA' : 'VENDA';
+            const tf = alert.timeframe === 'MULTI' ? 'MULTI' : alert.timeframe;
+            const newCount = registerAlert(alert.symbol, direction, alert.price, tf);
+            alert.displayDailyCount = newCount;
             const penaltyIcon = alert.totalPenalty < 0 ? '⚠️' : '✅';
             log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
         }
@@ -1229,8 +1137,8 @@ async function sendSingleAlert(alert) {
 
 async function sendGroupedAlerts(alerts, priority) {
     if (alerts.length === 0) return;
-    const buyAlerts = alerts.filter(a => a.isGreenAlert);
-    const sellAlerts = alerts.filter(a => !a.isGreenAlert);
+    const buyAlerts = alerts.filter(a => a.direction.includes('COMPRA'));
+    const sellAlerts = alerts.filter(a => a.direction.includes('CORREÇÃO'));
     let message = `<i>📊 **ALERTAS AGRUPADOS (${priority.toUpperCase()})**\n\n`;
     if (buyAlerts.length > 0) {
         message += `🟢 **COMPRA** (${buyAlerts.length})\n`;
@@ -1264,7 +1172,7 @@ async function sendGroupedAlerts(alerts, priority) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA IDENTIFICAR CLUSTERS DE SUPORTE E RESISTÊNCIA (CORRIGIDA) ===
+// === FUNÇÃO PARA IDENTIFICAR CLUSTERS DE SUPORTE E RESISTÊNCIA ===
 // =====================================================================
 function findClusterLevels(candles, currentPrice, tolerancePercent = 0.5, maxClusters = 2) {
     const allSupports = [];
@@ -1320,9 +1228,9 @@ function findClusterLevels(candles, currentPrice, tolerancePercent = 0.5, maxClu
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME (RETORNA OS DADOS DE DIVERGÊNCIA) ===
+// === ANALISAR TIMEFRAME (usa candles já carregados) ===
 // =====================================================================
-async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
+async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles) {
     try {
         if (!candles || candles.length < 40) return null;
         const currentPrice = candles[candles.length - 1].close;
@@ -1341,7 +1249,14 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
 
         const clusters = findClusterLevels(candles, currentPrice, 0.5, 2);
 
-        const additional = await getAdditionalData(symbol, currentPrice, isGreenAlert);
+        // Usar os candles já carregados (passados via allCandles)
+        const candles1h = allCandles['1h'];
+        const candles3m = allCandles['3m'];
+        const candlesDaily = allCandles['1d'];
+        const candles4h = allCandles['4h'];
+        const candles15m = allCandles['15m'];
+
+        const additional = await getAdditionalData(symbol, currentPrice, candles1h, candles3m, candlesDaily, candles4h, candles15m);
         const volumePercentage = additional.volume1h.percentage;
 
         let volatilityWarning = null;
@@ -1371,42 +1286,6 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
             totalPenalty = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
         }
 
-        const warnings = checkAlertWarnings(
-            symbol, direction, currentPrice, confirmationScore,
-            additional.volume1h.ratio, additional.volume1h.usdt,
-            additional.volume24h.usdt, additional.trendStrength,
-            additional.rsi, volumePercentage, timeframe,
-            { volatilityWarning, lsrPenalty, fundingPenalty }
-        );
-
-        let candlesForStop;
-        if (timeframe === '1d') candlesForStop = additional.candlesDaily;
-        else if (timeframe === '4h') candlesForStop = additional.candles4h;
-        else candlesForStop = additional.candles1h;
-        const stopLoss = calculateProtectedStopLoss(currentPrice, isGreenAlert, timeframe, candlesForStop);
-        const trValues = [];
-        for (let i = 1; i < candlesForStop.length; i++) {
-            const high = candlesForStop[i].high;
-            const low = candlesForStop[i].low;
-            const prevClose = candlesForStop[i-1].close;
-            trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
-        }
-        const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
-        const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 2.5;
-        let tp1, tp2, tp3;
-        if (isGreenAlert) {
-            tp1 = currentPrice + atr * atrMultiplier;
-            tp2 = currentPrice + atr * (atrMultiplier * 1.5);
-            tp3 = currentPrice + atr * (atrMultiplier * 2);
-        } else {
-            tp1 = currentPrice - atr * atrMultiplier;
-            tp2 = currentPrice - atr * (atrMultiplier * 1.5);
-            tp3 = currentPrice - atr * (atrMultiplier * 2);
-        }
-
-        const dailyCount = dailyCounter.get(`${symbol}_daily`) || 0;
-
-        // Retornar um objeto com todos os dados relevantes para agregação
         return {
             symbol,
             timeframe,
@@ -1414,8 +1293,6 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
             timeframeText: `#${timeframe.toUpperCase()}`,
             direction: isGreenAlert ? '🟢🔍 Divergência de ALTA' : '🔴🔍 Divergência de BAIXA',
             price: currentPrice,
-            stopLoss, tp1, tp2, tp3,
-            dailyCount: dailyCount + 1,
             isGreenAlert,
             confirmationScore,
             confirmations: `Divergência ${bestDiv.subtype} (${bestDiv.emoji}) com score ${bestDiv.score}`,
@@ -1429,12 +1306,10 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
             lsrValue: additional.lsr,
             fundingValue: additional.funding,
             usedTimeframe: timeframe,
-            warnings,
             supports: clusters.supports,
             resistances: clusters.resistances,
             cci4h: additional.cci4h,
             cciDaily: additional.cciDaily,
-            // Dados comuns (pegamos do additional)
             rsi: additional.rsi,
             stoch1d: additional.stoch1d,
             stoch4h: additional.stoch4h,
@@ -1443,11 +1318,9 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
             volume3m: additional.volume3m,
             volume24h: additional.volume24h,
             trendStrength: additional.trendStrength,
-            candlesByTimeframe: additional.candlesByTimeframe,
-            candles4h: additional.candles4h,
-            candles1h: additional.candles1h,
-            candlesDaily: additional.candlesDaily,
-            candles15m: additional.candles15m
+            candles1h, candles4h, candlesDaily, candles15m,
+            // Guarda também os candles originais para possível uso futuro
+            originalCandles: candles
         };
     } catch (error) {
         log(`Erro em analyzeDivergenceTimeframe ${symbol} [${timeframe}]: ${error.message}`, 'error');
@@ -1456,16 +1329,30 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO (AGREGA TODAS AS DIVERGÊNCIAS E APLICA LÓGICA DE COMPRA/CORREÇÃO) ===
+// === BUSCAR TODOS OS CANDLES NECESSÁRIOS DE UMA VEZ ===
+// =====================================================================
+async function fetchAllCandles(symbol) {
+    const intervals = ['15m', '30m', '1h', '2h', '4h', '12h', '1d', '3m', '1w'];
+    const promises = intervals.map(interval => getCandles(symbol, interval, 100));
+    const results = await Promise.all(promises);
+    const map = {};
+    intervals.forEach((interval, idx) => { map[interval] = results[idx]; });
+    return map;
+}
+
+// =====================================================================
+// === ANALISAR SÍMBOLO (COM BUSCA ÚNICA DE CANDLES) ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
+        // Busca todos os candles necessários uma única vez
+        const allCandles = await fetchAllCandles(symbol);
+        
         const divergences = [];
-        // Para cada timeframe, obter as divergências
         for (const tf of CONFIG.RSI_DIVERGENCE.TIMEFRAMES) {
-            const candles = await getCandles(symbol, tf, 100);
-            if (candles.length >= 40) {
-                const result = await analyzeDivergenceTimeframe(symbol, candles, tf);
+            const candles = allCandles[tf];
+            if (candles && candles.length >= 40) {
+                const result = await analyzeDivergenceTimeframe(symbol, candles, tf, allCandles);
                 if (result) {
                     divergences.push(result);
                 }
@@ -1473,24 +1360,21 @@ async function analyzeSymbol(symbol) {
         }
         if (divergences.length === 0) return [];
 
-        // Usar o primeiro resultado para os dados comuns
-        const base = divergences[0];
-        const maxScore = Math.max(...divergences.map(d => d.confirmationScore));
+        // Encontrar a divergência com maior score para usar seus dados gerais (como preço, indicadores)
+        const bestDivergence = divergences.reduce((a, b) => a.confirmationScore > b.confirmationScore ? a : b);
+        const maxScore = bestDivergence.confirmationScore;
         
-        // Contar divergências de alta e baixa
         const bullishCount = divergences.filter(d => d.isGreenAlert).length;
         const bearishCount = divergences.filter(d => !d.isGreenAlert).length;
         
-        // Verificar proximidade de suporte e resistência
-        const supports = base.supports || [];
-        const resistances = base.resistances || [];
-        const currentPrice = base.price;
+        const supports = bestDivergence.supports || [];
+        const resistances = bestDivergence.resistances || [];
+        const currentPrice = bestDivergence.price;
         const proximityThreshold = CONFIG.ALERTS.PROXIMITY_THRESHOLD_PERCENT / 100;
         
         let isNearSupport = false;
         let isNearResistance = false;
         
-        // Verificar se o preço está perto de algum suporte
         for (const s of supports) {
             const distancePercent = (currentPrice - s.avgPrice) / currentPrice;
             if (distancePercent >= 0 && distancePercent <= proximityThreshold) {
@@ -1499,7 +1383,6 @@ async function analyzeSymbol(symbol) {
             }
         }
         
-        // Verificar se o preço está perto de alguma resistência
         for (const r of resistances) {
             const distancePercent = (r.avgPrice - currentPrice) / currentPrice;
             if (distancePercent >= 0 && distancePercent <= proximityThreshold) {
@@ -1508,32 +1391,52 @@ async function analyzeSymbol(symbol) {
             }
         }
         
-        // Determinar o tipo de alerta - SOMENTE se houver pelo menos 2 divergências e proximidade
         let finalDirection = '';
-        let finalEmoji = '';
-        let finalText = '';
+        let isGreenAlert = false;
         
         if (bullishCount >= 2 && isNearSupport) {
-            finalDirection = '🟢🔍 Analisar Compra';
-            finalEmoji = '🟢';
-            finalText = `Potencial de Compra (${bullishCount} divergências de ALTA + próximo ao suporte)`;
+            finalDirection = '🟢 COMPRA';
+            isGreenAlert = true;
         } else if (bearishCount >= 2 && isNearResistance) {
-            finalDirection = '🔴🔍 Analisar Correção';
-            finalEmoji = '🔴';
-            finalText = `Potencial de Correção (${bearishCount} divergências de BAIXA + próximo à resistência)`;
+            finalDirection = '🔴 CORREÇÃO ';
+            isGreenAlert = false;
         } else {
-            // NÃO gera alerta genérico - retorna vazio
             return [];
         }
         
+        // Verifica Bollinger
+        const bollingerCheck = await checkBollingerCondition(symbol, isGreenAlert);
+        if (!bollingerCheck.passed) {
+            log(`❌ ${symbol} - ${finalDirection} bloqueado por Bollinger: ${bollingerCheck.message}`, 'warning');
+            return [];
+        }
+        
+        // Verifica cooldown e limite diário
+        const directionStr = finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA';
+        if (isCooldownActive(symbol, directionStr, 'MULTI')) return [];
+        if (isDailyLimitReached(symbol)) return [];
+        
+        // Escolhe o timeframe para cálculo de stop e alvos (o com maior score ou padrão 1h)
+        let timeframeForTargets = '1h';
+        let candlesForTargets = allCandles['1h'];
+        if (bestDivergence.usedTimeframe && allCandles[bestDivergence.usedTimeframe] && allCandles[bestDivergence.usedTimeframe].length >= 20) {
+            timeframeForTargets = bestDivergence.usedTimeframe;
+            candlesForTargets = allCandles[timeframeForTargets];
+        }
+        
+        // Calcula stop e alvos com a direção correta
+        const { stop, tp1, tp2, tp3 } = computeStopAndTargets(currentPrice, isGreenAlert, timeframeForTargets, candlesForTargets);
+        
+        const bbInfo = bollingerCheck.bands ? 
+            `📊 BB 15m: ${formatPrice(bollingerCheck.bands.lower)} / ${formatPrice(bollingerCheck.bands.middle)} / ${formatPrice(bollingerCheck.bands.upper)}` : '';
+        
         const consolidated = {
-            ...base,
+            ...bestDivergence, // herda propriedades como volume, rsi, stoch, etc.
             timeframe: 'MULTI',
             timeframeEmoji: '✨',
             timeframeText: '#MULTI',
             direction: finalDirection,
             confirmationScore: maxScore,
-            dailyCount: base.dailyCount,
             divergencesList: divergences.map(d => ({
                 timeframe: d.timeframe,
                 type: d.direction,
@@ -1547,8 +1450,30 @@ async function analyzeSymbol(symbol) {
             bearishCount,
             isNearSupport,
             isNearResistance,
-            finalText
+            finalText: (isGreenAlert ? `Potencial de Compra (${bullishCount} divergências de ALTA + próximo ao suporte)` : `Potencial de Correção (${bearishCount} divergências de BAIXA + próximo à resistência)`),
+            bollingerMessage: bollingerCheck.message,
+            bollingerInfo: bbInfo,
+            stopLoss: stop,
+            tp1, tp2, tp3,
+            // Garante que os dados de volume e indicadores sejam os do bestDivergence
+            volume1h: bestDivergence.volume1h,
+            volume3m: bestDivergence.volume3m,
+            volume24h: bestDivergence.volume24h,
+            rsi: bestDivergence.rsi,
+            stoch1d: bestDivergence.stoch1d,
+            stoch4h: bestDivergence.stoch4h,
+            stoch1h: bestDivergence.stoch1h,
+            cci4h: bestDivergence.cci4h,
+            cciDaily: bestDivergence.cciDaily,
+            supports: bestDivergence.supports,
+            resistances: bestDivergence.resistances,
+            lsrValue: bestDivergence.lsrValue,
+            fundingValue: bestDivergence.fundingValue,
+            lsrPenalty: bestDivergence.lsrPenalty,
+            fundingPenalty: bestDivergence.fundingPenalty,
+            totalPenalty: bestDivergence.totalPenalty
         };
+        
         queueAlert(consolidated);
         return [consolidated];
     } catch (error) {
@@ -1558,7 +1483,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM (COM MÚLTIPLAS DIVERGÊNCIAS E LÓGICA DE COMPRA/CORREÇÃO) ===
+// === FORMATAR MENSAGEM (SIMPLIFICADA COM 3 ALVOS E STOP CORRETOS) ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -1573,63 +1498,59 @@ function formatAlert(data) {
     const volume1hLine = `#Vol 1h: ${data.volume1h.ratioFormatted}x (${data.volume1h.percentage.toFixed(0)}%) ${volumeDirectionText}`;
     const volume3mLine = `#Vol 3m: ${data.volume3m.ratioFormatted}x (${data.volume3m.percentage.toFixed(0)}%) ${data.volume3m.text}`;
     
-    // Construir lista de divergências
     let divergencesText = '';
     if (data.divergencesList && data.divergencesList.length > 0) {
-        divergencesText = data.divergencesList.map(d => {
-            const tipo = d.type.includes('ALTA') ? 'ALTA' : 'BAIXA';
-            return `• ${d.timeframe} ${tipo} (${d.subtype}) score ${d.score} | RSI ${d.rsiValue.toFixed(1)} | Preço $${formatPrice(d.priceAtDivergence)}`;
-        }).join('\n');
+        const tfList = data.divergencesList.map(d => d.timeframe).join(',');
+        divergencesText = `${data.bullishCount + data.bearishCount} divergências (${tfList})`;
     } else {
-        divergencesText = `• ${data.timeframe} ${data.direction.includes('ALTA') ? 'ALTA' : 'BAIXA'} (${data.divergenceType}) score ${data.confirmationScore} | RSI ${data.rsiValue.toFixed(1)} | Preço $${formatPrice(data.priceAtDivergence)}`;
+        divergencesText = `${data.divergenceType}`;
     }
     
-    // Adicionar informações de proximidade
     let proximityInfo = '';
     if (data.isNearSupport && data.bullishCount >= 2) {
-        proximityInfo = `\n📈 Preço próximo ao suporte (${data.bullishCount} divergências de ALTA)`;
+        proximityInfo = `📈 Próx. suporte (${data.bullishCount} divergências)`;
     } else if (data.isNearResistance && data.bearishCount >= 2) {
-        proximityInfo = `\n📉 Preço próximo à resistência (${data.bearishCount} divergências de BAIXA)`;
+        proximityInfo = `📉 Próx. resistência (${data.bearishCount} divergências)`;
     }
     
-    const lsrWarning = data.lsrPenalty ? `\n ⚠️ LSR ${data.lsrValue.toFixed(2)}` : '';
-    const fundingWarning = data.fundingPenalty ? `\n ⚠️ Funding ${fundingSign}${fundingPct}%` : '';
-    const totalPenaltyLine = data.totalPenalty < 0 ? `\n ⚠️ Penalidade total: ${data.totalPenalty} pontos` : '';
-
+    const targets = `🎯 TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}`;
+    const stop = `🛑 SL: ${formatPrice(data.stopLoss)}`;
+    
     let supportLine = '';
     if (data.supports && data.supports.length > 0) {
-        const supportStrings = data.supports.map(s => `$${formatPrice(s.avgPrice)} (${s.touches}x)`).join(' | ');
+        const supportStrings = data.supports.map(s => `${formatPrice(s.avgPrice)} (${s.touches}x)`).join(' | ');
         supportLine = `Suporte: ${supportStrings}`;
     }
     let resistanceLine = '';
     if (data.resistances && data.resistances.length > 0) {
-        const resistanceStrings = data.resistances.map(r => `$${formatPrice(r.avgPrice)} (${r.touches}x)`).join(' | ');
+        const resistanceStrings = data.resistances.map(r => `${formatPrice(r.avgPrice)} (${r.touches}x)`).join(' | ');
         resistanceLine = `Resistência: ${resistanceStrings}`;
     }
-
+    
     const cci4hText = data.cci4h && data.cci4h.text ? data.cci4h.text : 'CCI 4H N/A';
     const cciDailyText = data.cciDaily && data.cciDaily.text ? data.cciDaily.text : 'CCI 1D N/A';
+    
+    const dailyCount = data.displayDailyCount || (dailyCounter.get(`${data.symbol}_daily`) || 0);
+    
+    return `<i>${data.direction} - ${symbolName} | ${time.time}
+💲 ${formatPrice(data.price)}
+🔍 ${divergencesText}
+${targets}
+${stop}
+▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
+#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TV</a>
+${volume3mLine}
+${volume1hLine}
+#LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
+Stoch 1D: ${data.stoch1d}
+Stoch 4H: ${data.stoch4h}
+CCI 4H:${cci4hText}
+CCI 1D:${cciDailyText}
+${supportLine ? supportLine : ''}
+${resistanceLine ? resistanceLine : ''}
+${data.lsrPenalty ? `⚠️ LSR ${data.lsrValue.toFixed(2)}` : ''}${data.fundingPenalty ? ` ⚠️ Funding ${fundingSign}${fundingPct}%` : ''}${data.totalPenalty < 0 ? ` ⚠️ Penal: ${data.totalPenalty}` : ''}
 
-    return `<i>${data.direction} - ${symbolName} ${data.timeframeEmoji} ${data.timeframeText}
- Alerta:${data.dailyCount} | ${time.full}hs
- 💲Preço: $${formatPrice(data.price)}
- 🔍 Divergências detectadas:
-${divergencesText}
-${proximityInfo}
- ▫️Vol 24hs: ${data.volume24h.pct} ${data.volume24h.text}
- #RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TradingView</a>
- ${volume3mLine}
- ${volume1hLine}
- #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
- Stoch 1D: ${data.stoch1d}
- Stoch 4H: ${data.stoch4h}
- CCI 4H:${cci4hText}
- CCI Diário:${cciDailyText}
- ${supportLine ? supportLine : ''}
- ${resistanceLine ? resistanceLine : ''}
- ${lsrWarning}${fundingWarning}${totalPenaltyLine}
-
- Titanium Prime by @J4Rviz</i>`;
+Titanium Prime by @J4Rviz</i>`;
 }
 
 // =====================================================================
@@ -1637,16 +1558,16 @@ ${proximityInfo}
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME - ATIVADO (Somente Compra/Correção com 2+ Divergências)');
+    console.log('🚀 TITANIUM PRIME - ATIVADO ');
     console.log('='.repeat(70));
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
-        const initMessage = `🚀 Titanium Prime Ativado (Somente Compra/Correção com 2+ Divergências)\n\n` +
-            ` Monitorando: ${currentTopSymbols.length} símbolos\n` +
-            ` ${getBrazilianDateTime().full}`;
+        const initMessage = `🚀 Titanium Prime Ativado\n` +
+            `Monitorando: ${currentTopSymbols.length} símbolos\n` +
+            `${getBrazilianDateTime().full}`;
         const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
