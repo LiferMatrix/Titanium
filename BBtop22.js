@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_o',
-        CHAT_ID: '-100199'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 8,
@@ -1628,7 +1628,7 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM (SIMPLIFICADA COM 3 ALVOS E STOP CORRETOS) ===
+// === FORMATAR MENSAGEM (COM DATA E PREÇO AO LADO DO NOME) ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -1651,13 +1651,6 @@ function formatAlert(data) {
         divergencesText = `${data.divergenceType}`;
     }
     
-    let proximityInfo = '';
-    if (data.isNearSupport && data.bullishCount >= 2) {
-        proximityInfo = `📈 Próx. suporte (${data.bullishCount} divergências)`;
-    } else if (data.isNearResistance && data.bearishCount >= 2) {
-        proximityInfo = `📉 Próx. resistência (${data.bearishCount} divergências)`;
-    }
-    
     const targets = `🎯 TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}`;
     const stop = `🛑 SL: ${formatPrice(data.stopLoss)}`;
     
@@ -1675,12 +1668,13 @@ function formatAlert(data) {
     const cci4hText = data.cci4h && data.cci4h.text ? data.cci4h.text : 'CCI 4H N/A';
     const cciDailyText = data.cciDaily && data.cciDaily.text ? data.cciDaily.text : 'CCI 1D N/A';
     
-    const candleConfirmEmoji = data.candleConfirmed ? '🕯️✅' : '🕯️❌';
-    
     const dailyCount = data.displayDailyCount || (dailyCounter.get(`${data.symbol}_daily`) || 0);
     
-    return `<i>${data.direction} - ${symbolName} | ${time.time}
-💲 ${formatPrice(data.price)} | Score: ${data.confirmationScore.toFixed(1)}
+    // Formata a data e hora no formato desejado: 22/03/2026 07:59hs
+    const formattedDateTime = `${time.date} ${time.time}hs`;
+    
+    return `<i>${data.direction} - ${symbolName} | 💲 ${formatPrice(data.price)}
+🔹#SCORE: ${data.confirmationScore.toFixed(1)} / Data: ${formattedDateTime}
 🔍 ${divergencesText}
 ${targets}
 ${stop}
@@ -1696,7 +1690,6 @@ CCI 1D:${cciDailyText}
 ${supportLine ? supportLine : ''}
 ${resistanceLine ? resistanceLine : ''}
 ${data.lsrPenalty ? `⚠️ LSR ${data.lsrValue.toFixed(2)}` : ''}${data.fundingPenalty ? ` ⚠️ Funding ${fundingSign}${fundingPct}%` : ''}${data.totalPenalty < 0 ? ` ⚠️ Penal: ${data.totalPenalty}` : ''}
-
  🤖...Alerta Educativo, não é recomendação de investimento.
 Titanium Prime by @J4Rviz</i>`;
 }
