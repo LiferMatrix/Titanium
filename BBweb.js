@@ -5,13 +5,13 @@ const WebSocket = require('ws');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-// =====================================================================
+/// =====================================================================
 // === CONFIGURAÇÕES CENTRALIZADAS ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 10,
@@ -2375,7 +2375,7 @@ ${supportLine ? supportLine : ''}
 ${resistanceLine ? resistanceLine : ''}
 ${penaltiesLine}
  🤖...Alerta Educativo, não é recomendação de investimento.
-Titanium Prime v3.0 (CVD Real via WebSocket) by @J4Rviz</i>`;
+Titanium Prime X by @J4Rviz</i>`;
 }
 
 // =====================================================================
