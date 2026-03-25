@@ -6,13 +6,19 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURAÇÕES ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSy
-const TELEGRAM_CHAT_ID = '-100255
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do fractal (igual ao Pine Script)
-const PERIODS = 2; // n = 2 no código original
-const FRACTAL_BARS = 3; // 3 ou 5 barras
+const PERIODS = 2;
+const FRACTAL_BARS = 3;
 const MAX_HISTORICAL_FRACTALS = 20;
+
+// === CONFIGURAÇÕES DE CLUSTER ===
+const CLUSTER_PROXIMITY_THRESHOLD = 0.005; // 0.5% de proximidade para agrupar níveis
+const MIN_CLUSTER_SIZE = 2; // Mínimo de 2 pontos para formar um cluster
+const STRONG_CLUSTER_THRESHOLD = 3; // Cluster com 3+ pontos é considerado forte
+const MAX_CLUSTERS_TO_SHOW = 3; // Mostrar até 3 clusters de cada tipo
 
 // === OTIMIZAÇÕES DE PERFORMANCE ===
 const MIN_DELAY_BETWEEN_SYMBOLS = 7000;
@@ -29,29 +35,30 @@ const REQUESTS_PER_MINUTE = 1200;
 const REQUEST_WINDOW_MS = 60000;
 
 // === CONFIGURAÇÕES DE LIMPEZA AUTOMÁTICA ===
-const CLEANUP_INTERVAL = 60 * 60 * 1000; // Limpeza a cada 1 hora
-const MAX_CACHE_SIZE = 500; // Máximo de 500 itens no cache
-const MAX_LOG_FILE_SIZE = 10 * 1024 * 1024; // 10 MB máximo por arquivo de log
-const MAX_BACKUP_FILES = 5; // Manter apenas 5 arquivos de backup
-const ALERTS_HISTORY_LIMIT = 1000; // Manter apenas 1000 alertas no histórico
-const DATA_RETENTION_DAYS = 7; // Manter dados por 7 dias
+const CLEANUP_INTERVAL = 60 * 60 * 1000;
+const MAX_CACHE_SIZE = 500;
+const MAX_LOG_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_BACKUP_FILES = 5;
+const ALERTS_HISTORY_LIMIT = 1000;
+const DATA_RETENTION_DAYS = 7;
 
 // === CONFIGURAÇÕES PARA EVITAR ALERTAS REPETIDOS ===
-const MIN_PRICE_CHANGE_PERCENT = 0.5; // 0.5% de mudança mínima para novo alerta
-const DIRECTION_CHANGE_THRESHOLD = 0.1; // 0.1% para considerar mudança de direção
+const MIN_PRICE_CHANGE_PERCENT = 0.5;
 
 // === VARIÁVEIS GLOBAIS ===
 let requestCount = 0;
 let requestWindowStart = Date.now();
 let candleCache = new Map();
+let fundingRateCache = new Map();
+let lsrCache = new Map();
 const alertsCooldown = {};
 let VALID_SYMBOLS = [];
 let totalAlertsSent = 0;
-let alertsHistory = []; // Histórico de alertas enviados
+let alertsHistory = [];
 let lastCleanup = Date.now();
 
 // Armazenar o último alerta por símbolo para evitar repetições
-const lastAlertBySymbol = new Map(); // { symbol: { type, price, fractalLevel, timestamp, direction } }
+const lastAlertBySymbol = new Map();
 
 // ============================================
 // SISTEMA DE LIMPEZA AUTOMÁTICA
@@ -65,7 +72,6 @@ class DataCleanupManager {
     }
 
     async initialize() {
-        // Criar diretórios necessários
         const dirs = [this.logsDir, this.backupDir, this.dataDir];
         for (const dir of dirs) {
             try {
@@ -105,8 +111,6 @@ class DataCleanupManager {
                 const backupFile = path.join(this.backupDir, `log_${timestamp}.txt`);
                 await fs.rename(logFile, backupFile);
                 console.log(`📋 Log rotacionado: ${path.basename(logFile)} -> ${path.basename(backupFile)}`);
-                
-                // Limpar backups antigos
                 await this.cleanupOldBackups();
             }
         } catch (error) {
@@ -136,7 +140,6 @@ class DataCleanupManager {
             const now = Date.now();
             let removedCount = 0;
             
-            // Remover itens expirados do cache
             for (const [key, value] of candleCache.entries()) {
                 if (now - value.timestamp > CACHE_TTL) {
                     candleCache.delete(key);
@@ -144,7 +147,20 @@ class DataCleanupManager {
                 }
             }
             
-            // Se ainda estiver acima do limite, remover os mais antigos
+            for (const [key, value] of fundingRateCache.entries()) {
+                if (now - value.timestamp > CACHE_TTL) {
+                    fundingRateCache.delete(key);
+                    removedCount++;
+                }
+            }
+            
+            for (const [key, value] of lsrCache.entries()) {
+                if (now - value.timestamp > CACHE_TTL) {
+                    lsrCache.delete(key);
+                    removedCount++;
+                }
+            }
+            
             if (candleCache.size > MAX_CACHE_SIZE) {
                 const sortedEntries = Array.from(candleCache.entries())
                     .sort((a, b) => a[1].timestamp - b[1].timestamp);
@@ -169,12 +185,10 @@ class DataCleanupManager {
             const now = Date.now();
             const retentionTime = DATA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
             
-            // Remover alertas antigos
             alertsHistory = alertsHistory.filter(alert => {
                 return (now - alert.timestamp) <= retentionTime;
             });
             
-            // Limitar tamanho do histórico
             if (alertsHistory.length > ALERTS_HISTORY_LIMIT) {
                 alertsHistory = alertsHistory.slice(-ALERTS_HISTORY_LIMIT);
             }
@@ -232,6 +246,8 @@ class DataCleanupManager {
                 timestamp: Date.now(),
                 totalAlertsSent,
                 cacheSize: candleCache.size,
+                fundingRateCacheSize: fundingRateCache.size,
+                lsrCacheSize: lsrCache.size,
                 cooldownSize: Object.keys(alertsCooldown).length,
                 alertsHistorySize: alertsHistory.length,
                 lastAlertHistorySize: lastAlertBySymbol.size,
@@ -242,7 +258,6 @@ class DataCleanupManager {
             
             const statsFile = path.join(this.dataDir, `stats_${new Date().toISOString().split('T')[0]}.json`);
             
-            // Manter apenas os últimos 7 dias de estatísticas
             const files = await fs.readdir(this.dataDir);
             const statsFiles = files.filter(f => f.startsWith('stats_'));
             
@@ -276,6 +291,8 @@ class DataCleanupManager {
             console.log(`✅ LIMPEZA CONCLUÍDA em ${duration}s`);
             console.log(`📊 Estatísticas atuais:`);
             console.log(`   - Cache: ${candleCache.size} itens`);
+            console.log(`   - Funding Rate Cache: ${fundingRateCache.size} itens`);
+            console.log(`   - LSR Cache: ${lsrCache.size} itens`);
             console.log(`   - Cooldown: ${Object.keys(alertsCooldown).length} símbolos`);
             console.log(`   - Histórico: ${alertsHistory.length} alertas`);
             console.log(`   - Últimos alertas: ${lastAlertBySymbol.size} símbolos`);
@@ -288,7 +305,6 @@ class DataCleanupManager {
     }
 }
 
-// Inicializar gerenciador de limpeza
 const cleanupManager = new DataCleanupManager();
 
 // ============================================
@@ -298,35 +314,28 @@ const cleanupManager = new DataCleanupManager();
 function shouldSendAlert(symbol, newAlert) {
     const lastAlert = lastAlertBySymbol.get(symbol);
     
-    // Se não há alerta anterior para este símbolo, enviar
     if (!lastAlert) {
         return true;
     }
     
     const timeSinceLastAlert = Date.now() - lastAlert.timestamp;
     
-    // Se passou mais de 30 minutos desde o último alerta, enviar (respeitando cooldown)
     if (timeSinceLastAlert >= COOLDOWN) {
         return true;
     }
     
-    // Verificar se é uma direção diferente
     if (lastAlert.type !== newAlert.type) {
-        // Direção oposta (BUY vs SELL) - enviar alerta imediatamente
         console.log(`🔄 Mudança de direção detectada em ${symbol}: ${lastAlert.type} -> ${newAlert.type}`);
         return true;
     }
     
-    // Mesma direção, verificar se o nível mudou significativamente
     const priceChangePercent = Math.abs((newAlert.fractalLevel - lastAlert.fractalLevel) / lastAlert.fractalLevel) * 100;
     
     if (priceChangePercent >= MIN_PRICE_CHANGE_PERCENT) {
-        // Novo nível significativamente diferente
         console.log(`📈 Novo nível detectado em ${symbol}: ${lastAlert.fractalLevel} -> ${newAlert.fractalLevel} (${priceChangePercent.toFixed(2)}% de diferença)`);
         return true;
     }
     
-    // Mesmo nível e mesma direção - não enviar alerta repetido
     console.log(`⏭️ Alerta ignorado para ${symbol}: mesmo nível (${newAlert.fractalLevel}) e direção (${newAlert.type}) em menos de ${COOLDOWN/60000} minutos`);
     return false;
 }
@@ -407,8 +416,707 @@ async function getCurrentPrice(symbol) {
 }
 
 // ============================================
-// FUNÇÃO DE ENVIO PARA TELEGRAM
+// FUNÇÕES PARA LSR (LONG/SHORT RATIO)
 // ============================================
+
+async function getLongShortRatio(symbol) {
+    const cacheKey = `lsr_${symbol}`;
+    
+    const cached = lsrCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+    }
+    
+    await checkRateLimit(2);
+    
+    try {
+        // Tenta pegar do endpoint de top traders (mais confiável)
+        let url = `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`;
+        let response = await fetch(url);
+        let data = await response.json();
+        
+        if (data && data.length > 0 && data[0].longShortRatio) {
+            const ratio = parseFloat(data[0].longShortRatio);
+            const result = {
+                ratio: ratio.toFixed(3),
+                longPercent: ((ratio / (1 + ratio)) * 100).toFixed(1),
+                shortPercent: ((1 / (1 + ratio)) * 100).toFixed(1),
+                source: 'top_traders'
+            };
+            lsrCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            return result;
+        }
+        
+        // Fallback para o endpoint de posições
+        url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`;
+        response = await fetch(url);
+        data = await response.json();
+        
+        if (data && data.length > 0 && data[0].longShortRatio) {
+            const ratio = parseFloat(data[0].longShortRatio);
+            const result = {
+                ratio: ratio.toFixed(3),
+                longPercent: ((ratio / (1 + ratio)) * 100).toFixed(1),
+                shortPercent: ((1 / (1 + ratio)) * 100).toFixed(1),
+                source: 'global'
+            };
+            lsrCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            return result;
+        }
+        
+        return { ratio: 'N/A', longPercent: 'N/A', shortPercent: 'N/A', source: 'N/A' };
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar LSR para ${symbol}: ${error.message}`);
+        return { ratio: 'N/A', longPercent: 'N/A', shortPercent: 'N/A', source: 'N/A' };
+    }
+}
+
+// ============================================
+// FUNÇÕES PARA FUNDING RATE
+// ============================================
+
+async function getFundingRate(symbol) {
+    const cacheKey = `funding_${symbol}`;
+    
+    const cached = fundingRateCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+    }
+    
+    await checkRateLimit(1);
+    
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data && data.lastFundingRate) {
+            const fundingRate = parseFloat(data.lastFundingRate) * 100;
+            const result = {
+                rate: fundingRate.toFixed(4),
+                nextFundingTime: data.nextFundingTime,
+                isPositive: fundingRate > 0,
+                formatted: fundingRate > 0 ? `+${fundingRate.toFixed(4)}%` : `${fundingRate.toFixed(4)}%`
+            };
+            fundingRateCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            return result;
+        }
+        
+        return { rate: 'N/A', formatted: 'N/A', isPositive: null };
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar Funding Rate para ${symbol}: ${error.message}`);
+        return { rate: 'N/A', formatted: 'N/A', isPositive: null };
+    }
+}
+
+// ============================================
+// DETECÇÃO DE CLUSTERS COM CONTAGEM DE TOQUES
+// ============================================
+
+function detectPriceClusters(candles, lookbackBars = 200) {
+    if (!candles || candles.length < 50) return { supportClusters: [], resistanceClusters: [] };
+    
+    // Pegar apenas os últimos 'lookbackBars' candles para análise
+    const recentCandles = candles.slice(-lookbackBars);
+    
+    // Coletar todos os níveis de preço relevantes (máximos e mínimos)
+    const priceLevels = [];
+    
+    for (let i = 0; i < recentCandles.length; i++) {
+        const candle = recentCandles[i];
+        
+        // Adicionar máximo (possível resistência)
+        priceLevels.push({
+            price: candle.high,
+            type: 'resistance',
+            index: i,
+            touches: 1
+        });
+        
+        // Adicionar mínimo (possível suporte)
+        priceLevels.push({
+            price: candle.low,
+            type: 'support',
+            index: i,
+            touches: 1
+        });
+        
+        // Adicionar fechamento (importante para zonas de valor)
+        priceLevels.push({
+            price: candle.close,
+            type: 'value',
+            index: i,
+            touches: 1
+        });
+    }
+    
+    // Função para agrupar níveis próximos
+    function clusterLevels(levels, isSupport) {
+        const filteredLevels = levels.filter(l => isSupport ? 
+            l.type === 'support' || l.type === 'value' : 
+            l.type === 'resistance' || l.type === 'value');
+        
+        const clusters = [];
+        
+        for (const level of filteredLevels) {
+            let foundCluster = false;
+            
+            for (const cluster of clusters) {
+                const percentDiff = Math.abs((level.price - cluster.centerPrice) / cluster.centerPrice);
+                
+                if (percentDiff <= CLUSTER_PROXIMITY_THRESHOLD) {
+                    cluster.prices.push(level.price);
+                    cluster.centerPrice = cluster.prices.reduce((a, b) => a + b, 0) / cluster.prices.length;
+                    cluster.touches++;
+                    foundCluster = true;
+                    break;
+                }
+            }
+            
+            if (!foundCluster) {
+                clusters.push({
+                    centerPrice: level.price,
+                    prices: [level.price],
+                    touches: 1,
+                    type: isSupport ? 'support' : 'resistance'
+                });
+            }
+        }
+        
+        // Ordenar clusters por número de toques (maior primeiro)
+        clusters.sort((a, b) => b.touches - a.touches);
+        
+        // Filtrar clusters com pelo menos MIN_CLUSTER_SIZE toques
+        const strongClusters = clusters.filter(c => c.touches >= MIN_CLUSTER_SIZE);
+        
+        // Ordenar os clusters por preço (crescente para suporte e decrescente para resistência)
+        if (isSupport) {
+            strongClusters.sort((a, b) => a.centerPrice - b.centerPrice);
+        } else {
+            strongClusters.sort((a, b) => b.centerPrice - a.centerPrice);
+        }
+        
+        // Pegar os mais fortes (até MAX_CLUSTERS_TO_SHOW)
+        return strongClusters.slice(0, MAX_CLUSTERS_TO_SHOW);
+    }
+    
+    const resistanceClusters = clusterLevels(priceLevels, false);
+    const supportClusters = clusterLevels(priceLevels, true);
+    
+    return { supportClusters, resistanceClusters };
+}
+
+// ============================================
+// FUNÇÃO PARA DETECTAR PIVÔS (PONTOS DE VIRADA)
+// ============================================
+
+function detectPivots(candles) {
+    if (!candles || candles.length < 50) return { highPivots: [], lowPivots: [] };
+    
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    
+    const highPivots = [];
+    const lowPivots = [];
+    
+    for (let i = 2; i < candles.length - 2; i++) {
+        const isHighPivot = highs[i] > highs[i-1] && 
+                           highs[i] > highs[i-2] && 
+                           highs[i] > highs[i+1] && 
+                           highs[i] > highs[i+2];
+        
+        if (isHighPivot) {
+            highPivots.push({
+                price: highs[i],
+                index: i,
+                strength: 1,
+                type: 'HIGH_PIVOT'
+            });
+        }
+        
+        const isLowPivot = lows[i] < lows[i-1] && 
+                          lows[i] < lows[i-2] && 
+                          lows[i] < lows[i+1] && 
+                          lows[i] < lows[i+2];
+        
+        if (isLowPivot) {
+            lowPivots.push({
+                price: lows[i],
+                index: i,
+                strength: 1,
+                type: 'LOW_PIVOT'
+            });
+        }
+    }
+    
+    const filteredHighPivots = [];
+    const filteredLowPivots = [];
+    
+    for (let i = 0; i < highPivots.length; i++) {
+        let isSignificant = true;
+        for (let j = 0; j < highPivots.length; j++) {
+            if (i !== j && Math.abs(highPivots[i].index - highPivots[j].index) < 5) {
+                if (highPivots[j].price > highPivots[i].price) {
+                    isSignificant = false;
+                    break;
+                }
+            }
+        }
+        if (isSignificant) {
+            filteredHighPivots.push(highPivots[i]);
+        }
+    }
+    
+    for (let i = 0; i < lowPivots.length; i++) {
+        let isSignificant = true;
+        for (let j = 0; j < lowPivots.length; j++) {
+            if (i !== j && Math.abs(lowPivots[i].index - lowPivots[j].index) < 5) {
+                if (lowPivots[j].price < lowPivots[i].price) {
+                    isSignificant = false;
+                    break;
+                }
+            }
+        }
+        if (isSignificant) {
+            filteredLowPivots.push(lowPivots[i]);
+        }
+    }
+    
+    return { 
+        highPivots: filteredHighPivots.slice(-MAX_HISTORICAL_FRACTALS),
+        lowPivots: filteredLowPivots.slice(-MAX_HISTORICAL_FRACTALS)
+    };
+}
+
+// ============================================
+// FUNÇÃO PARA VERIFICAR SE SWEEP ESTÁ ALINHADO COM PIVÔ
+// ============================================
+
+function isSweepAlignedWithPivot(sweep, pivots) {
+    if (!sweep || !sweep.isActive) return false;
+    
+    if (sweep.type === 'BUY') {
+        for (const pivot of pivots.highPivots) {
+            const priceDifference = Math.abs(sweep.fractalLevel - pivot.price) / pivot.price * 100;
+            if (priceDifference <= 0.5) {
+                console.log(`✅ Sweep BUY alinhado com Pivô de ALTA em ${pivot.price}`);
+                return true;
+            }
+        }
+        console.log(`❌ Sweep BUY NÃO alinhado com nenhum Pivô de ALTA`);
+        return false;
+    }
+    
+    if (sweep.type === 'SELL') {
+        for (const pivot of pivots.lowPivots) {
+            const priceDifference = Math.abs(sweep.fractalLevel - pivot.price) / pivot.price * 100;
+            if (priceDifference <= 0.5) {
+                console.log(`✅ Sweep SELL alinhado com Pivô de BAIXA em ${pivot.price}`);
+                return true;
+            }
+        }
+        console.log(`❌ Sweep SELL NÃO alinhado com nenhum Pivô de BAIXA`);
+        return false;
+    }
+    
+    return false;
+}
+
+// ============================================
+// DETECÇÃO DE SWEEP COM VALIDAÇÃO DE PIVÔS
+// ============================================
+
+function detectSweepWithPivotValidation(candles) {
+    if (!candles || candles.length < 50) return null;
+    
+    const highs = candles.map(c => c.high);
+    const lows = candles.map(c => c.low);
+    const closes = candles.map(c => c.close);
+    const currentIndex = closes.length - 1;
+    const currentHigh = highs[currentIndex];
+    const currentLow = lows[currentIndex];
+    const currentClose = closes[currentIndex];
+    
+    let dnFractals = [];
+    let upFractals = [];
+    
+    for (let i = PERIODS; i < candles.length - PERIODS - 1; i++) {
+        let isDnFractal = false;
+        if (FRACTAL_BARS === 3) {
+            isDnFractal = highs[i - 1] < highs[i] && highs[i + 1] < highs[i];
+        } else if (FRACTAL_BARS === 5) {
+            isDnFractal = highs[i - 2] < highs[i] && 
+                          highs[i - 1] < highs[i] && 
+                          highs[i + 1] < highs[i] && 
+                          highs[i + 2] < highs[i];
+        }
+        
+        if (isDnFractal) {
+            dnFractals.push({
+                price: highs[i],
+                index: i,
+                barIndex: i
+            });
+        }
+        
+        let isUpFractal = false;
+        if (FRACTAL_BARS === 3) {
+            isUpFractal = lows[i - 1] > lows[i] && lows[i + 1] > lows[i];
+        } else if (FRACTAL_BARS === 5) {
+            isUpFractal = lows[i - 2] > lows[i] && 
+                          lows[i - 1] > lows[i] && 
+                          lows[i + 1] > lows[i] && 
+                          lows[i + 2] > lows[i];
+        }
+        
+        if (isUpFractal) {
+            upFractals.push({
+                price: lows[i],
+                index: i,
+                barIndex: i
+            });
+        }
+    }
+    
+    if (dnFractals.length > MAX_HISTORICAL_FRACTALS) {
+        dnFractals = dnFractals.slice(-MAX_HISTORICAL_FRACTALS);
+    }
+    if (upFractals.length > MAX_HISTORICAL_FRACTALS) {
+        upFractals = upFractals.slice(-MAX_HISTORICAL_FRACTALS);
+    }
+    
+    const pivots = detectPivots(candles);
+    
+    let sweepDetected = null;
+    
+    for (let i = 0; i < dnFractals.length; i++) {
+        const fractal = dnFractals[i];
+        const fractalPrice = fractal.price;
+        const fractalIndex = fractal.index;
+        
+        let limitCount = 0;
+        let hasHigherFractal = false;
+        
+        for (let t = i + 1; t < dnFractals.length; t++) {
+            const nextFractal = dnFractals[t];
+            if (fractalPrice < nextFractal.price) {
+                limitCount = nextFractal.index;
+                hasHigherFractal = true;
+                break;
+            }
+        }
+        
+        if (!hasHigherFractal) {
+            limitCount = 0;
+        }
+        
+        let lastWickIndex = -1;
+        let wickFound = false;
+        let lineActive = false;
+        
+        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
+            if (hasHigherFractal && j >= limitCount) {
+                break;
+            }
+            
+            if (highs[j] >= fractalPrice) {
+                if (fractalPrice < closes[j]) {
+                    break;
+                } else {
+                    lastWickIndex = j;
+                    wickFound = true;
+                }
+            }
+        }
+        
+        if (wickFound && lastWickIndex === currentIndex) {
+            lineActive = true;
+        }
+        
+        if (lineActive) {
+            const isSweep = currentHigh >= fractalPrice;
+            
+            if (isSweep) {
+                sweepDetected = {
+                    type: 'BUY',
+                    price: currentClose,
+                    fractalLevel: fractalPrice,
+                    fractalIndex: fractalIndex,
+                    isActive: true
+                };
+                break;
+            }
+        }
+    }
+    
+    if (sweepDetected && sweepDetected.type === 'BUY') {
+        const isValid = isSweepAlignedWithPivot(sweepDetected, pivots);
+        if (!isValid) {
+            console.log(`🚫 Sweep BUY rejeitado: não está alinhado com Pivô de ALTA`);
+            return null;
+        }
+        return sweepDetected;
+    }
+    
+    for (let i = 0; i < upFractals.length; i++) {
+        const fractal = upFractals[i];
+        const fractalPrice = fractal.price;
+        const fractalIndex = fractal.index;
+        
+        let limitCount = 0;
+        let hasLowerFractal = false;
+        
+        for (let t = i + 1; t < upFractals.length; t++) {
+            const nextFractal = upFractals[t];
+            if (fractalPrice > nextFractal.price) {
+                limitCount = nextFractal.index;
+                hasLowerFractal = true;
+                break;
+            }
+        }
+        
+        if (!hasLowerFractal) {
+            limitCount = 0;
+        }
+        
+        let lastWickIndex = -1;
+        let wickFound = false;
+        let lineActive = false;
+        
+        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
+            if (hasLowerFractal && j >= limitCount) {
+                break;
+            }
+            
+            if (lows[j] <= fractalPrice) {
+                if (fractalPrice > closes[j]) {
+                    break;
+                } else {
+                    lastWickIndex = j;
+                    wickFound = true;
+                }
+            }
+        }
+        
+        if (wickFound && lastWickIndex === currentIndex) {
+            lineActive = true;
+        }
+        
+        if (lineActive) {
+            const isSweep = currentLow <= fractalPrice;
+            
+            if (isSweep) {
+                sweepDetected = {
+                    type: 'SELL',
+                    price: currentClose,
+                    fractalLevel: fractalPrice,
+                    fractalIndex: fractalIndex,
+                    isActive: true
+                };
+                break;
+            }
+        }
+    }
+    
+    if (sweepDetected && sweepDetected.type === 'SELL') {
+        const isValid = isSweepAlignedWithPivot(sweepDetected, pivots);
+        if (!isValid) {
+            console.log(`🚫 Sweep SELL rejeitado: não está alinhado com Pivô de BAIXA`);
+            return null;
+        }
+        return sweepDetected;
+    }
+    
+    return null;
+}
+
+// ============================================
+// INDICADORES SIMPLIFICADOS
+// ============================================
+
+async function getIndicators(symbol) {
+    try {
+        const candles = await getCandles(symbol, '1h', CANDLE_LIMIT_INDICATORS);
+        
+        let rsiValue = 'N/A';
+        if (candles && candles.length > 14) {
+            const closes = candles.map(c => c.close);
+            const rsiValues = RSI.calculate({ values: closes, period: 14 });
+            if (rsiValues && rsiValues.length > 0) {
+                rsiValue = rsiValues[rsiValues.length - 1].toFixed(2);
+            }
+        }
+        
+        // Buscar LSR e Funding Rate
+        const lsr = await getLongShortRatio(symbol);
+        const funding = await getFundingRate(symbol);
+        
+        return {
+            rsi1h: { value: rsiValue },
+            lsr: lsr,
+            funding: funding
+        };
+    } catch (error) {
+        return { 
+            rsi1h: { value: 'N/A' },
+            lsr: { ratio: 'N/A', longPercent: 'N/A', shortPercent: 'N/A' },
+            funding: { rate: 'N/A', formatted: 'N/A' }
+        };
+    }
+}
+
+// ============================================
+// FUNÇÕES AUXILIARES
+// ============================================
+
+function getBrazilianDateTime() {
+    const now = new Date();
+    const brasiliaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    return {
+        date: `${String(brasiliaTime.getDate()).padStart(2, '0')}/${String(brasiliaTime.getMonth() + 1).padStart(2, '0')}/${brasiliaTime.getFullYear()}`,
+        time: `${String(brasiliaTime.getHours()).padStart(2, '0')}:${String(brasiliaTime.getMinutes()).padStart(2, '0')}:${String(brasiliaTime.getSeconds()).padStart(2, '0')}`
+    };
+}
+
+function formatNumber(num) {
+    if (num === null || num === undefined || isNaN(num)) return 'N/A';
+    if (num >= 1000) return num.toFixed(2);
+    if (num >= 1) return num.toFixed(3);
+    if (num >= 0.1) return num.toFixed(4);
+    return num.toFixed(6);
+}
+
+function getFundingEmoji(funding) {
+    if (!funding || funding.rate === 'N/A') return '⚪';
+    const rate = parseFloat(funding.rate);
+    if (rate > 0.01) return '🔴';
+    if (rate > 0.005) return '🟠';
+    if (rate > 0) return '🟡';
+    if (rate < -0.01) return '🟢';
+    if (rate < -0.005) return '🟢';
+    if (rate < 0) return '🟢';
+    return '⚪';
+}
+
+function getLSREmoji(lsr) {
+    if (!lsr || lsr.ratio === 'N/A') return '⚪';
+    const ratio = parseFloat(lsr.ratio);
+    if (ratio > 3.5) return '💥💥';
+    if (ratio > 3.0) return '🔴';
+    if (ratio > 2.5) return '🟠';
+    if (ratio > 1.5) return '🟡';
+    if (ratio > 1.2) return '🟢';
+    if (ratio > 0.8) return '🟢';
+    if (ratio < 0.5) return '🔵';
+    return '';
+}
+
+// ============================================
+// FUNÇÃO DE ENVIO DE ALERTA COM CLUSTERS
+// ============================================
+
+async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters, resistanceClusters) {
+    const isBullish = sweep.type === 'BUY';
+    const emoji = isBullish ? '🟢' : '🔴';
+    const title = isBullish ? '🔍Analisar Compra' : '🔍Analisar Correção';
+    
+    const priceFormatted = formatNumber(sweep.price);
+    
+    // Formatar clusters de suporte em ordem crescente
+    let supportText = '';
+    if (supportClusters && supportClusters.length > 0) {
+        const supportStrings = supportClusters.map(cluster => 
+            `$${formatNumber(cluster.centerPrice)} (${cluster.touches}x)`
+        );
+        supportText = `Suporte: ${supportStrings.join(' | ')}`;
+    } else {
+        supportText = `Suporte: N/A`;
+    }
+    
+    // Formatar clusters de resistência em ordem crescente
+    let resistanceText = '';
+    if (resistanceClusters && resistanceClusters.length > 0) {
+        const sortedResistance = [...resistanceClusters].sort((a, b) => a.centerPrice - b.centerPrice);
+        const resistanceStrings = sortedResistance.map(cluster => 
+            `$${formatNumber(cluster.centerPrice)} (${cluster.touches}x)`
+        );
+        resistanceText = `Resistência: ${resistanceStrings.join(' | ')}`;
+    } else {
+        resistanceText = `Resistência: N/A`;
+    }
+    
+    // Formatar LSR
+    const lsr = indicators.lsr;
+    const lsrEmoji = getLSREmoji(lsr);
+    let lsrText = '';
+    if (lsr && lsr.ratio !== 'N/A') {
+        lsrText = `${lsrEmoji} LSR: ${lsr.ratio} (${lsr.longPercent}% L / ${lsr.shortPercent}% S)`;
+    } else {
+        lsrText = `⚪ LSR: N/A`;
+    }
+    
+    // Formatar Funding Rate
+    const funding = indicators.funding;
+    const fundingEmoji = getFundingEmoji(funding);
+    let fundingText = '';
+    if (funding && funding.rate !== 'N/A') {
+        fundingText = `${fundingEmoji} Funding: ${funding.formatted}`;
+    } else {
+        fundingText = `⚪ Funding: N/A`;
+    }
+    
+    const lastAlert = lastAlertBySymbol.get(symbol);
+    let directionChangeNote = '';
+    if (lastAlert && lastAlert.type !== sweep.type) {
+        directionChangeNote = '\n🔄 <i>Swing!</i>';
+    }
+    
+    const message = `<i>${emoji} ${title} - ${symbol} - $${priceFormatted}</i>\n\n` +
+                   `<i>Data/Hora: ${brDateTime.date} ${brDateTime.time}hs</i>\n` +
+                   `<i>RSI 1h: ${indicators.rsi1h.value}</i>\n` +
+                   `<i>${lsrText}</i>\n` +
+                   `<i>${fundingText}</i>${directionChangeNote}\n` +
+                    `<i>Níveis Importantes:</i>\n` +
+                   `<i>🔹${supportText}</i>\n` +
+                   `<i>🔻${resistanceText}</i>\n` +
+                   `<i>🤖 Titanium Hunter!</i>`;
+    
+    const sent = await sendTelegramMessage(message);
+    
+    if (sent) {
+        console.log(`✅ ALERTA ENVIADO! ${symbol} - ${sweep.type} - Preço: ${sweep.price} | Fractal: ${sweep.fractalLevel}`);
+        console.log(`   📊 LSR: ${lsr.ratio} | Funding: ${funding.formatted}`);
+        totalAlertsSent++;
+        
+        alertsHistory.push({
+            timestamp: Date.now(),
+            symbol,
+            type: sweep.type,
+            price: sweep.price,
+            fractalLevel: sweep.fractalLevel,
+            brDateTime,
+            supportClusters,
+            resistanceClusters,
+            lsr: lsr,
+            funding: funding
+        });
+        
+        lastAlertBySymbol.set(symbol, {
+            type: sweep.type,
+            price: sweep.price,
+            fractalLevel: sweep.fractalLevel,
+            timestamp: Date.now(),
+            direction: sweep.type,
+            lsr: lsr,
+            funding: funding
+        });
+        
+        return true;
+    } else {
+        console.log(`❌ FALHA AO ENVIAR ALERTA! ${symbol}`);
+        return false;
+    }
+}
 
 async function sendTelegramMessage(message) {
     try {
@@ -433,341 +1141,6 @@ async function sendTelegramMessage(message) {
 }
 
 // ============================================
-// DETECÇÃO DE SWEEP (CORRIGIDA - IGUAL AO PINE SCRIPT)
-// ============================================
-
-function detectSweep(candles) {
-    if (!candles || candles.length < 50) return null;
-    
-    const highs = candles.map(c => c.high);
-    const lows = candles.map(c => c.low);
-    const closes = candles.map(c => c.close);
-    const currentIndex = closes.length - 1;
-    const currentHigh = highs[currentIndex];
-    const currentLow = lows[currentIndex];
-    const currentClose = closes[currentIndex];
-    
-    let dnFractals = []; // Fractals de topo (resistência)
-    let upFractals = []; // Fractals de fundo (suporte)
-    
-    // 1. IDENTIFICAR FRACTAIS (exatamente como no Pine Script)
-    // Usar offset -n, começando de PERIODS até length - PERIODS - 1
-    for (let i = PERIODS; i < candles.length - PERIODS - 1; i++) {
-        // Down Fractal (topo) - Sell
-        let isDnFractal = false;
-        if (FRACTAL_BARS === 3) {
-            // 3-bar fractal: (high[n-1] < high[n]) and (high[n+1] < high[n])
-            isDnFractal = highs[i - 1] < highs[i] && highs[i + 1] < highs[i];
-        } else if (FRACTAL_BARS === 5) {
-            // 5-bar fractal: 2 antes e 2 depois
-            isDnFractal = highs[i - 2] < highs[i] && 
-                          highs[i - 1] < highs[i] && 
-                          highs[i + 1] < highs[i] && 
-                          highs[i + 2] < highs[i];
-        }
-        
-        if (isDnFractal) {
-            dnFractals.push({
-                price: highs[i],
-                index: i,
-                barIndex: i
-            });
-        }
-        
-        // Up Fractal (fundo) - Buy
-        let isUpFractal = false;
-        if (FRACTAL_BARS === 3) {
-            // 3-bar fractal: (low[n-1] > low[n]) and (low[n+1] > low[n])
-            isUpFractal = lows[i - 1] > lows[i] && lows[i + 1] > lows[i];
-        } else if (FRACTAL_BARS === 5) {
-            // 5-bar fractal: 2 antes e 2 depois
-            isUpFractal = lows[i - 2] > lows[i] && 
-                          lows[i - 1] > lows[i] && 
-                          lows[i + 1] > lows[i] && 
-                          lows[i + 2] > lows[i];
-        }
-        
-        if (isUpFractal) {
-            upFractals.push({
-                price: lows[i],
-                index: i,
-                barIndex: i
-            });
-        }
-    }
-    
-    // Limitar quantidade de fractais históricos (max 20)
-    if (dnFractals.length > MAX_HISTORICAL_FRACTALS) {
-        dnFractals = dnFractals.slice(-MAX_HISTORICAL_FRACTALS);
-    }
-    if (upFractals.length > MAX_HISTORICAL_FRACTALS) {
-        upFractals = upFractals.slice(-MAX_HISTORICAL_FRACTALS);
-    }
-    
-    // 2. ANALISAR CADA FRACTAL E DETECTAR SWEEP (lógica completa do Pine Script)
-    
-    // Analisar Down Fractals (sweep de alta - SELL)
-    for (let i = 0; i < dnFractals.length; i++) {
-        const fractal = dnFractals[i];
-        const fractalPrice = fractal.price;
-        const fractalIndex = fractal.index;
-        
-        // Encontrar o próximo fractal mais alto (limitCount)
-        // Isso determina até onde a linha deve ser desenhada
-        let limitCount = 0;
-        let hasHigherFractal = false;
-        
-        for (let t = i + 1; t < dnFractals.length; t++) {
-            const nextFractal = dnFractals[t];
-            if (fractalPrice < nextFractal.price) {
-                limitCount = nextFractal.index;
-                hasHigherFractal = true;
-                break;
-            }
-        }
-        
-        // Se não há fractal mais alto, vai até o início
-        if (!hasHigherFractal) {
-            limitCount = 0;
-        }
-        
-        // Procurar o último pavio que tocou este nível
-        // Esta é a parte mais importante da lógica do Pine Script
-        let lastWickIndex = -1;
-        let wickFound = false;
-        let lineActive = false;
-        
-        // Verificar se o fractal ainda é válido (não foi quebrado por candle fechado)
-        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
-            // Se encontrou um fractal mais alto antes, parar
-            if (hasHigherFractal && j >= limitCount) {
-                break;
-            }
-            
-            // Verificar se o preço tocou o nível do fractal
-            if (highs[j] >= fractalPrice) {
-                // Verificar se é apenas um candle fechado acima (wick)
-                if (fractalPrice < closes[j]) {
-                    // Candle fechou acima, fractal quebrado por candle fechado
-                    // Deve deletar a linha (não é sweep válido)
-                    break;
-                } else {
-                    // Encontrou um pavio que tocou o nível
-                    lastWickIndex = j;
-                    wickFound = true;
-                }
-            }
-        }
-        
-        // Se encontrou um pavio, verificar se é o candle atual
-        if (wickFound && lastWickIndex === currentIndex) {
-            // O último pavio que tocou o nível é o candle atual
-            // Isso significa que o sweep está ocorrendo AGORA
-            lineActive = true;
-        }
-        
-        // Se a linha está ativa (tocou o nível no candle atual)
-        if (lineActive) {
-            // Verificar se o preço atual tocou ou ultrapassou o fractal
-            const isSweep = currentHigh >= fractalPrice;
-            
-            if (isSweep) {
-                return {
-                    type: 'SELL',
-                    price: currentClose,
-                    fractalLevel: fractalPrice,
-                    fractalIndex: fractalIndex,
-                    isActive: true
-                };
-            }
-        }
-    }
-    
-    // Analisar Up Fractals (sweep de baixa - BUY)
-    for (let i = 0; i < upFractals.length; i++) {
-        const fractal = upFractals[i];
-        const fractalPrice = fractal.price;
-        const fractalIndex = fractal.index;
-        
-        // Encontrar o próximo fractal mais baixo (limitCount)
-        let limitCount = 0;
-        let hasLowerFractal = false;
-        
-        for (let t = i + 1; t < upFractals.length; t++) {
-            const nextFractal = upFractals[t];
-            if (fractalPrice > nextFractal.price) {
-                limitCount = nextFractal.index;
-                hasLowerFractal = true;
-                break;
-            }
-        }
-        
-        // Se não há fractal mais baixo, vai até o início
-        if (!hasLowerFractal) {
-            limitCount = 0;
-        }
-        
-        // Procurar o último pavio que tocou este nível
-        let lastWickIndex = -1;
-        let wickFound = false;
-        let lineActive = false;
-        
-        // Verificar se o fractal ainda é válido
-        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
-            if (hasLowerFractal && j >= limitCount) {
-                break;
-            }
-            
-            // Verificar se o preço tocou o nível do fractal
-            if (lows[j] <= fractalPrice) {
-                // Verificar se é apenas um candle fechado abaixo
-                if (fractalPrice > closes[j]) {
-                    // Candle fechou abaixo, fractal quebrado
-                    break;
-                } else {
-                    // Encontrou um pavio que tocou o nível
-                    lastWickIndex = j;
-                    wickFound = true;
-                }
-            }
-        }
-        
-        // Se encontrou um pavio, verificar se é o candle atual
-        if (wickFound && lastWickIndex === currentIndex) {
-            lineActive = true;
-        }
-        
-        // Se a linha está ativa (tocou o nível no candle atual)
-        if (lineActive) {
-            // Verificar se o preço atual tocou ou ultrapassou o fractal
-            const isSweep = currentLow <= fractalPrice;
-            
-            if (isSweep) {
-                return {
-                    type: 'BUY',
-                    price: currentClose,
-                    fractalLevel: fractalPrice,
-                    fractalIndex: fractalIndex,
-                    isActive: true
-                };
-            }
-        }
-    }
-    
-    return null;
-}
-
-// ============================================
-// INDICADORES SIMPLIFICADOS
-// ============================================
-
-async function getIndicators(symbol) {
-    try {
-        const candles = await getCandles(symbol, '1h', CANDLE_LIMIT_INDICATORS);
-        
-        let rsiValue = 'N/A';
-        if (candles && candles.length > 14) {
-            const closes = candles.map(c => c.close);
-            const rsiValues = RSI.calculate({ values: closes, period: 14 });
-            if (rsiValues && rsiValues.length > 0) {
-                rsiValue = rsiValues[rsiValues.length - 1].toFixed(2);
-            }
-        }
-        
-        return {
-            rsi1h: { value: rsiValue }
-        };
-    } catch (error) {
-        return { rsi1h: { value: 'N/A' } };
-    }
-}
-
-async function getSupportResistance(symbol) {
-    return { supports: [], resistances: [] };
-}
-
-// ============================================
-// FUNÇÕES AUXILIARES
-// ============================================
-
-function getBrazilianDateTime() {
-    const now = new Date();
-    const brasiliaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    return {
-        date: `${String(brasiliaTime.getDate()).padStart(2, '0')}/${String(brasiliaTime.getMonth() + 1).padStart(2, '0')}/${brasiliaTime.getFullYear()}`,
-        time: `${String(brasiliaTime.getHours()).padStart(2, '0')}:${String(brasiliaTime.getMinutes()).padStart(2, '0')}:${String(brasiliaTime.getSeconds()).padStart(2, '0')}`
-    };
-}
-
-function formatNumber(num) {
-    if (num === null || num === undefined || isNaN(num)) return 'N/A';
-    if (num >= 1000) return num.toFixed(2);
-    if (num >= 1) return num.toFixed(3);
-    if (num >= 0.1) return num.toFixed(4);
-    return num.toFixed(6);
-}
-
-// ============================================
-// FUNÇÃO DE ENVIO DE ALERTA (COM DESTAQUE NA PRIMEIRA LINHA)
-// ============================================
-
-async function sendAlert(symbol, sweep, brDateTime, indicators) {
-    const isBullish = sweep.type === 'BUY';
-    const emoji = isBullish ? '🟢' : '🔴';
-    const title = isBullish ? 'Sweep COMPRA' : 'Sweep VENDA';
-    const fractalType = isBullish ? 'Fractal de Baixa (Suporte)' : 'Fractal de Alta (Resistência)';
-    
-    const priceFormatted = formatNumber(sweep.price);
-    const fractalFormatted = formatNumber(sweep.fractalLevel);
-    
-    // Verificar se houve mudança de direção para adicionar destaque
-    const lastAlert = lastAlertBySymbol.get(symbol);
-    let directionChangeNote = '';
-    if (lastAlert && lastAlert.type !== sweep.type) {
-        directionChangeNote = '\n🔄 <b>MUDANÇA DE DIREÇÃO DETECTADA!</b>';
-    }
-    
-    // Primeira linha com destaque: emoji + título + ativo + preço
-    const message = `<i>${emoji} ${title} - ${symbol} - $${priceFormatted}</i>\n\n` +
-                   `<i>Data/Hora: ${brDateTime.date} ${brDateTime.time}hs</i>\n` +
-                   `<i>Nível do Fractal: $${fractalFormatted}</i>\n` +
-                   `<i>Tipo: ${fractalType}</i>\n` +
-                   `<i>RSI 1h: ${indicators.rsi1h.value}</i>${directionChangeNote}\n` +
-                   `<i>🤖 Titanium Hunter - Sweep!</i>`;
-    
-    const sent = await sendTelegramMessage(message);
-    
-    if (sent) {
-        console.log(`✅ ALERTA ENVIADO! ${symbol} - ${sweep.type} - Preço: ${sweep.price} | Fractal: ${sweep.fractalLevel}`);
-        totalAlertsSent++;
-        
-        // Armazenar no histórico
-        alertsHistory.push({
-            timestamp: Date.now(),
-            symbol,
-            type: sweep.type,
-            price: sweep.price,
-            fractalLevel: sweep.fractalLevel,
-            brDateTime
-        });
-        
-        // Armazenar último alerta para controle de repetição
-        lastAlertBySymbol.set(symbol, {
-            type: sweep.type,
-            price: sweep.price,
-            fractalLevel: sweep.fractalLevel,
-            timestamp: Date.now(),
-            direction: sweep.type
-        });
-        
-        return true;
-    } else {
-        console.log(`❌ FALHA AO ENVIAR ALERTA! ${symbol}`);
-        return false;
-    }
-}
-
-// ============================================
 // PROCESSAR SÍMBOLO
 // ============================================
 
@@ -780,20 +1153,16 @@ async function processSymbol(symbol) {
             return false;
         }
         
-        // Buscar candles para detecção de sweep
         const candles = await getCandles(symbol, '1h', CANDLE_LIMIT_SWEEP);
         if (!candles || candles.length < 50) return false;
         
-        // Detectar sweep com a lógica corrigida
-        const sweep = detectSweep(candles);
+        const sweep = detectSweepWithPivotValidation(candles);
         
         if (sweep && sweep.isActive) {
-            console.log(`\n🎯 SWEEP DETECTADO! ${symbol} - ${sweep.type}`);
+            console.log(`\n🎯 SWEEP D! ${symbol} - ${sweep.type}`);
             console.log(`💰 Preço Atual: ${sweep.price}`);
             console.log(`📍 Nível do Fractal: ${sweep.fractalLevel}`);
-            console.log(`📊 Tipo: ${sweep.type === 'BUY' ? 'Compra (Suporte quebrado)' : 'Venda (Resistência quebrada)'}`);
             
-            // Verificar se deve enviar o alerta (evitar repetições)
             const shouldSend = shouldSendAlert(symbol, sweep);
             
             if (!shouldSend) {
@@ -801,12 +1170,20 @@ async function processSymbol(symbol) {
                 return false;
             }
             
-            // Buscar indicadores para complementar
+            // Detectar clusters de suporte e resistência
+            const { supportClusters, resistanceClusters } = detectPriceClusters(candles, CANDLE_LIMIT_CLUSTER);
+            
+            console.log(`📊 Suportes encontrados: ${supportClusters.length} clusters`);
+            supportClusters.forEach(c => console.log(`   - $${formatNumber(c.centerPrice)} (${c.touches}x toques)`));
+            console.log(`📊 Resistências encontradas: ${resistanceClusters.length} clusters`);
+            resistanceClusters.forEach(c => console.log(`   - $${formatNumber(c.centerPrice)} (${c.touches}x toques)`));
+            
             const indicators = await getIndicators(symbol);
+            console.log(`📊 LSR: ${indicators.lsr.ratio} | Funding: ${indicators.funding.formatted}`);
+            
             const brDateTime = getBrazilianDateTime();
             
-            // Enviar alerta
-            const sent = await sendAlert(symbol, sweep, brDateTime, indicators);
+            const sent = await sendAlert(symbol, sweep, brDateTime, indicators, supportClusters, resistanceClusters);
             
             if (sent) {
                 alertsCooldown[symbol] = now;
@@ -829,19 +1206,19 @@ async function monitorSymbols() {
     let alertCount = 0;
     console.log(`\n🔍 Varredura: ${VALID_SYMBOLS.length} símbolos...`);
     console.log(`⚙️ Configuração: Fractal ${FRACTAL_BARS} barras | Período: ${PERIODS}`);
+    console.log(`📊 Cluster: ${CLUSTER_PROXIMITY_THRESHOLD * 100}% de proximidade | Mínimo ${MIN_CLUSTER_SIZE} toques`);
     console.log(`🔄 Prevenção de repetição: ${MIN_PRICE_CHANGE_PERCENT}% de mudança mínima para mesmo nível`);
+    console.log(`📊 Monitorando LSR e Funding Rate em tempo real`);
     
     for (let i = 0; i < VALID_SYMBOLS.length; i++) {
         const symbol = VALID_SYMBOLS[i];
         const result = await processSymbol(symbol);
         if (result) alertCount++;
         
-        // Mostrar progresso
         if ((i + 1) % 10 === 0) {
             console.log(`📊 Progresso: ${i + 1}/${VALID_SYMBOLS.length} (${alertCount} alertas)`);
         }
         
-        // Delay entre símbolos para evitar rate limit
         await new Promise(r => setTimeout(r, MIN_DELAY_BETWEEN_SYMBOLS));
     }
     
@@ -857,12 +1234,14 @@ async function loadSymbols() {
     try {
         console.log('🔍 Carregando símbolos...');
         
-        // Lista completa de símbolos para monitorar
         const symbols = [
             'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
             'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT',
             'AEVOUSDT', 'AXLUSDT', 'ZECUSDT', 'TRUMPUSDT', 'TRBUSDT',
             'POLUSDT', 'UNIUSDT', 'ATOMUSDT', 'ETCUSDT', 'LTCUSDT',
+            'ZEREBROUSDT', '1000SHIBUSDT', '1000PEPEUSDT', 'API3USDT', 'AXLUSDT',
+            'ARUSDT', 'BANDUSDT', 'RUNEUSDT', 'BOMEUSDT', 'STGUSDT',
+            'CHRUSDT', 'CKBUSDT', 'GMTUSDT', 'GRTUSDT', 'HOTUSDT',
             'REZUSDT', 'PORTALUSDT', 'RVNUSDT', 'SEIUSDT', 'SKLUSDT',
             'SUIUSDT', 'THETAUSDT', 'TIAUSDT', 'UMAUSDT', 'VETUSDT',
             'ILVUSDT', 'ENJUSDT', 'FETUSDT', 'GMXUSDT', 'HBARUSDT',
@@ -890,9 +1269,11 @@ async function loadSymbols() {
 async function testTelegram() {
     console.log('\n🔍 Testando conexão com Telegram...');
     
-    const testMsg = `<i>🤖 Titanium </i>\n` +
+    const testMsg = `<i>🤖 Titanium Hunter iniciado!</i>\n` +
                    `<code>${'='.repeat(35)}</code>\n` +
-                   ` <b>alertas :</b> ${MIN_PRICE_CHANGE_PERCENT}% de mudança mínima`;
+                   `<i>Cluster: ${CLUSTER_PROXIMITY_THRESHOLD * 100}% de proximidade</i>\n` +
+                   `<i>Mudança mínima: ${MIN_PRICE_CHANGE_PERCENT}%</i>\n` +
+                   `<i>LSR e Funding Rate: ATIVOS</i>`;
     
     const sent = await sendTelegramMessage(testMsg);
     
@@ -910,10 +1291,8 @@ async function testTelegram() {
 // ============================================
 
 async function mainLoop() {
-    // Inicializar sistema de limpeza
     await cleanupManager.initialize();
     
-    // Carregar símbolos
     VALID_SYMBOLS = await loadSymbols();
     
     if (VALID_SYMBOLS.length === 0) {
@@ -921,14 +1300,16 @@ async function mainLoop() {
         process.exit(1);
     }
     
-    // Testar Telegram
     const telegramOk = await testTelegram();
     if (!telegramOk) {
         console.log('❌ Telegram não está respondendo! Continuando sem envio de mensagens...');
     }
     
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`🤖 TITANIUM `);
+    console.log(`🤖 TITANIUM HUNTER - SWEEP COM VALIDAÇÃO DE PIVÔS E CLUSTERS`);
+    console.log(`📊 Regras: Sweep COMPRA → Pivô de ALTA | Sweep VENDA → Pivô de BAIXA`);
+    console.log(`📊 Cluster: ${CLUSTER_PROXIMITY_THRESHOLD * 100}% de proximidade | Mínimo ${MIN_CLUSTER_SIZE} toques`);
+    console.log(`📊 LSR (Long/Short Ratio) e Funding Rate: MONITORADOS`);
     console.log(`${'='.repeat(60)}\n`);
     
     let cycle = 0;
@@ -941,7 +1322,6 @@ async function mainLoop() {
             
             await monitorSymbols();
             
-            // Verificar se precisa fazer limpeza automática
             const now = Date.now();
             if (now - lastCleanup >= CLEANUP_INTERVAL) {
                 await cleanupManager.performFullCleanup();
@@ -964,10 +1344,10 @@ async function mainLoop() {
 // ============================================
 
 console.log('\n' + '='.repeat(60));
-console.log('🤖 TITANIUM ');
+console.log('🤖 TITANIUM HUNTER - SWEEP COM VALIDAÇÃO DE PIVÔS E CLUSTERS');
+console.log('📈 Versão Aprimorada: Com detecção de clusters, LSR e Funding Rate');
 console.log('='.repeat(60) + '\n');
 
-// Iniciar o sistema
 mainLoop().catch(error => {
     console.error('❌ Erro fatal:', error);
     process.exit(1);
