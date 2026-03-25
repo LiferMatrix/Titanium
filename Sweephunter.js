@@ -6,8 +6,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURAÇÕES ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
-const TELEGRAM_CHAT_ID = '-1002554953979';
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8
+const TELEGRAM_CHAT_ID = '-1002554
 
 // Configurações do fractal (igual ao Pine Script)
 const PERIODS = 2;
