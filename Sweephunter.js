@@ -6,8 +6,8 @@ const path = require('path');
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // === CONFIGURAÇÕES ===
-const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSy
-const TELEGRAM_CHAT_ID = '-1002554
+const TELEGRAM_BOT_TOKEN = '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg';
+const TELEGRAM_CHAT_ID = '-1002554953979';
 
 // Configurações do fractal (igual ao Pine Script)
 const PERIODS = 2;
@@ -20,11 +20,11 @@ const RSI_SELL_MIN = 66; // Venda somente com RSI 1h MAIOR que 66
 
 // === CONFIGURAÇÕES DE CLUSTER ===
 const CLUSTER_PROXIMITY_THRESHOLD = 0.005; // 0.5% de proximidade para agrupar níveis
-const MIN_CLUSTER_SIZE = 2; // Mínimo de 2 pontos para formar um cluster forte
+const MIN_CLUSTER_SIZE = 2; // Mínimo de 2 pontos para formar um cluster
 const STRONG_CLUSTER_THRESHOLD = 3; // Cluster com 3+ pontos é considerado forte
 const MAX_CLUSTERS_TO_SHOW = 3; // Mostrar até 3 clusters de cada tipo
 
-// === OTIMIZAÇÕES DE PERFORMANCE (CONFIGURÁVEIS) ===
+// === OTIMIZAÇÕES DE PERFORMANCE ===
 const MIN_DELAY_BETWEEN_SYMBOLS = 7000;
 const CACHE_TTL = 120000;
 const COOLDOWN = 30 * 60 * 1000;
@@ -38,15 +38,13 @@ const CANDLE_LIMIT_CLUSTER = 200;
 const REQUESTS_PER_MINUTE = 1200;
 const REQUEST_WINDOW_MS = 60000;
 
-// === CONFIGURAÇÕES DE LIMPEZA AUTOMÁTICA (CONFIGURÁVEIS) ===
-const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hora
+// === CONFIGURAÇÕES DE LIMPEZA AUTOMÁTICA ===
+const CLEANUP_INTERVAL = 60 * 60 * 1000;
 const MAX_CACHE_SIZE = 500;
 const MAX_LOG_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_BACKUP_FILES = 5;
 const ALERTS_HISTORY_LIMIT = 1000;
 const DATA_RETENTION_DAYS = 7;
-const CYCLE_WAIT_MINUTES = 5;
-const ERROR_RETRY_WAIT_SECONDS = 60;
 
 // === CONFIGURAÇÕES PARA EVITAR ALERTAS REPETIDOS ===
 const MIN_PRICE_CHANGE_PERCENT = 0.5;
@@ -63,6 +61,7 @@ let totalAlertsSent = 0;
 let alertsHistory = [];
 let lastCleanup = Date.now();
 
+// Armazenar o último alerta por símbolo para evitar repetições
 const lastAlertBySymbol = new Map();
 
 // ============================================
@@ -74,7 +73,6 @@ class DataCleanupManager {
         this.logsDir = path.join(__dirname, 'logs');
         this.backupDir = path.join(__dirname, 'backups');
         this.dataDir = path.join(__dirname, 'data');
-        this.isCleaning = false;
     }
 
     async initialize() {
@@ -174,28 +172,6 @@ class DataCleanupManager {
                 const toRemove = sortedEntries.slice(0, candleCache.size - MAX_CACHE_SIZE);
                 for (const [key] of toRemove) {
                     candleCache.delete(key);
-                    removedCount++;
-                }
-            }
-            
-            if (fundingRateCache.size > MAX_CACHE_SIZE / 2) {
-                const sortedEntries = Array.from(fundingRateCache.entries())
-                    .sort((a, b) => a[1].timestamp - b[1].timestamp);
-                
-                const toRemove = sortedEntries.slice(0, fundingRateCache.size - Math.floor(MAX_CACHE_SIZE / 2));
-                for (const [key] of toRemove) {
-                    fundingRateCache.delete(key);
-                    removedCount++;
-                }
-            }
-            
-            if (lsrCache.size > MAX_CACHE_SIZE / 2) {
-                const sortedEntries = Array.from(lsrCache.entries())
-                    .sort((a, b) => a[1].timestamp - b[1].timestamp);
-                
-                const toRemove = sortedEntries.slice(0, lsrCache.size - Math.floor(MAX_CACHE_SIZE / 2));
-                for (const [key] of toRemove) {
-                    lsrCache.delete(key);
                     removedCount++;
                 }
             }
@@ -304,12 +280,6 @@ class DataCleanupManager {
     }
 
     async performFullCleanup() {
-        if (this.isCleaning) {
-            console.log('⚠️ Limpeza já em andamento, ignorando...');
-            return;
-        }
-        
-        this.isCleaning = true;
         const startTime = Date.now();
         console.log('\n🧹 INICIANDO LIMPEZA AUTOMÁTICA DE DADOS...');
         
@@ -335,8 +305,6 @@ class DataCleanupManager {
             
         } catch (error) {
             console.log(`❌ Erro durante limpeza automática: ${error.message}`);
-        } finally {
-            this.isCleaning = false;
         }
     }
 }
@@ -389,12 +357,14 @@ function checkRSICondition(rsiValue, alertType) {
     const rsi = parseFloat(rsiValue);
     
     if (alertType === 'BUY') {
+        // Compra: RSI 1h MENOR que 62
         const isValid = rsi < RSI_BUY_MAX;
         console.log(`📊 RSI 1h: ${rsi} | Condição para COMPRA: RSI < ${RSI_BUY_MAX} = ${isValid ? '✅ OK' : '❌ BLOQUEADO'}`);
         return isValid;
     } 
     
     if (alertType === 'SELL') {
+        // Venda: RSI 1h MAIOR que 66
         const isValid = rsi > RSI_SELL_MIN;
         console.log(`📊 RSI 1h: ${rsi} | Condição para VENDA: RSI > ${RSI_SELL_MIN} = ${isValid ? '✅ OK' : '❌ BLOQUEADO'}`);
         return isValid;
@@ -404,10 +374,10 @@ function checkRSICondition(rsiValue, alertType) {
 }
 
 // ============================================
-// OTIMIZAÇÃO DE RATE LIMIT (COM BACKOFF EXPONENCIAL)
+// OTIMIZAÇÃO DE RATE LIMIT
 // ============================================
 
-async function checkRateLimit(weight = 1, retryCount = 0) {
+async function checkRateLimit(weight = 1) {
     const now = Date.now();
     
     if (now - requestWindowStart > REQUEST_WINDOW_MS) {
@@ -416,13 +386,10 @@ async function checkRateLimit(weight = 1, retryCount = 0) {
     }
     
     if (requestCount + weight > REQUESTS_PER_MINUTE) {
-        const baseWaitTime = REQUEST_WINDOW_MS - (now - requestWindowStart) + 1000;
-        const backoffMultiplier = Math.min(Math.pow(2, retryCount), 32);
-        const waitTime = baseWaitTime * backoffMultiplier;
-        
-        console.log(`⏳ Rate limit (${requestCount}/${REQUESTS_PER_MINUTE}), aguardando ${Math.round(waitTime/1000)}s (tentativa ${retryCount + 1})...`);
+        const waitTime = REQUEST_WINDOW_MS - (now - requestWindowStart) + 1000;
+        console.log(`⏳ Rate limit (${requestCount}/${REQUESTS_PER_MINUTE}), aguardando ${Math.round(waitTime/1000)}s...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return checkRateLimit(weight, retryCount + 1);
+        return checkRateLimit(weight);
     }
     
     requestCount += weight;
@@ -496,6 +463,7 @@ async function getLongShortRatio(symbol) {
     await checkRateLimit(2);
     
     try {
+        // Tenta pegar do endpoint de top traders (mais confiável)
         let url = `https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`;
         let response = await fetch(url);
         let data = await response.json();
@@ -512,6 +480,7 @@ async function getLongShortRatio(symbol) {
             return result;
         }
         
+        // Fallback para o endpoint de posições
         url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`;
         response = await fetch(url);
         data = await response.json();
@@ -574,73 +543,55 @@ async function getFundingRate(symbol) {
 }
 
 // ============================================
-// DETECÇÃO DE CLUSTERS CORRIGIDA (CLASSIFICAÇÃO CORRETA)
+// DETECÇÃO DE CLUSTERS COM CONTAGEM DE TOQUES
 // ============================================
 
-function detectPriceClusters(candles, currentPrice, lookbackBars = 200) {
+function detectPriceClusters(candles, lookbackBars = 200) {
     if (!candles || candles.length < 50) return { supportClusters: [], resistanceClusters: [] };
     
+    // Pegar apenas os últimos 'lookbackBars' candles para análise
     const recentCandles = candles.slice(-lookbackBars);
     
-    // Coletar níveis de preço com suas classificações originais
+    // Coletar todos os níveis de preço relevantes (máximos e mínimos)
     const priceLevels = [];
     
     for (let i = 0; i < recentCandles.length; i++) {
         const candle = recentCandles[i];
         
-        // Máximos são naturalmente resistências
+        // Adicionar máximo (possível resistência)
         priceLevels.push({
             price: candle.high,
-            originalType: 'high',
+            type: 'resistance',
             index: i,
             touches: 1
         });
         
-        // Mínimos são naturalmente suportes
+        // Adicionar mínimo (possível suporte)
         priceLevels.push({
             price: candle.low,
-            originalType: 'low',
+            type: 'support',
             index: i,
             touches: 1
         });
         
-        // Fechamentos podem ser ambos, vamos classificar depois baseado no preço atual
+        // Adicionar fechamento (importante para zonas de valor)
         priceLevels.push({
             price: candle.close,
-            originalType: 'close',
+            type: 'value',
             index: i,
             touches: 1
         });
     }
     
-    function clusterLevels(isSupport) {
-        // Filtrar níveis que são candidatos a suporte ou resistência
-        let candidates = [];
+    // Função para agrupar níveis próximos
+    function clusterLevels(levels, isSupport) {
+        const filteredLevels = levels.filter(l => isSupport ? 
+            l.type === 'support' || l.type === 'value' : 
+            l.type === 'resistance' || l.type === 'value');
         
-        for (const level of priceLevels) {
-            if (isSupport) {
-                // Para suporte: lows e closes que estão abaixo do preço atual
-                if (level.originalType === 'low') {
-                    candidates.push(level);
-                } else if (level.originalType === 'close' && level.price < currentPrice) {
-                    candidates.push(level);
-                }
-            } else {
-                // Para resistência: highs e closes que estão acima do preço atual
-                if (level.originalType === 'high') {
-                    candidates.push(level);
-                } else if (level.originalType === 'close' && level.price > currentPrice) {
-                    candidates.push(level);
-                }
-            }
-        }
-        
-        if (candidates.length === 0) return [];
-        
-        // Agrupar níveis próximos
         const clusters = [];
         
-        for (const level of candidates) {
+        for (const level of filteredLevels) {
             let foundCluster = false;
             
             for (const cluster of clusters) {
@@ -665,41 +616,31 @@ function detectPriceClusters(candles, currentPrice, lookbackBars = 200) {
             }
         }
         
-        // Ordenar por número de toques
+        // Ordenar clusters por número de toques (maior primeiro)
         clusters.sort((a, b) => b.touches - a.touches);
         
-        // Pegar clusters fortes (mínimo MIN_CLUSTER_SIZE)
-        let resultClusters = clusters.filter(c => c.touches >= MIN_CLUSTER_SIZE);
+        // Filtrar clusters com pelo menos MIN_CLUSTER_SIZE toques
+        const strongClusters = clusters.filter(c => c.touches >= MIN_CLUSTER_SIZE);
         
-        // Se não houver clusters fortes, usar clusters fracos como fallback
-        if (resultClusters.length === 0) {
-            resultClusters = clusters.filter(c => c.touches === 1);
-            if (resultClusters.length > 0) {
-                console.log(`📊 Usando clusters ${isSupport ? 'de suporte' : 'de resistência'} fracos (1 toque) como fallback`);
-            }
-        }
-        
-        // Ordenar por proximidade ao preço atual
+        // Ordenar os clusters por preço (crescente para suporte e decrescente para resistência)
         if (isSupport) {
-            // Suportes: ordenar do MAIOR para o MENOR (mais próximo do preço atual primeiro)
-            resultClusters.sort((a, b) => b.centerPrice - a.centerPrice);
+            strongClusters.sort((a, b) => a.centerPrice - b.centerPrice);
         } else {
-            // Resistências: ordenar do MENOR para o MAIOR (mais próximo do preço atual primeiro)
-            resultClusters.sort((a, b) => a.centerPrice - b.centerPrice);
+            strongClusters.sort((a, b) => b.centerPrice - a.centerPrice);
         }
         
-        // Limitar número de clusters
-        return resultClusters.slice(0, MAX_CLUSTERS_TO_SHOW);
+        // Pegar os mais fortes (até MAX_CLUSTERS_TO_SHOW)
+        return strongClusters.slice(0, MAX_CLUSTERS_TO_SHOW);
     }
     
-    const supportClusters = clusterLevels(true);
-    const resistanceClusters = clusterLevels(false);
+    const resistanceClusters = clusterLevels(priceLevels, false);
+    const supportClusters = clusterLevels(priceLevels, true);
     
     return { supportClusters, resistanceClusters };
 }
 
 // ============================================
-// DETECÇÃO DE PIVÔS
+// FUNÇÃO PARA DETECTAR PIVÔS (PONTOS DE VIRADA)
 // ============================================
 
 function detectPivots(candles) {
@@ -741,171 +682,77 @@ function detectPivots(candles) {
         }
     }
     
-    const filterSignificantPivots = (pivots, isHigh) => {
-        const filtered = [];
-        for (let i = 0; i < pivots.length; i++) {
-            let isSignificant = true;
-            for (let j = 0; j < pivots.length; j++) {
-                if (i !== j && Math.abs(pivots[i].index - pivots[j].index) < 5) {
-                    if (isHigh && pivots[j].price > pivots[i].price) {
-                        isSignificant = false;
-                        break;
-                    }
-                    if (!isHigh && pivots[j].price < pivots[i].price) {
-                        isSignificant = false;
-                        break;
-                    }
+    const filteredHighPivots = [];
+    const filteredLowPivots = [];
+    
+    for (let i = 0; i < highPivots.length; i++) {
+        let isSignificant = true;
+        for (let j = 0; j < highPivots.length; j++) {
+            if (i !== j && Math.abs(highPivots[i].index - highPivots[j].index) < 5) {
+                if (highPivots[j].price > highPivots[i].price) {
+                    isSignificant = false;
+                    break;
                 }
             }
-            if (isSignificant) {
-                filtered.push(pivots[i]);
+        }
+        if (isSignificant) {
+            filteredHighPivots.push(highPivots[i]);
+        }
+    }
+    
+    for (let i = 0; i < lowPivots.length; i++) {
+        let isSignificant = true;
+        for (let j = 0; j < lowPivots.length; j++) {
+            if (i !== j && Math.abs(lowPivots[i].index - lowPivots[j].index) < 5) {
+                if (lowPivots[j].price < lowPivots[i].price) {
+                    isSignificant = false;
+                    break;
+                }
             }
         }
-        return filtered.slice(-MAX_HISTORICAL_FRACTALS);
-    };
+        if (isSignificant) {
+            filteredLowPivots.push(lowPivots[i]);
+        }
+    }
     
     return { 
-        highPivots: filterSignificantPivots(highPivots, true),
-        lowPivots: filterSignificantPivots(lowPivots, false)
+        highPivots: filteredHighPivots.slice(-MAX_HISTORICAL_FRACTALS),
+        lowPivots: filteredLowPivots.slice(-MAX_HISTORICAL_FRACTALS)
     };
 }
 
 // ============================================
-// FUNÇÃO PARA VERIFICAR SWEEP COM PIVÔ
+// FUNÇÃO PARA VERIFICAR SE SWEEP ESTÁ ALINHADO COM PIVÔ
 // ============================================
 
 function isSweepAlignedWithPivot(sweep, pivots) {
     if (!sweep || !sweep.isActive) return false;
     
-    const pivotType = sweep.type === 'BUY' ? pivots.highPivots : pivots.lowPivots;
-    const pivotLabel = sweep.type === 'BUY' ? 'ALTA' : 'BAIXA';
-    
-    for (const pivot of pivotType) {
-        const priceDifference = Math.abs(sweep.fractalLevel - pivot.price) / pivot.price * 100;
-        if (priceDifference <= 0.5) {
-            console.log(`✅ Sweep ${sweep.type} alinhado com Pivô de ${pivotLabel} em ${pivot.price}`);
-            return true;
+    if (sweep.type === 'BUY') {
+        for (const pivot of pivots.highPivots) {
+            const priceDifference = Math.abs(sweep.fractalLevel - pivot.price) / pivot.price * 100;
+            if (priceDifference <= 0.5) {
+                console.log(`✅ Sweep BUY alinhado com Pivô de ALTA em ${pivot.price}`);
+                return true;
+            }
         }
+        console.log(`❌ Sweep BUY NÃO alinhado com nenhum Pivô de ALTA`);
+        return false;
     }
     
-    console.log(`❌ Sweep ${sweep.type} NÃO alinhado com nenhum Pivô de ${pivotLabel}`);
+    if (sweep.type === 'SELL') {
+        for (const pivot of pivots.lowPivots) {
+            const priceDifference = Math.abs(sweep.fractalLevel - pivot.price) / pivot.price * 100;
+            if (priceDifference <= 0.5) {
+                console.log(`✅ Sweep SELL alinhado com Pivô de BAIXA em ${pivot.price}`);
+                return true;
+            }
+        }
+        console.log(`❌ Sweep SELL NÃO alinhado com nenhum Pivô de BAIXA`);
+        return false;
+    }
+    
     return false;
-}
-
-// ============================================
-// FUNÇÃO AUXILIAR PARA DETECTAR FRACTAIS
-// ============================================
-
-function detectFractals(candles, type) {
-    const isHighFractal = type === 'high';
-    const values = isHighFractal ? candles.map(c => c.high) : candles.map(c => c.low);
-    const fractals = [];
-    
-    for (let i = PERIODS; i < candles.length - PERIODS - 1; i++) {
-        let isFractal = false;
-        
-        if (FRACTAL_BARS === 3) {
-            if (isHighFractal) {
-                isFractal = values[i - 1] < values[i] && values[i + 1] < values[i];
-            } else {
-                isFractal = values[i - 1] > values[i] && values[i + 1] > values[i];
-            }
-        } else if (FRACTAL_BARS === 5) {
-            if (isHighFractal) {
-                isFractal = values[i - 2] < values[i] && 
-                           values[i - 1] < values[i] && 
-                           values[i + 1] < values[i] && 
-                           values[i + 2] < values[i];
-            } else {
-                isFractal = values[i - 2] > values[i] && 
-                           values[i - 1] > values[i] && 
-                           values[i + 1] > values[i] && 
-                           values[i + 2] > values[i];
-            }
-        }
-        
-        if (isFractal) {
-            fractals.push({
-                price: values[i],
-                index: i,
-                barIndex: i
-            });
-        }
-    }
-    
-    if (fractals.length > MAX_HISTORICAL_FRACTALS) {
-        return fractals.slice(-MAX_HISTORICAL_FRACTALS);
-    }
-    return fractals;
-}
-
-// ============================================
-// FUNÇÃO AUXILIAR PARA VERIFICAR SWEEP DE FRACTAL
-// ============================================
-
-function checkFractalSweep(fractals, values, currentValue, isHigh) {
-    for (let i = 0; i < fractals.length; i++) {
-        const fractal = fractals[i];
-        const fractalPrice = fractal.price;
-        const fractalIndex = fractal.index;
-        
-        let limitCount = 0;
-        let hasExtremeFractal = false;
-        
-        for (let t = i + 1; t < fractals.length; t++) {
-            const nextFractal = fractals[t];
-            if ((isHigh && fractalPrice < nextFractal.price) || 
-                (!isHigh && fractalPrice > nextFractal.price)) {
-                limitCount = nextFractal.index;
-                hasExtremeFractal = true;
-                break;
-            }
-        }
-        
-        if (!hasExtremeFractal) {
-            limitCount = 0;
-        }
-        
-        let lastWickIndex = -1;
-        let wickFound = false;
-        let lineActive = false;
-        
-        for (let j = fractalIndex + 1; j <= values.length - 1; j++) {
-            if (hasExtremeFractal && j >= limitCount) {
-                break;
-            }
-            
-            if ((isHigh && values[j] >= fractalPrice) || 
-                (!isHigh && values[j] <= fractalPrice)) {
-                if ((isHigh && fractalPrice < values[j]) || 
-                    (!isHigh && fractalPrice > values[j])) {
-                    break;
-                } else {
-                    lastWickIndex = j;
-                    wickFound = true;
-                }
-            }
-        }
-        
-        if (wickFound && lastWickIndex === values.length - 1) {
-            lineActive = true;
-        }
-        
-        if (lineActive) {
-            const isSweep = (isHigh && currentValue >= fractalPrice) || 
-                           (!isHigh && currentValue <= fractalPrice);
-            
-            if (isSweep) {
-                return {
-                    type: isHigh ? 'BUY' : 'SELL',
-                    fractalLevel: fractalPrice,
-                    fractalIndex: fractalIndex,
-                    isActive: true
-                };
-            }
-        }
-    }
-    return null;
 }
 
 // ============================================
@@ -923,25 +770,194 @@ function detectSweepWithPivotValidation(candles) {
     const currentLow = lows[currentIndex];
     const currentClose = closes[currentIndex];
     
-    const dnFractals = detectFractals(candles, 'high');
-    const upFractals = detectFractals(candles, 'low');
+    let dnFractals = [];
+    let upFractals = [];
+    
+    for (let i = PERIODS; i < candles.length - PERIODS - 1; i++) {
+        let isDnFractal = false;
+        if (FRACTAL_BARS === 3) {
+            isDnFractal = highs[i - 1] < highs[i] && highs[i + 1] < highs[i];
+        } else if (FRACTAL_BARS === 5) {
+            isDnFractal = highs[i - 2] < highs[i] && 
+                          highs[i - 1] < highs[i] && 
+                          highs[i + 1] < highs[i] && 
+                          highs[i + 2] < highs[i];
+        }
+        
+        if (isDnFractal) {
+            dnFractals.push({
+                price: highs[i],
+                index: i,
+                barIndex: i
+            });
+        }
+        
+        let isUpFractal = false;
+        if (FRACTAL_BARS === 3) {
+            isUpFractal = lows[i - 1] > lows[i] && lows[i + 1] > lows[i];
+        } else if (FRACTAL_BARS === 5) {
+            isUpFractal = lows[i - 2] > lows[i] && 
+                          lows[i - 1] > lows[i] && 
+                          lows[i + 1] > lows[i] && 
+                          lows[i + 2] > lows[i];
+        }
+        
+        if (isUpFractal) {
+            upFractals.push({
+                price: lows[i],
+                index: i,
+                barIndex: i
+            });
+        }
+    }
+    
+    if (dnFractals.length > MAX_HISTORICAL_FRACTALS) {
+        dnFractals = dnFractals.slice(-MAX_HISTORICAL_FRACTALS);
+    }
+    if (upFractals.length > MAX_HISTORICAL_FRACTALS) {
+        upFractals = upFractals.slice(-MAX_HISTORICAL_FRACTALS);
+    }
     
     const pivots = detectPivots(candles);
     
-    let sweepDetected = checkFractalSweep(dnFractals, highs, currentHigh, true);
-    if (sweepDetected) {
-        sweepDetected.price = currentClose;
-        const isValid = isSweepAlignedWithPivot(sweepDetected, pivots);
-        if (isValid) return sweepDetected;
-        return null;
+    let sweepDetected = null;
+    
+    for (let i = 0; i < dnFractals.length; i++) {
+        const fractal = dnFractals[i];
+        const fractalPrice = fractal.price;
+        const fractalIndex = fractal.index;
+        
+        let limitCount = 0;
+        let hasHigherFractal = false;
+        
+        for (let t = i + 1; t < dnFractals.length; t++) {
+            const nextFractal = dnFractals[t];
+            if (fractalPrice < nextFractal.price) {
+                limitCount = nextFractal.index;
+                hasHigherFractal = true;
+                break;
+            }
+        }
+        
+        if (!hasHigherFractal) {
+            limitCount = 0;
+        }
+        
+        let lastWickIndex = -1;
+        let wickFound = false;
+        let lineActive = false;
+        
+        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
+            if (hasHigherFractal && j >= limitCount) {
+                break;
+            }
+            
+            if (highs[j] >= fractalPrice) {
+                if (fractalPrice < closes[j]) {
+                    break;
+                } else {
+                    lastWickIndex = j;
+                    wickFound = true;
+                }
+            }
+        }
+        
+        if (wickFound && lastWickIndex === currentIndex) {
+            lineActive = true;
+        }
+        
+        if (lineActive) {
+            const isSweep = currentHigh >= fractalPrice;
+            
+            if (isSweep) {
+                sweepDetected = {
+                    type: 'BUY',
+                    price: currentClose,
+                    fractalLevel: fractalPrice,
+                    fractalIndex: fractalIndex,
+                    isActive: true
+                };
+                break;
+            }
+        }
     }
     
-    sweepDetected = checkFractalSweep(upFractals, lows, currentLow, false);
-    if (sweepDetected) {
-        sweepDetected.price = currentClose;
+    if (sweepDetected && sweepDetected.type === 'BUY') {
         const isValid = isSweepAlignedWithPivot(sweepDetected, pivots);
-        if (isValid) return sweepDetected;
-        return null;
+        if (!isValid) {
+            console.log(`🚫 Sweep BUY rejeitado: não está alinhado com Pivô de ALTA`);
+            return null;
+        }
+        return sweepDetected;
+    }
+    
+    for (let i = 0; i < upFractals.length; i++) {
+        const fractal = upFractals[i];
+        const fractalPrice = fractal.price;
+        const fractalIndex = fractal.index;
+        
+        let limitCount = 0;
+        let hasLowerFractal = false;
+        
+        for (let t = i + 1; t < upFractals.length; t++) {
+            const nextFractal = upFractals[t];
+            if (fractalPrice > nextFractal.price) {
+                limitCount = nextFractal.index;
+                hasLowerFractal = true;
+                break;
+            }
+        }
+        
+        if (!hasLowerFractal) {
+            limitCount = 0;
+        }
+        
+        let lastWickIndex = -1;
+        let wickFound = false;
+        let lineActive = false;
+        
+        for (let j = fractalIndex + 1; j <= currentIndex; j++) {
+            if (hasLowerFractal && j >= limitCount) {
+                break;
+            }
+            
+            if (lows[j] <= fractalPrice) {
+                if (fractalPrice > closes[j]) {
+                    break;
+                } else {
+                    lastWickIndex = j;
+                    wickFound = true;
+                }
+            }
+        }
+        
+        if (wickFound && lastWickIndex === currentIndex) {
+            lineActive = true;
+        }
+        
+        if (lineActive) {
+            const isSweep = currentLow <= fractalPrice;
+            
+            if (isSweep) {
+                sweepDetected = {
+                    type: 'SELL',
+                    price: currentClose,
+                    fractalLevel: fractalPrice,
+                    fractalIndex: fractalIndex,
+                    isActive: true
+                };
+                break;
+            }
+        }
+    }
+    
+    if (sweepDetected && sweepDetected.type === 'SELL') {
+        const isValid = isSweepAlignedWithPivot(sweepDetected, pivots);
+        if (!isValid) {
+            console.log(`🚫 Sweep SELL rejeitado: não está alinhado com Pivô de BAIXA`);
+            return null;
+        }
+        return sweepDetected;
     }
     
     return null;
@@ -964,6 +980,7 @@ async function getIndicators(symbol) {
             }
         }
         
+        // Buscar LSR e Funding Rate
         const lsr = await getLongShortRatio(symbol);
         const funding = await getFundingRate(symbol);
         
@@ -1027,7 +1044,7 @@ function getLSREmoji(lsr) {
 }
 
 // ============================================
-// FUNÇÃO DE ENVIO DE ALERTA
+// FUNÇÃO DE ENVIO DE ALERTA COM CLUSTERS E RSI
 // ============================================
 
 async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters, resistanceClusters) {
@@ -1037,6 +1054,7 @@ async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters,
     
     const priceFormatted = formatNumber(sweep.price);
     
+    // Formatar clusters de suporte em ordem crescente
     let supportText = '';
     if (supportClusters && supportClusters.length > 0) {
         const supportStrings = supportClusters.map(cluster => 
@@ -1047,9 +1065,11 @@ async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters,
         supportText = `Suporte: N/A`;
     }
     
+    // Formatar clusters de resistência em ordem crescente
     let resistanceText = '';
     if (resistanceClusters && resistanceClusters.length > 0) {
-        const resistanceStrings = resistanceClusters.map(cluster => 
+        const sortedResistance = [...resistanceClusters].sort((a, b) => a.centerPrice - b.centerPrice);
+        const resistanceStrings = sortedResistance.map(cluster => 
             `$${formatNumber(cluster.centerPrice)} (${cluster.touches}x)`
         );
         resistanceText = `Resistência: ${resistanceStrings.join(' | ')}`;
@@ -1057,6 +1077,7 @@ async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters,
         resistanceText = `Resistência: N/A`;
     }
     
+    // Formatar LSR
     const lsr = indicators.lsr;
     const lsrEmoji = getLSREmoji(lsr);
     let lsrText = '';
@@ -1066,6 +1087,7 @@ async function sendAlert(symbol, sweep, brDateTime, indicators, supportClusters,
         lsrText = `⚪ LSR: N/A`;
     }
     
+    // Formatar Funding Rate
     const funding = indicators.funding;
     const fundingEmoji = getFundingEmoji(funding);
     let fundingText = '';
@@ -1168,9 +1190,6 @@ async function processSymbol(symbol) {
         const candles = await getCandles(symbol, '1h', CANDLE_LIMIT_SWEEP);
         if (!candles || candles.length < 50) return false;
         
-        const currentPriceData = await getCurrentPrice(symbol);
-        const currentPrice = currentPriceData.close;
-        
         const sweep = detectSweepWithPivotValidation(candles);
         
         if (sweep && sweep.isActive) {
@@ -1178,9 +1197,11 @@ async function processSymbol(symbol) {
             console.log(`💰 Preço Atual: ${sweep.price}`);
             console.log(`📍 Nível do Fractal: ${sweep.fractalLevel}`);
             
+            // Buscar indicadores (inclui RSI)
             const indicators = await getIndicators(symbol);
             console.log(`📊 RSI 1h: ${indicators.rsi1h.value} | LSR: ${indicators.lsr.ratio} | Funding: ${indicators.funding.formatted}`);
             
+            // VALIDAÇÃO DO RSI ANTES DE CONTINUAR
             const rsiValid = checkRSICondition(indicators.rsi1h.value, sweep.type);
             
             if (!rsiValid) {
@@ -1196,11 +1217,12 @@ async function processSymbol(symbol) {
                 return false;
             }
             
-            const { supportClusters, resistanceClusters } = detectPriceClusters(candles, currentPrice, CANDLE_LIMIT_CLUSTER);
+            // Detectar clusters de suporte e resistência
+            const { supportClusters, resistanceClusters } = detectPriceClusters(candles, CANDLE_LIMIT_CLUSTER);
             
-            console.log(`📊 Suportes encontrados (abaixo do preço ${formatNumber(currentPrice)}): ${supportClusters.length} clusters`);
+            console.log(`📊 Suportes encontrados: ${supportClusters.length} clusters`);
             supportClusters.forEach(c => console.log(`   - $${formatNumber(c.centerPrice)} (${c.touches}x toques)`));
-            console.log(`📊 Resistências encontradas (acima do preço ${formatNumber(currentPrice)}): ${resistanceClusters.length} clusters`);
+            console.log(`📊 Resistências encontradas: ${resistanceClusters.length} clusters`);
             resistanceClusters.forEach(c => console.log(`   - $${formatNumber(c.centerPrice)} (${c.touches}x toques)`));
             
             const brDateTime = getBrazilianDateTime();
@@ -1356,13 +1378,13 @@ async function mainLoop() {
                 lastCleanup = now;
             }
             
-            console.log(`\n⏱️ Aguardando ${CYCLE_WAIT_MINUTES} minutos para próximo ciclo...`);
-            await new Promise(r => setTimeout(r, CYCLE_WAIT_MINUTES * 60 * 1000));
+            console.log(`\n⏱️ Aguardando 5 minutos para próximo ciclo...`);
+            await new Promise(r => setTimeout(r, 5 * 60 * 1000));
             
         } catch (error) {
             console.error(`❌ Erro no ciclo principal: ${error.message}`);
-            console.log(`⏱️ Aguardando ${ERROR_RETRY_WAIT_SECONDS} segundos antes de reiniciar...`);
-            await new Promise(r => setTimeout(r, ERROR_RETRY_WAIT_SECONDS * 1000));
+            console.log(`⏱️ Aguardando 1 minuto antes de reiniciar...`);
+            await new Promise(r => setTimeout(r, 60000));
         }
     }
 }
