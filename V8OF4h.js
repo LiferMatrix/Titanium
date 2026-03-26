@@ -2,23 +2,25 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const z = require('zod');
+const https = require('https');
+const { Agent } = require('http');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS ===
+// === CONFIGURAÇÕES CENTRALIZADAS - VERSÃO MAIS RÁPIDA ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_o
-        CHAT_ID: '-1001990
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     PERFORMANCE: {
-        SYMBOL_DELAY_MS: 200,
+        SYMBOL_DELAY_MS: 250,
         SCAN_INTERVAL_SECONDS: 120,
         CANDLE_CACHE_TTL: 300000,
         BATCH_SIZE: 15,
-        REQUEST_TIMEOUT: 15000,
+        REQUEST_TIMEOUT: 20000,
         COOLDOWN_MINUTES: 15,
         PRICE_DEVIATION_THRESHOLD: 0.5,
         TELEGRAM_RETRY_ATTEMPTS: 3,
@@ -27,25 +29,37 @@ const CONFIG = {
     VOLUME: {
         TIMEFRAME: '1h',
         EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 2.0,
+        MIN_VOLUME_RATIO: 1.7,
         BUYER_THRESHOLD: 52,
         SELLER_THRESHOLD: 48,
         CONFIRMATION_CANDLES: 2
     },
+    VOLUME_3M: {
+        ENABLED: true,
+        TIMEFRAME: '3m',
+        EMA_PERIOD: 9,
+        MIN_VOLUME_RATIO: 1.5,
+        BUYER_THRESHOLD: 52,
+        SELLER_THRESHOLD: 48
+    },
     RATE_LIMITER: {
-        INITIAL_DELAY: 200,
-        MAX_DELAY: 5000,
-        BACKOFF_FACTOR: 2
+        INITIAL_DELAY: 300,
+        MAX_DELAY: 8000,
+        BACKOFF_FACTOR: 2,
+        MAX_RETRIES: 5,
+        RESET_THRESHOLD: 3,
+        MAX_CONCURRENT_REQUESTS: 8,
+        REQUESTS_PER_MINUTE: 900
     },
     TRADE: {
-        RISK_REWARD_RATIO: 2.5,
+        RISK_REWARD_RATIO: 1.8,
         STOP_PERCENTAGE: 2,
         TAKE_PROFIT_LEVELS: [2, 3, 4],
         PARTIAL_CLOSE: [30, 30, 40]
     },
     ALERTS: {
         MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 2.0,
+        MIN_VOLUME_RATIO: 1.7,
         ENABLE_SOUND: true,
         MAX_ALERTS_PER_SCAN: 5,
         MAX_DAILY_ALERTS_PER_SYMBOL: 10,
@@ -79,8 +93,8 @@ const CONFIG = {
         EMA_PERIOD: 5,
         MIN_ALTA_SCORE: 30,
         MIN_BAIXA_SCORE: 30,
-        REQUIRED_FOR_BUY: 'ALTA',
-        REQUIRED_FOR_SELL: 'BAIXA'
+        REQUIRED_FOR_BUY: 'ALTA',      // Critério obrigatório para COMPRA
+        REQUIRED_FOR_SELL: 'BAIXA'     // Critério obrigatório para VENDA
     },
     STOCH: {
         PERIOD_1D: 5,
@@ -103,6 +117,15 @@ const CONFIG = {
         MAX_ZONES: 3,
         VOLUME_WEIGHT: 0.6,
         PRICE_WEIGHT: 0.4
+    },
+    CONNECTION: {
+        KEEP_ALIVE: true,
+        KEEP_ALIVE_MSECS: 20000,
+        MAX_SOCKETS: 35,
+        MAX_FREE_SOCKETS: 10,
+        SOCKET_TIMEOUT: 20000,
+        FREE_SOCKET_TIMEOUT: 10000,
+        REJECT_UNAUTHORIZED: false
     }
 };
 
@@ -165,12 +188,20 @@ const TradeAlertSchema = z.object({
     volumeRatio: z.number(),
     buyerPercentage: z.number(),
     sellerPercentage: z.number(),
+    volume24hVsEma9: z.string(),
+    volume24hEmoji: z.string(),
+    volumeRatio3m: z.number().optional().nullable(),
+    buyerPercentage3m: z.number().optional().nullable(),
+    sellerPercentage3m: z.number().optional().nullable(),
     lsr: z.number().optional().nullable(),
     funding: z.number().optional().nullable(),
     rsi: z.number().optional().nullable(),
-    cciDaily: z.string().optional().nullable(),
-    cciValue: z.number().optional().nullable(),
-    cciEma: z.number().optional().nullable(),
+    cci4h: z.string().optional().nullable(),           // CCI 4H para critério obrigatório
+    cciDaily: z.string().optional().nullable(),        // CCI Diário para informação
+    cciValue4h: z.number().optional().nullable(),
+    cciEma4h: z.number().optional().nullable(),
+    cciValueDaily: z.number().optional().nullable(),
+    cciEmaDaily: z.number().optional().nullable(),
     stochDaily: z.string().optional().nullable(),
     stoch4h: z.string().optional().nullable(),
     longLiquidationZones: z.array(z.number()).optional().nullable(),
@@ -193,6 +224,288 @@ const ALERTS_DIR = './alerts';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
+
+// =====================================================================
+// === RATE LIMITER E GERENCIADOR DE CONEXÃO ROBUSTO V2 ===
+// =====================================================================
+class RateLimiter {
+    constructor() {
+        this.currentDelay = CONFIG.RATE_LIMITER.INITIAL_DELAY;
+        this.consecutiveErrors = 0;
+        this.lastRequestTime = 0;
+        this.requestCount = 0;
+        this.minuteRequests = 0;
+        this.lastMinuteReset = Date.now();
+        this.errorLog = new Map();
+        this.resetCount = 0;
+        this.consecutiveResetErrors = 0;
+        this.activeRequests = 0;
+        this.maxConcurrentRequests = CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS;
+        this.requestQueue = [];
+        this.processingQueue = false;
+        this.recreateAgent();
+    }
+
+    recreateAgent() {
+        if (this.currentAgent && this.currentAgent.destroy) {
+            try {
+                this.currentAgent.destroy();
+            } catch (e) {}
+        }
+        
+        this.currentAgent = new https.Agent({
+            keepAlive: CONFIG.CONNECTION.KEEP_ALIVE,
+            keepAliveMsecs: CONFIG.CONNECTION.KEEP_ALIVE_MSECS,
+            maxSockets: CONFIG.CONNECTION.MAX_SOCKETS,
+            maxFreeSockets: CONFIG.CONNECTION.MAX_FREE_SOCKETS,
+            timeout: CONFIG.CONNECTION.SOCKET_TIMEOUT,
+            freeSocketTimeout: CONFIG.CONNECTION.FREE_SOCKET_TIMEOUT,
+            rejectUnauthorized: CONFIG.CONNECTION.REJECT_UNAUTHORIZED,
+            scheduling: 'fifo'
+        });
+        
+        return this.currentAgent;
+    }
+
+    checkRateLimit() {
+        const now = Date.now();
+        
+        if (now - this.lastMinuteReset > 60000) {
+            console.log(`📊 Requisições no último minuto: ${this.minuteRequests}`);
+            this.minuteRequests = 0;
+            this.lastMinuteReset = now;
+        }
+        
+        if (this.minuteRequests >= CONFIG.RATE_LIMITER.REQUESTS_PER_MINUTE) {
+            const waitTime = 60000 - (now - this.lastMinuteReset);
+            if (waitTime > 0) {
+                console.log(`⏳ Rate limit atingido (${this.minuteRequests}/min), aguardando ${Math.ceil(waitTime/1000)}s`);
+                return waitTime;
+            }
+        }
+        
+        if (this.activeRequests >= this.maxConcurrentRequests) {
+            return 100;
+        }
+        
+        return 0;
+    }
+
+    resetConnection() {
+        this.resetCount++;
+        this.consecutiveResetErrors++;
+        
+        console.log(`🔄 Resetando conexão (tentativa #${this.resetCount}, consecutivas: ${this.consecutiveResetErrors})...`);
+        
+        if (this.consecutiveResetErrors > 3) {
+            const waitTime = Math.min(30000, this.currentDelay * 4);
+            console.log(`⏳ Muitos erros consecutivos, aguardando ${waitTime/1000}s...`);
+            return waitTime;
+        }
+        
+        this.recreateAgent();
+        return 0;
+    }
+
+    async processQueue() {
+        if (this.processingQueue) return;
+        this.processingQueue = true;
+
+        while (this.requestQueue.length > 0) {
+            if (this.activeRequests >= this.maxConcurrentRequests) {
+                await new Promise(r => setTimeout(r, 100));
+                continue;
+            }
+
+            const { url, options, type, resolve, reject, retryCount } = this.requestQueue.shift();
+            
+            this.activeRequests++;
+            
+            this.executeRequest(url, options, type, retryCount)
+                .then(resolve)
+                .catch(reject)
+                .finally(() => {
+                    this.activeRequests--;
+                });
+
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        this.processingQueue = false;
+    }
+
+    async executeRequest(url, options = {}, type = 'klines', retryCount = 1) {
+        const maxRetries = CONFIG.RATE_LIMITER.MAX_RETRIES;
+        let agent = this.currentAgent;
+        let lastError;
+
+        for (let attempt = retryCount; attempt <= maxRetries; attempt++) {
+            try {
+                const rateLimitWait = this.checkRateLimit();
+                if (rateLimitWait > 0) {
+                    await new Promise(r => setTimeout(r, rateLimitWait));
+                }
+
+                const now = Date.now();
+                const timeSinceLastRequest = now - this.lastRequestTime;
+                if (timeSinceLastRequest < this.currentDelay) {
+                    await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
+                }
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
+
+                const fetchOptions = {
+                    ...options,
+                    signal: controller.signal,
+                    agent: agent,
+                    headers: {
+                        ...options.headers,
+                        'Connection': 'keep-alive',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Accept': '*/*',
+                        'User-Agent': 'Mozilla/5.0 (compatible; TitaniumBot/1.0)'
+                    }
+                };
+
+                const response = await fetch(url, fetchOptions);
+                clearTimeout(timeoutId);
+                
+                this.lastRequestTime = Date.now();
+                this.minuteRequests++;
+                this.requestCount++;
+
+                if (!response.ok) {
+                    const errorText = await response.text().catch(() => '');
+                    
+                    if (response.status === 429) {
+                        const retryAfter = response.headers.get('retry-after') || 60;
+                        console.log(`⏳ Rate limit 429, aguardando ${retryAfter}s`);
+                        
+                        this.currentDelay = Math.min(
+                            CONFIG.RATE_LIMITER.MAX_DELAY,
+                            this.currentDelay * 2
+                        );
+                        
+                        await new Promise(r => setTimeout(r, retryAfter * 1000));
+                        continue;
+                    }
+                    
+                    if (response.status >= 500) {
+                        console.log(`⚠️ Erro ${response.status} no servidor, tentativa ${attempt}/${maxRetries}`);
+                        await new Promise(r => setTimeout(r, this.currentDelay * attempt));
+                        continue;
+                    }
+                    
+                    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+                }
+
+                let data;
+                try {
+                    const text = await response.text();
+                    if (!text || text.trim().length === 0) {
+                        throw new Error('Resposta vazia');
+                    }
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    console.log(`⚠️ Erro ao parsear resposta: ${parseError.message}`);
+                    throw new Error('Resposta inválida do servidor');
+                }
+
+                this.consecutiveErrors = 0;
+                this.consecutiveResetErrors = 0;
+                
+                this.currentDelay = Math.max(
+                    CONFIG.RATE_LIMITER.INITIAL_DELAY,
+                    this.currentDelay * 0.8
+                );
+                
+                return data;
+
+            } catch (error) {
+                lastError = error;
+                this.consecutiveErrors++;
+                
+                const errorType = error.code || error.name;
+                const isConnectionError = errorType === 'ECONNRESET' || 
+                                         errorType === 'EPIPE' || 
+                                         errorType === 'ECONNREFUSED' ||
+                                         errorType === 'ENOTFOUND' ||
+                                         errorType === 'ETIMEDOUT' ||
+                                         error.name === 'AbortError' ||
+                                         error.message.includes('Premature') ||
+                                         error.message.includes('socket') ||
+                                         error.message.includes('closed') ||
+                                         error.message.includes('Invalid response body');
+                
+                if (isConnectionError) {
+                    console.log(`🔌 Erro de conexão (${errorType}) em ${type} (tentativa ${attempt}/${maxRetries})`);
+                    
+                    if (attempt < maxRetries) {
+                        const waitTime = this.resetConnection();
+                        if (waitTime > 0) {
+                            await new Promise(r => setTimeout(r, waitTime));
+                        }
+                        
+                        agent = this.currentAgent;
+                    }
+                } else {
+                    console.log(`⚠️ Erro na requisição ${type} (tentativa ${attempt}/${maxRetries}): ${error.message}`);
+                }
+                
+                if (attempt < maxRetries) {
+                    const baseWait = this.currentDelay * Math.pow(2, attempt - 1);
+                    const jitter = Math.random() * 1000;
+                    const waitTime = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, baseWait + jitter);
+                    
+                    console.log(`⏳ Aguardando ${Math.ceil(waitTime/1000)}s antes de tentar novamente...`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                }
+            }
+        }
+
+        this.currentDelay = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, this.currentDelay * 2);
+        
+        this.errorLog.set(url.split('?')[0], {
+            timestamp: Date.now(),
+            error: lastError?.message,
+            attempts: maxRetries
+        });
+        
+        throw lastError;
+    }
+
+    async makeRequest(url, options = {}, type = 'klines') {
+        return new Promise((resolve, reject) => {
+            this.requestQueue.push({
+                url,
+                options,
+                type,
+                resolve,
+                reject,
+                retryCount: 1
+            });
+            
+            this.processQueue();
+        });
+    }
+
+    getStats() {
+        return {
+            currentDelay: this.currentDelay,
+            consecutiveErrors: this.consecutiveErrors,
+            requestCount: this.requestCount,
+            minuteRequests: this.minuteRequests,
+            resetCount: this.resetCount,
+            consecutiveResetErrors: this.consecutiveResetErrors,
+            activeRequests: this.activeRequests,
+            queueLength: this.requestQueue.length,
+            errorLogSize: this.errorLog.size
+        };
+    }
+}
+
+const rateLimiter = new RateLimiter();
 
 // =====================================================================
 // === SISTEMA DE LIMPEZA AUTOMÁTICA ===
@@ -450,106 +763,21 @@ class CacheManager {
         const key = `${symbol}_${timeframe}_${limit}`;
         candleCache.set(key, { data, timestamp: Date.now() });
     }
-}
-
-// =====================================================================
-// === RATE LIMITER MELHORADO ===
-// =====================================================================
-class RateLimiter {
-    constructor() {
-        this.currentDelay = CONFIG.RATE_LIMITER.INITIAL_DELAY;
-        this.consecutiveErrors = 0;
-        this.lastRequestTime = 0;
-        this.requestCount = 0;
-        this.minuteRequests = 0;
-        this.lastMinuteReset = Date.now();
-        this.errorLog = new Map();
-    }
-
-    checkRateLimit() {
+    
+    static cleanup() {
         const now = Date.now();
-        if (now - this.lastMinuteReset > 60000) {
-            this.minuteRequests = 0;
-            this.lastMinuteReset = now;
-        }
-        
-        if (this.minuteRequests >= 1000) {
-            const waitTime = 60000 - (now - this.lastMinuteReset);
-            if (waitTime > 0) {
-                console.log(`⏳ Rate limit atingido, aguardando ${Math.ceil(waitTime/1000)}s`);
-                return waitTime;
+        let cleaned = 0;
+        for (const [key, value] of candleCache.entries()) {
+            if (now - value.timestamp > CONFIG.PERFORMANCE.CANDLE_CACHE_TTL) {
+                candleCache.delete(key);
+                cleaned++;
             }
         }
-        return 0;
-    }
-
-    async makeRequest(url, options = {}, type = 'klines') {
-        const rateLimitWait = this.checkRateLimit();
-        if (rateLimitWait > 0) {
-            await new Promise(r => setTimeout(r, rateLimitWait));
+        if (cleaned > 0 && CONFIG.DEBUG.VERBOSE) {
+            console.log(`🧹 Cache limpo: ${cleaned} entradas removidas`);
         }
-
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        
-        if (timeSinceLastRequest < this.currentDelay) {
-            await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
-        }
-
-        const maxRetries = 3;
-        let lastError;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
-
-                const response = await fetch(url, { ...options, signal: controller.signal });
-                clearTimeout(timeoutId);
-                
-                this.lastRequestTime = Date.now();
-                this.minuteRequests++;
-                this.requestCount++;
-
-                if (!response.ok) {
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('retry-after') || 60;
-                        console.log(`⏳ Rate limit 429, aguardando ${retryAfter}s`);
-                        await new Promise(r => setTimeout(r, retryAfter * 1000));
-                        continue;
-                    }
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                this.consecutiveErrors = 0;
-                this.currentDelay = Math.max(CONFIG.RATE_LIMITER.INITIAL_DELAY, this.currentDelay * 0.9);
-                
-                return await response.json();
-                
-            } catch (error) {
-                lastError = error;
-                this.consecutiveErrors++;
-                
-                if (error.name === 'AbortError') {
-                    console.log(`⏱️ Timeout na requisição ${type} (tentativa ${attempt}/${maxRetries})`);
-                } else {
-                    console.log(`⚠️ Erro na requisição ${type} (tentativa ${attempt}/${maxRetries}): ${error.message}`);
-                }
-                
-                if (attempt < maxRetries) {
-                    const waitTime = this.currentDelay * Math.pow(2, attempt - 1);
-                    console.log(`⏳ Aguardando ${Math.ceil(waitTime/1000)}s antes de tentar novamente...`);
-                    await new Promise(r => setTimeout(r, waitTime));
-                }
-            }
-        }
-        
-        this.currentDelay = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, this.currentDelay * CONFIG.RATE_LIMITER.BACKOFF_FACTOR);
-        throw lastError;
     }
 }
-
-const rateLimiter = new RateLimiter();
 
 // =====================================================================
 // === FUNÇÕES AUXILIARES ===
@@ -931,6 +1159,65 @@ function calculateSupportResistance(candles) {
 }
 
 // =====================================================================
+// === ANÁLISE VOLUME 24H VS EMA 9 ===
+// =====================================================================
+function calculateVolume24hVsEma9(candles) {
+    if (!candles || candles.length < 24) {
+        return { percentage: 0, status: 'NEUTRO', emoji: '⚪' };
+    }
+    
+    const last24Candles = candles.slice(-24);
+    
+    const closes = last24Candles.map(c => c.close);
+    const ema9 = calculateEMA(closes, 9);
+    
+    let volumeAboveEma = 0;
+    let volumeBelowEma = 0;
+    let totalVolume = 0;
+    
+    last24Candles.forEach(candle => {
+        const vol = candle.volume;
+        totalVolume += vol;
+        
+        if (candle.close > ema9) {
+            volumeAboveEma += vol;
+        } else if (candle.close < ema9) {
+            volumeBelowEma += vol;
+        } else {
+            volumeAboveEma += vol / 2;
+            volumeBelowEma += vol / 2;
+        }
+    });
+    
+    const percentageAbove = (volumeAboveEma / totalVolume) * 100;
+    const percentageBelow = (volumeBelowEma / totalVolume) * 100;
+    
+    let status = 'NEUTRO';
+    let emoji = '⚪';
+    
+    if (percentageAbove > 55) {
+        status = 'COMPRADOR';
+        emoji = '🟢';
+    } else if (percentageBelow > 55) {
+        status = 'VENDEDOR';
+        emoji = '🔴';
+    }
+    
+    const dominantPercentage = percentageAbove > percentageBelow ? percentageAbove : percentageBelow;
+    const sign = percentageAbove > percentageBelow ? '+' : '-';
+    const statusText = percentageAbove > percentageBelow ? 'Comprador' : 'Vendedor';
+    
+    const formattedString = `${sign}${dominantPercentage.toFixed(0)}% ${emoji} ${statusText}`;
+    
+    return {
+        percentage: dominantPercentage,
+        status: statusText,
+        emoji: emoji,
+        formatted: formattedString
+    };
+}
+
+// =====================================================================
 // === COOLDOWN CHECK ===
 // =====================================================================
 function canSendAlert(symbol, currentPrice, direction) {
@@ -989,42 +1276,63 @@ function registerAlert(symbol, price, direction) {
 }
 
 // =====================================================================
-// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
+// === FUNÇÃO getCandles MELHORADA ===
 // =====================================================================
 async function getCandles(symbol, timeframe, limit = 100) {
     const cached = CacheManager.get(symbol, timeframe, limit);
     if (cached) return cached;
 
     const intervalMap = {
-        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
         '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
     };
     
     const interval = intervalMap[timeframe] || '1h';
     const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     
-    try {
-        const data = await rateLimiter.makeRequest(url, {}, 'klines');
-        
-        const candles = data.map(candle => ({
-            open: parseFloat(candle[1]),
-            high: parseFloat(candle[2]),
-            low: parseFloat(candle[3]),
-            close: parseFloat(candle[4]),
-            volume: parseFloat(candle[5]),
-            time: candle[0]
-        }));
-        
-        CacheManager.set(symbol, timeframe, limit, candles);
-        return candles;
-    } catch (error) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⚠️ Erro ao buscar candles ${symbol}: ${error.message}`);
+    const maxAttempts = 3;
+    let lastError;
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const data = await rateLimiter.makeRequest(url, {}, 'klines');
+            
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                throw new Error('Dados inválidos ou vazios');
+            }
+            
+            const candles = data.map(candle => ({
+                open: parseFloat(candle[1]),
+                high: parseFloat(candle[2]),
+                low: parseFloat(candle[3]),
+                close: parseFloat(candle[4]),
+                volume: parseFloat(candle[5]),
+                time: candle[0]
+            }));
+            
+            CacheManager.set(symbol, timeframe, limit, candles);
+            return candles;
+            
+        } catch (error) {
+            lastError = error;
+            
+            if (attempt < maxAttempts) {
+                const waitTime = 1000 * Math.pow(2, attempt);
+                console.log(`⏳ Tentativa ${attempt}/${maxAttempts} para ${symbol} ${timeframe} falhou, aguardando ${waitTime/1000}s...`);
+                await new Promise(r => setTimeout(r, waitTime));
+            }
         }
-        return [];
     }
+    
+    if (CONFIG.DEBUG.VERBOSE) {
+        console.log(`⚠️ Falha ao buscar candles ${symbol} ${timeframe} após ${maxAttempts} tentativas: ${lastError?.message}`);
+    }
+    return [];
 }
 
+// =====================================================================
+// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
+// =====================================================================
 async function getLSR(symbol) {
     try {
         const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`;
@@ -1119,18 +1427,24 @@ function calculateTradeLevels(price, atr, direction, support, resistance) {
 
 async function analyzeForAlerts(symbol) {
     try {
-        const [candles1h, candles15m, candlesDaily, candles4h] = await Promise.all([
+        // Buscar candles necessários - CCI 4H como critério obrigatório, CCI Diário para informação
+        const [candles1h, candles15m, candles4h, candlesDaily, candles3m] = await Promise.all([
             getCandles(symbol, '1h', 100),
             getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 100),
-            getCandles(symbol, '4h', 100)
+            getCandles(symbol, '4h', 100),      // CCI 4H para critério obrigatório
+            getCandles(symbol, '1d', 100),       // CCI Diário para informação no alerta
+            getCandles(symbol, '3m', 50)
         ]);
         
-        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 50 || candles4h.length < 50) return null;
+        if (candles1h.length < 30 || candles15m.length < 20 || candles4h.length < 50 || 
+            candlesDaily.length < 50 || candles3m.length < 30) return null;
         
         const currentPrice = candles1h[candles1h.length - 1].close;
         const currentCandle15m = candles15m[candles15m.length - 1];
         
+        // =================================================================
+        // === ANÁLISE VOLUME 1H ===
+        // =================================================================
         const volumes = candles1h.map(c => c.volume);
         const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
         const currentVolume = volumes[volumes.length - 1];
@@ -1159,7 +1473,44 @@ async function analyzeForAlerts(symbol) {
         const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
         const sellerPercentage = 100 - buyerPercentage;
         
-        const cciDaily = calculateCCITrend(candlesDaily);
+        // =================================================================
+        // === ANÁLISE VOLUME 3 MINUTOS ===
+        // =================================================================
+        const volumes3m = candles3m.map(c => c.volume);
+        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const currentVolume3m = volumes3m[volumes3m.length - 1];
+        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
+        
+        const closes3m = candles3m.map(c => c.close);
+        const ema9_3m = calculateEMA(closes3m.slice(-20), 9);
+        
+        let buyerVolume3m = 0, sellerVolume3m = 0, totalVolume3m = 0;
+        const recentCandles3m = candles3m.slice(-30);
+        
+        recentCandles3m.forEach(candle => {
+            const vol = candle.volume;
+            totalVolume3m += vol;
+            
+            if (candle.close > ema9_3m) {
+                buyerVolume3m += vol;
+            } else if (candle.close < ema9_3m) {
+                sellerVolume3m += vol;
+            } else {
+                buyerVolume3m += vol / 2;
+                sellerVolume3m += vol / 2;
+            }
+        });
+        
+        const buyerPercentage3m = totalVolume3m > 0 ? (buyerVolume3m / totalVolume3m) * 100 : 50;
+        const sellerPercentage3m = 100 - buyerPercentage3m;
+        
+        const volume24hVsEma9 = calculateVolume24hVsEma9(candles1h);
+        
+        // =================================================================
+        // === CÁLCULO CCI 4H (CRITÉRIO OBRIGATÓRIO) E CCI DIÁRIO (INFORMAÇÃO) ===
+        // =================================================================
+        const cci4h = calculateCCITrend(candles4h);           // Critério obrigatório
+        const cciDaily = calculateCCITrend(candlesDaily);     // Apenas informação
         
         const stochDaily = calculateStochastic(
             candlesDaily, 
@@ -1203,11 +1554,19 @@ async function analyzeForAlerts(symbol) {
         let score = 0;
         let confidence = 0;
         
+        // =================================================================
+        // === CONDIÇÃO DE COMPRA - CCI 4H COMO CRITÉRIO OBRIGATÓRIO ===
+        // =================================================================
         if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h < CONFIG.RSI.BUY_MAX) {
+            rsi1h < CONFIG.RSI.BUY_MAX &&
             
-            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
+            CONFIG.VOLUME_3M.ENABLED && 
+            buyerPercentage3m > CONFIG.VOLUME_3M.BUYER_THRESHOLD &&
+            volumeRatio3m > CONFIG.VOLUME_3M.MIN_VOLUME_RATIO) {
+            
+            // CRITÉRIO OBRIGATÓRIO: CCI 4H em ALTA
+            if (cci4h.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
                 direction = 'COMPRA';
                 score = 45;
                 
@@ -1220,12 +1579,22 @@ async function analyzeForAlerts(symbol) {
                 else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
+                if (volumeRatio3m > 2.5) score += 10;
+                else if (volumeRatio3m > 2.0) score += 8;
+                else if (volumeRatio3m > 1.8) score += 6;
+                else if (volumeRatio3m > 1.5) score += 4;
+                
+                if (buyerPercentage3m > 65) score += 8;
+                else if (buyerPercentage3m > 60) score += 6;
+                else if (buyerPercentage3m > 55) score += 4;
+                else if (buyerPercentage3m > 52) score += 2;
+                
                 if (lsr) {
-                    if (lsr < 1.5) score += 18;
-                    else if (lsr < 2.0) score += 15;
-                    else if (lsr < 2.3) score += 12;
+                    if (lsr < 1.5) score += 15;
+                    else if (lsr < 2.0) score += 12;
+                    else if (lsr < 2.3) score += 10;
                     else if (lsr < 2.6) score += 8;
-                    else if (lsr > 3.0) score -= 15;
+                    else if (lsr > 3.0) score -= 18;
                     else if (lsr > 2.8) score -= 12;
                 }
                 
@@ -1237,26 +1606,39 @@ async function analyzeForAlerts(symbol) {
                 
                 if (rsi1h) {
                     if (rsi1h < 35) score += 14;
-                    else if (rsi1h < 40) score += 12;
-                    else if (rsi1h < 45) score += 10;
-                    else if (rsi1h < 50) score += 5;
+                    else if (rsi1h < 40) score += 13;
+                    else if (rsi1h < 45) score += 12;
+                    else if (rsi1h < 50) score += 10;
                 }
                 
                 if (currentPrice < sr.resistance) {
                     const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-                    if (distanceToResistance > 5) score += 8;
-                    else if (distanceToResistance > 2) score += 5;
+                    if (distanceToResistance > 5) score += 10;
+                    else if (distanceToResistance > 2) score += 8;
                 }
-            } else if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} rejeitado para COMPRA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_BUY})`);
+                
+                // PONTUAÇÃO EXTRA BASEADA NO CCI DIÁRIO (INFORMAÇÃO)
+                if (cciDaily.trend === "ALTA") {
+                    score += 12;
+                } else if (cciDaily.trend === "BAIXA") {
+                    score -= 5;
+                }
             }
         }
         
+        // =================================================================
+        // === CONDIÇÃO DE VENDA - CCI 4H COMO CRITÉRIO OBRIGATÓRIO ===
+        // =================================================================
         if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
             volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h > CONFIG.RSI.SELL_MIN) {
+            rsi1h > CONFIG.RSI.SELL_MIN &&
             
-            if (cciDaily.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
+            CONFIG.VOLUME_3M.ENABLED && 
+            sellerPercentage3m > (100 - CONFIG.VOLUME_3M.SELLER_THRESHOLD) &&
+            volumeRatio3m > CONFIG.VOLUME_3M.MIN_VOLUME_RATIO) {
+            
+            // CRITÉRIO OBRIGATÓRIO: CCI 4H em BAIXA
+            if (cci4h.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
                 direction = 'VENDA';
                 score = 45;
                 
@@ -1269,12 +1651,22 @@ async function analyzeForAlerts(symbol) {
                 else if (volumeRatio > 1.8) score += 10;
                 else if (volumeRatio > 1.6) score += 8;
                 
+                if (volumeRatio3m > 2.5) score += 10;
+                else if (volumeRatio3m > 2.0) score += 8;
+                else if (volumeRatio3m > 1.8) score += 6;
+                else if (volumeRatio3m > 1.5) score += 4;
+                
+                if (sellerPercentage3m > 65) score += 8;
+                else if (sellerPercentage3m > 60) score += 6;
+                else if (sellerPercentage3m > 55) score += 4;
+                else if (sellerPercentage3m > 52) score += 2;
+                
                 if (lsr) {
-                    if (lsr > 4.0) score += 18;
-                    else if (lsr > 3.5) score += 15;
-                    else if (lsr > 3.0) score += 12;
+                    if (lsr > 4.0) score += 15;
+                    else if (lsr > 3.5) score += 12;
+                    else if (lsr > 3.0) score += 10;
                     else if (lsr > 2.7) score += 8;
-                    else if (lsr < 1.0) score -= 15;
+                    else if (lsr < 1.0) score -= 18;
                     else if (lsr < 1.2) score -= 12;
                 }
                 
@@ -1285,19 +1677,24 @@ async function analyzeForAlerts(symbol) {
                 }
                 
                 if (rsi1h) {
-                    if (rsi1h > 75) score += 14;
-                    else if (rsi1h > 70) score += 12;
-                    else if (rsi1h > 65) score += 10;
+                    if (rsi1h > 75) score += 16;
+                    else if (rsi1h > 70) score += 14;
+                    else if (rsi1h > 65) score += 8;
                     else if (rsi1h > 60) score += 5;
                 }
                 
                 if (currentPrice > sr.support) {
                     const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-                    if (distanceToSupport > 5) score += 8;
-                    else if (distanceToSupport > 2) score += 5;
+                    if (distanceToSupport > 5) score += 10;
+                    else if (distanceToSupport > 2) score += 8;
                 }
-            } else if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} rejeitado para VENDA: CCI Diário = ${cciDaily.trend} (necessário: ${CONFIG.CCI.REQUIRED_FOR_SELL})`);
+                
+                // PONTUAÇÃO EXTRA BASEADA NO CCI DIÁRIO (INFORMAÇÃO)
+                if (cciDaily.trend === "BAIXA") {
+                    score += 12;
+                } else if (cciDaily.trend === "ALTA") {
+                    score -= 5;
+                }
             }
         }
         
@@ -1314,9 +1711,13 @@ async function analyzeForAlerts(symbol) {
         
         const emoji = getConfidenceEmoji(confidence);
         
-        let cciDisplay = "NEUTRO";
-        if (cciDaily.trend === "ALTA") cciDisplay = "CCI 💹ALTA";
-        else if (cciDaily.trend === "BAIXA") cciDisplay = "CCI 🔴BAIXA";
+        let cci4hDisplay = "NEUTRO";
+        if (cci4h.trend === "ALTA") cci4hDisplay = "CCI 4H 💹ALTA";
+        else if (cci4h.trend === "BAIXA") cci4hDisplay = "CCI 4H 🔴BAIXA";
+        
+        let cciDailyDisplay = "NEUTRO";
+        if (cciDaily.trend === "ALTA") cciDailyDisplay = "CCI Diário 💹ALTA";
+        else if (cciDaily.trend === "BAIXA") cciDailyDisplay = "CCI Diário 🔴BAIXA";
         
         const alert = {
             symbol,
@@ -1332,12 +1733,20 @@ async function analyzeForAlerts(symbol) {
             volumeRatio,
             buyerPercentage,
             sellerPercentage,
+            volume24hVsEma9: volume24hVsEma9.formatted,
+            volume24hEmoji: volume24hVsEma9.emoji,
+            volumeRatio3m,
+            buyerPercentage3m,
+            sellerPercentage3m,
             lsr,
             funding,
             rsi: rsi1h,
-            cciDaily: cciDisplay,
-            cciValue: cciDaily.value,
-            cciEma: cciDaily.ema,
+            cci4h: cci4hDisplay,           // CCI 4H - Critério obrigatório
+            cciDaily: cciDailyDisplay,      // CCI Diário - Informação
+            cciValue4h: cci4h.value,
+            cciEma4h: cci4h.ema,
+            cciValueDaily: cciDaily.value,
+            cciEmaDaily: cciDaily.ema,
             stochDaily: stochDailyDisplay,
             stoch4h: stoch4hDisplay,
             longLiquidationZones: liquidationZones.longZones,
@@ -1439,6 +1848,9 @@ function formatTradeAlert(alert) {
     const volPct = alert.direction === 'COMPRA' ? 
         alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
     
+    const volPct3m = alert.direction === 'COMPRA' ? 
+        alert.buyerPercentage3m?.toFixed(0) : alert.sellerPercentage3m?.toFixed(0);
+    
     const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
     const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
     
@@ -1455,15 +1867,12 @@ function formatTradeAlert(alert) {
         (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
     
     const iaDica = alert.direction === 'COMPRA' 
-        ? '<b>🤖 IA Dica...</b> Observar Zonas de 🔹Suporte de Compra' 
-        : '<b>🤖 IA Dica...</b> Realizar Lucro ou Parcial perto da 🔻Resistência.';
+        ? '<i>🤖 IA Dica...</i> Observar Zonas de 🔹Suporte de Compra' 
+        : '<i>🤖 IA Dica...</i> Realizar Lucro ou Parcial perto da 🔻Resistência.';
     
     const stochDaily = alert.stochDaily || 'N/D';
     const stoch4h = alert.stoch4h || 'N/D';
     
-    // =================================================================
-    // === FORMATAR ZONAS DE LIQUIDAÇÃO - LINHAS SEPARADAS ===
-    // =================================================================
     let longLiqText = '';
     let shortLiqText = '';
     
@@ -1482,22 +1891,25 @@ function formatTradeAlert(alert) {
         }
     }
     
-    return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>🐋Volume!</b> | ✨#SCORE: ${alert.confidence}%
- Alerta:${dailyCount} | ${time.full}hs
- 💲Preço: $${entry}
- #RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
- #LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%
- 📊 Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
- Stoch 1D: ${stochDaily}
- Stoch 4H: ${stoch4h}
- ${shortLiqText}
- ${longLiqText} 
- <b>Alvos</b>: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}
+    return `<i>${alert.emoji} <i>${dirEmoji} Analisar ${direction} - ${symbolName}</i> ${alert.emoji}
+ <i>🐋Volume! | ✨#SCORE: ${alert.confidence}%</i>
+ <i>Alerta:${dailyCount} | ${time.full}hs
+ <i>💲Preço: $${entry}</i>
+ <i>▫️Vol 24hs: ${alert.volume24hVsEma9}</i> 
+ <i>#RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol 1h: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)</i>
+ <i>#Vol 3m: ${alert.volumeRatio3m?.toFixed(2)}x (${volPct3m}%)</i>
+ <i>#LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%</i>
+ <i>📊 ${alert.cci4h || 'NEUTRO'}</i>
+ <i>📊 ${alert.cciDaily || 'NEUTRO'}</i>
+ <i>Stoch 1D: ${stochDaily}</i>
+ <i>Stoch 4H: ${stoch4h}</i>
+ <i>${shortLiqText}</i>
+ <i>${longLiqText}</i> 
+ <i>Alvos: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}</i>
 ❅──────✧❅🔹❅✧──────❅
- ${iaDica}
-Alerta Educativo, não é recomendação de investimento.
- Titanium Prime by @J4Rviz</i>`;
+<i> ${iaDica}</i>
+<i>Alerta Educativo, não é recomendação de investimento.</i>
+ <i>Titanium Prime by @J4Rviz</i>`;
 }
 
 // =====================================================================
@@ -1531,14 +1943,22 @@ async function realTimeScanner() {
     
     const symbols = await fetchAllFuturesSymbols();
     console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`   - Venda necessita: ${CONFIG.CCI.REQUIRED_FOR_SELL}`);
+    console.log(`   - Critério OBRIGATÓRIO: CCI 4H em ${CONFIG.CCI.REQUIRED_FOR_BUY} para COMPRA / ${CONFIG.CCI.REQUIRED_FOR_SELL} para VENDA`);
+    console.log(`   - CCI Diário: apenas para informação e pontuação extra`);
+    console.log(`   - Max requisições concorrentes: ${CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS}`);
+    console.log(`   - Delay entre símbolos: ${CONFIG.PERFORMANCE.SYMBOL_DELAY_MS}ms`);
+    console.log(`   - Batch size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
     if (CONFIG.LIQUIDATION.ENABLED) {
         console.log(`   - Zonas de liquidação: ATIVADO`);
+    }
+    if (CONFIG.VOLUME_3M.ENABLED) {
+        console.log(`   - Volume 3m: ATIVADO (mínimo ${CONFIG.VOLUME_3M.MIN_VOLUME_RATIO}x)`);
     }
     
     let scanCount = 0;
     let alertsSent = 0;
     let consecutiveEmptyScans = 0;
+    let lastErrorCheck = Date.now();
     
     while (true) {
         const startTime = Date.now();
@@ -1546,7 +1966,21 @@ async function realTimeScanner() {
         
         resetDailyCounterIfNeeded();
         
+        if (scanCount % 5 === 0) {
+            CacheManager.cleanup();
+        }
+        
+        if (Date.now() - lastErrorCheck > 300000) {
+            const stats = rateLimiter.getStats();
+            if (stats.consecutiveErrors > 20) {
+                console.log('⚠️ Muitos erros consecutivos, recriando agente...');
+                rateLimiter.recreateAgent();
+            }
+            lastErrorCheck = Date.now();
+        }
+        
         console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
+        console.log(`📊 Stats da conexão:`, rateLimiter.getStats());
         
         const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
         const alerts = [];
@@ -1619,12 +2053,18 @@ async function realTimeScanner() {
 // =====================================================================
 async function startBot() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME');
+    console.log('🚀 TITANIUM PRIME - CCI 4H como Critério Obrigatório');
     console.log('='.repeat(70) + '\n');
     
     console.log('📅 Inicializando...');
     console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
     console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}`);
+    console.log(`📊 Volume 3m: ${CONFIG.VOLUME_3M.ENABLED ? '✅ ATIVADO' : '❌ DESATIVADO'} (mínimo ${CONFIG.VOLUME_3M.MIN_VOLUME_RATIO}x)`);
+    console.log(`🔌 Keep-Alive: ATIVADO (sockets: ${CONFIG.CONNECTION.MAX_SOCKETS})`);
+    console.log(`🔄 Max Retries: ${CONFIG.RATE_LIMITER.MAX_RETRIES}`);
+    console.log(`🔄 Max Requisições Concorrentes: ${CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS}`);
+    console.log(`📊 CCI 4H: CRITÉRIO OBRIGATÓRIO (${CONFIG.CCI.REQUIRED_FOR_BUY} para COMPRA / ${CONFIG.CCI.REQUIRED_FOR_SELL} para VENDA)`);
+    console.log(`📊 CCI Diário: INFORMAÇÃO na mensagem e pontuação extra`);
     if (CONFIG.LIQUIDATION.ENABLED) {
         console.log(`💰 Zonas de Liquidação: ATIVADO`);
     }
@@ -1632,7 +2072,7 @@ async function startBot() {
     
     cleanupManager.start();
     
-    const initMessage = `🤖 Titanium Prime Ativado - Sistema pronto!`;
+    const initMessage = `🤖 Titanium Prime Ativado!\n📊 Critério: CCI 4H (${CONFIG.CCI.REQUIRED_FOR_BUY}/${CONFIG.CCI.REQUIRED_FOR_SELL})\n📊 Info extra: CCI Diário na mensagem`;
     
     const sent = await sendTelegramAlert(initMessage);
     if (sent) {
@@ -1651,8 +2091,9 @@ async function startBot() {
 // =====================================================================
 process.on('uncaughtException', async (err) => {
     console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
+    console.error(err.stack);
     
-    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s`;
+    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s\n\`\`\`${err.message.substring(0, 100)}\`\`\``;
     
     await sendTelegramAlert(errorMessage);
     
@@ -1669,12 +2110,12 @@ process.on('unhandledRejection', async (reason) => {
 // =====================================================================
 // === START ===
 // =====================================================================
-console.log('🚀 Iniciando Titanium Prime Real-Time Alert System...');
+console.log('🚀 Iniciando Titanium Prime com CCI 4H como critério obrigatório...');
 startBot().catch(async error => {
     console.error('❌ Erro fatal:', error);
     
     try {
-        await sendTelegramAlert(`❌ ERRO FATAL`);
+        await sendTelegramAlert(`❌ ERRO FATAL - BOT PAROU\n\`\`\`${error.message}\`\`\``);
     } catch {}
     
     cleanupManager.stop();
