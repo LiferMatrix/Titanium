@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const WebSocket = require('ws');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
@@ -9,28 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyz
-        CHAT_ID: '-100255
-    },
-    // CONFIGURAÇÃO PARA BINGX - SPOT TRADFI
-    EXCHANGE: {
-        NAME: 'bingx',
-        // USAR ENDPOINT SPOT para TradFi
-        BASE_URL: 'https://open-api.bingx.com',
-        ENDPOINTS: {
-            // SPOT (TradFi - Ações, Forex, Commodities)
-            SPOT_KLINE: '/openApi/spot/v1/market/kline',
-            SPOT_TICKER_24H: '/openApi/spot/v1/market/ticker/24hr',
-            SPOT_SYMBOLS: '/openApi/spot/v1/market/ticker',
-            // SWAP (Futuros) - apenas criptomoedas
-            SWAP_KLINE: '/openApi/swap/v2/quote/klines',
-            SWAP_TICKER_24H: '/openApi/swap/v2/quote/ticker/24hr'
-        },
-        // Usar SPOT para TradFi
-        useSpot: true,
-        formatSymbol: (symbol) => symbol, // Spot não precisa de hífen
-        // TradingView link para BingX Spot
-        getTradingViewLink: (symbol) => `https://www.tradingview.com/chart/?symbol=BINGX:${symbol.replace('USDT', 'USDT')}`
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 10,
@@ -73,8 +54,8 @@ const CONFIG = {
         MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
-            BUY_MIN_PERCENTAGE: 51,
-            SELL_MAX_PERCENTAGE: 49,
+            BUY_MIN_PERCENTAGE: 52,
+            SELL_MAX_PERCENTAGE: 45,
             STRICT_MODE: true,
             REQUIRE_VOLUME_DIRECTION: true
         },
@@ -94,7 +75,7 @@ const CONFIG = {
         GROUP_WINDOW_MINUTES: 10,
         MAX_GROUP_SIZE: 3,
         SIMILAR_PRICE_DIFF: 1.0,
-        MIN_SCORE_TO_ALERT: 2,
+        MIN_SCORE_TO_ALERT: 3,
         MAX_ALERTS_PER_SCAN: 30,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
         TELEGRAM_DELAY_MS: 5000,
@@ -165,6 +146,15 @@ const CONFIG = {
                 '3d': 5.5,
                 '1w': 6.0
             }
+        },
+        // CONFIGURAÇÕES DA MEMÓRIA DE ESTUDO
+        MEMORY: {
+            ENABLED: true,
+            EXPIRY_HOURS: 48,           // Mantém o estudo na memória por 48 horas
+            CHECK_TIMEFRAME: '3m',      // Timeframe para confirmação da reversão
+            EMA_FAST: 13,               // EMA rápida para cruzamento
+            EMA_SLOW: 34,               // EMA lenta para cruzamento
+            EMA_TREND: 55               // EMA de tendência para fechamento
         }
     },
     VOLUME: { EMA_PERIOD: 9 },
@@ -277,74 +267,238 @@ const CONFIG = {
         TP1_MULTIPLIER: 1.0,
         TP2_MULTIPLIER: 1.5,
         TP3_MULTIPLIER: 2.0
+    },
+    CVD: {
+        ENABLED: true,
+        TIMEFRAME: '15m',
+        LOOKBACK_CANDLES: 20,
+        MIN_VOLUME_USDT: 100000,
+        SCORE_BONUS: {
+            BULLISH_DIVERGENCE: 2.0,
+            BEARISH_DIVERGENCE: 2.0,
+            TREND_BONUS: 1.0
+        },
+        WEBSOCKET: {
+            ENABLED: true,
+            MAX_SYMBOLS: 100,
+            SNAPSHOT_INTERVAL_MS: 15 * 60 * 1000,
+            RECONNECT_DELAY_MS: 5000,
+            WS_URL: 'wss://fstream.binance.com'
+        }
     }
 };
-
-// =====================================================================
-// === LISTA DE SÍMBOLOS DA BINGX SPOT (TRADFI) ===
-// =====================================================================
-const BINGX_SYMBOLS = {
-    // Ações (TradFi) - Spot
-    STOCKS: [
-        'NVDAUSDT',   // NVIDIA
-        'TSLAUSDT',   // Tesla
-        'AAPLUSDT',   // Apple
-        'MSFTUSDT',   // Microsoft
-        'AMZNUSDT',   // Amazon
-        'METAUSDT',   // Meta
-        'GOOGLUSDT',  // Google
-        'NFLXUSDT',   // Netflix
-        'AMDUSDT',    // AMD
-        'INTCUSDT',   // Intel
-        'BABAUSDT',   // Alibaba
-        'KOUSDT',     // Coca-Cola
-        'JPMUSDT',    // JPMorgan
-        'VUSDT',      // Visa
-        'WMTUSDT',    // Walmart
-        'DISUSDT',    // Disney
-        'PYPLUSDT'    // PayPal
-    ],
-    // Commodities - Spot
-    COMMODITIES: [
-        'WTIUSDT',        // Petróleo WTI
-        'BrentUSDT',      // Petróleo Brent
-        'NaturalGasUSDT', // Gás Natural
-        'GoldUSDT',       // Ouro
-        'SilverUSDT'      // Prata
-    ],
-    // Índices - Spot
-    INDICES: [
-        'NASDAQ100USDT',  // NASDAQ 100
-        'SPX500USDT',     // S&P 500
-        'DJ30USDT',       // Dow Jones
-        'Nikkei225USDT',  // Nikkei 225
-        'HSIUSDT'         // Hang Seng
-    ],
-    // Forex - Spot
-    FOREX: [
-        'EURUSDT',    // Euro / Dólar
-        'GBPUSDT',    // Libra / Dólar
-        'JPYUSDT',    // Iene / Dólar
-        'AUDUSDT',    // Dólar Australiano
-        'CADUSDT',    // Dólar Canadense
-        'CHFUSDT',    // Franco Suíço
-        'NZDUSDT'     // Dólar Neozelandês
-    ]
-};
-
-// Combinar todos os símbolos
-const ALL_SYMBOLS = [
-    ...BINGX_SYMBOLS.STOCKS,
-    ...BINGX_SYMBOLS.COMMODITIES,
-    ...BINGX_SYMBOLS.INDICES,
-    ...BINGX_SYMBOLS.FOREX
-];
 
 // =====================================================================
 // === DIRETÓRIOS ===
 // =====================================================================
 const LOG_DIR = './logs';
+const MEMORY_FILE = path.join(__dirname, 'studyMemory.json');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+
+// =====================================================================
+// === SISTEMA DE MEMÓRIA DE ESTUDO ===
+// =====================================================================
+class StudyMemory {
+    constructor() {
+        this.memory = new Map(); // symbol -> { direction, timestamp, price, bbLower, bbUpper, divergenceScore, studyData }
+        this.loadFromFile();
+    }
+
+    loadFromFile() {
+        try {
+            if (fs.existsSync(MEMORY_FILE)) {
+                const data = fs.readFileSync(MEMORY_FILE, 'utf8');
+                const loaded = JSON.parse(data);
+                for (const [key, value] of Object.entries(loaded)) {
+                    this.memory.set(key, value);
+                }
+                log(`Carregados ${this.memory.size} estudos da memória`, 'info');
+            }
+        } catch (error) {
+            log(`Erro ao carregar memória: ${error.message}`, 'error');
+        }
+    }
+
+    saveToFile() {
+        try {
+            const obj = Object.fromEntries(this.memory);
+            fs.writeFileSync(MEMORY_FILE, JSON.stringify(obj, null, 2));
+        } catch (error) {
+            log(`Erro ao salvar memória: ${error.message}`, 'error');
+        }
+    }
+
+    addStudy(symbol, direction, price, bbLower, bbUpper, divergenceScore, studyData) {
+        const key = `${symbol}_${direction}`;
+        const expiryHours = CONFIG.ALERTS.MEMORY.EXPIRY_HOURS || 48;
+        
+        this.memory.set(key, {
+            symbol,
+            direction,
+            price,
+            bbLower,
+            bbUpper,
+            divergenceScore,
+            studyData,
+            timestamp: Date.now(),
+            expiryTime: Date.now() + (expiryHours * 60 * 60 * 1000)
+        });
+        
+        this.saveToFile();
+        log(`📝 MEMÓRIA: ${symbol} ${direction} registrado para estudo (válido por ${expiryHours}h)`, 'success');
+    }
+
+    getStudy(symbol, direction) {
+        const key = `${symbol}_${direction}`;
+        const study = this.memory.get(key);
+        
+        if (!study) return null;
+        
+        // Verifica se expirou
+        if (Date.now() > study.expiryTime) {
+            this.memory.delete(key);
+            this.saveToFile();
+            return null;
+        }
+        
+        return study;
+    }
+
+    hasStudy(symbol, direction) {
+        return this.getStudy(symbol, direction) !== null;
+    }
+
+    removeStudy(symbol, direction) {
+        const key = `${symbol}_${direction}`;
+        this.memory.delete(key);
+        this.saveToFile();
+    }
+
+    cleanupExpired() {
+        let removed = 0;
+        for (const [key, study] of this.memory) {
+            if (Date.now() > study.expiryTime) {
+                this.memory.delete(key);
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            this.saveToFile();
+            log(`🧹 Limpeza de memória: ${removed} estudos expirados removidos`, 'info');
+        }
+    }
+
+    getStats() {
+        const stats = { total: this.memory.size, byDirection: { COMPRA: 0, VENDA: 0 } };
+        for (const [key, study] of this.memory) {
+            if (study.direction === 'COMPRA') stats.byDirection.COMPRA++;
+            else stats.byDirection.VENDA++;
+        }
+        return stats;
+    }
+}
+
+// Instância global da memória
+const studyMemory = new StudyMemory();
+
+// =====================================================================
+// === FUNÇÕES DE EMA PARA CONFIRMAÇÃO NO GRÁFICO 3 MINUTOS ===
+// =====================================================================
+function calculateEMASeries(values, period) {
+    if (!values || values.length === 0) return [];
+    if (values.length < period) return values.map(v => v);
+    
+    const multiplier = 2 / (period + 1);
+    const emaSeries = [];
+    let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    emaSeries.push(ema);
+    
+    for (let i = period; i < values.length; i++) {
+        ema = (values[i] - ema) * multiplier + ema;
+        emaSeries.push(ema);
+    }
+    
+    return emaSeries;
+}
+
+async function checkEMAConfirmation(symbol, direction) {
+    try {
+        const timeframe = CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME || '3m';
+        const candles = await getCandles(symbol, timeframe, 100);
+        
+        if (!candles || candles.length < 60) {
+            return { confirmed: false, message: 'Dados insuficientes no timeframe 3m', ema13: null, ema34: null, ema55: null };
+        }
+        
+        const closes = candles.map(c => c.close);
+        
+        // Calcula EMAs
+        const ema13Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_FAST);
+        const ema34Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_SLOW);
+        const ema55Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_TREND);
+        
+        const currentEMA13 = ema13Series[ema13Series.length - 1];
+        const previousEMA13 = ema13Series.length >= 2 ? ema13Series[ema13Series.length - 2] : currentEMA13;
+        
+        const currentEMA34 = ema34Series[ema34Series.length - 1];
+        const previousEMA34 = ema34Series.length >= 2 ? ema34Series[ema34Series.length - 2] : currentEMA34;
+        
+        const currentEMA55 = ema55Series[ema55Series.length - 1];
+        const currentPrice = closes[closes.length - 1];
+        const currentCandle = candles[candles.length - 1];
+        
+        let confirmed = false;
+        let message = '';
+        
+        if (direction === 'COMPRA') {
+            // CRITÉRIO DE COMPRA: EMA13 cruza para cima da EMA34 E preço fecha acima da EMA55
+            const ema13CrossedUp = previousEMA13 <= previousEMA34 && currentEMA13 > currentEMA34;
+            const priceAboveEMA55 = currentPrice > currentEMA55;
+            
+            if (ema13CrossedUp && priceAboveEMA55) {
+                confirmed = true;
+                message = `✅ COMPRA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} > ${currentEMA34.toFixed(2)}) | Preço (${formatPrice(currentPrice)}) > EMA55 (${currentEMA55.toFixed(2)})`;
+                log(`📈 ${symbol} - ${message}`, 'success');
+            } else if (ema13CrossedUp && !priceAboveEMA55) {
+                message = `⏳ Aguardando fechamento acima da EMA55 (${formatPrice(currentPrice)} < ${currentEMA55.toFixed(2)})`;
+            } else if (!ema13CrossedUp && priceAboveEMA55) {
+                message = `⏳ Aguardando cruzamento da EMA13 sobre EMA34 (${currentEMA13.toFixed(2)} < ${currentEMA34.toFixed(2)})`;
+            } else {
+                message = `⏳ Aguardando confirmação: EMA13:${currentEMA13.toFixed(2)} | EMA34:${currentEMA34.toFixed(2)} | Preço/EMA55:${formatPrice(currentPrice)}/${currentEMA55.toFixed(2)}`;
+            }
+        } else {
+            // CRITÉRIO DE VENDA: EMA13 cruza para baixo da EMA34 E preço fecha abaixo da EMA55
+            const ema13CrossedDown = previousEMA13 >= previousEMA34 && currentEMA13 < currentEMA34;
+            const priceBelowEMA55 = currentPrice < currentEMA55;
+            
+            if (ema13CrossedDown && priceBelowEMA55) {
+                confirmed = true;
+                message = `✅ VENDA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} < ${currentEMA34.toFixed(2)}) | Preço (${formatPrice(currentPrice)}) < EMA55 (${currentEMA55.toFixed(2)})`;
+                log(`📉 ${symbol} - ${message}`, 'success');
+            } else if (ema13CrossedDown && !priceBelowEMA55) {
+                message = `⏳ Aguardando fechamento abaixo da EMA55 (${formatPrice(currentPrice)} > ${currentEMA55.toFixed(2)})`;
+            } else if (!ema13CrossedDown && priceBelowEMA55) {
+                message = `⏳ Aguardando cruzamento da EMA13 abaixo da EMA34 (${currentEMA13.toFixed(2)} > ${currentEMA34.toFixed(2)})`;
+            } else {
+                message = `⏳ Aguardando confirmação: EMA13:${currentEMA13.toFixed(2)} | EMA34:${currentEMA34.toFixed(2)} | Preço/EMA55:${formatPrice(currentPrice)}/${currentEMA55.toFixed(2)}`;
+            }
+        }
+        
+        return {
+            confirmed,
+            message,
+            ema13: currentEMA13,
+            ema34: currentEMA34,
+            ema55: currentEMA55,
+            currentPrice,
+            candles
+        };
+        
+    } catch (error) {
+        log(`Erro ao verificar EMA para ${symbol}: ${error.message}`, 'error');
+        return { confirmed: false, message: 'Erro na verificação EMA', ema13: null, ema34: null, ema55: null };
+    }
+}
 
 // =====================================================================
 // === PERSISTÊNCIA DOS CONTADORES DIÁRIOS ===
@@ -473,80 +627,396 @@ let isSendingTelegram = false;
 let alertsSentThisScan = 0;
 
 // =====================================================================
-// === FUNÇÕES ESPECÍFICAS DA BINGX SPOT ===
+// === CVD REAL VIA WEBSOCKET ===
 // =====================================================================
 
-// Converte intervalo para formato BingX Spot
-function convertIntervalToBingx(interval) {
-    const map = {
-        '1m': '1m',
-        '5m': '5m',
-        '15m': '15m',
-        '30m': '30m',
-        '1h': '1h',
-        '2h': '2h',
-        '4h': '4h',
-        '6h': '6h',
-        '12h': '12h',
-        '1d': '1d',
-        '3d': '3d',
-        '1w': '1w',
-        '1M': '1M'
-    };
-    return map[interval] || interval;
-}
+class RealCVDManager {
+    constructor() {
+        this.connections = new Map();
+        this.snapshots = new Map();
+        this.listeners = new Map();
+        this.isInitialized = false;
+        this.reconnectTimer = null;
+    }
 
-// Busca candles na BingX Spot
-async function getBingxSpotCandles(symbol, interval, limit = 100) {
-    try {
-        const bingxInterval = convertIntervalToBingx(interval);
-        const url = `${CONFIG.EXCHANGE.BASE_URL}${CONFIG.EXCHANGE.ENDPOINTS.SPOT_KLINE}?symbol=${symbol}&interval=${bingxInterval}&limit=${limit}`;
+    async initialize(symbols) {
+        if (!CONFIG.CVD.WEBSOCKET.ENABLED) {
+            log('CVD WebSocket desativado, usando modo simulado', 'warning');
+            return false;
+        }
+
+        const maxSymbols = CONFIG.CVD.WEBSOCKET.MAX_SYMBOLS;
+        const activeSymbols = symbols.slice(0, maxSymbols);
         
-        const cacheKey = `bingx_spot_candles_${symbol}_${interval}_${limit}`;
-        const data = await rateLimiter.makeRequest(url, cacheKey);
+        log(`Inicializando CVD Real para ${activeSymbols.length} símbolos...`, 'info');
         
-        // Verifica resposta da BingX Spot
-        if (data.code !== undefined && data.code !== 0) {
-            return [];
+        for (const symbol of activeSymbols) {
+            await this.connectSymbol(symbol);
+            await new Promise(r => setTimeout(r, 100));
         }
         
-        const klines = data.data || [];
-        return klines.map(candle => ({
-            open: parseFloat(candle[0]),
-            high: parseFloat(candle[1]),
-            low: parseFloat(candle[2]),
-            close: parseFloat(candle[3]),
-            volume: parseFloat(candle[4]),
-            time: candle[6]
-        }));
-    } catch (error) {
-        return [];
+        this.isInitialized = true;
+        log(`CVD Real ativo para ${activeSymbols.length} símbolos`, 'success');
+        return true;
+    }
+
+    async connectSymbol(symbol) {
+        if (this.connections.has(symbol)) {
+            this.disconnectSymbol(symbol);
+        }
+
+        const streamName = `${symbol.toLowerCase()}@trade`;
+        const wsUrl = `${CONFIG.CVD.WEBSOCKET.WS_URL}/ws/${streamName}`;
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.on('open', () => {
+            log(`✅ WebSocket conectado para ${symbol}`, 'success');
+            this.snapshots.set(symbol, {
+                cumulative: 0,
+                deltas: [],
+                lastUpdate: Date.now(),
+                startPrice: null,
+                lastPrice: null
+            });
+        });
+        
+        ws.on('message', (data) => {
+            try {
+                const trade = JSON.parse(data);
+                this.processTrade(symbol, trade);
+            } catch (e) {}
+        });
+        
+        ws.on('error', (error) => {
+            log(`Erro WebSocket ${symbol}: ${error.message}`, 'error');
+        });
+        
+        ws.on('close', () => {
+            log(`WebSocket fechado para ${symbol}, reconectando...`, 'warning');
+            this.connections.delete(symbol);
+            setTimeout(() => this.connectSymbol(symbol), CONFIG.CVD.WEBSOCKET.RECONNECT_DELAY_MS);
+        });
+        
+        this.connections.set(symbol, ws);
+    }
+
+    disconnectSymbol(symbol) {
+        const ws = this.connections.get(symbol);
+        if (ws) {
+            ws.close();
+            this.connections.delete(symbol);
+        }
+    }
+
+    processTrade(symbol, trade) {
+        const snapshot = this.snapshots.get(symbol);
+        if (!snapshot) return;
+        
+        const price = parseFloat(trade.p);
+        const quantity = parseFloat(trade.q);
+        const value = price * quantity;
+        const isAggressiveBuy = !trade.m;
+        const delta = isAggressiveBuy ? value : -value;
+        snapshot.cumulative += delta;
+        
+        snapshot.deltas.push({
+            delta: delta,
+            price: price,
+            timestamp: trade.T || Date.now(),
+            cumulative: snapshot.cumulative
+        });
+        
+        snapshot.lastPrice = price;
+        if (!snapshot.startPrice) snapshot.startPrice = price;
+        
+        const maxDeltas = 900;
+        if (snapshot.deltas.length > maxDeltas) {
+            snapshot.deltas = snapshot.deltas.slice(-maxDeltas);
+        }
+        
+        snapshot.lastUpdate = Date.now();
+        
+        const listeners = this.listeners.get(symbol);
+        if (listeners) {
+            listeners.forEach(cb => cb({
+                symbol,
+                price,
+                delta,
+                cumulative: snapshot.cumulative,
+                timestamp: trade.T
+            }));
+        }
+    }
+
+    onTrade(symbol, callback) {
+        if (!this.listeners.has(symbol)) {
+            this.listeners.set(symbol, []);
+        }
+        this.listeners.get(symbol).push(callback);
+    }
+
+    getCVDAnalysis(symbol, currentPrice, isGreenAlert) {
+        const snapshot = this.snapshots.get(symbol);
+        
+        if (!snapshot || !snapshot.deltas || snapshot.deltas.length < 10) {
+            return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: false };
+        }
+        
+        const deltas = snapshot.deltas;
+        const recentDeltas = deltas.slice(-50);
+        
+        const cvdValues = recentDeltas.map(d => d.cumulative);
+        const cvdStart = cvdValues[0] || 0;
+        const cvdEnd = cvdValues[cvdValues.length - 1] || 0;
+        const cvdTrend = cvdEnd - cvdStart;
+        
+        const prices = recentDeltas.map(d => d.price);
+        const priceStart = prices[0] || currentPrice;
+        const priceEnd = prices[prices.length - 1] || currentPrice;
+        const priceTrend = priceEnd - priceStart;
+        
+        let divergence = null;
+        
+        if (priceTrend < 0 && cvdTrend > 0) {
+            divergence = {
+                type: 'bullish',
+                description: 'Preço caindo, CVD subindo (acumulação)',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.BULLISH_DIVERGENCE
+            };
+        } else if (priceTrend > 0 && cvdTrend < 0) {
+            divergence = {
+                type: 'bearish',
+                description: 'Preço subindo, CVD caindo (distribuição)',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.BEARISH_DIVERGENCE
+            };
+        } else if ((priceTrend > 0 && cvdTrend > 0) || (priceTrend < 0 && cvdTrend < 0)) {
+            divergence = {
+                type: priceTrend > 0 ? 'bullish' : 'bearish',
+                description: 'CVD alinhado com tendência',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.TREND_BONUS
+            };
+        }
+        
+        if (divergence) {
+            const isAligned = (isGreenAlert && divergence.type === 'bullish') ||
+                              (!isGreenAlert && divergence.type === 'bearish');
+            
+            return {
+                cvdConfirmed: isAligned,
+                cvdScore: divergence.score,
+                cvdSignal: divergence,
+                isReal: true,
+                cvdTrend: cvdTrend,
+                priceTrend: priceTrend,
+                deltaCount: recentDeltas.length
+            };
+        }
+        
+        return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: true };
+    }
+
+    getStats() {
+        const stats = { connected: this.connections.size, withData: 0, symbols: [] };
+        for (const [symbol, snapshot] of this.snapshots) {
+            if (snapshot.deltas.length > 0) {
+                stats.withData++;
+                stats.symbols.push({ symbol, deltas: snapshot.deltas.length, cumulative: snapshot.cumulative.toFixed(2) });
+            }
+        }
+        return stats;
+    }
+
+    shutdown() {
+        for (const [symbol, ws] of this.connections) {
+            ws.close();
+        }
+        this.connections.clear();
+        this.snapshots.clear();
+        log('CVD Real desligado', 'info');
     }
 }
 
-// Busca ticker 24h na BingX Spot
-async function getBingxSpotTicker24h(symbol) {
+const realCVD = new RealCVDManager();
+
+async function analyzeCVDHybrid(symbol, currentPrice, isGreenAlert) {
+    if (CONFIG.CVD.WEBSOCKET.ENABLED && realCVD.isInitialized) {
+        const realResult = realCVD.getCVDAnalysis(symbol, currentPrice, isGreenAlert);
+        if (realResult.isReal && realResult.cvdSignal) {
+            if (realResult.cvdConfirmed) {
+                log(`✅ ${symbol} - CVD REAL ${realResult.cvdSignal.type} +${realResult.cvdScore} (${realResult.deltaCount} trades)`, 'success');
+            }
+            return realResult;
+        }
+    }
+    return await analyzeCVDSimulated(symbol, currentPrice, isGreenAlert);
+}
+
+async function getCVDDataSimulated(symbol) {
     try {
-        const url = `${CONFIG.EXCHANGE.BASE_URL}${CONFIG.EXCHANGE.ENDPOINTS.SPOT_TICKER_24H}?symbol=${symbol}`;
+        const interval = CONFIG.CVD.TIMEFRAME;
+        const limit = CONFIG.CVD.LOOKBACK_CANDLES + 15;
+        const candles = await getCandles(symbol, interval, limit);
         
-        const data = await rateLimiter.makeRequest(url, `bingx_spot_ticker_${symbol}`);
+        if (!candles || candles.length < 15) return null;
         
-        if (data.code !== undefined && data.code !== 0) {
-            return null;
+        let cumulativeDelta = 0;
+        const deltas = [];
+        
+        for (let i = 0; i < candles.length; i++) {
+            const candle = candles[i];
+            const isBullish = candle.close > candle.open;
+            const delta = isBullish ? candle.volume : -candle.volume;
+            cumulativeDelta += delta;
+            deltas.push({
+                time: candle.time,
+                delta: delta,
+                cumulative: cumulativeDelta,
+                price: candle.close,
+                volume: candle.volume,
+                direction: isBullish ? 'buy' : 'sell'
+            });
         }
         
-        const ticker = data.data;
-        return {
-            symbol: symbol,
-            lastPrice: parseFloat(ticker.lastPrice),
-            volume: parseFloat(ticker.volume),
-            quoteVolume: parseFloat(ticker.volume) * parseFloat(ticker.lastPrice),
-            high: parseFloat(ticker.highPrice),
-            low: parseFloat(ticker.lowPrice),
-            changePercent: parseFloat(ticker.priceChangePercent)
-        };
+        return { symbol, interval, currentCVD: cumulativeDelta, deltas, lastCandle: deltas[deltas.length - 1], previousCandle: deltas.length >= 2 ? deltas[deltas.length - 2] : null };
     } catch (error) {
         return null;
+    }
+}
+
+function findLocalExtremes(values, type) {
+    const extremes = [];
+    for (let i = 1; i < values.length - 1; i++) {
+        if (type === 'high') {
+            if (values[i] > values[i-1] && values[i] > values[i+1]) {
+                extremes.push({ index: i, value: values[i] });
+            }
+        } else {
+            if (values[i] < values[i-1] && values[i] < values[i+1]) {
+                extremes.push({ index: i, value: values[i] });
+            }
+        }
+    }
+    return extremes;
+}
+
+function detectCVDDivergenceSimulated(cvdData, candles) {
+    if (!cvdData || !cvdData.deltas || cvdData.deltas.length < 15) return null;
+    
+    const deltas = cvdData.deltas;
+    const prices = candles.map(c => c.close);
+    const lookback = Math.min(CONFIG.CVD.LOOKBACK_CANDLES, deltas.length - 2);
+    const recentDeltas = deltas.slice(-lookback);
+    const recentPrices = prices.slice(-lookback);
+    
+    if (recentPrices.length < 10 || recentDeltas.length < 10) return null;
+    
+    const priceHighs = findLocalExtremes(recentPrices, 'high');
+    const priceLows = findLocalExtremes(recentPrices, 'low');
+    const cvdValues = recentDeltas.map(d => d.cumulative);
+    const cvdHighs = findLocalExtremes(cvdValues, 'high');
+    const cvdLows = findLocalExtremes(cvdValues, 'low');
+    
+    let divergence = null;
+    
+    if (priceLows.length >= 2 && cvdLows.length >= 2) {
+        const lastPriceLow = priceLows[priceLows.length - 1];
+        const prevPriceLow = priceLows[priceLows.length - 2];
+        const lastCvdLow = cvdLows[cvdLows.length - 1];
+        const prevCvdLow = cvdLows[cvdLows.length - 2];
+        
+        if (lastPriceLow.index > prevPriceLow.index && lastCvdLow.index > prevCvdLow.index) {
+            if (lastPriceLow.value < prevPriceLow.value && lastCvdLow.value > prevCvdLow.value) {
+                divergence = {
+                    type: 'bullish',
+                    description: 'Preço fez nova mínima, CVD fez mínima mais alta',
+                    strength: Math.abs((lastCvdLow.value - prevCvdLow.value) / (prevCvdLow.value || 1) * 100),
+                    score: CONFIG.CVD.SCORE_BONUS.BULLISH_DIVERGENCE
+                };
+            }
+        }
+    }
+    
+    if (!divergence && priceHighs.length >= 2 && cvdHighs.length >= 2) {
+        const lastPriceHigh = priceHighs[priceHighs.length - 1];
+        const prevPriceHigh = priceHighs[priceHighs.length - 2];
+        const lastCvdHigh = cvdHighs[cvdHighs.length - 1];
+        const prevCvdHigh = cvdHighs[cvdHighs.length - 2];
+        
+        if (lastPriceHigh.index > prevPriceHigh.index && lastCvdHigh.index > prevCvdHigh.index) {
+            if (lastPriceHigh.value > prevPriceHigh.value && lastCvdHigh.value < prevCvdHigh.value) {
+                divergence = {
+                    type: 'bearish',
+                    description: 'Preço fez nova máxima, CVD fez máxima mais baixa',
+                    strength: Math.abs((prevCvdHigh.value - lastCvdHigh.value) / (prevCvdHigh.value || 1) * 100),
+                    score: CONFIG.CVD.SCORE_BONUS.BEARISH_DIVERGENCE
+                };
+            }
+        }
+    }
+    
+    if (!divergence) {
+        const last5CVD = cvdValues.slice(-5);
+        const cvdTrend = last5CVD[last5CVD.length - 1] - last5CVD[0];
+        const last5Prices = recentPrices.slice(-5);
+        const priceTrend = last5Prices[last5Prices.length - 1] - last5Prices[0];
+        
+        if (cvdTrend > 0 && priceTrend > 0) {
+            divergence = {
+                type: 'bullish',
+                description: 'CVD em tendência de alta',
+                strength: Math.abs(cvdTrend),
+                score: CONFIG.CVD.SCORE_BONUS.TREND_BONUS
+            };
+        } else if (cvdTrend < 0 && priceTrend < 0) {
+            divergence = {
+                type: 'bearish',
+                description: 'CVD em tendência de baixa',
+                strength: Math.abs(cvdTrend),
+                score: CONFIG.CVD.SCORE_BONUS.TREND_BONUS
+            };
+        }
+    }
+    
+    return divergence;
+}
+
+async function analyzeCVDSimulated(symbol, currentPrice, isGreenAlert) {
+    if (!CONFIG.CVD.ENABLED) return { cvdScore: 0, cvdSignal: null, cvdConfirmed: false, isReal: false };
+    
+    try {
+        const candles = await getCandles(symbol, CONFIG.CVD.TIMEFRAME, 40);
+        const cvdData = await getCVDDataSimulated(symbol);
+        
+        if (!cvdData || !candles || candles.length < 15) {
+            return { cvdScore: 0, cvdSignal: null, cvdConfirmed: false, isReal: false };
+        }
+        
+        const cvdDivergence = detectCVDDivergenceSimulated(cvdData, candles);
+        
+        if (cvdDivergence) {
+            const isAligned = (isGreenAlert && cvdDivergence.type === 'bullish') ||
+                              (!isGreenAlert && cvdDivergence.type === 'bearish');
+            
+            if (isAligned) {
+                return {
+                    cvdScore: cvdDivergence.score,
+                    cvdSignal: { type: cvdDivergence.type, description: cvdDivergence.description, strength: cvdDivergence.strength },
+                    cvdConfirmed: true,
+                    isReal: false
+                };
+            } else {
+                return { cvdScore: 0, cvdSignal: cvdDivergence, cvdConfirmed: false, isReal: false };
+            }
+        }
+        
+        return { cvdScore: 0, cvdSignal: null, cvdConfirmed: false, isReal: false };
+        
+    } catch (error) {
+        return { cvdScore: 0, cvdSignal: null, cvdConfirmed: false, isReal: false };
     }
 }
 
@@ -639,11 +1109,38 @@ const rateLimiter = new IntelligentRateLimiter();
 // =====================================================================
 // === FUNÇÕES DE CLASSIFICAÇÃO DE SÍMBOLOS ===
 // =====================================================================
+async function getTopSymbols() {
+    try {
+        log('Buscando top símbolos por volume...');
+        const data = await rateLimiter.makeRequest('https://fapi.binance.com/fapi/v1/ticker/24hr', 'top_symbols_24h');
+        const topSymbols = data
+            .filter(s => s.symbol.endsWith('USDT') && parseFloat(s.volume) > 0)
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+            .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
+            .map(s => s.symbol);
+        log(`Encontrados ${topSymbols.length} símbolos top por volume`);
+        return topSymbols;
+    } catch (e) {
+        log('Falha ao buscar top symbols, usando lista estática expandida', 'warning');
+        return [
+            'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
+            'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
+            'LTCUSDT','BCHUSDT','ARBUSDT','OPUSDT','INJUSDT','IMXUSDT','STXUSDT','HBARUSDT','VETUSDT','RUNEUSDT',
+            'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT',
+            'AAVEUSDT','MKRUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','BALUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
+        ];
+    }
+}
+
 function getSymbolCategory(symbol, topSymbols = []) {
-    if (BINGX_SYMBOLS.STOCKS.includes(symbol)) return 'TOP_10';
-    if (BINGX_SYMBOLS.COMMODITIES.includes(symbol)) return 'TOP_50';
-    if (BINGX_SYMBOLS.INDICES.includes(symbol)) return 'TOP_50';
-    if (BINGX_SYMBOLS.FOREX.includes(symbol)) return 'TOP_50';
+    const top10 = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+                   'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'TONUSDT'];
+    if (top10.includes(symbol)) return 'TOP_10';
+    if (topSymbols.length > 0) {
+        const rank = topSymbols.indexOf(symbol);
+        if (rank !== -1 && rank < 50) return 'TOP_50';
+        if (rank !== -1 && rank < 150) return 'TOP_150';
+    }
     return 'OTHER';
 }
 
@@ -1051,47 +1548,6 @@ function checkFundingPenalty(funding, isGreenAlert) {
     return { hasPenalty: false, points: 0, message: '' };
 }
 
-// =====================================================================
-// === FUNÇÕES DE BUSCA DE DADOS BINGX SPOT ===
-// =====================================================================
-
-// Busca candles (unificada)
-async function getCandles(symbol, interval, limit = 100) {
-    return getBingxSpotCandles(symbol, interval, limit);
-}
-
-// Busca ticker 24h
-async function getTicker24h(symbol) {
-    return getBingxSpotTicker24h(symbol);
-}
-
-// Busca funding rate (não existe em Spot)
-async function getFundingRate(symbol) {
-    return null;
-}
-
-// Busca LSR (não existe em Spot)
-async function getLSR(symbol) {
-    return null;
-}
-
-// =====================================================================
-// === FUNÇÕES DE ANÁLISE TÉCNICA (ADAPTADAS) ===
-// =====================================================================
-async function getTopSymbolsBingx() {
-    try {
-        log('Buscando top símbolos por volume na BingX Spot...');
-        // Para Spot TradFi, usar lista estática
-        return ALL_SYMBOLS;
-    } catch (error) {
-        log(`Erro ao buscar top symbols: ${error.message}`, 'warning');
-        return ALL_SYMBOLS;
-    }
-}
-
-// =====================================================================
-// === VERIFICAÇÕES E ANÁLISE ===
-// =====================================================================
 async function check15MinVolatility(symbol) {
     if (!CONFIG.ALERTS.MIN_15M_VOLATILITY.ENABLED) return { passed: true, message: '', metrics: {} };
     try {
@@ -1099,7 +1555,6 @@ async function check15MinVolatility(symbol) {
         if (!candles15m || candles15m.length < 20) {
             return { passed: false, message: 'Dados insuficientes 15m', metrics: {} };
         }
-        
         const trValues = [];
         for (let i = 1; i < candles15m.length; i++) {
             const high = candles15m[i].high;
@@ -1107,7 +1562,6 @@ async function check15MinVolatility(symbol) {
             const prevClose = candles15m[i-1].close;
             trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
         }
-        
         const recentTR = trValues.slice(-14);
         const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
         const currentPrice = candles15m[candles15m.length - 1].close;
@@ -1135,7 +1589,6 @@ async function check15MinVolatility(symbol) {
     }
 }
 
-// Função auxiliar para calcular stop e alvos
 function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
     const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 3.0;
     const minStopPercent = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 2.0;
@@ -1230,7 +1683,7 @@ function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
 }
 
 // =====================================================================
-// === BOLLINGER BANDS (15m) COM CONFIRMAÇÃO DE CANDLE ===
+// === BOLLINGER BANDS (15m) COM CONFIRMAÇÃO DE CANDLE E MEMÓRIA ===
 // =====================================================================
 function calculateBollingerBands(candles, period, stdDev) {
     if (!candles || candles.length < period) {
@@ -1245,16 +1698,18 @@ function calculateBollingerBands(candles, period, stdDev) {
     return { upper, middle: sma, lower };
 }
 
-async function checkBollingerCondition(symbol, isGreenAlert) {
-    if (!CONFIG.ALERTS.BOLLINGER.ENABLED) return { passed: true, message: '', candleConfirmed: true };
+async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, studyData) {
+    if (!CONFIG.ALERTS.BOLLINGER.ENABLED) return { passed: true, message: '', candleConfirmed: true, shouldStudy: false };
+    
     try {
         const candles = await getCandles(symbol, CONFIG.ALERTS.BOLLINGER.TIMEFRAME, CONFIG.ALERTS.BOLLINGER.PERIOD + 5);
         if (!candles || candles.length < CONFIG.ALERTS.BOLLINGER.PERIOD) {
-            return { passed: false, message: 'Dados insuficientes para Bollinger Bands', candleConfirmed: false };
+            return { passed: false, message: 'Dados insuficientes para Bollinger Bands', candleConfirmed: false, shouldStudy: false };
         }
+        
         const bb = calculateBollingerBands(candles, CONFIG.ALERTS.BOLLINGER.PERIOD, CONFIG.ALERTS.BOLLINGER.STD_DEV);
         if (bb.upper === null || bb.lower === null) {
-            return { passed: false, message: 'Falha no cálculo das Bollinger Bands', candleConfirmed: false };
+            return { passed: false, message: 'Falha no cálculo das Bollinger Bands', candleConfirmed: false, shouldStudy: false };
         }
         
         const currentCandle = candles[candles.length - 1];
@@ -1264,43 +1719,70 @@ async function checkBollingerCondition(symbol, isGreenAlert) {
         let passed = false;
         let message = '';
         let candleConfirmed = false;
+        let shouldStudy = false;
+        
+        const direction = isGreenAlert ? 'COMPRA' : 'VENDA';
         
         if (isGreenAlert) {
-            passed = currentPrice <= bb.lower;
+            const touchedLowerBand = currentPrice <= bb.lower;
             
-            if (!passed) {
-                const diffPercent = ((currentPrice - bb.lower) / bb.lower) * 100;
-                message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)}) - distância +${diffPercent.toFixed(2)}%`;
+            if (touchedLowerBand && currentCandle.close > previousCandle.low) {
+                // TOCOU NA BANDA INFERIOR COM CANDLE DE ALTA - ESTUDAR
+                passed = false; // Não alerta ainda, só estuda
+                shouldStudy = true;
+                candleConfirmed = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda inferior (${formatPrice(currentPrice)} ≤ ${formatPrice(bb.lower)}) com divergência de COMPRA. Aguardando confirmação EMA 3m...`;
+                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
+            } else if (touchedLowerBand) {
+                shouldStudy = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda inferior mas candle não confirmado. Aguardando...`;
             } else {
-                if (currentCandle.close > previousCandle.low) {
-                    candleConfirmed = true;
-                    message = `✅ Preço abaixo da banda inferior ($${formatPrice(currentPrice)} < $${formatPrice(bb.lower)}) | Candle de alta confirmado`;
-                } else {
-                    message = `❌ Preço abaixo da banda inferior, mas candle não é de alta`;
-                    passed = false;
-                }
+                message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)})`;
             }
         } else {
-            passed = currentPrice >= bb.upper;
+            const touchedUpperBand = currentPrice >= bb.upper;
             
-            if (!passed) {
-                const diffPercent = ((bb.upper - currentPrice) / currentPrice) * 100;
-                message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)}) - distância -${diffPercent.toFixed(2)}%`;
+            if (touchedUpperBand && currentCandle.close < previousCandle.high) {
+                // TOCOU NA BANDA SUPERIOR COM CANDLE DE BAIXA - ESTUDAR
+                passed = false; // Não alerta ainda, só estuda
+                shouldStudy = true;
+                candleConfirmed = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda superior (${formatPrice(currentPrice)} ≥ ${formatPrice(bb.upper)}) com divergência de VENDA. Aguardando confirmação EMA 3m...`;
+                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
+            } else if (touchedUpperBand) {
+                shouldStudy = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda superior mas candle não confirmado. Aguardando...`;
             } else {
-                if (currentCandle.close < previousCandle.high) {
-                    candleConfirmed = true;
-                    message = `✅ Preço acima da banda superior ($${formatPrice(currentPrice)} > $${formatPrice(bb.upper)}) | Candle de baixa confirmado`;
-                } else {
-                    message = `❌ Preço acima da banda superior, mas candle não é de baixa`;
-                    passed = false;
-                }
+                message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)})`;
             }
         }
         
-        return { passed, message, bands: bb, candleConfirmed };
+        return { passed, message, bands: bb, candleConfirmed, shouldStudy, touchedBollinger: (isGreenAlert ? currentPrice <= bb.lower : currentPrice >= bb.upper), bbLower: bb.lower, bbUpper: bb.upper };
+        
     } catch (error) {
         log(`Erro ao verificar Bollinger para ${symbol}: ${error.message}`, 'error');
-        return { passed: false, message: 'Erro na verificação Bollinger', candleConfirmed: false };
+        return { passed: false, message: 'Erro na verificação Bollinger', candleConfirmed: false, shouldStudy: false };
+    }
+}
+
+// =====================================================================
+// === BUSCAR CANDLES COM CACHE ===
+// =====================================================================
+async function getCandles(symbol, interval, limit = 100) {
+    try {
+        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const data = await rateLimiter.makeRequest(url, cacheKey);
+        return data.map(candle => ({
+            open: parseFloat(candle[1]),
+            high: parseFloat(candle[2]),
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]),
+            volume: parseFloat(candle[5]),
+            time: candle[0]
+        }));
+    } catch (error) {
+        return [];
     }
 }
 
@@ -1335,10 +1817,16 @@ async function getAdditionalData(symbol, currentPrice, candles1h, candles3m, can
         const currentVolume3m = volumes3m[volumes3m.length - 1] || 0;
         const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
         const volume24hUSDT = volumes1h.slice(-24).reduce((sum, vol) => sum + (vol * currentPrice), 0);
-        
-        let lsr = await getLSR(symbol);
-        let funding = await getFundingRate(symbol);
-        
+        let lsr = null;
+        try {
+            const lsrData = await rateLimiter.makeRequest(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`, `lsr_${symbol}`);
+            lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
+        } catch {}
+        let funding = null;
+        try {
+            const fundingData = await rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, `funding_${symbol}`);
+            funding = parseFloat(fundingData.lastFundingRate) || null;
+        } catch {}
         const volumeChangePct = ((volumeRatio1h - 1) * 100);
         const volume24hPct = volumeChangePct > 0 ? `+${volumeChangePct.toFixed(0)}%` : `${volumeChangePct.toFixed(0)}%`;
         const trendStrength = checkTrendStrength(candles1h);
@@ -1380,8 +1868,8 @@ function isCooldownActive(symbol, direction, timeframe) {
     const lastGlobal = alertCache.get(globalKey);
     if (lastGlobal) {
         const minutesDiff = (now - lastGlobal.timestamp) / (1000 * 60);
-        if (minutesDiff < CONFIG.ALERTS.COOLDOWN_MINUTES) {
-            log(`⏱️ Cooldown global ativo para ${symbol} (${minutesDiff.toFixed(1)}min < ${CONFIG.ALERTS.COOLDOWN_MINUTES}min)`, 'warning');
+        if (minutesDiff < 15) {
+            log(`⏱️ Cooldown global ativo para ${symbol} (${minutesDiff.toFixed(1)}min < 30min)`, 'warning');
             return true;
         }
     }
@@ -1389,7 +1877,7 @@ function isCooldownActive(symbol, direction, timeframe) {
     const lastSpecific = alertCache.get(specificKey);
     if (lastSpecific) {
         const minutesDiff = (now - lastSpecific.timestamp) / (1000 * 60);
-        const required = CONFIG.ALERTS.COOLDOWN_BY_TIMEFRAME[timeframe] || 15;
+        const required = CONFIG.ALERTS.COOLDOWN_BY_TIMEFRAME[timeframe] || 30;
         if (minutesDiff < required) {
             log(`⏱️ Cooldown ${timeframe} ativo para ${symbol} ${direction} (${minutesDiff.toFixed(1)}min < ${required}min)`, 'warning');
             return true;
@@ -1526,7 +2014,8 @@ async function sendSingleAlert(alert) {
             const newCount = registerAlert(alert.symbol, direction, alert.price, tf);
             alert.displayDailyCount = newCount;
             const penaltyIcon = alert.totalPenalty < 0 ? '⚠️' : '✅';
-            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
+            const cvdType = alert.cvdIsReal ? 'REAL' : 'SIM';
+            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | CVD: ${alert.cvdConfirmed ? '✅' : '❌'} (${cvdType}) | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
         }
         return true;
     } catch (error) {
@@ -1543,7 +2032,8 @@ async function sendGroupedAlerts(alerts, priority) {
     if (buyAlerts.length > 0) {
         message += `🟢 **COMPRA** (${buyAlerts.length})\n`;
         buyAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%) | Penal: ${a.totalPenalty}\n`;
+            const cvdType = a.cvdIsReal ? '🔴' : '🟡';
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%) | Penal: ${a.totalPenalty}\n`;
         });
         if (buyAlerts.length > 5) message += `... e mais ${buyAlerts.length - 5}\n`;
         message += '\n';
@@ -1551,7 +2041,8 @@ async function sendGroupedAlerts(alerts, priority) {
     if (sellAlerts.length > 0) {
         message += `🔴 **VENDA** (${sellAlerts.length})\n`;
         sellAlerts.slice(0, 5).forEach(a => {
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | Vol: ${a.volume1h.direction} (${(100 - a.volume1h.percentage).toFixed(1)}% vendedor) | Penal: ${a.totalPenalty}\n`;
+            const cvdType = a.cvdIsReal ? '🔴' : '🟡';
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${(100 - a.volume1h.percentage).toFixed(1)}% vendedor | Penal: ${a.totalPenalty}\n`;
         });
         if (sellAlerts.length > 5) message += `... e mais ${sellAlerts.length - 5}\n`;
     }
@@ -1687,7 +2178,6 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
             totalPenalty = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
         }
 
-        // CCI SCORE ADJUSTMENT
         let cciScoreAdjustment = 0;
         if (isGreenAlert && additional.cci4h.trend === 'ALTA') cciScoreAdjustment += 1;
         if (isGreenAlert && additional.cci4h.trend === 'BAIXA') cciScoreAdjustment -= 1;
@@ -1704,7 +2194,7 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
         return {
             symbol,
             timeframe,
-            timeframeEmoji: timeframe === '1w' ? '📆' : (timeframe === '3d' ? '📅' : (timeframe === '1d' ? '📅' : (timeframe === '4h' ? '⏰' : '⏱️'))),
+            timeframeEmoji: timeframe === '1w' ? '' : (timeframe === '3d' ? '' : (timeframe === '1d' ? '' : (timeframe === '4h' ? '' : ''))),
             timeframeText: `#${timeframe.toUpperCase()}`,
             direction: isGreenAlert ? '🟢🔍 Divergência de ALTA' : '🔴🔍 Divergência de BAIXA',
             price: currentPrice,
@@ -1757,7 +2247,7 @@ async function fetchAllCandles(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO ===
+// === ANALISAR SÍMBOLO COM SISTEMA DE MEMÓRIA ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
@@ -1818,6 +2308,9 @@ async function analyzeSymbol(symbol) {
             return [];
         }
         
+        // ANÁLISE DO CVD (HÍBRIDO: REAL + SIMULADO)
+        const cvdAnalysis = await analyzeCVDHybrid(symbol, currentPrice, isGreenAlert);
+        
         // VERIFICAÇÃO DE DIREÇÃO DO VOLUME
         const volumeDirectionCheck = checkVolumeDirection(bestDivergence.volume1h, isGreenAlert);
         if (!volumeDirectionCheck.passed) {
@@ -1837,7 +2330,6 @@ async function analyzeSymbol(symbol) {
             let bonus = Math.min(maxClusterBonus, strongestSupport.touches * perTouchBonus);
             clusterScoreBonus += bonus;
             clusterInfo += ` 📈 Suporte +${bonus.toFixed(1)} (${strongestSupport.touches} toques)`;
-            log(`Cluster bonus SUPPORT: +${bonus} para ${symbol}`, 'info');
         }
 
         if (isNearResistance && resistances.length > 0) {
@@ -1845,17 +2337,22 @@ async function analyzeSymbol(symbol) {
             let bonus = Math.min(maxClusterBonus, strongestResistance.touches * perTouchBonus);
             clusterScoreBonus += bonus;
             clusterInfo += ` 📉 Resistência +${bonus.toFixed(1)} (${strongestResistance.touches} toques)`;
-            log(`Cluster bonus RESISTANCE: +${bonus} para ${symbol}`, 'info');
         }
 
         if ((isNearSupport && supports.length >= 2) || (isNearResistance && resistances.length >= 2)) {
             clusterScoreBonus += multiClusterBonus;
             clusterInfo += ` 🔥 Multi-cluster +${multiClusterBonus}`;
-            log(`Multi-cluster bonus: +${multiClusterBonus} para ${symbol}`, 'info');
         }
         
         clusterScoreBonus = Math.min(maxClusterBonus * 2, clusterScoreBonus);
         maxScore += clusterScoreBonus;
+        
+        // ADICIONA O SCORE DO CVD
+        if (cvdAnalysis.cvdConfirmed) {
+            maxScore += cvdAnalysis.cvdScore;
+            const cvdType = cvdAnalysis.isReal ? 'REAL' : 'SIM';
+            log(`✅ ${symbol} - CVD ${cvdType} confirmado! Bônus +${cvdAnalysis.cvdScore} | Score total: ${maxScore.toFixed(1)}`, 'success');
+        }
         
         // VERIFICAÇÃO DE SCORE MÍNIMO
         if (!isMinimumScoreReached(maxScore)) {
@@ -1863,86 +2360,166 @@ async function analyzeSymbol(symbol) {
             return [];
         }
         
-        // Verifica Bollinger
-        const bollingerCheck = await checkBollingerCondition(symbol, isGreenAlert);
-        if (!bollingerCheck.passed) {
-            log(`❌ ${symbol} - ${finalDirection} bloqueado: ${bollingerCheck.message}`, 'warning');
+        // =====================================================================
+        // === SISTEMA DE MEMÓRIA E CONFIRMAÇÃO EMA ===
+        // =====================================================================
+        
+        const directionStr = finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA';
+        
+        // Primeiro, verifica se já existe um estudo ativo na memória para este símbolo/direção
+        const existingStudy = studyMemory.getStudy(symbol, directionStr);
+        
+        if (existingStudy) {
+            // Já temos um estudo ativo - verifica confirmação das EMAs
+            log(`📚 ${symbol} - Estudo ativo encontrado para ${directionStr} (desde ${new Date(existingStudy.timestamp).toLocaleString()})`, 'info');
+            
+            // Verifica confirmação no gráfico 3m
+            const emaConfirmation = await checkEMAConfirmation(symbol, directionStr);
+            
+            if (emaConfirmation.confirmed) {
+                // CONFIRMAÇÃO OBTIDA! Envia o alerta com os dados do estudo
+                log(`✅ ${symbol} - CONFIRMAÇÃO OBTIDA! Enviando alerta...`, 'success');
+                
+                // Prepara o estudoData com a confirmação
+                const studyData = {
+                    ...existingStudy.studyData,
+                    emaConfirmation: emaConfirmation,
+                    confirmedAt: Date.now()
+                };
+                
+                // Verifica Bollinger novamente para pegar dados atualizados
+                const bollingerCheck = await checkBollingerWithMemory(symbol, isGreenAlert, maxScore, studyData);
+                
+                // Verifica cooldown
+                if (isCooldownActive(symbol, directionStr, 'MULTI')) return [];
+                if (isDailyLimitReached(symbol)) return [];
+                
+                // Timeframe para stop
+                let timeframeForTargets = '1h';
+                let candlesForTargets = allCandles['1h'];
+                if (bestDivergence.usedTimeframe && allCandles[bestDivergence.usedTimeframe] && allCandles[bestDivergence.usedTimeframe].length >= 20) {
+                    timeframeForTargets = bestDivergence.usedTimeframe;
+                    candlesForTargets = allCandles[timeframeForTargets];
+                }
+                
+                const { stop, tp1, tp2, tp3 } = computeStopAndTargets(currentPrice, isGreenAlert, timeframeForTargets, candlesForTargets);
+                
+                // Pega as bandas do estudo existente
+                const bbInfo = existingStudy.bbLower ? 
+                    `📊 BB 15m: ${formatPrice(existingStudy.bbLower)} / ${formatPrice((existingStudy.bbLower + existingStudy.bbUpper) / 2)} / ${formatPrice(existingStudy.bbUpper)}` : '';
+                
+                const allPenaltyMessages = [];
+                if (bestDivergence.penaltyMessages) {
+                    allPenaltyMessages.push(...bestDivergence.penaltyMessages);
+                }
+                
+                const consolidated = {
+                    ...bestDivergence,
+                    timeframe: 'MULTI',
+                    timeframeEmoji: '✨',
+                    timeframeText: '#MULTI',
+                    direction: finalDirection,
+                    confirmationScore: maxScore,
+                    clusterBonus: clusterScoreBonus,
+                    clusterInfo: clusterInfo,
+                    divergencesList: divergences.map(d => ({
+                        timeframe: d.timeframe,
+                        type: d.direction,
+                        subtype: d.divergenceType,
+                        score: d.confirmationScore,
+                        rsiValue: d.rsiValue,
+                        priceAtDivergence: d.priceAtDivergence,
+                        emoji: d.divergenceEmoji,
+                        isRecent: d.isDivergenceRecent
+                    })),
+                    bullishCount,
+                    bearishCount,
+                    isNearSupport,
+                    isNearResistance,
+                    finalText: (isGreenAlert ? `Potencial de Compra CONFIRMADO (${bullishCount} divergências de ALTA + suporte)` : `Potencial de Correção CONFIRMADO (${bearishCount} divergências de BAIXA + resistência)`),
+                    bollingerMessage: `✅ CONFIRMADO: ${directionStr} após estudo de ${Math.round((Date.now() - existingStudy.timestamp) / 60000)} minutos | ${emaConfirmation.message}`,
+                    bollingerInfo: bbInfo,
+                    candleConfirmed: true,
+                    stopLoss: stop,
+                    tp1, tp2, tp3,
+                    volume1h: bestDivergence.volume1h,
+                    volume3m: bestDivergence.volume3m,
+                    volume24h: bestDivergence.volume24h,
+                    rsi: bestDivergence.rsi,
+                    stoch1d: bestDivergence.stoch1d,
+                    stoch4h: bestDivergence.stoch4h,
+                    stoch1h: bestDivergence.stoch1h,
+                    cci4h: bestDivergence.cci4h,
+                    cciDaily: bestDivergence.cciDaily,
+                    supports: bestDivergence.supports,
+                    resistances: bestDivergence.resistances,
+                    lsrValue: bestDivergence.lsrValue,
+                    fundingValue: bestDivergence.fundingValue,
+                    lsrPenalty: bestDivergence.lsrPenalty,
+                    fundingPenalty: bestDivergence.fundingPenalty,
+                    totalPenalty: bestDivergence.totalPenalty,
+                    penaltyMessages: allPenaltyMessages,
+                    cvdConfirmed: cvdAnalysis.cvdConfirmed,
+                    cvdScore: cvdAnalysis.cvdScore,
+                    cvdSignal: cvdAnalysis.cvdSignal,
+                    cvdIsReal: cvdAnalysis.isReal || false,
+                    studyInfo: {
+                        studiedAt: existingStudy.timestamp,
+                        studiedPrice: existingStudy.price,
+                        confirmedAt: Date.now(),
+                        ema13: emaConfirmation.ema13,
+                        ema34: emaConfirmation.ema34,
+                        ema55: emaConfirmation.ema55
+                    }
+                };
+                
+                // Remove o estudo da memória após o alerta
+                studyMemory.removeStudy(symbol, directionStr);
+                queueAlert(consolidated);
+                return [consolidated];
+                
+            } else {
+                // Ainda aguardando confirmação
+                log(`⏳ ${symbol} - Aguardando confirmação EMA para ${directionStr}: ${emaConfirmation.message}`, 'info');
+                return [];
+            }
+        }
+        
+        // =====================================================================
+        // === NÃO TEM ESTUDO ATIVO - VERIFICA BOLLINGER PARA CRIAR NOVO ESTUDO ===
+        // =====================================================================
+        
+        const bollingerCheck = await checkBollingerWithMemory(symbol, isGreenAlert, maxScore, null);
+        
+        if (bollingerCheck.shouldStudy && CONFIG.ALERTS.MEMORY.ENABLED) {
+            // Criar novo estudo na memória
+            const studyData = {
+                symbol,
+                direction: directionStr,
+                price: currentPrice,
+                bbLower: bollingerCheck.bbLower,
+                bbUpper: bollingerCheck.bbUpper,
+                divergenceScore: maxScore,
+                divergences: divergences.map(d => ({ timeframe: d.timeframe, type: d.direction, subtype: d.divergenceType, score: d.confirmationScore })),
+                bullishCount,
+                bearishCount,
+                isNearSupport,
+                isNearResistance,
+                supports,
+                resistances,
+                volume1h: bestDivergence.volume1h,
+                rsi: bestDivergence.rsi
+            };
+            
+            studyMemory.addStudy(symbol, directionStr, currentPrice, bollingerCheck.bbLower, bollingerCheck.bbUpper, maxScore, studyData);
+            log(`📚 ${symbol} - NOVO ESTUDO registrado para ${directionStr}. Aguardando confirmação EMA...`, 'success');
             return [];
         }
         
-        // Verifica cooldown e limite diário
-        const directionStr = finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA';
-        if (isCooldownActive(symbol, directionStr, 'MULTI')) return [];
-        if (isDailyLimitReached(symbol)) return [];
+        // Se chegou aqui, não tem estudo e não tocou Bollinger - alerta normal? Não, pois queremos só com estudo
+        // Então retorna vazio
+        return [];
         
-        // Timeframe para stop
-        let timeframeForTargets = '1h';
-        let candlesForTargets = allCandles['1h'];
-        if (bestDivergence.usedTimeframe && allCandles[bestDivergence.usedTimeframe] && allCandles[bestDivergence.usedTimeframe].length >= 20) {
-            timeframeForTargets = bestDivergence.usedTimeframe;
-            candlesForTargets = allCandles[timeframeForTargets];
-        }
-        
-        const { stop, tp1, tp2, tp3 } = computeStopAndTargets(currentPrice, isGreenAlert, timeframeForTargets, candlesForTargets);
-        
-        const bbInfo = bollingerCheck.bands ? 
-            `📊 BB 15m: ${formatPrice(bollingerCheck.bands.lower)} / ${formatPrice(bollingerCheck.bands.middle)} / ${formatPrice(bollingerCheck.bands.upper)}` : '';
-        
-        const allPenaltyMessages = [];
-        if (bestDivergence.penaltyMessages) {
-            allPenaltyMessages.push(...bestDivergence.penaltyMessages);
-        }
-        
-        const consolidated = {
-            ...bestDivergence,
-            timeframe: 'MULTI',
-            timeframeEmoji: '✨',
-            timeframeText: '#MULTI',
-            direction: finalDirection,
-            confirmationScore: maxScore,
-            clusterBonus: clusterScoreBonus,
-            clusterInfo: clusterInfo,
-            divergencesList: divergences.map(d => ({
-                timeframe: d.timeframe,
-                type: d.direction,
-                subtype: d.divergenceType,
-                score: d.confirmationScore,
-                rsiValue: d.rsiValue,
-                priceAtDivergence: d.priceAtDivergence,
-                emoji: d.divergenceEmoji,
-                isRecent: d.isDivergenceRecent
-            })),
-            bullishCount,
-            bearishCount,
-            isNearSupport,
-            isNearResistance,
-            finalText: (isGreenAlert ? `Potencial de Compra (${bullishCount} divergências de ALTA + próximo ao suporte)` : `Potencial de Correção (${bearishCount} divergências de BAIXA + próximo à resistência)`),
-            bollingerMessage: bollingerCheck.message,
-            bollingerInfo: bbInfo,
-            candleConfirmed: bollingerCheck.candleConfirmed,
-            stopLoss: stop,
-            tp1, tp2, tp3,
-            volume1h: bestDivergence.volume1h,
-            volume3m: bestDivergence.volume3m,
-            volume24h: bestDivergence.volume24h,
-            rsi: bestDivergence.rsi,
-            stoch1d: bestDivergence.stoch1d,
-            stoch4h: bestDivergence.stoch4h,
-            stoch1h: bestDivergence.stoch1h,
-            cci4h: bestDivergence.cci4h,
-            cciDaily: bestDivergence.cciDaily,
-            supports: bestDivergence.supports,
-            resistances: bestDivergence.resistances,
-            lsrValue: bestDivergence.lsrValue,
-            fundingValue: bestDivergence.fundingValue,
-            lsrPenalty: bestDivergence.lsrPenalty,
-            fundingPenalty: bestDivergence.fundingPenalty,
-            totalPenalty: bestDivergence.totalPenalty,
-            penaltyMessages: allPenaltyMessages
-        };
-        
-        queueAlert(consolidated);
-        return [consolidated];
     } catch (error) {
         log(`Erro em analyzeSymbol ${symbol}: ${error.message}`, 'error');
         return [];
@@ -1950,21 +2527,41 @@ async function analyzeSymbol(symbol) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM ===
+// === FUNÇÃO AUXILIAR PARA CLASSIFICAR FORÇA DO PIVÔ ===
+// =====================================================================
+function getPivotStrength(touches) {
+    if (touches >= 5) return { text: 'FORTE', emoji: '🔥' };
+    if (touches >= 3) return { text: 'MEDIANO', emoji: '⚡' };
+    return { text: 'FRACO', emoji: '⚠️' };
+}
+
+// =====================================================================
+// === FORMATAR MENSAGEM COM INFORMAÇÕES DO ESTUDO ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
     const symbolName = data.symbol.replace('USDT', '');
-    // Link do TradingView para BingX Spot
-    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINGX:${data.symbol}`;
+    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
     const fundingPct = data.fundingValue ? (data.fundingValue * 100).toFixed(4) : '0.0000';
     const fundingSign = data.fundingValue && data.fundingValue > 0 ? '+' : '';
-    const rsiEmoji = data.rsi < 40 ? '🟢' : data.rsi > 60 ? '🔴' : '⚪';
+    const rsiEmoji = data.rsi < 40 ? '🟢' : data.rsi > 60 ? '🔴' : '';
     const lsr = data.lsrValue ? data.lsrValue.toFixed(2) : 'N/A';
     const volumeEmoji = data.volume1h.emoji;
-    const volumeDirectionText = data.volume1h.direction !== 'Neutro' ? `${volumeEmoji} ${data.volume1h.direction}` : '⚪ Neutro';
+    const volumeDirectionText = data.volume1h.direction !== 'Neutro' ? `${volumeEmoji} ${data.volume1h.direction}` : ' Neutro';
     const volume1hLine = `#Vol 1h: ${data.volume1h.ratioFormatted}x (${data.volume1h.percentage.toFixed(0)}%) ${volumeDirectionText}`;
     const volume3mLine = `#Vol 3m: ${data.volume3m.ratioFormatted}x (${data.volume3m.percentage.toFixed(0)}%) ${data.volume3m.text}`;
+    
+    let cvdLine = '';
+    const cvdTypeIcon = data.cvdIsReal ? '🔴' : '🟡';
+    
+    if (data.cvdConfirmed) {
+        const cvdEmoji = data.cvdSignal?.type === 'bullish' ? '💹' : '🔻';
+        cvdLine = `#CVD ${cvdTypeIcon}: ${cvdEmoji} ${data.cvdSignal?.type === 'bullish' ? '#BULL' : '#BEAR'} +${data.cvdScore} ${data.cvdIsReal ? '(REAL)' : '(SIM)'}`;
+    } else if (data.cvdSignal && !data.cvdConfirmed) {
+        cvdLine = `#CVD🐋 ${cvdTypeIcon}: ⚠️ ${data.cvdSignal.type === 'bullish' ? '#BULL' : '#BEAR'} (não alinhado)`;
+    } else {
+        cvdLine = `#CVD🐋 ${cvdTypeIcon}: ❌ Indefinido`;
+    }
     
     let divergencesText = '';
     if (data.divergencesList && data.divergencesList.length > 0) {
@@ -1975,24 +2572,75 @@ function formatAlert(data) {
     }
     
     const targets = `🎯 TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}`;
-    const stop = `🛑 SL: ${formatPrice(data.stopLoss)} (${((Math.abs(data.stopLoss - data.price) / data.price) * 100).toFixed(1)}%)`;
+    const stop = `⛔ Stop: ${formatPrice(data.stopLoss)} (${((Math.abs(data.stopLoss - data.price) / data.price) * 100).toFixed(1)}%)`;
+    
+    function getTimeframeIcon(tf) {
+        const icons = {
+            '1w': '',
+            '3d': '',
+            '1d': '',
+            '4h': '',
+            '2h': '',
+            '1h': '',
+            '30m': '',
+            '15m': '',
+            'MULTI': ''
+        };
+        return icons[tf] || '';
+    }
     
     let supportLine = '';
+    let supportScoreBonus = 0;
     if (data.supports && data.supports.length > 0) {
-        const supportStrings = data.supports.map(s => `${formatPrice(s.avgPrice)} (${s.touches}x)`).join(' | ');
-        supportLine = `Suporte: ${supportStrings}`;
+        const supportStrings = data.supports.map(s => {
+            const strength = getPivotStrength(s.touches);
+            let scoreBonus = 0;
+            const tfMultiplier = data.usedTimeframe === '1w' ? 1.5 : 
+                                 data.usedTimeframe === '1d' ? 1.2 : 
+                                 data.usedTimeframe === '4h' ? 0.8 : 0.5;
+            
+            if (s.touches >= 5) scoreBonus = 0.5 * tfMultiplier;
+            else if (s.touches >= 3) scoreBonus = 0.3 * tfMultiplier;
+            else scoreBonus = 0.1 * tfMultiplier;
+            
+            supportScoreBonus += scoreBonus;
+            const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
+            return `${formatPrice(s.avgPrice)} (${s.touches}x) ${strength.emoji} ${strength.text} ${timeframeIcon}`;
+        }).join(' | ');
+        const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
+        supportLine = `📉 Suporte ${timeframeIcon}: ${supportStrings}`;
     }
+    
     let resistanceLine = '';
+    let resistanceScoreBonus = 0;
     if (data.resistances && data.resistances.length > 0) {
-        const resistanceStrings = data.resistances.map(r => `${formatPrice(r.avgPrice)} (${r.touches}x)`).join(' | ');
-        resistanceLine = `Resistência: ${resistanceStrings}`;
+        const resistanceStrings = data.resistances.map(r => {
+            const strength = getPivotStrength(r.touches);
+            let scoreBonus = 0;
+            const tfMultiplier = data.usedTimeframe === '1w' ? 1.5 : 
+                                 data.usedTimeframe === '1d' ? 1.2 : 
+                                 data.usedTimeframe === '4h' ? 0.8 : 0.5;
+            
+            if (r.touches >= 5) scoreBonus = 0.5 * tfMultiplier;
+            else if (r.touches >= 3) scoreBonus = 0.3 * tfMultiplier;
+            else scoreBonus = 0.1 * tfMultiplier;
+            
+            resistanceScoreBonus += scoreBonus;
+            const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
+            return `${formatPrice(r.avgPrice)} (${r.touches}x) ${strength.emoji} ${strength.text} ${timeframeIcon}`;
+        }).join(' | ');
+        const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
+        resistanceLine = `📈 Resistência ${timeframeIcon}: ${resistanceStrings}`;
     }
+    
+    const totalPivotBonus = supportScoreBonus + resistanceScoreBonus;
+    const finalScore = data.confirmationScore + totalPivotBonus;
     
     const cci4hText = data.cci4h && data.cci4h.text ? data.cci4h.text : 'CCI 4H N/A';
     const cciDailyText = data.cciDaily && data.cciDaily.text ? data.cciDaily.text : 'CCI 1D N/A';
     
     const formattedDateTime = `${time.date} ${time.time}hs`;
-    const scoreEmoji = getScoreEmoji(data.confirmationScore);
+    const scoreEmoji = getScoreEmoji(finalScore);
     
     let penaltiesLine = '';
     if (data.totalPenalty < 0 && data.penaltyMessages && data.penaltyMessages.length > 0) {
@@ -2006,13 +2654,29 @@ function formatAlert(data) {
         penaltiesLine = ` ⚠️ Penal: ${data.totalPenalty}`;
     }
     
+    // Adiciona informações do estudo se disponível
+    let studyInfo = '';
+    if (data.studyInfo) {
+        const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
+        const confirmTime = new Date(data.studyInfo.confirmedAt).toLocaleTimeString();
+        const waitMinutes = Math.round((data.studyInfo.confirmedAt - data.studyInfo.studiedAt) / 60000);
+        studyInfo = `\n📚 ESTUDO: Registrado às ${studyTime} | Confirmado após ${waitMinutes}min | EMA13:${data.studyInfo.ema13?.toFixed(2)} | EMA34:${data.studyInfo.ema34?.toFixed(2)} | EMA55:${data.studyInfo.ema55?.toFixed(2)}`;
+    }
+    
+    const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
+    const timeframeText = data.usedTimeframe === '1w' ? ' Semanal' : 
+                          data.usedTimeframe === '1d' ? ' Diário' : 
+                          data.usedTimeframe === '4h' ? ' 4 Horas' : 
+                          data.usedTimeframe === '1h' ? ' 1 Hora' : ' 15 Minutos';
+    
     return `<i>${data.direction} - ${symbolName} | 💲 ${formatPrice(data.price)}
-${scoreEmoji} #SCORE: ${data.confirmationScore.toFixed(1)} | Data: ${formattedDateTime}
+${scoreEmoji} #SCORE: ${finalScore.toFixed(1)} (Pivôs +${totalPivotBonus.toFixed(1)}) | Data: ${formattedDateTime}
 🔍 ${divergencesText}
+${cvdLine}
 ${targets}
 ${stop}
 ▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
-#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TV BingX</a>
+#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TV</a>
 ${volume3mLine}
 ${volume1hLine}
 #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -2020,11 +2684,13 @@ Stoch 1D: ${data.stoch1d}
 Stoch 4H: ${data.stoch4h}
 CCI 4H:${cci4hText}
 CCI 1D:${cciDailyText}
+📌 Pivôs (${timeframeText}):
 ${supportLine ? supportLine : ''}
 ${resistanceLine ? resistanceLine : ''}
 ${penaltiesLine}
+${studyInfo}
  🤖...Alerta Educativo, não é recomendação de investimento.
-Titanium Prime by @J4Rviz</i>`;
+Titanium Prime X by @J4Rviz</i>`;
 }
 
 // =====================================================================
@@ -2032,30 +2698,39 @@ Titanium Prime by @J4Rviz</i>`;
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME - ATIVADO (BingX Spot - TradFi)');
-    console.log('📊 Monitorando: Ações + Commodities + Índices + Forex');
+    console.log('🚀 TITANIUM PRIME X - COM MEMÓRIA DE ESTUDO');
+    console.log('='.repeat(70));
+    console.log('📚 Sistema de Memória: Registra toques nas Bollinger + divergências');
+    console.log('✅ Confirmação: EMA13/34 (cruzamento) + fechamento acima/abaixo EMA55 (3m)');
     console.log('='.repeat(70));
     
-    currentTopSymbols = await getTopSymbolsBingx();
-    log(`Monitorando ${currentTopSymbols.length} símbolos na BingX Spot`, 'success');
+    currentTopSymbols = await getTopSymbols();
+    log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
     
-    // Log da lista de símbolos sendo monitorados
-    log(`📈 Símbolos configurados:`, 'info');
-    log(`   📊 Ações (TradFi): ${BINGX_SYMBOLS.STOCKS.length}`, 'info');
-    log(`   🛢️ Commodities: ${BINGX_SYMBOLS.COMMODITIES.length}`, 'info');
-    log(`   📈 Índices: ${BINGX_SYMBOLS.INDICES.length}`, 'info');
-    log(`   💱 Forex: ${BINGX_SYMBOLS.FOREX.length}`, 'info');
+    // Inicializa CVD Real
+    if (CONFIG.CVD.WEBSOCKET.ENABLED) {
+        log('Inicializando CVD Real via WebSocket...', 'info');
+        await realCVD.initialize(currentTopSymbols);
+        
+        setTimeout(() => {
+            const stats = realCVD.getStats();
+            log(`CVD Real: ${stats.connected} conexões ativas, ${stats.withData} com dados`, 'success');
+        }, 10000);
+    }
+    
+    log(`CVD (Cumulative Volume Delta) - TIMEFRAME: ${CONFIG.CVD.TIMEFRAME}`, 'success');
+    log(`📚 Memória de estudo: ATIVADA | Expira em ${CONFIG.ALERTS.MEMORY.EXPIRY_HOURS}h`, 'success');
+    log(`✅ Confirmação EMA: ${CONFIG.ALERTS.MEMORY.EMA_FAST}/${CONFIG.ALERTS.MEMORY.EMA_SLOW} cruzamento | Fechamento EMA${CONFIG.ALERTS.MEMORY.EMA_TREND} (${CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME})`, 'success');
     
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
-        const initMessage = `🚀 Titanium Prime Ativado (BingX Spot)\n` +
-            `📊 Monitorando (TradFi):\n` +
-            `   📊 Ações: ${BINGX_SYMBOLS.STOCKS.length}\n` +
-            `   🛢️ Commodities: ${BINGX_SYMBOLS.COMMODITIES.length}\n` +
-            `   📈 Índices: ${BINGX_SYMBOLS.INDICES.length}\n` +
-            `   💱 Forex: ${BINGX_SYMBOLS.FOREX.length}\n` +
-            `Total: ${currentTopSymbols.length} símbolos\n` +
+        const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? 'CVD REAL via WebSocket' : 'CVD Simulado';
+        const initMessage = `🚀 Titanium Prime X v4.0 Ativado (COM MEMÓRIA DE ESTUDO)\n` +
+            `Monitorando: ${currentTopSymbols.length} símbolos\n` +
+            `${cvdStatus}\n` +
+            `📚 Estudo: Toque na Bollinger + Divergência → Aguarda confirmação EMA13/34/55 (3m)\n` +
+            `✅ Alerta só após reversão confirmada\n` +
             `${getBrazilianDateTime().full}`;
         const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
@@ -2075,6 +2750,10 @@ async function startScanner() {
             saveDailyCounters();
             log('Contadores diários resetados', 'info');
         }
+        // Limpeza de memória expirada a cada hora
+        studyMemory.cleanupExpired();
+        const stats = studyMemory.getStats();
+        log(`📚 Memória: ${stats.total} estudos ativos (COMPRA: ${stats.byDirection.COMPRA}, VENDA: ${stats.byDirection.VENDA})`, 'info');
     }, 60000);
     
     setInterval(() => processPriorityQueue(), 30000);
@@ -2095,7 +2774,16 @@ async function startScanner() {
                 }
             }
             
-            log(`Scan #${scanCount} concluído. Alertas no scan: ${alertsSentThisScan}`, 'success');
+            log(`Scan #${scanCount} concluído. Alertas enviados: ${alertsSentThisScan}`, 'success');
+            
+            const memoryStats = studyMemory.getStats();
+            log(`📚 Status da memória: ${memoryStats.total} estudos ativos (COMPRA: ${memoryStats.byDirection.COMPRA}, VENDA: ${memoryStats.byDirection.VENDA})`, 'info');
+            
+            if (scanCount % 10 === 0 && CONFIG.CVD.WEBSOCKET.ENABLED) {
+                const stats = realCVD.getStats();
+                log(`📊 CVD Real Stats: ${stats.connected} conexões, ${stats.withData} com dados`, 'info');
+            }
+            
             log(`Aguardando 30s para próximo scan...`, 'info');
             await new Promise(r => setTimeout(r, 30000));
         } catch (error) {
@@ -2104,6 +2792,17 @@ async function startScanner() {
         }
     }
 }
+
+// Tratamento de desligamento gracioso
+process.on('SIGINT', () => {
+    log('Desligando...', 'warning');
+    const stats = studyMemory.getStats();
+    log(`Memória final: ${stats.total} estudos salvos`, 'info');
+    if (CONFIG.CVD.WEBSOCKET.ENABLED) {
+        realCVD.shutdown();
+    }
+    process.exit(0);
+});
 
 loadDailyCounters();
 startScanner().catch(console.error);
