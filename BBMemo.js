@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswIL
-        CHAT_ID: '-100199
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 10,
@@ -20,7 +20,7 @@ const CONFIG = {
         COOLDOWN_AFTER_BATCH_MS: 2000,
         MAX_REQUESTS_PER_MINUTE: 1200,
         CACHE_DURATION_SECONDS: 30,
-        TOP_SYMBOLS_LIMIT: 350
+        TOP_SYMBOLS_LIMIT: 400
     },
     ALERTS: {
         COOLDOWN_MINUTES: 15,
@@ -51,7 +51,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
@@ -76,12 +76,12 @@ const CONFIG = {
         MAX_GROUP_SIZE: 3,
         SIMILAR_PRICE_DIFF: 1.0,
         MIN_SCORE_TO_ALERT: 3,
-        MAX_ALERTS_PER_SCAN: 30,
+        MAX_ALERTS_PER_SCAN: 40,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
         TELEGRAM_DELAY_MS: 5000,
         MIN_15M_VOLATILITY: {
             ENABLED: true,
-            MIN_ATR_PERCENT: 0.5,
+            MIN_ATR_PERCENT: 0.4,
             MIN_BB_WIDTH_PERCENT: 1.2,
             CHECK_TIMEFRAMES: ['1h', '4h', '1d', '3d', '1w']
         },
@@ -2556,7 +2556,7 @@ function formatAlert(data) {
     
     if (data.cvdConfirmed) {
         const cvdEmoji = data.cvdSignal?.type === 'bullish' ? '💹' : '🔻';
-        cvdLine = `#CVD ${cvdTypeIcon}: ${cvdEmoji} ${data.cvdSignal?.type === 'bullish' ? '#BULL' : '#BEAR'} +${data.cvdScore} ${data.cvdIsReal ? '(REAL)' : '(SIM)'}`;
+        cvdLine = `#CVD ${cvdTypeIcon}: ${cvdEmoji} ${data.cvdSignal?.type === 'bullish' ? '#BULL' : '#BEAR'} +${data.cvdScore} ${data.cvdIsReal ? '' : ''}`;
     } else if (data.cvdSignal && !data.cvdConfirmed) {
         cvdLine = `#CVD🐋 ${cvdTypeIcon}: ⚠️ ${data.cvdSignal.type === 'bullish' ? '#BULL' : '#BEAR'} (não alinhado)`;
     } else {
@@ -2660,7 +2660,7 @@ function formatAlert(data) {
         const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
         const confirmTime = new Date(data.studyInfo.confirmedAt).toLocaleTimeString();
         const waitMinutes = Math.round((data.studyInfo.confirmedAt - data.studyInfo.studiedAt) / 60000);
-        studyInfo = `\n📚 ESTUDO: Registrado às ${studyTime} | Confirmado após ${waitMinutes}min | EMA13:${data.studyInfo.ema13?.toFixed(2)} | EMA34:${data.studyInfo.ema34?.toFixed(2)} | EMA55:${data.studyInfo.ema55?.toFixed(2)}`;
+        studyInfo = `\nOperação encontrada às ${studyTime} | Confirmado após ${waitMinutes}min }`;
     }
     
     const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
@@ -2698,7 +2698,7 @@ Titanium Prime X by @J4Rviz</i>`;
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - COM MEMÓRIA DE ESTUDO');
+    console.log('🚀 TITANIUM PRIME X');
     console.log('='.repeat(70));
     console.log('📚 Sistema de Memória: Registra toques nas Bollinger + divergências');
     console.log('✅ Confirmação: EMA13/34 (cruzamento) + fechamento acima/abaixo EMA55 (3m)');
