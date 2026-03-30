@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const WebSocket = require('ws');
 require('dotenv').config();
 
 // =====================================================================
@@ -437,16 +438,246 @@ class AdaptiveRateLimiter {
 }
 
 // =====================================================================
+// === CVD REAL COM WEBSOCKET ===
+// =====================================================================
+class RealCVDManager {
+    constructor() {
+        this.cvdData = new Map();
+        this.subscribedSymbols = new Set();
+        this.updateCallbacks = [];
+        this.reconnectAttempts = new Map();
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 5000;
+    }
+    
+    subscribeToSymbol(symbol, callback = null) {
+        if (this.subscribedSymbols.has(symbol)) {
+            console.log(`ℹ️ ${symbol} já está inscrito no CVD Real`);
+            return;
+        }
+        
+        if (callback) {
+            this.updateCallbacks.push({ symbol, callback });
+        }
+        
+        this.subscribedSymbols.add(symbol);
+        
+        this.cvdData.set(symbol, {
+            value: 0,
+            history: [],
+            lastUpdate: Date.now(),
+            buyVolume: 0,
+            sellVolume: 0,
+            totalTrades: 0,
+            lastPrice: null
+        });
+        
+        this.connectWebSocket(symbol);
+        console.log(`🔌 Conectando CVD Real para ${symbol}`);
+    }
+    
+    connectWebSocket(symbol) {
+        const symbolLower = symbol.toLowerCase();
+        const wsUrl = `wss://fstream.binance.com/ws/${symbolLower}@aggTrade`;
+        
+        console.log(`🌐 Conectando WebSocket: ${symbolLower}@aggTrade`);
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.on('open', () => {
+            console.log(`✅ WebSocket CVD conectado para ${symbol}`);
+            this.reconnectAttempts.set(symbol, 0);
+            
+            const data = this.cvdData.get(symbol);
+            if (data) {
+                data.ws = ws;
+                data.connected = true;
+            }
+        });
+        
+        ws.on('message', (data) => {
+            try {
+                const trade = JSON.parse(data);
+                this.processTrade(symbol, trade);
+            } catch (error) {
+                console.log(`Erro ao processar trade ${symbol}: ${error.message}`);
+            }
+        });
+        
+        ws.on('error', (error) => {
+            console.log(`❌ Erro WebSocket ${symbol}: ${error.message}`);
+            this.handleDisconnect(symbol);
+        });
+        
+        ws.on('close', () => {
+            console.log(`🔌 WebSocket desconectado para ${symbol}`);
+            this.handleDisconnect(symbol);
+        });
+        
+        const data = this.cvdData.get(symbol);
+        if (data) {
+            data.ws = ws;
+        }
+    }
+    
+    processTrade(symbol, trade) {
+        const volume = parseFloat(trade.q);
+        const price = parseFloat(trade.p);
+        const isBuyerMaker = trade.m;
+        
+        let delta;
+        if (isBuyerMaker) {
+            delta = -volume;
+        } else {
+            delta = +volume;
+        }
+        
+        const data = this.cvdData.get(symbol);
+        if (!data) return;
+        
+        data.value += delta;
+        data.lastUpdate = Date.now();
+        data.lastPrice = price;
+        
+        if (delta > 0) {
+            data.buyVolume += volume;
+        } else {
+            data.sellVolume += volume;
+        }
+        data.totalTrades++;
+        
+        data.history.push({
+            timestamp: Date.now(),
+            delta: delta,
+            volume: volume,
+            price: price,
+            cvd: data.value,
+            isBuy: !isBuyerMaker
+        });
+        
+        if (data.history.length > 1000) {
+            data.history.shift();
+        }
+        
+        for (const cb of this.updateCallbacks) {
+            if (cb.symbol === symbol && cb.callback) {
+                cb.callback({
+                    symbol,
+                    cvd: data.value,
+                    lastPrice: price,
+                    buyVolume: data.buyVolume,
+                    sellVolume: data.sellVolume,
+                    totalTrades: data.totalTrades,
+                    lastDelta: delta
+                });
+            }
+        }
+    }
+    
+    handleDisconnect(symbol) {
+        const attempts = this.reconnectAttempts.get(symbol) || 0;
+        
+        if (attempts < this.maxReconnectAttempts) {
+            const delay = this.reconnectDelay * Math.pow(2, attempts);
+            console.log(`🔄 Tentando reconectar ${symbol} em ${delay/1000}s (tentativa ${attempts + 1}/${this.maxReconnectAttempts})`);
+            
+            setTimeout(() => {
+                this.reconnectAttempts.set(symbol, attempts + 1);
+                this.connectWebSocket(symbol);
+            }, delay);
+        } else {
+            console.log(`❌ Falha ao reconectar ${symbol} após ${this.maxReconnectAttempts} tentativas`);
+            
+            const data = this.cvdData.get(symbol);
+            if (data && data.ws) {
+                try {
+                    data.ws.terminate();
+                } catch(e) {}
+            }
+        }
+    }
+    
+    unsubscribeFromSymbol(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (data && data.ws) {
+            try {
+                data.ws.close();
+                data.ws.terminate();
+            } catch(e) {}
+        }
+        
+        this.subscribedSymbols.delete(symbol);
+        this.cvdData.delete(symbol);
+        
+        this.updateCallbacks = this.updateCallbacks.filter(cb => cb.symbol !== symbol);
+        
+        console.log(`🔌 Desinscrito CVD Real para ${symbol}`);
+    }
+    
+    getCVD(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return null;
+        
+        return {
+            symbol,
+            cvd: data.value,
+            lastUpdate: data.lastUpdate,
+            lastPrice: data.lastPrice,
+            buyVolume: data.buyVolume,
+            sellVolume: data.sellVolume,
+            totalTrades: data.totalTrades,
+            buySellRatio: data.sellVolume > 0 ? data.buyVolume / data.sellVolume : 1
+        };
+    }
+    
+    getCVDHistory(symbol, limit = 100) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return [];
+        
+        return data.history.slice(-limit);
+    }
+    
+    calculateCVDChange(symbol, seconds = 60) {
+        const data = this.cvdData.get(symbol);
+        if (!data || data.history.length === 0) return 0;
+        
+        const now = Date.now();
+        const cutoff = now - (seconds * 1000);
+        
+        const oldCVD = data.history.find(h => h.timestamp <= cutoff);
+        if (!oldCVD) return 0;
+        
+        const change = data.value - oldCVD.cvd;
+        const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
+        
+        return {
+            change,
+            changePercent,
+            currentCVD: data.value,
+            oldCVD: oldCVD.cvd,
+            period: seconds
+        };
+    }
+    
+    cleanup() {
+        for (const symbol of this.subscribedSymbols) {
+            this.unsubscribeFromSymbol(symbol);
+        }
+        console.log('🧹 CVD Manager limpo');
+    }
+}
+
+// =====================================================================
 // === CONFIGURAÇÃO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-1002554
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
-        TOP_SIZE: 5,
+        TOP_SIZE: 8,
         MIN_VOLUME_USDT: 500000,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
@@ -455,7 +686,9 @@ const CONFIG = {
             TIMEFRAME_15M: '15m',
             CHECK_INTERVAL_SECONDS: 60,
             LOOKBACK_CANDLES: 20,
-            MIN_CVD_CHANGE_PERCENT: 5
+            MIN_CVD_CHANGE_PERCENT: 5,
+            CVD_HISTORY_SECONDS: 300,
+            CVD_CHANGE_WINDOW: 60
         },
         RSI: {
             PERIOD: 14,
@@ -486,7 +719,6 @@ const CONFIG = {
 const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
 const ALERT_HISTORY_FILE = path.join(__dirname, 'fundingAlerts.json');
 
-// Inicializar sistema de limpeza
 const storageCleaner = new StorageCleaner({
     maxFileSizeMB: CONFIG.MONITOR.STORAGE.MAX_FILE_SIZE_MB,
     maxTotalSizeMB: CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB,
@@ -494,7 +726,6 @@ const storageCleaner = new StorageCleaner({
     checkIntervalMs: CONFIG.MONITOR.STORAGE.CLEANUP_INTERVAL_HOURS * 3600000
 });
 
-// Inicializar rate limiter
 const rateLimiter = new AdaptiveRateLimiter({
     baseDelayMs: 200,
     maxDelayMs: 15000,
@@ -505,9 +736,8 @@ const rateLimiter = new AdaptiveRateLimiter({
     recoveryMultiplier: 0.85
 });
 
-// =====================================================================
-// === FUNÇÃO DE FETCH COM RATE LIMITING ===
-// =====================================================================
+const cvdManager = new RealCVDManager();
+
 async function rateLimitedFetch(url, options = {}) {
     return rateLimiter.executeWithRateLimit(
         () => fetch(url, options),
@@ -1140,73 +1370,68 @@ async function analyzeRSIDivergences(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR CVD ===
+// === ANALISAR CVD REAL COM WEBSOCKET ===
 // =====================================================================
-async function analyzeCVD(symbol, timeframe, isPositive) {
+async function analyzeRealCVD(symbol, isPositive) {
     try {
-        const candles = await getCandles(symbol, timeframe, CONFIG.MONITOR.CVD.LOOKBACK_CANDLES + 10);
+        const cvdData = cvdManager.getCVD(symbol);
         
-        if (!candles || candles.length < 15) {
-            return { direction: null, changePercent: 0, cvdValue: 0, volumeChange: 0 };
+        if (!cvdData) {
+            log(`CVD Real não disponível para ${symbol}`, 'warning');
+            return { direction: null, changePercent: 0, cvdValue: 0, buySellRatio: 0 };
         }
         
-        let cumulativeDelta = 0;
-        const deltas = [];
+        const cvdChange = cvdManager.calculateCVDChange(symbol, CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW);
         
-        for (let i = 0; i < candles.length; i++) {
-            const candle = candles[i];
-            const isBullish = candle.close > candle.open;
-            const delta = isBullish ? candle.volume : -candle.volume;
-            cumulativeDelta += delta;
-            deltas.push({
-                time: candle.time,
-                delta: delta,
-                cumulative: cumulativeDelta,
-                price: candle.close,
-                volume: candle.volume
-            });
+        const history = cvdManager.getCVDHistory(symbol, 100);
+        let trend = 0;
+        let trendStrength = 0;
+        
+        if (history.length >= 10) {
+            const oldCVD = history[0].cvd;
+            const newCVD = history[history.length - 1].cvd;
+            trend = newCVD - oldCVD;
+            trendStrength = Math.abs(trend / (Math.abs(oldCVD) || 1)) * 100;
         }
-        
-        if (deltas.length < 10) {
-            return { direction: null, changePercent: 0, cvdValue: 0, volumeChange: 0 };
-        }
-        
-        const recentDeltas = deltas.slice(-CONFIG.MONITOR.CVD.LOOKBACK_CANDLES);
-        const cvdStart = recentDeltas[0].cumulative;
-        const cvdEnd = recentDeltas[recentDeltas.length - 1].cumulative;
-        const cvdTrend = cvdEnd - cvdStart;
-        const cvdChangePercent = Math.abs(cvdTrend / (Math.abs(cvdStart) || 1)) * 100;
-        
-        const volumes = recentDeltas.map(d => d.volume);
-        const avgVolumeFirst = volumes.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
-        const avgVolumeLast = volumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
-        const volumeChangePercent = avgVolumeFirst > 0 ? ((avgVolumeLast - avgVolumeFirst) / avgVolumeFirst) * 100 : 0;
         
         let direction = null;
+        let alertReason = '';
         
         if (isPositive) {
-            if (cvdTrend < 0 && cvdChangePercent > CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
+            if (cvdChange.change < 0 && cvdChange.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
                 direction = 'SELL';
+                alertReason = `CVD caindo ${cvdChange.changePercent.toFixed(1)}%`;
+            } else if (trend < 0 && trendStrength >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
+                direction = 'SELL';
+                alertReason = `Tendência CVD negativa ${trendStrength.toFixed(1)}%`;
             }
-        } 
-        else {
-            if (cvdTrend > 0 && cvdChangePercent > CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
+        } else {
+            if (cvdChange.change > 0 && cvdChange.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
                 direction = 'BUY';
+                alertReason = `CVD subindo ${cvdChange.changePercent.toFixed(1)}%`;
+            } else if (trend > 0 && trendStrength >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
+                direction = 'BUY';
+                alertReason = `Tendência CVD positiva ${trendStrength.toFixed(1)}%`;
             }
         }
         
         return {
             direction,
-            changePercent: cvdChangePercent,
-            cvdValue: cvdEnd,
-            volumeChange: volumeChangePercent,
-            trend: cvdTrend,
-            timeframe
+            changePercent: cvdChange.changePercent,
+            cvdValue: cvdData.cvd,
+            buySellRatio: cvdData.buySellRatio,
+            buyVolume: cvdData.buyVolume,
+            sellVolume: cvdData.sellVolume,
+            totalTrades: cvdData.totalTrades,
+            lastPrice: cvdData.lastPrice,
+            alertReason,
+            trend,
+            trendStrength
         };
         
     } catch (error) {
-        log(`Erro ao analisar CVD para ${symbol}: ${error.message}`, 'error');
-        return { direction: null, changePercent: 0, cvdValue: 0, volumeChange: 0 };
+        log(`Erro ao analisar CVD Real para ${symbol}: ${error.message}`, 'error');
+        return { direction: null, changePercent: 0, cvdValue: 0, buySellRatio: 0 };
     }
 }
 
@@ -1348,7 +1573,7 @@ async function updateWatchedSymbols() {
 }
 
 // =====================================================================
-// === MONITORAR CVD + BOLLINGER + VALIDAÇÃO DE RSI ===
+// === MONITORAR CVD REAL + BOLLINGER + VALIDAÇÃO DE RSI ===
 // =====================================================================
 async function monitorCVDAndRSI() {
     const watched = fundingMemory.getWatchedSymbols();
@@ -1356,6 +1581,10 @@ async function monitorCVDAndRSI() {
     
     const allSymbols = [...watched.positive, ...watched.negative];
     const rsiResults = new Map();
+    
+    for (const item of allSymbols) {
+        cvdManager.subscribeToSymbol(item.fullSymbol, (cvdUpdate) => {});
+    }
     
     for (const item of allSymbols) {
         log(`Analisando RSI para ${item.fullSymbol}...`, 'info');
@@ -1376,45 +1605,32 @@ async function monitorCVDAndRSI() {
     }
     
     for (const item of watched.positive) {
-        const cvd1h = await analyzeCVD(item.fullSymbol, CONFIG.MONITOR.CVD.TIMEFRAME_1H, true);
-        const cvd15m = await analyzeCVD(item.fullSymbol, CONFIG.MONITOR.CVD.TIMEFRAME_15M, true);
+        const cvdReal = await analyzeRealCVD(item.fullSymbol, true);
         
-        let cvdAlertTriggered = false;
-        let timeframeUsed = '';
-        let cvdData = null;
-        
-        if (cvd1h.direction === 'SELL' && cvd1h.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
-            cvdAlertTriggered = true;
-            timeframeUsed = CONFIG.MONITOR.CVD.TIMEFRAME_1H;
-            cvdData = cvd1h;
-        } else if (cvd15m.direction === 'SELL' && cvd15m.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
-            cvdAlertTriggered = true;
-            timeframeUsed = CONFIG.MONITOR.CVD.TIMEFRAME_15M;
-            cvdData = cvd15m;
-        }
-        
-        if (cvdAlertTriggered) {
+        if (cvdReal.direction === 'SELL') {
             const bollingerTouched = await checkBollingerTouch(item.fullSymbol, 'sell');
             const rsiAnalysis = rsiResults.get(item.fullSymbol);
             const hasEnoughBearishDivergences = rsiAnalysis && rsiAnalysis.totalBearishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
-            if (bollingerTouched && hasEnoughBearishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'positive', cvdData.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'sell')) {
+            if (bollingerTouched && hasEnoughBearishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'positive', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'sell')) {
                 alerts.push({
                     ...item,
                     type: 'positive',
                     action: 'VENDA',
-                    cvd: cvdData,
-                    timeframe: timeframeUsed,
-                    volumeChange: cvdData.volumeChange,
-                    cvdChangePercent: cvdData.changePercent,
+                    cvd: cvdReal,
+                    timeframe: 'REAL_TIME',
+                    volumeChange: cvdReal.changePercent,
+                    cvdChangePercent: cvdReal.changePercent,
                     bollingerTouch: 'superior',
+                    buySellRatio: cvdReal.buySellRatio,
                     rsiDivergences: {
                         count: rsiAnalysis.totalBearishDivergences,
                         timeframes: rsiAnalysis.bearishTimeframes,
                         details: rsiAnalysis.details
                     }
                 });
-                log(`✅ ALERTA VENDA: ${item.symbol} - CVD confirmado + TOQUE BANDA SUPERIOR + ${rsiAnalysis.totalBearishDivergences} divergências de RSI`, 'success');
+                log(`✅ Analisar Correção: ${item.symbol} -  + ${rsiAnalysis.totalBearishDivergences} divergências de RSI`, 'success');
+                log(`   📊 CVD: ${cvdReal.alertReason} | Buy/Sell Ratio: ${cvdReal.buySellRatio.toFixed(2)}`, 'info');
             } else if (!bollingerTouched) {
                 log(`⏳ Aguardando toque na banda SUPERIOR para ${item.symbol} (VENDA)`, 'warning');
             } else if (!hasEnoughBearishDivergences && rsiAnalysis) {
@@ -1424,45 +1640,32 @@ async function monitorCVDAndRSI() {
     }
     
     for (const item of watched.negative) {
-        const cvd1h = await analyzeCVD(item.fullSymbol, CONFIG.MONITOR.CVD.TIMEFRAME_1H, false);
-        const cvd15m = await analyzeCVD(item.fullSymbol, CONFIG.MONITOR.CVD.TIMEFRAME_15M, false);
+        const cvdReal = await analyzeRealCVD(item.fullSymbol, false);
         
-        let cvdAlertTriggered = false;
-        let timeframeUsed = '';
-        let cvdData = null;
-        
-        if (cvd1h.direction === 'BUY' && cvd1h.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
-            cvdAlertTriggered = true;
-            timeframeUsed = CONFIG.MONITOR.CVD.TIMEFRAME_1H;
-            cvdData = cvd1h;
-        } else if (cvd15m.direction === 'BUY' && cvd15m.changePercent >= CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT) {
-            cvdAlertTriggered = true;
-            timeframeUsed = CONFIG.MONITOR.CVD.TIMEFRAME_15M;
-            cvdData = cvd15m;
-        }
-        
-        if (cvdAlertTriggered) {
+        if (cvdReal.direction === 'BUY') {
             const bollingerTouched = await checkBollingerTouch(item.fullSymbol, 'buy');
             const rsiAnalysis = rsiResults.get(item.fullSymbol);
             const hasEnoughBullishDivergences = rsiAnalysis && rsiAnalysis.totalBullishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
-            if (bollingerTouched && hasEnoughBullishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'negative', cvdData.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'buy')) {
+            if (bollingerTouched && hasEnoughBullishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'negative', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'buy')) {
                 alerts.push({
                     ...item,
                     type: 'negative',
                     action: 'COMPRA',
-                    cvd: cvdData,
-                    timeframe: timeframeUsed,
-                    volumeChange: cvdData.volumeChange,
-                    cvdChangePercent: cvdData.changePercent,
+                    cvd: cvdReal,
+                    timeframe: 'REAL_TIME',
+                    volumeChange: cvdReal.changePercent,
+                    cvdChangePercent: cvdReal.changePercent,
                     bollingerTouch: 'inferior',
+                    buySellRatio: cvdReal.buySellRatio,
                     rsiDivergences: {
                         count: rsiAnalysis.totalBullishDivergences,
                         timeframes: rsiAnalysis.bullishTimeframes,
                         details: rsiAnalysis.details
                     }
                 });
-                log(`✅ ALERTA COMPRA: ${item.symbol} - CVD confirmado + TOQUE BANDA INFERIOR + ${rsiAnalysis.totalBullishDivergences} divergências de RSI`, 'success');
+                log(`✅ Analisar COMPRA: ${item.symbol} -  + ${rsiAnalysis.totalBullishDivergences} divergências de RSI`, 'success');
+                log(`   📊 CVD: ${cvdReal.alertReason} | Buy/Sell Ratio: ${cvdReal.buySellRatio.toFixed(2)}`, 'info');
             } else if (!bollingerTouched) {
                 log(`⏳ Aguardando toque na banda INFERIOR para ${item.symbol} (COMPRA)`, 'warning');
             } else if (!hasEnoughBullishDivergences && rsiAnalysis) {
@@ -1481,20 +1684,19 @@ function formatCompleteAlert(alert) {
     const dateTime = getBrazilianDateTime();
     const priceFormatted = formatPrice(alert.price);
     
-    const volumeIcon = alert.volumeChange > 0 ? '📈' : '📉';
-    const volumeText = alert.volumeChange > 0 ? `+${alert.volumeChange.toFixed(1)}%` : `${alert.volumeChange.toFixed(1)}%`;
-    
     const isBuy = alert.type === 'negative';
-    const emoji = isBuy ? '🟢' : '🔴';
+    const emoji = isBuy ? '🟢💹' : '🔴🔥';
     const acao = alert.action;
     const divergenciaTipo = isBuy ? 'ALTA (Bullish)' : 'BAIXA (Bearish)';
     const divergenciaCount = alert.rsiDivergences.count;
     const required = CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
+    const buySellRatio = alert.buySellRatio || 0;
+    const ratioText = buySellRatio > 1 ? `🚀 ${buySellRatio.toFixed(2)}x` : `📉 ${buySellRatio.toFixed(2)}x`;
     
     let message = `<i>${emoji} Analisar ${acao}</i>\n`;
     message += `<i>${alert.symbol} | ${priceFormatted} | ${dateTime.full}</i>\n\n`;
     
-    message += `<i>📊 FUNDING + LSR</i>\n`;
+    message += `<i> FUNDING + LSR</i>\n`;
     if (isBuy) {
         message += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}% (BAIXO)</i>\n`;
         message += `<i>LSR: ${alert.lsr.toFixed(2)} (BAIXO)</i>\n`;
@@ -1503,35 +1705,35 @@ function formatCompleteAlert(alert) {
         message += `<i>LSR: ${alert.lsr.toFixed(2)} (ALTO)</i>\n`;
     }
     
-    message += `\n<i>📈 CVD CONFIRMADO - ${alert.timeframe.toUpperCase()}</i>\n`;
+    message += `\n<i>📈 CVD</i>\n`;
+    message += `<i>${alert.cvd.alertReason}</i>\n`;
+    message += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
     if (isBuy) {
-        message += `<i>CVD em ALTA: ${alert.cvdChangePercent.toFixed(1)}%</i>\n`;
+        message += `<i>Volume de compras: ${(alert.cvd.buyVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     } else {
-        message += `<i>CVD em QUEDA: ${alert.cvdChangePercent.toFixed(1)}%</i>\n`;
+        message += `<i>Volume de vendas: ${(alert.cvd.sellVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     }
-    message += `<i>Volume ${volumeIcon}: ${volumeText}</i>\n`;
+    message += `<i>Total trades: ${alert.cvd.totalTrades}</i>\n`;
     
-    message += `\n<i>🎯 DIVERGÊNCIA DE RSI (${divergenciaTipo})</i>\n`;
+    message += `\n<i> DIVERGÊNCIA DE RSI (${divergenciaTipo})</i>\n`;
     message += `<i>Timeframes confirmados: ${alert.rsiDivergences.timeframes.join(', ')}</i>\n`;
     message += `\n<i>🤖 Titanium Prime X</i>\n`;
-    message += `<i>✅ ${divergenciaCount}/${required} divergências confirmadas</i>`;
+    message += `<i> ${divergenciaCount}/${required} divergências confirmadas</i>`;
+    message += `\n<i>⚡ CVD em Tempo Real</i>`;
     
     return message;
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM DE ATUALIZAÇÃO ===
+// === FORMATAR MENSAGEM DE ATUALIZAÇÃO - 8 ATIVOS SEM TÍTULO E RODAPÉ ===
 // =====================================================================
 function formatListMessage(positive, negative, total) {
-    const dateTime = getBrazilianDateTime();
-    
-    let message = `<i>🚀 Titanium Prime X</i>\n`;
-    message += `<i>📅 ${dateTime.full}</i>\n\n`;
-    message += `<i>🔴 FUNDING ALTO (+) + LSR ALTO </i>\n`;
+    let message = `<i>🔴 FUNDING ALTO (+) + LSR ALTO </i>\n`;
     message += `<i>Par          Preço        Funding%      LSR</i>\n`;
     message += `<i>------------------------------------------------</i>\n`;
     
-    for (const item of positive) {
+    const positiveToShow = positive.slice(0, 8);
+    for (const item of positiveToShow) {
         const fundingStr = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
         message += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${fundingStr.padEnd(12)} ${item.lsr.toFixed(2).padEnd(8)}</i>\n`;
     }
@@ -1540,12 +1742,11 @@ function formatListMessage(positive, negative, total) {
     message += `<i>Par          Preço        Funding%      LSR</i>\n`;
     message += `<i>------------------------------------------------</i>\n`;
     
-    for (const item of negative) {
+    const negativeToShow = negative.slice(0, 8);
+    for (const item of negativeToShow) {
         const fundingStr = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
         message += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${fundingStr.padEnd(12)} ${item.lsr.toFixed(2).padEnd(8)}</i>\n`;
     }
-    
-    message += `\n<i>📊 Total analisado: ${total} pares</i>`;
     
     return message;
 }
@@ -1593,13 +1794,14 @@ async function sendInitMessage() {
     
     let message = `<i>🚀 Titanium Prime X - Sistema Completo</i>\n\n`;
     message += `<i>✅ Módulos ativos:</i>\n`;
-    message += `<i>  • CVD (1h/15m)</i>\n`;
+    message += `<i>  • CVD REAL (WebSocket - Aggregated Trades)</i>\n`;
     message += `<i>  • RSI Divergence (${CONFIG.MONITOR.RSI.TIMEFRAMES.length} timeframes)</i>\n`;
     message += `<i>  • Bollinger Bands (${CONFIG.MONITOR.BOLLINGER.TIMEFRAME})</i>\n`;
     message += `<i>  • Rate Limiter Adaptativo</i>\n`;
     message += `<i>  • Storage Cleaner Automático</i>\n\n`;
     message += `<i>⚡ Rate Limiter: ${rateLimiterStats.currentDelay}ms delay</i>\n`;
-    message += `<i>🧹 Storage: max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB</i>\n\n`;
+    message += `<i>🧹 Storage: max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB</i>\n`;
+    message += `<i>📊 CVD: janela ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW}s</i>\n\n`;
     message += `<i>⏰ Sistema iniciado: ${dateTime.full}</i>`;
     
     await sendToTelegram(message);
@@ -1613,11 +1815,12 @@ async function startMonitor() {
     console.log('🚀 TITANIUM PRIME X - SISTEMA COMPLETO');
     console.log('='.repeat(70));
     console.log(`📊 Lista atualizada: a cada ${CONFIG.MONITOR.INTERVAL_MINUTES} minutos`);
-    console.log(`🔄 CVD verificado: a cada ${CONFIG.MONITOR.CVD.CHECK_INTERVAL_SECONDS} segundos`);
+    console.log(`🔄 CVD Real: WebSocket Aggregated Trades (tempo real)`);
     console.log(`📊 Bollinger (15m): Período ${CONFIG.MONITOR.BOLLINGER.PERIOD} | Desvio ${CONFIG.MONITOR.BOLLINGER.STD_DEVIATION}`);
     console.log(`⭐ RSI: Mínimo ${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências obrigatórias`);
     console.log(`⚡ Rate Limiter: Delay base ${rateLimiter.baseDelayMs}ms | Max ${rateLimiter.maxDelayMs}ms`);
     console.log(`🧹 Storage Cleaner: Max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB | Backup ${CONFIG.MONITOR.STORAGE.MAX_BACKUP_AGE_DAYS} dias`);
+    console.log(`📊 CVD Real: Janela ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW}s | Min mudança ${CONFIG.MONITOR.CVD.MIN_CVD_CHANGE_PERCENT}%`);
     console.log('='.repeat(70));
     
     await sendInitMessage();
@@ -1633,14 +1836,17 @@ async function startMonitor() {
         currentNegative = initial.negative;
         totalSymbols = initial.total;
         
+        for (const item of [...currentPositive, ...currentNegative]) {
+            cvdManager.subscribeToSymbol(item.fullSymbol);
+        }
+        
         const listMessage = formatListMessage(currentPositive, currentNegative, totalSymbols);
         await sendToTelegram(listMessage);
     }
     
-    // Monitoramento CVD + RSI + Bollinger
     setInterval(async () => {
         try {
-            log('🔍 Iniciando verificação de CVD + Bollinger + Divergências RSI...', 'info');
+            log('🔍 Iniciando verificação de CVD Real + Bollinger + Divergências RSI...', 'info');
             const alerts = await monitorCVDAndRSI();
             
             for (const alert of alerts) {
@@ -1663,7 +1869,6 @@ async function startMonitor() {
         }
     }, CONFIG.MONITOR.CVD.CHECK_INTERVAL_SECONDS * 1000);
     
-    // Atualização da lista
     setInterval(async () => {
         try {
             listUpdateCount++;
@@ -1672,9 +1877,20 @@ async function startMonitor() {
             const result = await updateWatchedSymbols();
             
             if (result) {
+                const oldSymbols = [...currentPositive.map(s => s.fullSymbol), ...currentNegative.map(s => s.fullSymbol)];
+                for (const symbol of oldSymbols) {
+                    if (![...result.positive.map(s => s.fullSymbol), ...result.negative.map(s => s.fullSymbol)].includes(symbol)) {
+                        cvdManager.unsubscribeFromSymbol(symbol);
+                    }
+                }
+                
                 currentPositive = result.positive;
                 currentNegative = result.negative;
                 totalSymbols = result.total;
+                
+                for (const item of [...currentPositive, ...currentNegative]) {
+                    cvdManager.subscribeToSymbol(item.fullSymbol);
+                }
                 
                 const listMessage = formatListMessage(currentPositive, currentNegative, totalSymbols);
                 await sendToTelegram(listMessage);
@@ -1687,15 +1903,16 @@ async function startMonitor() {
         }
     }, CONFIG.MONITOR.INTERVAL_MINUTES * 60 * 1000);
     
-    // Limpeza periódica de storage
     setInterval(() => {
         storageCleaner.performFullCleanup(MEMORY_FILE, ALERT_HISTORY_FILE);
     }, CONFIG.MONITOR.STORAGE.CLEANUP_INTERVAL_HOURS * 3600000);
     
-    // Relatório diário de estatísticas
     setInterval(() => {
         const stats = rateLimiter.getStats();
         log(`📊 RELATÓRIO DIÁRIO RATE LIMITER: Delay=${stats.currentDelay}ms, Requests=${stats.success + stats.error}, Erros=${stats.error}, RateLimits=${stats.rateLimit}`, 'info');
+        
+        const activeConnections = cvdManager.subscribedSymbols.size;
+        log(`📡 WebSockets ativos: ${activeConnections} conexões CVD Real`, 'info');
     }, 24 * 3600000);
 }
 
@@ -1703,6 +1920,10 @@ process.on('SIGINT', () => {
     log('\n🛑 Desligando monitor...', 'warning');
     log('📊 Estatísticas finais do Rate Limiter:', 'info');
     console.log(rateLimiter.getStats());
+    
+    log('🔌 Fechando conexões WebSocket CVD Real...', 'warning');
+    cvdManager.cleanup();
+    
     process.exit(0);
 });
 
