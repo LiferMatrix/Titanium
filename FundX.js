@@ -462,6 +462,46 @@ class RealCVDManager {
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 5000;
         this.lastCVDAlert = new Map();
+        
+        // Iniciar o reset diário às 21h
+        this.scheduleDailyReset();
+    }
+    
+    // Agenda o reset dos volumes para às 21h todos os dias
+    scheduleDailyReset() {
+        const now = new Date();
+        const target = new Date();
+        target.setHours(21, 0, 0, 0); // 21:00:00
+        
+        let msUntilTarget = target - now;
+        if (msUntilTarget < 0) {
+            // Se já passou das 21h hoje, agenda para amanhã
+            msUntilTarget += 24 * 60 * 60 * 1000;
+        }
+        
+        console.log(`⏰ Reset diário de volumes agendado para ${target.toLocaleString()}`);
+        
+        setTimeout(() => {
+            this.resetDailyVolumes();
+            // Após o primeiro reset, agenda para executar a cada 24h
+            setInterval(() => this.resetDailyVolumes(), 24 * 60 * 60 * 1000);
+        }, msUntilTarget);
+    }
+    
+    // Reseta os volumes acumulados de todos os símbolos
+    resetDailyVolumes() {
+        console.log('🔄 Resetando volumes acumulados (ciclo diário 21h)...');
+        
+        for (const [symbol, data] of this.cvdData.entries()) {
+            data.buyVolume = 0;
+            data.sellVolume = 0;
+            data.totalTrades = 0;
+            // Mantém o histórico? Vamos resetar também para não acumular dados antigos
+            data.history = [];
+            console.log(`   📊 ${symbol}: volumes resetados`);
+        }
+        
+        console.log('✅ Reset diário de volumes concluído!');
     }
     
     subscribeToSymbol(symbol, callback = null) {
@@ -709,8 +749,8 @@ class RealCVDManager {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6g',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
@@ -1240,8 +1280,11 @@ async function analyzeRSIDivergences(symbol) {
     
     const counts = fundingMemory.getRSIDivergenceCount(symbol);
     return {
-        symbol, totalBullishDivergences: counts.bullish, totalBearishDivergences: counts.bearish,
-        bullishTimeframes: counts.bullishTimeframes, bearishTimeframes: counts.bearishTimeframes
+        symbol,
+        totalBullishDivergences: counts.bullish,
+        totalBearishDivergences: counts.bearish,
+        bullishTimeframes: counts.bullishTimeframes,
+        bearishTimeframes: counts.bearishTimeframes
     };
 }
 
@@ -1305,34 +1348,71 @@ async function monitorCVDAndRSI() {
     const alerts = [];
     const results = new Map();
     
+    // Analisar divergências apenas para os símbolos que estão sendo monitorados
     for (const item of [...watched.positive, ...watched.negative]) {
         results.set(item.fullSymbol, await analyzeRSIDivergences(item.fullSymbol));
     }
     
+    // Para símbolos com funding positivo (alta) - deve ter divergência de BAIXA (bearish)
     for (const item of watched.positive) {
         const cvd = await analyzeRealCVD(item.fullSymbol, true);
         if (cvd.direction === 'SELL') {
             const bollinger = await checkBollingerTouch(item.fullSymbol, 'sell');
-            const rsi = results.get(item.fullSymbol);
-            const hasDiv = rsi && rsi.totalBearishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
+            const rsiData = results.get(item.fullSymbol);
+            
+            // Para VENDA, precisamos de divergências de BAIXA (bearish)
+            const hasDiv = rsiData && rsiData.totalBearishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
             if (bollinger && hasDiv && fundingMemory.shouldAlertCVD(item.fullSymbol, 'positive', cvd.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'sell')) {
-                alerts.push({ ...item, type: 'positive', action: 'VENDA', cvd, bollingerTouch: 'superior',
-                              rsiDivergences: { count: rsi.totalBearishDivergences, timeframes: rsi.bearishTimeframes } });
+                // Adicionar RSI 1h para o alerta
+                const rsi1h = await getRSIForTimeframe(item.fullSymbol, '1h');
+                
+                alerts.push({ 
+                    ...item, 
+                    type: 'positive', 
+                    action: 'VENDA', 
+                    cvd, 
+                    bollingerTouch: 'superior',
+                    rsiDivergences: { 
+                        bearishCount: rsiData.totalBearishDivergences, 
+                        bullishCount: rsiData.totalBullishDivergences, 
+                        bearishTimeframes: rsiData.bearishTimeframes, 
+                        bullishTimeframes: rsiData.bullishTimeframes 
+                    },
+                    rsi1h: rsi1h ? rsi1h.value : null
+                });
             }
         }
     }
     
+    // Para símbolos com funding negativo (baixa) - deve ter divergência de ALTA (bullish)
     for (const item of watched.negative) {
         const cvd = await analyzeRealCVD(item.fullSymbol, false);
         if (cvd.direction === 'BUY') {
             const bollinger = await checkBollingerTouch(item.fullSymbol, 'buy');
-            const rsi = results.get(item.fullSymbol);
-            const hasDiv = rsi && rsi.totalBullishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
+            const rsiData = results.get(item.fullSymbol);
+            
+            // Para COMPRA, precisamos de divergências de ALTA (bullish)
+            const hasDiv = rsiData && rsiData.totalBullishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
             if (bollinger && hasDiv && fundingMemory.shouldAlertCVD(item.fullSymbol, 'negative', cvd.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'buy')) {
-                alerts.push({ ...item, type: 'negative', action: 'COMPRA', cvd, bollingerTouch: 'inferior',
-                              rsiDivergences: { count: rsi.totalBullishDivergences, timeframes: rsi.bullishTimeframes } });
+                // Adicionar RSI 1h para o alerta
+                const rsi1h = await getRSIForTimeframe(item.fullSymbol, '1h');
+                
+                alerts.push({ 
+                    ...item, 
+                    type: 'negative', 
+                    action: 'COMPRA', 
+                    cvd, 
+                    bollingerTouch: 'inferior',
+                    rsiDivergences: { 
+                        bearishCount: rsiData.totalBearishDivergences, 
+                        bullishCount: rsiData.totalBullishDivergences, 
+                        bearishTimeframes: rsiData.bearishTimeframes, 
+                        bullishTimeframes: rsiData.bullishTimeframes 
+                    },
+                    rsi1h: rsi1h ? rsi1h.value : null
+                });
             }
         }
     }
@@ -1348,15 +1428,17 @@ function formatCVDRSIAlert(alert) {
     const ratioText = ratio > 1 ? `🚀 ${ratio.toFixed(2)}x` : `📉 ${ratio.toFixed(2)}x`;
     const rsiStatus = alert.rsi1h > 66 ? '🔴 ' : (alert.rsi1h < 51 ? '🟢' : '');
     
-    let msg = `<i>${emoji} ${alert.action}</i>\n`;
-    msg += `<i>${alert.symbol} | ${formatPrice(alert.lastPrice || alert.price)} | ${dt.full}</i>\n`;
+    let msg = `<i>${emoji} ${alert.symbol} </i>\n`;
+    msg += `<i>Criterios: ${alert.action} ${formatPrice(alert.lastPrice || alert.price)} | ${dt.full}</i>\n`;
     msg += `<i> INDICADORES</i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>\n`;
     msg += `<i>RSI 1h: ${alert.rsi1h.toFixed(1)} ${rsiStatus}</i>\n`;
     msg += `<i>CVD variação: ${isBuy ? '+' : ''}${cvdPct}% em 60s</i>\n`;
     msg += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
-    msg += `<i>Volume: ${((isBuy ? alert.buyVolume : alert.sellVolume) / 1000000).toFixed(2)}M USDT</i>\n`;
+    msg += `<i>Volume:</i>\n`;
+    msg += `<i>🟢Compras: ${(alert.buyVolume / 1000000).toFixed(2)}M USDT</i>\n`;
+    msg += `<i>🔴Vendas: ${(alert.sellVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     msg += `<i>🔍Total trades: ${alert.totalTrades}</i>\n`;
     msg += `\n<i>🤖 Titanium Prime X</i>`;
     return msg;
@@ -1369,18 +1451,41 @@ function formatCompleteAlert(alert) {
     const ratio = alert.cvd.buySellRatio || 0;
     const ratioText = ratio > 1 ? `🚀 ${ratio.toFixed(2)}x` : `📉 ${ratio.toFixed(2)}x`;
     
-    let msg = `<i>${emoji} Analisar ${alert.action}</i>\n`;
-    msg += `<i>${alert.symbol} | ${formatPrice(alert.price)} | ${dt.full}</i>\n`;
-    msg += `<i> FUNDING + LSR</i>\n`;
+    // RSI 1h
+    const rsiValue = alert.rsi1h;
+    const rsiStatus = rsiValue ? (rsiValue > 66 ? '🔴' : (rsiValue < 51 ? '🟢' : '')) : '';
+    const rsiLine = rsiValue ? `\n<i>RSI 1h: ${rsiValue.toFixed(1)} ${rsiStatus}</i>` : '';
+    
+    let msg = `<i>${emoji} ${alert.symbol} Analisar ${alert.action}</i>\n`;
+    msg += `<i>${formatPrice(alert.price)} | ${dt.full}</i>\n`;
+    msg += `<i> Criterios: FUNDING + LSR</i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
-    msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>\n`;
+    msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>${rsiLine}\n`;
     msg += `<i>⭐ ${alert.cvd.alertReason}</i>\n`;
     msg += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
-    msg += `<i>Volume: ${((isBuy ? alert.cvd.buyVolume : alert.cvd.sellVolume) / 1000000).toFixed(2)}M USDT</i>\n`;
+    msg += `<i>Volume:</i>\n`;
+    msg += `<i>🟢Compras: ${(alert.cvd.buyVolume / 1000000).toFixed(2)}M USDT</i>\n`;
+    msg += `<i>🔴Vendas: ${(alert.cvd.sellVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     msg += `<i>🔍Total trades: ${alert.cvd.totalTrades}</i>\n`;
     msg += `<i>⭐ DIVERGÊNCIA DE RSI</i>\n`;
-    msg += `<i>Timeframes: ${alert.rsiDivergences.timeframes.join(', ') || 'Nenhum'}</i>\n`;
-    msg += `<i>${alert.rsiDivergences.count}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências</i>\n`;
+    
+    // Mostrar apenas as divergências relevantes para o tipo de alerta
+    if (isBuy) {
+        // Alerta de COMPRA - mostrar apenas divergências de ALTA (bullish)
+        if (alert.rsiDivergences.bullishCount > 0) {
+            msg += `<i>📈 ALTA: ${alert.rsiDivergences.bullishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em ${alert.rsiDivergences.bullishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
+        } else {
+            msg += `<i>📈 Nenhuma divergência de ALTA detectada</i>\n`;
+        }
+    } else {
+        // Alerta de VENDA - mostrar apenas divergências de BAIXA (bearish)
+        if (alert.rsiDivergences.bearishCount > 0) {
+            msg += `<i>📉 BAIXA: ${alert.rsiDivergences.bearishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em ${alert.rsiDivergences.bearishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
+        } else {
+            msg += `<i>📉 Nenhuma divergência de BAIXA detectada</i>\n`;
+        }
+    }
+    
     msg += `\n<i>🤖 Titanium Prime X</i>`;
     return msg;
 }
@@ -1391,8 +1496,8 @@ function formatListMessage(positive, negative) {
     const negShow = negative.slice(0, maxDisplay);
     
     let msg = `<i>🔴 FUNDING ALTO + LSR ALTO (${positive.length})</i>\n`;
-    msg += `<i>Par          Preço        Funding%      LSR</i>\n`;
-    msg += `<i>------------------------------------------------</i>\n`;
+    msg += `<i>Par       Preço      Funding%    LSR</i>\n`;
+    msg += `<i>--------------------------------------------</i>\n`;
     for (const item of posShow) {
         const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
         msg += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${funding.padEnd(12)} ${item.lsr.toFixed(2)}</i>\n`;
@@ -1400,8 +1505,8 @@ function formatListMessage(positive, negative) {
     if (positive.length > maxDisplay) msg += `<i>... e mais ${positive.length - maxDisplay} símbolos</i>\n`;
     
     msg += `\n<i>🟢 FUNDING BAIXO + LSR BAIXO (${negative.length})</i>\n`;
-    msg += `<i>Par          Preço        Funding%      LSR</i>\n`;
-    msg += `<i>------------------------------------------------</i>\n`;
+    msg += `<i>Par       Preço      Funding%    LSR</i>\n`;
+    msg += `<i>--------------------------------------------</i>\n`;
     for (const item of negShow) {
         const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
         msg += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${funding.padEnd(12)} ${item.lsr.toFixed(2)}</i>\n`;
@@ -1482,6 +1587,8 @@ async function sendInitMessage() {
     const dt = getBrazilianDateTime();
     const stats = rateLimiter.getStats();
     let msg = `<i>🚀 Titanium Prime X</i>\n\n`;
+    msg += `<i>📊 Sistema iniciado em ${dt.full}</i>\n`;
+    msg += `<i>🔄 Reset de volumes programado para às 21:00 todos os dias</i>\n`;
     await sendToTelegram(msg);
 }
 
@@ -1501,10 +1608,6 @@ async function startMonitor() {
         await sendToTelegram(formatListMessage(currentPositive, currentNegative));
     }
     
-    setInterval(async () => {
-        const alerts = await monitorCVDRSIAlerts();
-        for (const a of alerts) await sendToTelegram(formatCVDRSIAlert(a));
-    }, CONFIG.MONITOR.CVD.CHECK_INTERVAL_SECONDS * 1000);
     
     setInterval(async () => {
         const alerts = await monitorCVDAndRSI();
