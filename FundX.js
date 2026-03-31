@@ -639,13 +639,13 @@ class RealCVDManager {
     
     calculateCVDChange(symbol, seconds = 60) {
         const data = this.cvdData.get(symbol);
-        if (!data || data.history.length === 0) return 0;
+        if (!data || data.history.length === 0) return { change: 0, changePercent: 0, currentCVD: 0, oldCVD: 0, period: seconds };
         
         const now = Date.now();
         const cutoff = now - (seconds * 1000);
         
         const oldCVD = data.history.find(h => h.timestamp <= cutoff);
-        if (!oldCVD) return 0;
+        if (!oldCVD) return { change: 0, changePercent: 0, currentCVD: data.value, oldCVD: 0, period: seconds };
         
         const change = data.value - oldCVD.cvd;
         const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
@@ -672,11 +672,12 @@ class RealCVDManager {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8',
-        CHAT_ID: '-1002'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
+        CVD_ALERT_INTERVAL_MINUTES: 15,
         TOP_SIZE: 8,
         MIN_VOLUME_USDT: 500000,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
@@ -703,7 +704,7 @@ const CONFIG = {
             PERIOD: 20,
             STD_DEVIATION: 2,
             TIMEFRAME: '15m',
-            APPROACH_PERCENTAGE: 0.5  // 0.5% de aproximação da banda
+            APPROACH_PERCENTAGE: 0.5
         },
         STORAGE: {
             MAX_FILE_SIZE_MB: 10,
@@ -748,7 +749,7 @@ async function rateLimitedFetch(url, options = {}) {
 }
 
 // =====================================================================
-// === SISTEMA DE MEMÓRIA ===
+// === SISTEMA DE MEMÓRIA CORRIGIDO ===
 // =====================================================================
 class FundingMemory {
     constructor() {
@@ -758,8 +759,8 @@ class FundingMemory {
         };
         this.lastUpdate = null;
         this.cvdStatus = new Map();
-        this.rsiDivergenceHistory = new Map();
-        this.bollingerHistory = new Map();
+        this.rsiDivergenceHistory = new Map(); // Usando Map para consistência
+        this.bollingerHistory = new Map();     // Usando Map para consistência
         this.loadFromFile();
     }
 
@@ -770,10 +771,25 @@ class FundingMemory {
                 const loaded = JSON.parse(data);
                 this.watchedSymbols = loaded.watchedSymbols || { positive: [], negative: [] };
                 this.lastUpdate = loaded.lastUpdate;
-                this.rsiDivergenceHistory = loaded.rsiDivergenceHistory || {};
-                this.bollingerHistory = loaded.bollingerHistory || {};
+                
+                // Converter rsiDivergenceHistory de objeto para Map
+                if (loaded.rsiDivergenceHistory && typeof loaded.rsiDivergenceHistory === 'object') {
+                    this.rsiDivergenceHistory = new Map();
+                    for (const [key, value] of Object.entries(loaded.rsiDivergenceHistory)) {
+                        this.rsiDivergenceHistory.set(key, value);
+                    }
+                }
+                
+                // Converter bollingerHistory de objeto para Map
+                if (loaded.bollingerHistory && typeof loaded.bollingerHistory === 'object') {
+                    this.bollingerHistory = new Map();
+                    for (const [key, value] of Object.entries(loaded.bollingerHistory)) {
+                        this.bollingerHistory.set(key, value);
+                    }
+                }
                 
                 console.log(`📂 Carregados ${this.watchedSymbols.positive.length} positivos e ${this.watchedSymbols.negative.length} negativos da memória`);
+                console.log(`📂 Carregados ${this.rsiDivergenceHistory.size} registros de RSI e ${this.bollingerHistory.size} registros de Bollinger`);
             }
         } catch (error) {
             console.log(`Erro ao carregar memória: ${error.message}`);
@@ -782,11 +798,22 @@ class FundingMemory {
 
     saveToFile() {
         try {
+            // Converter Maps para objetos para serialização JSON
+            const rsiDivergenceHistoryObj = {};
+            for (const [key, value] of this.rsiDivergenceHistory.entries()) {
+                rsiDivergenceHistoryObj[key] = value;
+            }
+            
+            const bollingerHistoryObj = {};
+            for (const [key, value] of this.bollingerHistory.entries()) {
+                bollingerHistoryObj[key] = value;
+            }
+            
             const data = {
                 watchedSymbols: this.watchedSymbols,
                 lastUpdate: this.lastUpdate,
-                rsiDivergenceHistory: this.rsiDivergenceHistory,
-                bollingerHistory: this.bollingerHistory
+                rsiDivergenceHistory: rsiDivergenceHistoryObj,
+                bollingerHistory: bollingerHistoryObj
             };
             fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
         } catch (error) {
@@ -847,15 +874,15 @@ class FundingMemory {
 
     addRSIDivergence(symbol, type, timeframe, details) {
         const key = symbol;
-        if (!this.rsiDivergenceHistory[key]) {
-            this.rsiDivergenceHistory[key] = {
+        if (!this.rsiDivergenceHistory.has(key)) {
+            this.rsiDivergenceHistory.set(key, {
                 bullishDivergences: [],
                 bearishDivergences: [],
                 lastAlert: null
-            };
+            });
         }
         
-        const history = this.rsiDivergenceHistory[key];
+        const history = this.rsiDivergenceHistory.get(key);
         const divergenceList = type === 'bullish' ? history.bullishDivergences : history.bearishDivergences;
         
         const exists = divergenceList.some(d => d.timeframe === timeframe && (Date.now() - d.timestamp) < 3600000);
@@ -869,6 +896,7 @@ class FundingMemory {
             
             if (divergenceList.length > 10) divergenceList.shift();
             
+            this.rsiDivergenceHistory.set(key, history);
             this.saveToFile();
             return true;
         }
@@ -876,7 +904,7 @@ class FundingMemory {
     }
 
     getRSIDivergenceCount(symbol) {
-        const history = this.rsiDivergenceHistory[symbol];
+        const history = this.rsiDivergenceHistory.get(symbol);
         if (!history) return { bullish: 0, bearish: 0, bullishTimeframes: [], bearishTimeframes: [] };
         
         const now = Date.now();
@@ -896,7 +924,7 @@ class FundingMemory {
     }
 
     shouldAlertRSI(symbol, type) {
-        const history = this.rsiDivergenceHistory[symbol];
+        const history = this.rsiDivergenceHistory.get(symbol);
         if (!history) return false;
         
         if (history.lastAlert && (Date.now() - history.lastAlert) < 4 * 3600000) {
@@ -915,6 +943,7 @@ class FundingMemory {
         
         if (hasEnoughDivergences) {
             history.lastAlert = Date.now();
+            this.rsiDivergenceHistory.set(symbol, history);
             this.saveToFile();
             return true;
         }
@@ -980,6 +1009,37 @@ async function getCandles(symbol, interval, limit = 100) {
 }
 
 // =====================================================================
+// === CALCULAR RSI PARA UM TIMEFRAME ESPECÍFICO ===
+// =====================================================================
+async function getRSIForTimeframe(symbol, timeframe = '1h') {
+    try {
+        const candles = await getCandles(symbol, timeframe, CONFIG.MONITOR.RSI.LOOKBACK_CANDLES);
+        
+        if (!candles || candles.length < CONFIG.MONITOR.RSI.PERIOD + 1) {
+            return null;
+        }
+        
+        const prices = candles.map(c => c.close);
+        const rsiValues = calculateRSI(prices, CONFIG.MONITOR.RSI.PERIOD);
+        
+        if (!rsiValues || rsiValues.length === 0) {
+            return null;
+        }
+        
+        const lastRSI = rsiValues[rsiValues.length - 1];
+        
+        return {
+            value: lastRSI,
+            isOverbought: lastRSI > CONFIG.MONITOR.RSI.OVERBOUGHT,
+            isOversold: lastRSI < CONFIG.MONITOR.RSI.OVERSOLD
+        };
+    } catch (error) {
+        log(`Erro ao calcular RSI para ${symbol} ${timeframe}: ${error.message}`, 'error');
+        return null;
+    }
+}
+
+// =====================================================================
 // === CÁLCULO DAS BANDAS DE BOLLINGER ===
 // =====================================================================
 function calculateBollingerBands(prices, period = 20, stdDev = 2) {
@@ -1021,12 +1081,10 @@ async function checkBollingerTouch(symbol, type) {
         const approachPercentage = CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE || 0.5;
         
         if (type === 'buy') {
-            // Para COMPRA: verifica aproximação da banda INFERIOR
             const distanceToLower = ((currentPrice - bollinger.lower) / bollinger.lower) * 100;
             const isApproachingLower = distanceToLower <= approachPercentage;
             const isBelowSMA = currentPrice <= bollinger.sma;
             
-            // Condição: preço está próximo da banda inferior (até 0.5% acima)
             if (isApproachingLower && isBelowSMA) {
                 const approachType = currentPrice <= bollinger.lower ? 'TOQUE' : 'APROXIMAÇÃO';
                 const message = `📊 ${symbol} - ${approachType} DA BANDA INFERIOR: Preço ${formatPrice(currentPrice)} | Banda Inferior ${formatPrice(bollinger.lower)} | Distância: ${distanceToLower.toFixed(2)}%`;
@@ -1037,12 +1095,10 @@ async function checkBollingerTouch(symbol, type) {
         }
         
         if (type === 'sell') {
-            // Para VENDA: verifica aproximação da banda SUPERIOR
             const distanceToUpper = ((bollinger.upper - currentPrice) / currentPrice) * 100;
             const isApproachingUpper = distanceToUpper <= approachPercentage;
             const isAboveSMA = currentPrice >= bollinger.sma;
             
-            // Condição: preço está próximo da banda superior (até 0.5% abaixo)
             if (isApproachingUpper && isAboveSMA) {
                 const approachType = currentPrice >= bollinger.upper ? 'TOQUE' : 'APROXIMAÇÃO';
                 const message = `📊 ${symbol} - ${approachType} DA BANDA SUPERIOR: Preço ${formatPrice(currentPrice)} | Banda Superior ${formatPrice(bollinger.upper)} | Distância: ${distanceToUpper.toFixed(2)}%`;
@@ -1454,6 +1510,49 @@ async function analyzeRealCVD(symbol, isPositive) {
 }
 
 // =====================================================================
+// === OBTER RANKING DE CVD (SUBINDO E DESCENDO) ===
+// =====================================================================
+async function getCVDRanking() {
+    const watched = fundingMemory.getWatchedSymbols();
+    const allSymbols = [...watched.positive, ...watched.negative];
+    const cvdDataList = [];
+    
+    for (const item of allSymbols) {
+        const cvdData = cvdManager.getCVD(item.fullSymbol);
+        if (cvdData) {
+            const cvdChange = cvdManager.calculateCVDChange(item.fullSymbol, CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW);
+            const rsi1h = await getRSIForTimeframe(item.fullSymbol, '1h');
+            
+            cvdDataList.push({
+                symbol: item.symbol,
+                fullSymbol: item.fullSymbol,
+                price: item.price,
+                cvdValue: cvdData.cvd,
+                cvdChange: cvdChange.change,
+                cvdChangePercent: cvdChange.changePercent,
+                buySellRatio: cvdData.buySellRatio,
+                buyVolume: cvdData.buyVolume,
+                sellVolume: cvdData.sellVolume,
+                rsi1h: rsi1h ? rsi1h.value : null,
+                rsiStatus: rsi1h ? (rsi1h.isOverbought ? 'SOBRECOMPRA' : (rsi1h.isOversold ? 'SOBREVENDA' : 'NEUTRO')) : 'N/A'
+            });
+        }
+    }
+    
+    const cvdRising = [...cvdDataList]
+        .filter(item => item.cvdChange > 0)
+        .sort((a, b) => b.cvdChangePercent - a.cvdChangePercent)
+        .slice(0, CONFIG.MONITOR.TOP_SIZE);
+    
+    const cvdFalling = [...cvdDataList]
+        .filter(item => item.cvdChange < 0)
+        .sort((a, b) => a.cvdChangePercent - b.cvdChangePercent)
+        .slice(0, CONFIG.MONITOR.TOP_SIZE);
+    
+    return { rising: cvdRising, falling: cvdFalling };
+}
+
+// =====================================================================
 // === BUSCAR DADOS DE 24H ===
 // =====================================================================
 async function get24hData() {
@@ -1696,6 +1795,61 @@ async function monitorCVDAndRSI() {
 }
 
 // =====================================================================
+// === ENVIAR ALERTA DE CVD (15 EM 15 MINUTOS) ===
+// =====================================================================
+async function sendCVDRankingAlert() {
+    try {
+        log('📊 Gerando ranking de CVD (15 minutos)...', 'info');
+        const ranking = await getCVDRanking();
+        
+        if (ranking.rising.length === 0 && ranking.falling.length === 0) {
+            log('Nenhum dado de CVD disponível para ranking', 'warning');
+            return;
+        }
+        
+        const dateTime = getBrazilianDateTime();
+        let message = `<i>📊 RANKING CVD REAL TIME</i>\n`;
+        message += `<i>⏰ ${dateTime.full}</i>\n`;
+        message += `<i>📈 Janela: ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW} segundos</i>\n\n`;
+        
+        message += `<i>🟢 CVD SUBINDO (${ranking.rising.length}/8)</i>\n`;
+        message += `<i>Par          Preço        CVD %     RSI 1h     Buy/Sell</i>\n`;
+        message += `<i>--------------------------------------------------------</i>\n`;
+        
+        for (const item of ranking.rising) {
+            const cvdPercent = item.cvdChange > 0 ? `+${item.cvdChangePercent.toFixed(1)}%` : `${item.cvdChangePercent.toFixed(1)}%`;
+            const rsiText = item.rsi1h ? `${item.rsi1h.toFixed(1)}` : 'N/A';
+            const rsiEmoji = item.rsiStatus === 'SOBRECOMPRA' ? '🔴' : (item.rsiStatus === 'SOBREVENDA' ? '🟢' : '⚪');
+            const ratioText = item.buySellRatio > 1 ? `${item.buySellRatio.toFixed(2)}x🚀` : `${item.buySellRatio.toFixed(2)}x📉`;
+            
+            message += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${cvdPercent.padEnd(8)} ${rsiEmoji} ${rsiText.padEnd(8)} ${ratioText}</i>\n`;
+        }
+        
+        message += `\n<i>🔴 CVD DESCENDO (${ranking.falling.length}/8)</i>\n`;
+        message += `<i>Par          Preço        CVD %     RSI 1h     Buy/Sell</i>\n`;
+        message += `<i>--------------------------------------------------------</i>\n`;
+        
+        for (const item of ranking.falling) {
+            const cvdPercent = item.cvdChange > 0 ? `+${item.cvdChangePercent.toFixed(1)}%` : `${item.cvdChangePercent.toFixed(1)}%`;
+            const rsiText = item.rsi1h ? `${item.rsi1h.toFixed(1)}` : 'N/A';
+            const rsiEmoji = item.rsiStatus === 'SOBRECOMPRA' ? '🔴' : (item.rsiStatus === 'SOBREVENDA' ? '🟢' : '⚪');
+            const ratioText = item.buySellRatio > 1 ? `${item.buySellRatio.toFixed(2)}x🚀` : `${item.buySellRatio.toFixed(2)}x📉`;
+            
+            message += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${cvdPercent.padEnd(8)} ${rsiEmoji} ${rsiText.padEnd(8)} ${ratioText}</i>\n`;
+        }
+        
+        message += `\n<i>🤖 Titanium Prime X - Monitor CVD</i>\n`;
+        message += `<i>⚡ Dados em tempo real via WebSocket</i>`;
+        
+        await sendToTelegram(message);
+        log(`✅ Ranking CVD enviado: ${ranking.rising.length} subindo, ${ranking.falling.length} descendo`, 'success');
+        
+    } catch (error) {
+        log(`Erro ao enviar ranking CVD: ${error.message}`, 'error');
+    }
+}
+
+// =====================================================================
 // === FORMATAR ALERTA ===
 // =====================================================================
 function formatCompleteAlert(alert) {
@@ -1824,7 +1978,8 @@ async function sendInitMessage() {
     message += `<i>⚡ Rate Limiter: ${rateLimiterStats.currentDelay}ms delay</i>\n`;
     message += `<i>🧹 Storage: max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB</i>\n`;
     message += `<i>📊 CVD: janela ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW}s</i>\n`;
-    message += `<i>📊 Bollinger: aproximação de ${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}% das bandas</i>\n\n`;
+    message += `<i>📊 Bollinger: aproximação de ${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}% das bandas</i>\n`;
+    message += `<i>📊 Alerta CVD: a cada ${CONFIG.MONITOR.CVD_ALERT_INTERVAL_MINUTES} minutos (ranking 8+8)</i>\n\n`;
     message += `<i>⏰ Sistema iniciado: ${dateTime.full}</i>`;
     
     await sendToTelegram(message);
@@ -1838,6 +1993,7 @@ async function startMonitor() {
     console.log('🚀 TITANIUM PRIME X - SISTEMA COMPLETO');
     console.log('='.repeat(70));
     console.log(`📊 Lista atualizada: a cada ${CONFIG.MONITOR.INTERVAL_MINUTES} minutos`);
+    console.log(`📊 Alerta CVD: a cada ${CONFIG.MONITOR.CVD_ALERT_INTERVAL_MINUTES} minutos (ranking 8+8)`);
     console.log(`🔄 CVD Real: WebSocket Aggregated Trades (tempo real)`);
     console.log(`📊 Bollinger (${CONFIG.MONITOR.BOLLINGER.TIMEFRAME}): Período ${CONFIG.MONITOR.BOLLINGER.PERIOD} | Desvio ${CONFIG.MONITOR.BOLLINGER.STD_DEVIATION} | Aproximação ${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}%`);
     console.log(`⭐ RSI: Mínimo ${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências obrigatórias`);
@@ -1867,6 +2023,16 @@ async function startMonitor() {
         await sendToTelegram(listMessage);
     }
     
+    // Alerta de CVD a cada 15 minutos
+    setInterval(async () => {
+        try {
+            await sendCVDRankingAlert();
+        } catch (error) {
+            log(`Erro no alerta CVD periódico: ${error.message}`, 'error');
+        }
+    }, CONFIG.MONITOR.CVD_ALERT_INTERVAL_MINUTES * 60 * 1000);
+    
+    // Monitoramento de alertas completos (CVD + Bollinger + RSI)
     setInterval(async () => {
         try {
             log('🔍 Iniciando verificação de CVD Real + Bollinger + Divergências RSI...', 'info');
@@ -1892,6 +2058,7 @@ async function startMonitor() {
         }
     }, CONFIG.MONITOR.CVD.CHECK_INTERVAL_SECONDS * 1000);
     
+    // Atualização da lista de símbolos (funding + LSR)
     setInterval(async () => {
         try {
             listUpdateCount++;
@@ -1926,10 +2093,12 @@ async function startMonitor() {
         }
     }, CONFIG.MONITOR.INTERVAL_MINUTES * 60 * 1000);
     
+    // Limpeza automática de armazenamento
     setInterval(() => {
         storageCleaner.performFullCleanup(MEMORY_FILE, ALERT_HISTORY_FILE);
     }, CONFIG.MONITOR.STORAGE.CLEANUP_INTERVAL_HOURS * 3600000);
     
+    // Relatório diário
     setInterval(() => {
         const stats = rateLimiter.getStats();
         log(`📊 RELATÓRIO DIÁRIO RATE LIMITER: Delay=${stats.currentDelay}ms, Requests=${stats.success + stats.error}, Erros=${stats.error}, RateLimits=${stats.rateLimit}`, 'info');
