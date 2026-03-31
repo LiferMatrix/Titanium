@@ -672,8 +672,8 @@ class RealCVDManager {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-10025'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
@@ -702,7 +702,8 @@ const CONFIG = {
         BOLLINGER: {
             PERIOD: 20,
             STD_DEVIATION: 2,
-            TIMEFRAME: '15m'
+            TIMEFRAME: '15m',
+            APPROACH_PERCENTAGE: 0.5  // 0.5% de aproximação da banda
         },
         STORAGE: {
             MAX_FILE_SIZE_MB: 10,
@@ -1001,7 +1002,7 @@ function calculateBollingerBands(prices, period = 20, stdDev = 2) {
 }
 
 // =====================================================================
-// === VERIFICAR TOQUE NAS BANDAS DE BOLLINGER ===
+// === VERIFICAR APROXIMAÇÃO DAS BANDAS DE BOLLINGER ===
 // =====================================================================
 async function checkBollingerTouch(symbol, type) {
     try {
@@ -1017,19 +1018,36 @@ async function checkBollingerTouch(symbol, type) {
         if (!bollinger) return false;
         
         const currentPrice = bollinger.currentPrice;
+        const approachPercentage = CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE || 0.5;
         
         if (type === 'buy') {
-            const touchedLowerBand = currentPrice <= bollinger.lower;
-            if (touchedLowerBand) {
-                log(`📊 ${symbol} - TOQUE NA BANDA INFERIOR: Preço ${formatPrice(currentPrice)} ≤ Banda Inferior ${formatPrice(bollinger.lower)}`, 'success');
+            // Para COMPRA: verifica aproximação da banda INFERIOR
+            const distanceToLower = ((currentPrice - bollinger.lower) / bollinger.lower) * 100;
+            const isApproachingLower = distanceToLower <= approachPercentage;
+            const isBelowSMA = currentPrice <= bollinger.sma;
+            
+            // Condição: preço está próximo da banda inferior (até 0.5% acima)
+            if (isApproachingLower && isBelowSMA) {
+                const approachType = currentPrice <= bollinger.lower ? 'TOQUE' : 'APROXIMAÇÃO';
+                const message = `📊 ${symbol} - ${approachType} DA BANDA INFERIOR: Preço ${formatPrice(currentPrice)} | Banda Inferior ${formatPrice(bollinger.lower)} | Distância: ${distanceToLower.toFixed(2)}%`;
+                
+                log(message, 'success');
                 return true;
             }
         }
         
         if (type === 'sell') {
-            const touchedUpperBand = currentPrice >= bollinger.upper;
-            if (touchedUpperBand) {
-                log(`📊 ${symbol} - TOQUE NA BANDA SUPERIOR: Preço ${formatPrice(currentPrice)} ≥ Banda Superior ${formatPrice(bollinger.upper)}`, 'success');
+            // Para VENDA: verifica aproximação da banda SUPERIOR
+            const distanceToUpper = ((bollinger.upper - currentPrice) / currentPrice) * 100;
+            const isApproachingUpper = distanceToUpper <= approachPercentage;
+            const isAboveSMA = currentPrice >= bollinger.sma;
+            
+            // Condição: preço está próximo da banda superior (até 0.5% abaixo)
+            if (isApproachingUpper && isAboveSMA) {
+                const approachType = currentPrice >= bollinger.upper ? 'TOQUE' : 'APROXIMAÇÃO';
+                const message = `📊 ${symbol} - ${approachType} DA BANDA SUPERIOR: Preço ${formatPrice(currentPrice)} | Banda Superior ${formatPrice(bollinger.upper)} | Distância: ${distanceToUpper.toFixed(2)}%`;
+                
+                log(message, 'success');
                 return true;
             }
         }
@@ -1608,11 +1626,11 @@ async function monitorCVDAndRSI() {
         const cvdReal = await analyzeRealCVD(item.fullSymbol, true);
         
         if (cvdReal.direction === 'SELL') {
-            const bollingerTouched = await checkBollingerTouch(item.fullSymbol, 'sell');
+            const bollingerApproached = await checkBollingerTouch(item.fullSymbol, 'sell');
             const rsiAnalysis = rsiResults.get(item.fullSymbol);
             const hasEnoughBearishDivergences = rsiAnalysis && rsiAnalysis.totalBearishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
-            if (bollingerTouched && hasEnoughBearishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'positive', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'sell')) {
+            if (bollingerApproached && hasEnoughBearishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'positive', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'sell')) {
                 alerts.push({
                     ...item,
                     type: 'positive',
@@ -1621,7 +1639,7 @@ async function monitorCVDAndRSI() {
                     timeframe: 'REAL_TIME',
                     volumeChange: cvdReal.changePercent,
                     cvdChangePercent: cvdReal.changePercent,
-                    bollingerTouch: 'superior',
+                    bollingerTouch: 'superior (aproximação)',
                     buySellRatio: cvdReal.buySellRatio,
                     rsiDivergences: {
                         count: rsiAnalysis.totalBearishDivergences,
@@ -1629,10 +1647,10 @@ async function monitorCVDAndRSI() {
                         details: rsiAnalysis.details
                     }
                 });
-                log(`✅ Analisar Correção: ${item.symbol} -  + ${rsiAnalysis.totalBearishDivergences} divergências de RSI`, 'success');
+                log(`✅ Alerta de VENDA: ${item.symbol} - ${rsiAnalysis.totalBearishDivergences} divergências de RSI BEARISH`, 'success');
                 log(`   📊 CVD: ${cvdReal.alertReason} | Buy/Sell Ratio: ${cvdReal.buySellRatio.toFixed(2)}`, 'info');
-            } else if (!bollingerTouched) {
-                log(`⏳ Aguardando toque na banda SUPERIOR para ${item.symbol} (VENDA)`, 'warning');
+            } else if (!bollingerApproached) {
+                log(`⏳ Aguardando aproximação da banda SUPERIOR para ${item.symbol} (VENDA)`, 'warning');
             } else if (!hasEnoughBearishDivergences && rsiAnalysis) {
                 log(`⏳ Aguardando mais divergências de RSI para ${item.symbol} (VENDA): atualmente ${rsiAnalysis.totalBearishDivergences}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED}`, 'warning');
             }
@@ -1643,11 +1661,11 @@ async function monitorCVDAndRSI() {
         const cvdReal = await analyzeRealCVD(item.fullSymbol, false);
         
         if (cvdReal.direction === 'BUY') {
-            const bollingerTouched = await checkBollingerTouch(item.fullSymbol, 'buy');
+            const bollingerApproached = await checkBollingerTouch(item.fullSymbol, 'buy');
             const rsiAnalysis = rsiResults.get(item.fullSymbol);
             const hasEnoughBullishDivergences = rsiAnalysis && rsiAnalysis.totalBullishDivergences >= CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED;
             
-            if (bollingerTouched && hasEnoughBullishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'negative', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'buy')) {
+            if (bollingerApproached && hasEnoughBullishDivergences && fundingMemory.shouldAlertCVD(item.fullSymbol, 'negative', cvdReal.cvdValue) && fundingMemory.shouldAlertBollinger(item.fullSymbol, 'buy')) {
                 alerts.push({
                     ...item,
                     type: 'negative',
@@ -1656,7 +1674,7 @@ async function monitorCVDAndRSI() {
                     timeframe: 'REAL_TIME',
                     volumeChange: cvdReal.changePercent,
                     cvdChangePercent: cvdReal.changePercent,
-                    bollingerTouch: 'inferior',
+                    bollingerTouch: 'inferior (aproximação)',
                     buySellRatio: cvdReal.buySellRatio,
                     rsiDivergences: {
                         count: rsiAnalysis.totalBullishDivergences,
@@ -1664,10 +1682,10 @@ async function monitorCVDAndRSI() {
                         details: rsiAnalysis.details
                     }
                 });
-                log(`✅ Analisar COMPRA: ${item.symbol} -  + ${rsiAnalysis.totalBullishDivergences} divergências de RSI`, 'success');
+                log(`✅ Alerta de COMPRA: ${item.symbol} - ${rsiAnalysis.totalBullishDivergences} divergências de RSI BULLISH`, 'success');
                 log(`   📊 CVD: ${cvdReal.alertReason} | Buy/Sell Ratio: ${cvdReal.buySellRatio.toFixed(2)}`, 'info');
-            } else if (!bollingerTouched) {
-                log(`⏳ Aguardando toque na banda INFERIOR para ${item.symbol} (COMPRA)`, 'warning');
+            } else if (!bollingerApproached) {
+                log(`⏳ Aguardando aproximação da banda INFERIOR para ${item.symbol} (COMPRA)`, 'warning');
             } else if (!hasEnoughBullishDivergences && rsiAnalysis) {
                 log(`⏳ Aguardando mais divergências de RSI para ${item.symbol} (COMPRA): atualmente ${rsiAnalysis.totalBullishDivergences}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED}`, 'warning');
             }
@@ -1696,7 +1714,7 @@ function formatCompleteAlert(alert) {
     let message = `<i>${emoji} Analisar ${acao}</i>\n`;
     message += `<i>${alert.symbol} | ${priceFormatted} | ${dateTime.full}</i>\n\n`;
     
-    message += `<i> FUNDING + LSR</i>\n`;
+    message += `<i>📊 FUNDING + LSR</i>\n`;
     if (isBuy) {
         message += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}% (BAIXO)</i>\n`;
         message += `<i>LSR: ${alert.lsr.toFixed(2)} (BAIXO)</i>\n`;
@@ -1705,7 +1723,7 @@ function formatCompleteAlert(alert) {
         message += `<i>LSR: ${alert.lsr.toFixed(2)} (ALTO)</i>\n`;
     }
     
-    message += `\n<i>📈 CVD</i>\n`;
+    message += `\n<i>📈 CVD REAL TIME</i>\n`;
     message += `<i>${alert.cvd.alertReason}</i>\n`;
     message += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
     if (isBuy) {
@@ -1715,20 +1733,24 @@ function formatCompleteAlert(alert) {
     }
     message += `<i>Total trades: ${alert.cvd.totalTrades}</i>\n`;
     
-    message += `\n<i> DIVERGÊNCIA DE RSI (${divergenciaTipo})</i>\n`;
-    message += `<i>Timeframes confirmados: ${alert.rsiDivergences.timeframes.join(', ')}</i>\n`;
+    message += `\n<i>📊 BOLLINGER BANDS (${CONFIG.MONITOR.BOLLINGER.TIMEFRAME})</i>\n`;
+    message += `<i>Preço aproximado da banda ${alert.bollingerTouch} (${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}% de distância)</i>\n`;
+    
+    message += `\n<i>⭐ DIVERGÊNCIA DE RSI (${divergenciaTipo})</i>\n`;
+    message += `<i>Timeframes confirmados: ${alert.rsiDivergences.timeframes.join(', ') || 'Nenhum'}</i>\n`;
+    message += `<i>${divergenciaCount}/${required} divergências confirmadas</i>\n`;
+    
     message += `\n<i>🤖 Titanium Prime X</i>\n`;
-    message += `<i> ${divergenciaCount}/${required} divergências confirmadas</i>`;
-    message += `\n<i>⚡ CVD em Tempo Real</i>`;
+    message += `<i>⚡ Monitoramento em Tempo Real</i>`;
     
     return message;
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM DE ATUALIZAÇÃO - 8 ATIVOS SEM TÍTULO E RODAPÉ ===
+// === FORMATAR MENSAGEM DE ATUALIZAÇÃO ===
 // =====================================================================
 function formatListMessage(positive, negative, total) {
-    let message = `<i>🔴 FUNDING ALTO (+) + LSR ALTO </i>\n`;
+    let message = `<i>🔴 FUNDING ALTO (+) + LSR ALTO</i>\n`;
     message += `<i>Par          Preço        Funding%      LSR</i>\n`;
     message += `<i>------------------------------------------------</i>\n`;
     
@@ -1738,7 +1760,7 @@ function formatListMessage(positive, negative, total) {
         message += `<i>${item.symbol.padEnd(12)} ${formatPrice(item.price).padEnd(12)} ${fundingStr.padEnd(12)} ${item.lsr.toFixed(2).padEnd(8)}</i>\n`;
     }
     
-    message += `\n<i>🟢 FUNDING BAIXO (-) + LSR BAIXO </i>\n`;
+    message += `\n<i>🟢 FUNDING BAIXO (-) + LSR BAIXO</i>\n`;
     message += `<i>Par          Preço        Funding%      LSR</i>\n`;
     message += `<i>------------------------------------------------</i>\n`;
     
@@ -1801,7 +1823,8 @@ async function sendInitMessage() {
     message += `<i>  • Storage Cleaner Automático</i>\n\n`;
     message += `<i>⚡ Rate Limiter: ${rateLimiterStats.currentDelay}ms delay</i>\n`;
     message += `<i>🧹 Storage: max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB</i>\n`;
-    message += `<i>📊 CVD: janela ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW}s</i>\n\n`;
+    message += `<i>📊 CVD: janela ${CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW}s</i>\n`;
+    message += `<i>📊 Bollinger: aproximação de ${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}% das bandas</i>\n\n`;
     message += `<i>⏰ Sistema iniciado: ${dateTime.full}</i>`;
     
     await sendToTelegram(message);
@@ -1816,7 +1839,7 @@ async function startMonitor() {
     console.log('='.repeat(70));
     console.log(`📊 Lista atualizada: a cada ${CONFIG.MONITOR.INTERVAL_MINUTES} minutos`);
     console.log(`🔄 CVD Real: WebSocket Aggregated Trades (tempo real)`);
-    console.log(`📊 Bollinger (15m): Período ${CONFIG.MONITOR.BOLLINGER.PERIOD} | Desvio ${CONFIG.MONITOR.BOLLINGER.STD_DEVIATION}`);
+    console.log(`📊 Bollinger (${CONFIG.MONITOR.BOLLINGER.TIMEFRAME}): Período ${CONFIG.MONITOR.BOLLINGER.PERIOD} | Desvio ${CONFIG.MONITOR.BOLLINGER.STD_DEVIATION} | Aproximação ${CONFIG.MONITOR.BOLLINGER.APPROACH_PERCENTAGE}%`);
     console.log(`⭐ RSI: Mínimo ${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências obrigatórias`);
     console.log(`⚡ Rate Limiter: Delay base ${rateLimiter.baseDelayMs}ms | Max ${rateLimiter.maxDelayMs}ms`);
     console.log(`🧹 Storage Cleaner: Max ${CONFIG.MONITOR.STORAGE.MAX_TOTAL_SIZE_MB}MB | Backup ${CONFIG.MONITOR.STORAGE.MAX_BACKUP_AGE_DAYS} dias`);
