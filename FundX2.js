@@ -749,8 +749,8 @@ class RealCVDManager {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-100255'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
@@ -778,7 +778,9 @@ const CONFIG = {
             MIN_DIVERGENCES_REQUIRED: 2,
             MIN_DIVERGENCE_STRENGTH: 5,
             CVD_RSI_BUY_THRESHOLD: 60,
-            CVD_RSI_SELL_THRESHOLD: 65
+            CVD_RSI_SELL_THRESHOLD: 65,
+            CVD_LSR_MAX_BUY: 1.5,  // LSR máximo para alerta de COMPRA (não alertar acima disso)
+            CVD_LSR_MIN_SELL: 2.5   // LSR mínimo para alerta de VENDA (só alertar acima disso)
         },
         BOLLINGER: {
             PERIOD: 20,
@@ -796,7 +798,9 @@ const CONFIG = {
             LOOKBACK_CANDLES: 200,
             CLUSTER_THRESHOLD: 3,
             MAX_CLUSTERS: 5,
-            PRICE_GROUP_PERCENTAGE: 0.5
+            PRICE_GROUP_PERCENTAGE: 0.5,
+            MIN_CLUSTER_STRENGTH: 3,
+            ROBUST_CLUSTER_THRESHOLD: 4
         }
     }
 };
@@ -1088,6 +1092,27 @@ class FundingMemory {
             bearishTimeframes: [...new Set(recentBearish.map(d => d.timeframe))]
         };
     }
+    
+    // Função para verificar se existe divergência em timeframe específico (15m ou 1h)
+    hasDivergenceInTimeframe(symbol, type) {
+        const history = this.rsiDivergenceHistory.get(symbol);
+        if (!history) return false;
+        
+        const now = Date.now();
+        const relevantTimeframes = ['15m', '1h'];
+        
+        if (type === 'bullish') {
+            const bullishDivs = history.bullishDivergences.filter(d => 
+                relevantTimeframes.includes(d.timeframe) && (now - d.timestamp) < 86400000
+            );
+            return bullishDivs.length > 0;
+        } else {
+            const bearishDivs = history.bearishDivergences.filter(d => 
+                relevantTimeframes.includes(d.timeframe) && (now - d.timestamp) < 86400000
+            );
+            return bearishDivs.length > 0;
+        }
+    }
 
     shouldAlertRSI(symbol, type) {
         const history = this.rsiDivergenceHistory.get(symbol);
@@ -1150,18 +1175,18 @@ function log(message, type = 'info') {
 }
 
 // =====================================================================
-// === FUNÇÕES DE CLUSTERS (SUPORTE E RESISTÊNCIA) ===
+// === FUNÇÕES DE CLUSTERS (SUPORTE E RESISTÊNCIA) ROBUSTAS ===
 // =====================================================================
 async function getClusterLevels(symbol, currentPrice) {
     try {
-        // Buscar candles para análise de clusters
+        // Buscar candles para análise de clusters - usar 1h para maior confiabilidade
         const candles = await getCandles(symbol, '1h', CONFIG.MONITOR.CLUSTERS.LOOKBACK_CANDLES);
         if (!candles || candles.length < 50) return { supports: [], resistances: [] };
         
-        // Extrair pontos de virada (máximos e mínimos locais)
+        // Extrair pontos de virada (máximos e mínimos locais) com janela maior para robustez
         const highs = [];
         const lows = [];
-        const lookback = 5;
+        const lookback = 5; // Janela de 5 candles para identificar topos e fundos
         
         for (let i = lookback; i < candles.length - lookback; i++) {
             let isHigh = true;
@@ -1176,10 +1201,12 @@ async function getClusterLevels(symbol, currentPrice) {
             if (isLow) lows.push(candles[i].low);
         }
         
-        // Agrupar níveis próximos
+        // Agrupar níveis próximos com percentual ajustado
         const groupPercentage = CONFIG.MONITOR.CLUSTERS.PRICE_GROUP_PERCENTAGE / 100;
         
-        function groupLevels(levels) {
+        function groupLevels(levels, isSupport = true) {
+            if (levels.length === 0) return [];
+            
             const sorted = [...levels].sort((a, b) => a - b);
             const groups = [];
             
@@ -1199,26 +1226,50 @@ async function getClusterLevels(symbol, currentPrice) {
                 }
             }
             
-            // Filtrar por threshold e ordenar
+            // Filtrar por threshold mínimo de força (ROBUST_CLUSTER_THRESHOLD)
+            const robustThreshold = CONFIG.MONITOR.CLUSTERS.ROBUST_CLUSTER_THRESHOLD;
             return groups
-                .filter(g => g.count >= CONFIG.MONITOR.CLUSTERS.CLUSTER_THRESHOLD)
+                .filter(g => g.count >= robustThreshold)
                 .sort((a, b) => b.count - a.count)
                 .slice(0, CONFIG.MONITOR.CLUSTERS.MAX_CLUSTERS);
         }
         
-        const supportGroups = groupLevels(lows);
-        const resistanceGroups = groupLevels(highs);
+        const supportGroups = groupLevels(lows, true);
+        const resistanceGroups = groupLevels(highs, false);
         
         // Filtrar apenas níveis abaixo (suportes) e acima (resistências) do preço atual
-        const supports = supportGroups
+        // Para suportes, pegar os mais próximos do preço atual (até 3)
+        let supports = supportGroups
             .filter(g => g.price < currentPrice)
             .sort((a, b) => b.price - a.price)
-            .slice(0, 2);
+            .slice(0, 3);
         
-        const resistances = resistanceGroups
+        // Para resistências, pegar os mais próximos do preço atual (até 3)
+        let resistances = resistanceGroups
             .filter(g => g.price > currentPrice)
             .sort((a, b) => a.price - b.price)
-            .slice(0, 2);
+            .slice(0, 3);
+        
+        // Validar se os clusters encontrados são válidos (distância mínima do preço)
+        const minDistancePercent = 0.5; // 0.5% de distância mínima
+        supports = supports.filter(s => (currentPrice - s.price) / currentPrice * 100 >= minDistancePercent);
+        resistances = resistances.filter(r => (r.price - currentPrice) / currentPrice * 100 >= minDistancePercent);
+        
+        // Se não encontrou clusters robustos, tentar com threshold mais baixo
+        if (supports.length === 0 && resistances.length === 0) {
+            const fallbackGroups = groupLevels([...lows, ...highs], true);
+            const fallbackSupports = fallbackGroups
+                .filter(g => g.price < currentPrice && g.count >= CONFIG.MONITOR.CLUSTERS.CLUSTER_THRESHOLD)
+                .sort((a, b) => b.price - a.price)
+                .slice(0, 2);
+            
+            const fallbackResistances = fallbackGroups
+                .filter(g => g.price > currentPrice && g.count >= CONFIG.MONITOR.CLUSTERS.CLUSTER_THRESHOLD)
+                .sort((a, b) => a.price - b.price)
+                .slice(0, 2);
+            
+            return { supports: fallbackSupports, resistances: fallbackResistances };
+        }
         
         return { supports, resistances };
         
@@ -1440,16 +1491,49 @@ async function monitorCVDRSIAlerts() {
         const rsi = await getRSIForTimeframe(item.fullSymbol, '1h');
         if (!rsi) continue;
         
-        if (isUp && rsi.value < CONFIG.MONITOR.RSI.CVD_RSI_BUY_THRESHOLD && fundingMemory.shouldAlertCVDRSI(item.fullSymbol, 'buy')) {
-            alerts.push({ ...item, type: 'cvd_rsi_buy', action: 'COMPRA (CVD + RSI)', cvdChange: { changePercent: capped },
-                          rsi1h: rsi.value, buySellRatio: cvd.buySellRatio, buyVolume: cvd.buyVolume, sellVolume: cvd.sellVolume,
-                          totalTrades: cvd.totalTrades, lastPrice: cvd.lastPrice });
+        // NOVOS CRITÉRIOS PARA CVD+RSI:
+        // 1. Para COMPRA (CVD subindo): LSR deve ser <= 1.5 e deve ter divergência de ALTA em 15m ou 1h
+        if (isUp && rsi.value < CONFIG.MONITOR.RSI.CVD_RSI_BUY_THRESHOLD) {
+            // Verifica LSR máximo para compra
+            if (item.lsr > CONFIG.MONITOR.RSI.CVD_LSR_MAX_BUY) {
+                console.log(`🚫 Alerta CVD+RSI COMPRA bloqueado para ${item.symbol}: LSR ${item.lsr.toFixed(2)} > ${CONFIG.MONITOR.RSI.CVD_LSR_MAX_BUY}`);
+                continue;
+            }
+            
+            // Verifica se tem divergência de ALTA em 15m ou 1h
+            const hasBullishDiv = fundingMemory.hasDivergenceInTimeframe(item.fullSymbol, 'bullish');
+            if (!hasBullishDiv) {
+                console.log(`🚫 Alerta CVD+RSI COMPRA bloqueado para ${item.symbol}: Sem divergência de ALTA em 15m ou 1h`);
+                continue;
+            }
+            
+            if (fundingMemory.shouldAlertCVDRSI(item.fullSymbol, 'buy')) {
+                alerts.push({ ...item, type: 'cvd_rsi_buy', action: 'COMPRA (CVD + RSI)', cvdChange: { changePercent: capped },
+                              rsi1h: rsi.value, buySellRatio: cvd.buySellRatio, buyVolume: cvd.buyVolume, sellVolume: cvd.sellVolume,
+                              totalTrades: cvd.totalTrades, lastPrice: cvd.lastPrice });
+            }
         }
         
-        if (isDown && rsi.value > CONFIG.MONITOR.RSI.CVD_RSI_SELL_THRESHOLD && fundingMemory.shouldAlertCVDRSI(item.fullSymbol, 'sell')) {
-            alerts.push({ ...item, type: 'cvd_rsi_sell', action: 'VENDA (CVD + RSI)', cvdChange: { changePercent: capped },
-                          rsi1h: rsi.value, buySellRatio: cvd.buySellRatio, buyVolume: cvd.buyVolume, sellVolume: cvd.sellVolume,
-                          totalTrades: cvd.totalTrades, lastPrice: cvd.lastPrice });
+        // 2. Para VENDA (CVD descendo): LSR deve ser >= 2.5 e deve ter divergência de BAIXA em 15m ou 1h
+        if (isDown && rsi.value > CONFIG.MONITOR.RSI.CVD_RSI_SELL_THRESHOLD) {
+            // Verifica LSR mínimo para venda
+            if (item.lsr < CONFIG.MONITOR.RSI.CVD_LSR_MIN_SELL) {
+                console.log(`🚫 Alerta CVD+RSI VENDA bloqueado para ${item.symbol}: LSR ${item.lsr.toFixed(2)} < ${CONFIG.MONITOR.RSI.CVD_LSR_MIN_SELL}`);
+                continue;
+            }
+            
+            // Verifica se tem divergência de BAIXA em 15m ou 1h
+            const hasBearishDiv = fundingMemory.hasDivergenceInTimeframe(item.fullSymbol, 'bearish');
+            if (!hasBearishDiv) {
+                console.log(`🚫 Alerta CVD+RSI VENDA bloqueado para ${item.symbol}: Sem divergência de BAIXA em 15m ou 1h`);
+                continue;
+            }
+            
+            if (fundingMemory.shouldAlertCVDRSI(item.fullSymbol, 'sell')) {
+                alerts.push({ ...item, type: 'cvd_rsi_sell', action: 'VENDA (CVD + RSI)', cvdChange: { changePercent: capped },
+                              rsi1h: rsi.value, buySellRatio: cvd.buySellRatio, buyVolume: cvd.buyVolume, sellVolume: cvd.sellVolume,
+                              totalTrades: cvd.totalTrades, lastPrice: cvd.lastPrice });
+            }
         }
     }
     return alerts;
@@ -1538,7 +1622,6 @@ async function monitorCVDAndRSI() {
     }
     return alerts;
 }
-
 function formatCVDRSIAlert(alert) {
     const dt = getBrazilianDateTime();
     const isBuy = alert.type === 'cvd_rsi_buy';
@@ -1548,8 +1631,8 @@ function formatCVDRSIAlert(alert) {
     const ratioText = ratio > 1 ? `🚀 ${ratio.toFixed(2)}x` : `📉 ${ratio.toFixed(2)}x`;
     const rsiStatus = alert.rsi1h > 66 ? '🔴 ' : (alert.rsi1h < 51 ? '🟢' : '');
     
-    let msg = `<i>${emoji} ${alert.symbol} </i>\n`;
-    msg += `<i>Criterios: ${alert.action} ${formatPrice(alert.lastPrice || alert.price)} | ${dt.full}</i>\n`;
+    let msg = `<i>${emoji} ${alert.symbol} ${formatPrice(alert.lastPrice || alert.price)} </i>\n`;
+    msg += `<i>Criterios: ${alert.action} | ${dt.full}hs</i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>\n`;
     msg += `<i>RSI 1h: ${alert.rsi1h.toFixed(1)} ${rsiStatus}</i>\n`;
@@ -1559,6 +1642,41 @@ function formatCVDRSIAlert(alert) {
     msg += `<i>🟢Compras: ${(alert.buyVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     msg += `<i>🔴Vendas: ${(alert.sellVolume / 1000000).toFixed(2)}M USDT</i>\n`;
     msg += `<i>🔍Total trades: ${alert.totalTrades}</i>\n`;
+    
+    // Adicionar Suportes e Resistências (clusters)
+    const clusters = alert.clusters || { supports: [], resistances: [] };
+    
+    // Formatar suportes - apenas se existirem clusters com dados
+    let suporteText = '';
+    if (clusters.supports && clusters.supports.length > 0) {
+        for (let i = 0; i < clusters.supports.length; i++) {
+            const s = clusters.supports[i];
+            const forca = s.count >= 5 ? '🔥 FORTE' : (s.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
+            const emojiForca = s.count >= 5 ? '🔥' : (s.count >= 4 ? '⚡' : '⚠️');
+            suporteText += `${formatPrice(s.price)} (${s.count}x) ${emojiForca} ${forca}`;
+            if (i < clusters.supports.length - 1) suporteText += '  |  ';
+        }
+    } else {
+        suporteText = 'Não Encontrado ';
+    }
+    
+    // Formatar resistências - apenas se existirem clusters com dados
+    let resistenciaText = '';
+    if (clusters.resistances && clusters.resistances.length > 0) {
+        for (let i = 0; i < clusters.resistances.length; i++) {
+            const r = clusters.resistances[i];
+            const forca = r.count >= 5 ? '🔥 FORTE' : (r.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
+            const emojiForca = r.count >= 5 ? '🔥' : (r.count >= 4 ? '⚡' : '⚠️');
+            resistenciaText += `${formatPrice(r.price)} (${r.count}x) ${emojiForca} ${forca}`;
+            if (i < clusters.resistances.length - 1) resistenciaText += '  |  ';
+        }
+    } else {
+        resistenciaText = 'Não Encontrado';
+    }
+    
+    msg += `<i> Suporte : ${suporteText}</i>\n`;
+    msg += `<i> Resistência : ${resistenciaText}</i>\n`;
+    msg += `<i>⭐ Divergência: ${isBuy ? 'ALTA' : 'BAIXA'} confirmada em 15m/1h</i>\n`;
     msg += `\n<i>🤖 Titanium Prime X</i>`;
     return msg;
 }
@@ -1576,7 +1694,7 @@ function formatCompleteAlert(alert) {
     const rsiLine = rsiValue ? `\n<i>RSI 1h: ${rsiValue.toFixed(1)} ${rsiStatus}</i>` : '';
     
     let msg = `<i>${emoji} ${alert.symbol} Analisar ${alert.action}</i>\n`;
-    msg += `<i>${formatPrice(alert.price)} | ${dt.full}</i>\n`;
+    msg += `<i>${formatPrice(alert.price)} | ${dt.full}hs</i>\n`;
     msg += `<i> Criterios: FUNDING + LSR</i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>${rsiLine}\n`;
@@ -1590,27 +1708,33 @@ function formatCompleteAlert(alert) {
     // Adicionar Suportes e Resistências (clusters)
     const clusters = alert.clusters || { supports: [], resistances: [] };
     
-    // Formatar suportes
+    // Formatar suportes - apenas se existirem clusters com dados
     let suporteText = '';
-    for (let i = 0; i < clusters.supports.length; i++) {
-        const s = clusters.supports[i];
-        const forca = s.count >= 5 ? '🔥 FORTE' : (s.count >= 3 ? '⚡ MÉDIO' : '⚠️ FRACO');
-        const emojiForca = s.count >= 5 ? '🔥' : (s.count >= 3 ? '⚡' : '⚠️');
-        suporteText += `${s.price.toFixed(4)} (${s.count}x) ${emojiForca} ${forca}`;
-        if (i < clusters.supports.length - 1) suporteText += '  |  ';
+    if (clusters.supports && clusters.supports.length > 0) {
+        for (let i = 0; i < clusters.supports.length; i++) {
+            const s = clusters.supports[i];
+            const forca = s.count >= 5 ? '🔥 FORTE' : (s.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
+            const emojiForca = s.count >= 5 ? '🔥' : (s.count >= 4 ? '⚡' : '⚠️');
+            suporteText += `${formatPrice(s.price)} (${s.count}x) ${emojiForca} ${forca}`;
+            if (i < clusters.supports.length - 1) suporteText += '  |  ';
+        }
+    } else {
+        suporteText = 'Não Encontrado';
     }
-    if (clusters.supports.length === 0) suporteText = '🔴Nenhum suporte identificado';
     
-    // Formatar resistências
+    // Formatar resistências - apenas se existirem clusters com dados
     let resistenciaText = '';
-    for (let i = 0; i < clusters.resistances.length; i++) {
-        const r = clusters.resistances[i];
-        const forca = r.count >= 5 ? '🔥 FORTE' : (r.count >= 3 ? '⚡ MÉDIO' : '⚠️ FRACO');
-        const emojiForca = r.count >= 5 ? '🔥' : (r.count >= 3 ? '⚡' : '⚠️');
-        resistenciaText += `${r.price.toFixed(4)} (${r.count}x) ${emojiForca} ${forca}`;
-        if (i < clusters.resistances.length - 1) resistenciaText += '  |  ';
+    if (clusters.resistances && clusters.resistances.length > 0) {
+        for (let i = 0; i < clusters.resistances.length; i++) {
+            const r = clusters.resistances[i];
+            const forca = r.count >= 5 ? '🔥 FORTE' : (r.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
+            const emojiForca = r.count >= 5 ? '🔥' : (r.count >= 4 ? '⚡' : '⚠️');
+            resistenciaText += `${formatPrice(r.price)} (${r.count}x) ${emojiForca} ${forca}`;
+            if (i < clusters.resistances.length - 1) resistenciaText += '  |  ';
+        }
+    } else {
+        resistenciaText = 'Não Encontrado';
     }
-    if (clusters.resistances.length === 0) resistenciaText = '🔴Nenhuma resistência identificada';
     
     msg += `<i> Suporte : ${suporteText}</i>\n`;
     msg += `<i> Resistência : ${resistenciaText}</i>\n`;
@@ -1736,6 +1860,9 @@ async function sendInitMessage() {
     let msg = `<i>🚀 Titanium Prime X</i>\n\n`;
     msg += `<i>📊 Sistema iniciado em ${dt.full}</i>\n`;
     msg += `<i>🔄 Reset de volumes programado para às 21:00 todos os dias</i>\n`;
+    msg += `<i>📋 Critérios CVD+RSI:</i>\n`;
+    msg += `<i>   • COMPRA: LSR ≤ 1.5 + Divergência ALTA em 15m/1h</i>\n`;
+    msg += `<i>   • VENDA: LSR ≥ 2.5 + Divergência BAIXA em 15m/1h</i>\n`;
     await sendToTelegram(msg);
 }
 
@@ -1755,10 +1882,23 @@ async function startMonitor() {
         await sendToTelegram(formatListMessage(currentPositive, currentNegative));
     }
     
-    
+    // Monitoramento combinado - ambos os tipos de alertas
     setInterval(async () => {
-        const alerts = await monitorCVDAndRSI();
-        for (const a of alerts) await sendToTelegram(formatCompleteAlert(a));
+        try {
+            // Alertas completos (CVD + Bollinger + Divergências RSI)
+            const alerts = await monitorCVDAndRSI();
+            for (const a of alerts) {
+                await sendToTelegram(formatCompleteAlert(a));
+            }
+            
+            // Alertas CVD+RSI (simples com novos critérios)
+            const cvdRsiAlerts = await monitorCVDRSIAlerts();
+            for (const a of cvdRsiAlerts) {
+                await sendToTelegram(formatCVDRSIAlert(a));
+            }
+        } catch (error) {
+            console.log(`Erro no monitoramento: ${error.message}`);
+        }
     }, CONFIG.MONITOR.CVD.CHECK_INTERVAL_SECONDS * 1000);
     
     setInterval(async () => {
