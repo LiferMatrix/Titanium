@@ -884,8 +884,8 @@ class RealCVDManager {
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AGg',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
@@ -1780,7 +1780,7 @@ function formatCVDRSIAlert(alert) {
     const ratioText = ratio > 1 ? `🚀 ${ratio.toFixed(2)}x` : `📉 ${ratio.toFixed(2)}x`;
     const rsiStatus = alert.rsi1h > 66 ? '🔴 ' : (alert.rsi1h < 51 ? '🟢' : '');
     
-    let msg = `<i>${emoji} ${alert.symbol} ${formatPrice(alert.lastPrice || alert.price)} </i>\n`;
+    let msg = `<i>${emoji} ${alert.symbol} - Preço: ${formatPrice(alert.lastPrice || alert.price)} </i>\n`;
     msg += `<i>🔹Alerta: ${alert.alertNumber} - ${dt.full}hs</i>\n`;
     msg += `<i>Criterios: ${alert.action} </i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
@@ -1846,6 +1846,7 @@ function formatCompleteAlert(alert) {
     
     let msg = `<i>${emoji} ${alert.symbol} Analisar ${alert.action}</i>\n`;
     msg += `<i>🔹Alerta: ${alert.alertNumber} - ${dt.full}hs</i>\n`;
+    msg += `<i>Preço: ${formatPrice(alert.lastPrice || alert.price)}</i>\n`;
     msg += `<i>Criterios: FUNDING + LSR</i>\n`;
     msg += `<i>Funding: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>${rsiLine}\n`;
