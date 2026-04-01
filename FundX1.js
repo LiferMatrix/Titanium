@@ -16,8 +16,8 @@ const ALERT_COUNTERS_FILE = path.join(__dirname, 'alertCounters.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8g',
-        CHAT_ID: '-1002554'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 15,
@@ -62,7 +62,7 @@ const CONFIG = {
             CLEANUP_INTERVAL_HOURS: 1
         },
         CLUSTERS: {
-            LOOKBACK_CANDLES: 300,
+            LOOKBACK_CANDLES: 400,
             CLUSTER_THRESHOLD: 2,
             MAX_CLUSTERS: 4,
             PRICE_GROUP_PERCENTAGE: 0.8,
@@ -1922,7 +1922,7 @@ function formatCVDRSIAlert(alert) {
         for (let i = 0; i < clusters.supports.length; i++) {
             const s = clusters.supports[i];
             const forca = s.count >= 5 ? '🔥 FORTE' : (s.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
-            const emojiForca = s.count >= 5 ? '🔥' : (s.count >= 4 ? '⚡' : '');
+            const emojiForca = s.count >= 5 ? '' : (s.count >= 4 ? '' : '');
             suporteText += `${formatPrice(s.price)} (${s.count}x) ${emojiForca} ${forca}`;
             if (i < clusters.supports.length - 1) suporteText += '  |  ';
         }
@@ -1935,7 +1935,7 @@ function formatCVDRSIAlert(alert) {
         for (let i = 0; i < clusters.resistances.length; i++) {
             const r = clusters.resistances[i];
             const forca = r.count >= 5 ? '🔥 FORTE' : (r.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
-            const emojiForca = r.count >= 5 ? '🔥' : (r.count >= 4 ? '⚡' : '');
+            const emojiForca = r.count >= 5 ? '' : (r.count >= 4 ? '' : '');
             resistenciaText += `${formatPrice(r.price)} (${r.count}x) ${emojiForca} ${forca}`;
             if (i < clusters.resistances.length - 1) resistenciaText += '  |  ';
         }
@@ -1991,7 +1991,7 @@ function formatCompleteAlert(alert) {
         for (let i = 0; i < clusters.supports.length; i++) {
             const s = clusters.supports[i];
             const forca = s.count >= 5 ? '🔥 FORTE' : (s.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
-            const emojiForca = s.count >= 5 ? '🔥' : (s.count >= 4 ? '⚡' : '');
+            const emojiForca = s.count >= 5 ? '' : (s.count >= 4 ? '' : '');
             suporteText += `${formatPrice(s.price)} (${s.count}x) ${emojiForca} ${forca}`;
             if (i < clusters.supports.length - 1) suporteText += '  |  ';
         }
@@ -2004,7 +2004,7 @@ function formatCompleteAlert(alert) {
         for (let i = 0; i < clusters.resistances.length; i++) {
             const r = clusters.resistances[i];
             const forca = r.count >= 5 ? '🔥 FORTE' : (r.count >= 4 ? '⚡ MÉDIO' : '⚠️ FRACO');
-            const emojiForca = r.count >= 5 ? '🔥' : (r.count >= 4 ? '⚡' : '');
+            const emojiForca = r.count >= 5 ? '' : (r.count >= 4 ? '' : '');
             resistenciaText += `${formatPrice(r.price)} (${r.count}x) ${emojiForca} ${forca}`;
             if (i < clusters.resistances.length - 1) resistenciaText += '  |  ';
         }
@@ -2039,8 +2039,8 @@ function formatListMessage(positive, negative) {
     const posShow = positive.slice(0, maxDisplay);
     const negShow = negative.slice(0, maxDisplay);
     
-    let msg = `<i>🔴 FUNDING ALTO + LSR ALTO </i>\n`;
-    msg += `\n<i>🔍🤖 Em análise para Correção... </i>\n`;
+    let msg = `<i>🔴 Titanium Setup Bear  </i>\n`;
+    msg += `\n<i>🔍🤖 Em análise para 🔻Correção... </i>\n`;
     msg += `<i>Par   Preço    Funding    LSR</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     for (const item of posShow) {
@@ -2049,8 +2049,8 @@ function formatListMessage(positive, negative) {
     }
     if (positive.length > maxDisplay) msg += `<i>... e mais ${positive.length - maxDisplay} símbolos</i>\n`;
     
-    msg += `\n<i>🟢 FUNDING BAIXO + LSR BAIXO </i>\n`;
-    msg += `\n<i>🔍🤖 Em análise para Compra... </i>\n`;
+    msg += `\n<i>🟢 Titanium Setup Bull  </i>\n`;
+    msg += `\n<i>🔍🤖 Em análise para 💹Compra... </i>\n`;
     msg += `<i>Par   Preço    Funding    LSR</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     for (const item of negShow) {
