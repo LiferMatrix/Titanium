@@ -1,3 +1,237 @@
+const fetch = require('node-fetch');
+const fs = require('fs');
+const path = require('path');
+const WebSocket = require('ws');
+require('dotenv').config();
+
+// =====================================================================
+// === ARQUIVOS DE MEMÓRIA ===
+// =====================================================================
+const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
+const ALERT_HISTORY_FILE = path.join(__dirname, 'fundingAlerts.json');
+const ALERT_COUNTERS_FILE = path.join(__dirname, 'alertCounters.json');
+
+// =====================================================================
+// === CONFIGURAÇÃO COM STOP LOSS E TARGETS ===
+// =====================================================================
+const CONFIG = {
+    TELEGRAM: {
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
+    },
+    MONITOR: {
+        INTERVAL_MINUTES: 15,
+        TOP_SIZE: 8,
+        MIN_VOLUME_USDT: 500000,
+        MAX_SYMBOLS: 100,
+        EXCLUDE_SYMBOLS: ['USDCUSDT'],
+        LSRS_PERIOD: '5m',
+        CVD: {
+            TIMEFRAME_1H: '1h',
+            TIMEFRAME_15M: '15m',
+            CHECK_INTERVAL_SECONDS: 60,
+            LOOKBACK_CANDLES: 20,
+            MIN_CVD_CHANGE_PERCENT: 5,
+            CVD_HISTORY_SECONDS: 300,
+            CVD_CHANGE_WINDOW: 60,
+            MAX_CVD_CHANGE_PERCENT: 500
+        },
+        RSI: {
+            PERIOD: 14,
+            OVERBOUGHT: 70,
+            OVERSOLD: 30,
+            TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h', '12h', '1d'],
+            LOOKBACK_CANDLES: 100,
+            MIN_DIVERGENCES_REQUIRED: 2,
+            MIN_DIVERGENCE_STRENGTH: 5,
+            CVD_RSI_BUY_THRESHOLD: 60,
+            CVD_RSI_SELL_THRESHOLD: 65,
+            CVD_LSR_MAX_BUY: 1.6,
+            CVD_LSR_MIN_SELL: 2.5
+        },
+        BOLLINGER: {
+            PERIOD: 20,
+            STD_DEVIATION: 2.2,
+            TIMEFRAME: '15m',
+            APPROACH_PERCENTAGE: 0.6
+        },
+        VOLATILITY: {
+            MIN_ATR_PERCENT: 0.6,
+            ATR_PERIOD: 14,
+            TIMEFRAME: '15m'
+        },
+        STORAGE: {
+            MAX_FILE_SIZE_MB: 10,
+            MAX_TOTAL_SIZE_MB: 50,
+            MAX_BACKUP_AGE_DAYS: 7,
+            CLEANUP_INTERVAL_HOURS: 1
+        },
+        CLUSTERS: {
+            LOOKBACK_CANDLES: 500,
+            CLUSTER_THRESHOLD: 2,
+            MAX_CLUSTERS: 2,
+            PRICE_GROUP_PERCENTAGE: 0.8,
+            MIN_CLUSTER_STRENGTH: 2,
+            ROBUST_CLUSTER_THRESHOLD: 2
+        },
+        STOP_LOSS: {
+            ATR_MULTIPLIER: {
+                '1m': 2.5,
+                '5m': 2.5,
+                '15m': 2.8,
+                '30m': 3.0,
+                '1h': 3.0,
+                '2h': 3.2,
+                '4h': 3.5,
+                '12h': 3.8,
+                '1d': 4.0,
+                '3d': 4.5,
+                '1w': 5.0
+            },
+            MIN_STOP_DISTANCE_PERCENT: {
+                '1m': 1.0,
+                '5m': 1.2,
+                '15m': 1.5,
+                '30m': 1.8,
+                '1h': 2.0,
+                '2h': 2.2,
+                '4h': 2.5,
+                '12h': 3.0,
+                '1d': 3.5,
+                '3d': 4.0,
+                '1w': 5.0
+            },
+            MAX_STOP_DISTANCE_PERCENT: {
+                '1m': 5.0,
+                '5m': 5.5,
+                '15m': 6.0,
+                '30m': 6.5,
+                '1h': 7.0,
+                '2h': 7.5,
+                '4h': 8.0,
+                '12h': 9.0,
+                '1d': 10.0,
+                '3d': 12.0,
+                '1w': 15.0
+            }
+        },
+        TARGETS: {
+            TP1_MULTIPLIER: 1.5,
+            TP2_MULTIPLIER: 2.5,
+            TP3_MULTIPLIER: 4.0
+        }
+    }
+};
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR SCORE CVD (COMPLETO) ===
+// =====================================================================
+function calculateCVDScore(cvdChangePercent, buySellRatio, lsr, divergenceCount, isBuy) {
+    let score = 0;
+    const absChange = Math.abs(cvdChangePercent);
+    
+    // 1. CVD INTENSIDADE (máx 30 pts)
+    if (isBuy) {
+        if (absChange >= 50) score += 30;
+        else if (absChange >= 30) score += 25;
+        else if (absChange >= 15) score += 20;
+        else if (absChange >= 5) score += 10;
+    } else {
+        if (absChange >= 50) score += 30;
+        else if (absChange >= 30) score += 25;
+        else if (absChange >= 15) score += 20;
+        else if (absChange >= 5) score += 10;
+    }
+    
+    // 2. BUY/SELL RATIO (máx 25 pts)
+    if (isBuy) {
+        if (buySellRatio < 0.8) score += 25;
+        else if (buySellRatio < 1.0) score += 20;
+        else if (buySellRatio < 1.2) score += 10;
+        else score += 0;
+    } else {
+        if (buySellRatio > 1.5) score += 25;
+        else if (buySellRatio > 1.3) score += 20;
+        else if (buySellRatio > 1.1) score += 10;
+        else score += 0;
+    }
+    
+    // 3. LSR (máx 25 pts)
+    if (isBuy) {
+        if (lsr < 0.8) score += 25;
+        else if (lsr < 1.0) score += 20;
+        else if (lsr < 1.2) score += 10;
+        else score += 0;
+    } else {
+        if (lsr > 2.5) score += 25;
+        else if (lsr > 2.0) score += 20;
+        else if (lsr > 1.5) score += 10;
+        else score += 0;
+    }
+    
+    // 4. DIVERGÊNCIAS (máx 20 pts)
+    if (divergenceCount >= 5) score += 20;
+    else if (divergenceCount >= 3) score += 15;
+    else if (divergenceCount >= 2) score += 10;
+    else score += 0;
+    
+    return score;
+}
+
+function getScoreEmojiAndText(score) {
+    if (score >= 80) return { emoji: '🏆', text: 'EXCELENTE' };
+    if (score >= 70) return { emoji: '✅', text: 'BOM' };
+    if (score >= 60) return { emoji: '🟡', text: 'REGULAR' };
+    if (score >= 50) return { emoji: '⚠️', text: 'FRACO' };
+    return { emoji: '❌', text: 'RUIM' };
+}
+
+// =====================================================================
+// === FUNÇÃO STOP LOSS E TARGETS INTELIGENTE ===
+// =====================================================================
+function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
+    const atrMultiplier = CONFIG.MONITOR.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 3.0;
+    const minStopPercent = CONFIG.MONITOR.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 2.0;
+    const maxStopPercent = CONFIG.MONITOR.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 7.0;
+    
+    if (!candles || candles.length < 20) {
+        const defaultAtr = currentPrice * 0.02;
+        const stop = isGreenAlert ? currentPrice - defaultAtr * atrMultiplier : currentPrice + defaultAtr * atrMultiplier;
+        const atr = defaultAtr;
+        let tp1, tp2, tp3;
+        if (isGreenAlert) {
+            tp1 = currentPrice + atr * CONFIG.MONITOR.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice + atr * CONFIG.MONITOR.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice + atr * CONFIG.MONITOR.TARGETS.TP3_MULTIPLIER;
+        } else {
+            tp1 = currentPrice - atr * CONFIG.MONITOR.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice - atr * CONFIG.MONITOR.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice - atr * CONFIG.MONITOR.TARGETS.TP3_MULTIPLIER;
+        }
+        
+        let stopDistance = Math.abs(currentPrice - stop) / currentPrice * 100;
+        let finalStop = stop;
+        if (stopDistance < minStopPercent) {
+            finalStop = isGreenAlert ? currentPrice * (1 - minStopPercent / 100) : currentPrice * (1 + minStopPercent / 100);
+            stopDistance = minStopPercent;
+        } else if (stopDistance > maxStopPercent) {
+            finalStop = isGreenAlert ? currentPrice * (1 - maxStopPercent / 100) : currentPrice * (1 + maxStopPercent / 100);
+            stopDistance = maxStopPercent;
+        }
+        
+        const stopPercent = stopDistance;
+        
+        return { stop: finalStop, tp1, tp2, tp3, stopPercent };
+    }
+
+    const trValues = [];
+    for (let i = 1; i < candles.length; i++) {
+        const high = candles[i].high;
+        const low = candles[i].low;
+        const prevClose = candles[i-1].close;
+        trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+    }
+    const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
 
     let stopPrice = isGreenAlert ? currentPrice - (atr * atrMultiplier)
                                  : currentPrice + (atr * atrMultiplier);
@@ -1814,6 +2048,11 @@ async function monitorCVDRSIAlerts() {
                 // CALCULAR STOP LOSS E TARGETS PARA COMPRA (isGreenAlert = true)
                 const stopData = computeStopAndTargets(item.price, true, '1h', candles);
                 
+                // CALCULAR SCORE CVD
+                const divergenceCount = fundingMemory.getRSIDivergenceCount(item.fullSymbol).bullish;
+                const score = calculateCVDScore(capped, cvd.buySellRatio, item.lsr, divergenceCount, true);
+                const scoreInfo = getScoreEmojiAndText(score);
+                
                 alerts.push({ 
                     ...item, 
                     type: 'cvd_rsi_buy', 
@@ -1831,7 +2070,10 @@ async function monitorCVDRSIAlerts() {
                     stopLoss: stopData.stop,
                     stopLossPercent: stopData.stopPercent,
                     targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 },
-                    volatility: { atrPercent: volatilityData.atrPercent }
+                    volatility: { atrPercent: volatilityData.atrPercent },
+                    score: score,
+                    scoreEmoji: scoreInfo.emoji,
+                    scoreText: scoreInfo.text
                 });
             }
         }
@@ -1860,6 +2102,11 @@ async function monitorCVDRSIAlerts() {
                 // CALCULAR STOP LOSS E TARGETS PARA VENDA (isGreenAlert = false)
                 const stopData = computeStopAndTargets(item.price, false, '1h', candles);
                 
+                // CALCULAR SCORE CVD
+                const divergenceCount = fundingMemory.getRSIDivergenceCount(item.fullSymbol).bearish;
+                const score = calculateCVDScore(capped, cvd.buySellRatio, item.lsr, divergenceCount, false);
+                const scoreInfo = getScoreEmojiAndText(score);
+                
                 alerts.push({ 
                     ...item, 
                     type: 'cvd_rsi_sell', 
@@ -1877,7 +2124,10 @@ async function monitorCVDRSIAlerts() {
                     stopLoss: stopData.stop,
                     stopLossPercent: stopData.stopPercent,
                     targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 },
-                    volatility: { atrPercent: volatilityData.atrPercent }
+                    volatility: { atrPercent: volatilityData.atrPercent },
+                    score: score,
+                    scoreEmoji: scoreInfo.emoji,
+                    scoreText: scoreInfo.text
                 });
             }
         }
@@ -1910,6 +2160,10 @@ async function monitorCVDAndRSI() {
                 const candles = await getCandles(item.fullSymbol, '1h', 100);
                 const stopData = computeStopAndTargets(item.price, false, '1h', candles);
                 
+                // CALCULAR SCORE CVD
+                const score = calculateCVDScore(cvd.changePercent, cvd.buySellRatio, item.lsr, rsiData.totalBearishDivergences, false);
+                const scoreInfo = getScoreEmojiAndText(score);
+                
                 alerts.push({ 
                     ...item, 
                     type: 'positive', 
@@ -1927,7 +2181,10 @@ async function monitorCVDAndRSI() {
                     alertNumber: alertNumber,
                     stopLoss: stopData.stop,
                     stopLossPercent: stopData.stopPercent,
-                    targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 }
+                    targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 },
+                    score: score,
+                    scoreEmoji: scoreInfo.emoji,
+                    scoreText: scoreInfo.text
                 });
             }
         }
@@ -1949,6 +2206,10 @@ async function monitorCVDAndRSI() {
                 const candles = await getCandles(item.fullSymbol, '1h', 100);
                 const stopData = computeStopAndTargets(item.price, true, '1h', candles);
                 
+                // CALCULAR SCORE CVD
+                const score = calculateCVDScore(cvd.changePercent, cvd.buySellRatio, item.lsr, rsiData.totalBullishDivergences, true);
+                const scoreInfo = getScoreEmojiAndText(score);
+                
                 alerts.push({ 
                     ...item, 
                     type: 'negative', 
@@ -1966,7 +2227,10 @@ async function monitorCVDAndRSI() {
                     alertNumber: alertNumber,
                     stopLoss: stopData.stop,
                     stopLossPercent: stopData.stopPercent,
-                    targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 }
+                    targets: { tp1: stopData.tp1, tp2: stopData.tp2, tp3: stopData.tp3 },
+                    score: score,
+                    scoreEmoji: scoreInfo.emoji,
+                    scoreText: scoreInfo.text
                 });
             }
         }
@@ -1986,9 +2250,8 @@ function formatCVDRSIAlert(alert) {
     
     let msg = `<i>${emoji} ${alert.symbol} - Preço: ${formatPrice(alert.lastPrice || alert.price)} </i>\n`;
     msg += `<i>🔹Alerta: ${alert.alertNumber} - ${dt.full}hs</i>\n`;
-    msg += `<i>Criterios: ${alert.action} </i>\n`;
-    msg += `<i>Fund: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
-    msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>\n`;
+    msg += `<i>✨#Score: ${alert.scoreEmoji} ${alert.score}/100 (${alert.scoreText})</i>\n`;
+    msg += `<i>LSR: ${alert.lsr.toFixed(2)} | Fund: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>RSI 1h: ${alert.rsi1h.toFixed(1)} ${rsiStatus}</i>\n`;
     msg += `<i>CVD variação: ${isBuy ? '+' : ''}${cvdPct}% em 60s</i>\n`;
     msg += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
@@ -2049,14 +2312,12 @@ function formatCompleteAlert(alert) {
     
     const rsiValue = alert.rsi1h;
     const rsiStatus = rsiValue ? (rsiValue > 66 ? '🔴' : (rsiValue < 51 ? '🟢' : '')) : '';
-    const rsiLine = rsiValue ? `\n<i>RSI 1h: ${rsiValue.toFixed(1)} ${rsiStatus}</i>` : '';
     
     let msg = `<i>${emoji} ${alert.symbol} Analisar ${alert.action}</i>\n`;
     msg += `<i>🔹Alerta: ${alert.alertNumber} - ${dt.full}hs</i>\n`;
     msg += `<i>Preço: ${formatPrice(alert.lastPrice || alert.price)}</i>\n`;
-    msg += `<i>Criterios: FUNDING + LSR</i>\n`;
-    msg += `<i>Fund: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
-    msg += `<i>LSR: ${alert.lsr.toFixed(2)}</i>${rsiLine}\n`;
+    msg += `<i>✨#Score: ${alert.scoreEmoji} ${alert.score}/100 (${alert.scoreText})</i>\n`;
+    msg += `<i>LSR: ${alert.lsr.toFixed(2)} | RSI 1h: ${rsiValue ? rsiValue.toFixed(1) : '-'} ${rsiStatus} | Fund: ${alert.funding >= 0 ? '+' : ''}${alert.fundingPercent.toFixed(4)}%</i>\n`;
     msg += `<i>⭐ ${alert.cvd.alertReason}</i>\n`;
     msg += `<i>Buy/Sell Ratio: ${ratioText}</i>\n`;
     msg += `<i>🟢Compras CVD: ${(alert.cvd.buyVolume / 1000000).toFixed(2)}M USDT</i>\n`;
@@ -2099,28 +2360,27 @@ function formatCompleteAlert(alert) {
     
     msg += `<i> Suporte : ${suporteText}</i>\n`;
     msg += `<i> Resistência : ${resistenciaText}</i>\n`;
-    msg += `<i>⭐ DIVERGÊNCIA DE RSI</i>\n`;
+    msg += `<i>⭐ Divergência de RSI</i>\n`;
     
     if (isBuy) {
         if (alert.rsiDivergences.bullishCount > 0) {
-            msg += `<i>📈 ALTA: ${alert.rsiDivergences.bullishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em ${alert.rsiDivergences.bullishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
+            msg += `<i>📈 Alta: ${alert.rsiDivergences.bullishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED}  ${alert.rsiDivergences.bullishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
         } else {
-            msg += `<i>📈 ALTA: 0/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em Nenhum</i>\n`;
+            msg += `<i>📈 Alta: 0/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em Nenhum</i>\n`;
         }
     } else {
         if (alert.rsiDivergences.bearishCount > 0) {
-            msg += `<i>📉 BAIXA: ${alert.rsiDivergences.bearishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em ${alert.rsiDivergences.bearishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
+            msg += `<i>📉 Baixa: ${alert.rsiDivergences.bearishCount}/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED}  ${alert.rsiDivergences.bearishTimeframes.join(', ') || 'Nenhum'}</i>\n`;
         } else {
-            msg += `<i>📉 BAIXA: 0/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} divergências em Nenhum</i>\n`;
+            msg += `<i>📉 Baixa: 0/${CONFIG.MONITOR.RSI.MIN_DIVERGENCES_REQUIRED} </i>\n`;
         }
     }
     msg += `<i>"Não é recomendação de investimento"</i>\n`;
     msg += `<i>🤖 Titanium Prime X by  @J4Rviz</i>`;
     return msg;
 }
-
 // =====================================================================
-// === FUNÇÕES DE BUSCA DE DADOS (MOVER PARA CIMA) ===
+// === FUNÇÕES DE BUSCA DE DADOS ===
 // =====================================================================
 
 async function get24hData() {
@@ -2191,12 +2451,8 @@ async function updateWatchedSymbols() {
     return { positive, negative };
 }
 
-// =====================================================================
-// === FUNÇÃO FORMATAR MENSAGEM COM DATA/HORA ===
-// =====================================================================
-
 function formatListMessage(positive, negative) {
-    const dt = getBrazilianDateTime();  // ← ADICIONADO
+    const dt = getBrazilianDateTime();
     const maxDisplay = 8;
     const posShow = positive.slice(0, maxDisplay);
     const negShow = negative.slice(0, maxDisplay);
@@ -2224,65 +2480,8 @@ function formatListMessage(positive, negative) {
     return msg;
 }
 
-async function getFundingRates(symbols) {
-    try {
-        const res = await rateLimitedFetch('https://fapi.binance.com/fapi/v1/premiumIndex');
-        const data = await res.json();
-        const result = {};
-        for (const i of data) if (symbols.includes(i.symbol)) result[i.symbol] = parseFloat(i.lastFundingRate);
-        return result;
-    } catch (error) {
-        log(`Erro funding: ${error.message}`, 'error');
-        return {};
-    }
-}
-
-async function getLSRData(symbols) {
-    try {
-        const period = CONFIG.MONITOR.LSRS_PERIOD;
-        const promises = symbols.map(async s => {
-            try {
-                const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${s}&period=${period}&limit=1`;
-                const res = await rateLimitedFetch(url);
-                const data = await res.json();
-                return { symbol: s, lsr: data && data.length ? parseFloat(data[0].longShortRatio) : null };
-            } catch { return { symbol: s, lsr: null }; }
-        });
-        const results = await Promise.all(promises);
-        const result = {};
-        for (const i of results) result[i.symbol] = i.lsr;
-        return result;
-    } catch (error) {
-        log(`Erro LSR: ${error.message}`, 'error');
-        return {};
-    }
-}
-
-async function updateWatchedSymbols() {
-    const ticker = await get24hData();
-    const symbols = Object.keys(ticker);
-    if (!symbols.length) return null;
-    
-    const funding = await getFundingRates(symbols);
-    const lsr = await getLSRData(symbols);
-    const combined = [];
-    for (const s of symbols) {
-        if (funding[s] !== undefined && lsr[s] !== null && lsr[s] > 0) {
-            combined.push({ symbol: s.replace('USDT', ''), fullSymbol: s, price: ticker[s].price, funding: funding[s], fundingPercent: funding[s] * 100, lsr: lsr[s] });
-        }
-    }
-    
-    const positive = [...combined].sort((a, b) => b.funding - a.funding).slice(0, CONFIG.MONITOR.TOP_SIZE * 2).sort((a, b) => b.lsr - a.lsr).slice(0, CONFIG.MONITOR.TOP_SIZE);
-    const negative = [...combined].sort((a, b) => a.funding - b.funding).slice(0, CONFIG.MONITOR.TOP_SIZE * 2).sort((a, b) => a.lsr - b.lsr).slice(0, CONFIG.MONITOR.TOP_SIZE);
-    fundingMemory.updateWatchedSymbols(positive, negative);
-    return { positive, negative };
-}
-
 async function sendInitMessage() {
-    const dt = getBrazilianDateTime();
-    const stats = rateLimiter.getStats();
     let msg = `<i> Titanium Prime X</i>\n\n`;
-    
     await sendToTelegram(msg);
 }
 
@@ -2302,10 +2501,10 @@ async function startMonitor() {
         await sendToTelegram(formatListMessage(currentPositive, currentNegative));
     }
     
-    // Inicializar o monitor de conexão APÓS o cvdManager e fundingMemory estarem prontos
+    // Inicializar o monitor de conexão
     const connectionMonitor = new ConnectionMonitor(cvdManager, fundingMemory);
     
-    // Opcional: mostrar status a cada hora
+    // Mostrar status a cada hora
     setInterval(() => {
         const status = connectionMonitor.getStatus();
         if (!status.isConnected || status.connectedSymbols < status.totalSymbols) {
