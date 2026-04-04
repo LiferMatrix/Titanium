@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZf',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 10,
@@ -20,7 +20,7 @@ const CONFIG = {
         COOLDOWN_AFTER_BATCH_MS: 2000,
         MAX_REQUESTS_PER_MINUTE: 1200,
         CACHE_DURATION_SECONDS: 30,
-        TOP_SYMBOLS_LIMIT: 430
+        TOP_SYMBOLS_LIMIT: 400
     },
     ALERTS: {
         COOLDOWN_MINUTES: 15,
@@ -51,7 +51,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
@@ -1127,7 +1127,7 @@ async function getTopSymbols() {
             'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
             'LTCUSDT','BCHUSDT','ARBUSDT','OPUSDT','INJUSDT','IMXUSDT','STXUSDT','HBARUSDT','VETUSDT','RUNEUSDT',
             'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT',
-            'AAVEUSDT','MKRUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','BALUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
+            'AAVEUSDT','MKRUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','ONDOUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
         ];
     }
 }
@@ -2552,7 +2552,7 @@ function formatAlert(data) {
     const volume3mLine = `#Vol 3m: ${data.volume3m.ratioFormatted}x (${data.volume3m.percentage.toFixed(0)}%) ${data.volume3m.text}`;
     
     let cvdLine = '';
-    const cvdTypeIcon = data.cvdIsReal ? '🔴' : '🟡';
+    const cvdTypeIcon = data.cvdIsReal ? '🏆Top 100' : '🚨Vol Menor';
     
     if (data.cvdConfirmed) {
         const cvdEmoji = data.cvdSignal?.type === 'bullish' ? '💹' : '🔻';
@@ -2676,7 +2676,7 @@ ${cvdLine}
 ${targets}
 ${stop}
 ▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
-#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TV</a>
+#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 Gráfico</a>
 ${volume3mLine}
 ${volume1hLine}
 #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
