@@ -10,21 +10,17 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oA',
-        CHAT_ID: '-1001997'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 10,
         SYMBOL_DELAY_MS: 4000,
         REQUEST_TIMEOUT: 10000,
-        COOLDOWN_AFTER_BATCH_MS: 4000, // Aumentado de 2000 para 4000ms
+        COOLDOWN_AFTER_BATCH_MS: 2000,
         MAX_REQUESTS_PER_MINUTE: 1200,
         CACHE_DURATION_SECONDS: 30,
-        TOP_SYMBOLS_LIMIT: 400,
-        // Timeframes principais para divergência (inclui 30m e 2h)
-        TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h', '1d', '1w'],
-        // Timeframes adicionais para dados de suporte (3m e 15m para confirmação)
-        ADDITIONAL_TIMEFRAMES: ['3m', '15m']
+        TOP_SYMBOLS_LIMIT: 430
     },
     ALERTS: {
         COOLDOWN_MINUTES: 15,
@@ -55,7 +51,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
@@ -80,12 +76,12 @@ const CONFIG = {
         MAX_GROUP_SIZE: 3,
         SIMILAR_PRICE_DIFF: 1.0,
         MIN_SCORE_TO_ALERT: 3,
-        MAX_ALERTS_PER_SCAN: 40,
+        MAX_ALERTS_PER_SCAN: 30,
         IGNORE_LOW_VOLUME_SYMBOLS: true,
         TELEGRAM_DELAY_MS: 5000,
         MIN_15M_VOLATILITY: {
             ENABLED: true,
-            MIN_ATR_PERCENT: 0.4,
+            MIN_ATR_PERCENT: 0.5,
             MIN_BB_WIDTH_PERCENT: 1.2,
             CHECK_TIMEFRAMES: ['1h', '4h', '1d', '3d', '1w']
         },
@@ -158,10 +154,7 @@ const CONFIG = {
             CHECK_TIMEFRAME: '3m',      // Timeframe para confirmação da reversão
             EMA_FAST: 13,               // EMA rápida para cruzamento
             EMA_SLOW: 34,               // EMA lenta para cruzamento
-            EMA_TREND: 55,              // EMA de tendência para fechamento
-            MIN_CROSS_DISTANCE_PERCENT: 0.3, // Distância mínima entre EMAs para confirmação
-            REQUIRE_VOLUME_SPIKE: true,      // Exige pico de volume na confirmação
-            VOLUME_SPIKE_MULTIPLIER: 1.5     // Mínimo de volume relativo à média
+            EMA_TREND: 55               // EMA de tendência para fechamento
         }
     },
     VOLUME: { EMA_PERIOD: 9 },
@@ -287,12 +280,10 @@ const CONFIG = {
         },
         WEBSOCKET: {
             ENABLED: true,
-            MAX_SYMBOLS: 85, // Reduzido de 100 para 70 para maior estabilidade
+            MAX_SYMBOLS: 100,
             SNAPSHOT_INTERVAL_MS: 15 * 60 * 1000,
             RECONNECT_DELAY_MS: 5000,
-            WS_URL: 'wss://fstream.binance.com',
-            HEARTBEAT_INTERVAL_MS: 30000, // Heartbeat a cada 30s
-            MAX_RECONNECT_ATTEMPTS: 5
+            WS_URL: 'wss://fstream.binance.com'
         }
     }
 };
@@ -430,16 +421,6 @@ function calculateEMASeries(values, period) {
     return emaSeries;
 }
 
-function checkVolumeSpike(candles, multiplier) {
-    if (!candles || candles.length < 21) return false;
-    
-    const recentVolumes = candles.slice(-21, -1).map(c => c.volume);
-    const avgVolume = recentVolumes.reduce((a, b) => a + b, 0) / 20;
-    const currentVolume = candles[candles.length - 1].volume;
-    
-    return currentVolume > avgVolume * multiplier;
-}
-
 async function checkEMAConfirmation(symbol, direction) {
     try {
         const timeframe = CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME || '3m';
@@ -466,10 +447,6 @@ async function checkEMAConfirmation(symbol, direction) {
         const currentPrice = closes[closes.length - 1];
         const currentCandle = candles[candles.length - 1];
         
-        // Verifica volume spike
-        const volumeSpike = checkVolumeSpike(candles, CONFIG.ALERTS.MEMORY.VOLUME_SPIKE_MULTIPLIER);
-        const requireVolume = CONFIG.ALERTS.MEMORY.REQUIRE_VOLUME_SPIKE;
-        
         let confirmed = false;
         let message = '';
         
@@ -478,25 +455,14 @@ async function checkEMAConfirmation(symbol, direction) {
             const ema13CrossedUp = previousEMA13 <= previousEMA34 && currentEMA13 > currentEMA34;
             const priceAboveEMA55 = currentPrice > currentEMA55;
             
-            // Distância mínima entre EMAs
-            const crossDistance = ((currentEMA13 - currentEMA34) / currentEMA34) * 100;
-            const minDistance = CONFIG.ALERTS.MEMORY.MIN_CROSS_DISTANCE_PERCENT;
-            const distanceOk = crossDistance >= minDistance;
-            
-            if (ema13CrossedUp && priceAboveEMA55 && distanceOk) {
-                if (!requireVolume || volumeSpike) {
-                    confirmed = true;
-                    message = `✅ COMPRA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} > ${currentEMA34.toFixed(2)}) | Distância: ${crossDistance.toFixed(2)}% | Preço > EMA55 | Volume: ${volumeSpike ? 'PICO ✅' : 'Normal'}`;
-                    log(`📈 ${symbol} - ${message}`, 'success');
-                } else {
-                    message = `⏳ Aguardando pico de volume para confirmação (volume atual vs média)`;
-                }
+            if (ema13CrossedUp && priceAboveEMA55) {
+                confirmed = true;
+                message = `✅ COMPRA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} > ${currentEMA34.toFixed(2)}) | Preço (${formatPrice(currentPrice)}) > EMA55 (${currentEMA55.toFixed(2)})`;
+                log(`📈 ${symbol} - ${message}`, 'success');
             } else if (ema13CrossedUp && !priceAboveEMA55) {
                 message = `⏳ Aguardando fechamento acima da EMA55 (${formatPrice(currentPrice)} < ${currentEMA55.toFixed(2)})`;
             } else if (!ema13CrossedUp && priceAboveEMA55) {
                 message = `⏳ Aguardando cruzamento da EMA13 sobre EMA34 (${currentEMA13.toFixed(2)} < ${currentEMA34.toFixed(2)})`;
-            } else if (ema13CrossedUp && priceAboveEMA55 && !distanceOk) {
-                message = `⏳ Distância entre EMAs insuficiente: ${crossDistance.toFixed(2)}% < ${minDistance}%`;
             } else {
                 message = `⏳ Aguardando confirmação: EMA13:${currentEMA13.toFixed(2)} | EMA34:${currentEMA34.toFixed(2)} | Preço/EMA55:${formatPrice(currentPrice)}/${currentEMA55.toFixed(2)}`;
             }
@@ -505,25 +471,14 @@ async function checkEMAConfirmation(symbol, direction) {
             const ema13CrossedDown = previousEMA13 >= previousEMA34 && currentEMA13 < currentEMA34;
             const priceBelowEMA55 = currentPrice < currentEMA55;
             
-            // Distância mínima entre EMAs
-            const crossDistance = ((currentEMA34 - currentEMA13) / currentEMA34) * 100;
-            const minDistance = CONFIG.ALERTS.MEMORY.MIN_CROSS_DISTANCE_PERCENT;
-            const distanceOk = crossDistance >= minDistance;
-            
-            if (ema13CrossedDown && priceBelowEMA55 && distanceOk) {
-                if (!requireVolume || volumeSpike) {
-                    confirmed = true;
-                    message = `✅ VENDA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} < ${currentEMA34.toFixed(2)}) | Distância: ${crossDistance.toFixed(2)}% | Preço < EMA55 | Volume: ${volumeSpike ? 'PICO ✅' : 'Normal'}`;
-                    log(`📉 ${symbol} - ${message}`, 'success');
-                } else {
-                    message = `⏳ Aguardando pico de volume para confirmação (volume atual vs média)`;
-                }
+            if (ema13CrossedDown && priceBelowEMA55) {
+                confirmed = true;
+                message = `✅ VENDA confirmada: EMA13 cruzou EMA34 (${currentEMA13.toFixed(2)} < ${currentEMA34.toFixed(2)}) | Preço (${formatPrice(currentPrice)}) < EMA55 (${currentEMA55.toFixed(2)})`;
+                log(`📉 ${symbol} - ${message}`, 'success');
             } else if (ema13CrossedDown && !priceBelowEMA55) {
                 message = `⏳ Aguardando fechamento abaixo da EMA55 (${formatPrice(currentPrice)} > ${currentEMA55.toFixed(2)})`;
             } else if (!ema13CrossedDown && priceBelowEMA55) {
                 message = `⏳ Aguardando cruzamento da EMA13 abaixo da EMA34 (${currentEMA13.toFixed(2)} > ${currentEMA34.toFixed(2)})`;
-            } else if (ema13CrossedDown && priceBelowEMA55 && !distanceOk) {
-                message = `⏳ Distância entre EMAs insuficiente: ${crossDistance.toFixed(2)}% < ${minDistance}%`;
             } else {
                 message = `⏳ Aguardando confirmação: EMA13:${currentEMA13.toFixed(2)} | EMA34:${currentEMA34.toFixed(2)} | Preço/EMA55:${formatPrice(currentPrice)}/${currentEMA55.toFixed(2)}`;
             }
@@ -536,8 +491,6 @@ async function checkEMAConfirmation(symbol, direction) {
             ema34: currentEMA34,
             ema55: currentEMA55,
             currentPrice,
-            volumeSpike,
-            crossDistance: direction === 'COMPRA' ? ((currentEMA13 - currentEMA34) / currentEMA34) * 100 : ((currentEMA34 - currentEMA13) / currentEMA34) * 100,
             candles
         };
         
@@ -583,8 +536,6 @@ class SmartCache {
     constructor() {
         this.cache = new Map();
         this.requestTimestamps = [];
-        // Cache mais agressivo por símbolo + timeframe
-        this.symbolTimeframeCache = new Map();
     }
 
     get(key) {
@@ -595,22 +546,6 @@ class SmartCache {
             return null;
         }
         return item.data;
-    }
-    
-    getSymbolTimeframe(symbol, timeframe) {
-        const key = `${symbol}_${timeframe}`;
-        const item = this.symbolTimeframeCache.get(key);
-        if (!item) return null;
-        if (Date.now() - item.timestamp > CONFIG.SCAN.CACHE_DURATION_SECONDS * 1000) {
-            this.symbolTimeframeCache.delete(key);
-            return null;
-        }
-        return item.data;
-    }
-    
-    setSymbolTimeframe(symbol, timeframe, data) {
-        const key = `${symbol}_${timeframe}`;
-        this.symbolTimeframeCache.set(key, { data, timestamp: Date.now() });
     }
 
     set(key, data) {
@@ -690,7 +625,6 @@ let currentTopSymbols = [];
 const priorityQueue = { critical: [], high: [], medium: [], low: [] };
 let isSendingTelegram = false;
 let alertsSentThisScan = 0;
-let problemSymbols = new Map(); // Para monitorar símbolos problemáticos
 
 // =====================================================================
 // === CVD REAL VIA WEBSOCKET ===
@@ -703,8 +637,6 @@ class RealCVDManager {
         this.listeners = new Map();
         this.isInitialized = false;
         this.reconnectTimer = null;
-        this.heartbeatIntervals = new Map();
-        this.reconnectAttempts = new Map();
     }
 
     async initialize(symbols) {
@@ -714,10 +646,9 @@ class RealCVDManager {
         }
 
         const maxSymbols = CONFIG.CVD.WEBSOCKET.MAX_SYMBOLS;
-        // Filtra apenas os símbolos mais líquidos
         const activeSymbols = symbols.slice(0, maxSymbols);
         
-        log(`Inicializando CVD Real para ${activeSymbols.length} símbolos (limite ${maxSymbols})...`, 'info');
+        log(`Inicializando CVD Real para ${activeSymbols.length} símbolos...`, 'info');
         
         for (const symbol of activeSymbols) {
             await this.connectSymbol(symbol);
@@ -738,31 +669,16 @@ class RealCVDManager {
         const wsUrl = `${CONFIG.CVD.WEBSOCKET.WS_URL}/ws/${streamName}`;
         
         const ws = new WebSocket(wsUrl);
-        let reconnectAttempt = 0;
         
         ws.on('open', () => {
             log(`✅ WebSocket conectado para ${symbol}`, 'success');
-            this.reconnectAttempts.delete(symbol);
             this.snapshots.set(symbol, {
                 cumulative: 0,
                 deltas: [],
                 lastUpdate: Date.now(),
                 startPrice: null,
-                lastPrice: null,
-                lastHeartbeat: Date.now()
+                lastPrice: null
             });
-            
-            // Configura heartbeat/ping
-            const heartbeatInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.ping();
-                    const snapshot = this.snapshots.get(symbol);
-                    if (snapshot) {
-                        snapshot.lastHeartbeat = Date.now();
-                    }
-                }
-            }, CONFIG.CVD.WEBSOCKET.HEARTBEAT_INTERVAL_MS);
-            this.heartbeatIntervals.set(symbol, heartbeatInterval);
         });
         
         ws.on('message', (data) => {
@@ -774,27 +690,12 @@ class RealCVDManager {
         
         ws.on('error', (error) => {
             log(`Erro WebSocket ${symbol}: ${error.message}`, 'error');
-            this.logProblematicSymbol(symbol, error.message);
         });
         
         ws.on('close', () => {
             log(`WebSocket fechado para ${symbol}, reconectando...`, 'warning');
             this.connections.delete(symbol);
-            
-            const heartbeatInterval = this.heartbeatIntervals.get(symbol);
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-                this.heartbeatIntervals.delete(symbol);
-            }
-            
-            const attempts = (this.reconnectAttempts.get(symbol) || 0) + 1;
-            if (attempts <= CONFIG.CVD.WEBSOCKET.MAX_RECONNECT_ATTEMPTS) {
-                this.reconnectAttempts.set(symbol, attempts);
-                setTimeout(() => this.connectSymbol(symbol), CONFIG.CVD.WEBSOCKET.RECONNECT_DELAY_MS);
-            } else {
-                log(`❌ ${symbol} - Máximo de reconexões atingido, desativando CVD`, 'error');
-                this.logProblematicSymbol(symbol, 'max reconnections reached');
-            }
+            setTimeout(() => this.connectSymbol(symbol), CONFIG.CVD.WEBSOCKET.RECONNECT_DELAY_MS);
         });
         
         this.connections.set(symbol, ws);
@@ -806,54 +707,45 @@ class RealCVDManager {
             ws.close();
             this.connections.delete(symbol);
         }
-        const heartbeatInterval = this.heartbeatIntervals.get(symbol);
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-            this.heartbeatIntervals.delete(symbol);
-        }
     }
 
     processTrade(symbol, trade) {
-        try {
-            const snapshot = this.snapshots.get(symbol);
-            if (!snapshot) return;
-            
-            const price = parseFloat(trade.p);
-            const quantity = parseFloat(trade.q);
-            const value = price * quantity;
-            const isAggressiveBuy = !trade.m;
-            const delta = isAggressiveBuy ? value : -value;
-            snapshot.cumulative += delta;
-            
-            snapshot.deltas.push({
-                delta: delta,
-                price: price,
-                timestamp: trade.T || Date.now(),
-                cumulative: snapshot.cumulative
-            });
-            
-            snapshot.lastPrice = price;
-            if (!snapshot.startPrice) snapshot.startPrice = price;
-            
-            const maxDeltas = 900;
-            if (snapshot.deltas.length > maxDeltas) {
-                snapshot.deltas = snapshot.deltas.slice(-maxDeltas);
-            }
-            
-            snapshot.lastUpdate = Date.now();
-            
-            const listeners = this.listeners.get(symbol);
-            if (listeners) {
-                listeners.forEach(cb => cb({
-                    symbol,
-                    price,
-                    delta,
-                    cumulative: snapshot.cumulative,
-                    timestamp: trade.T
-                }));
-            }
-        } catch (error) {
-            this.logProblematicSymbol(symbol, `processTrade error: ${error.message}`);
+        const snapshot = this.snapshots.get(symbol);
+        if (!snapshot) return;
+        
+        const price = parseFloat(trade.p);
+        const quantity = parseFloat(trade.q);
+        const value = price * quantity;
+        const isAggressiveBuy = !trade.m;
+        const delta = isAggressiveBuy ? value : -value;
+        snapshot.cumulative += delta;
+        
+        snapshot.deltas.push({
+            delta: delta,
+            price: price,
+            timestamp: trade.T || Date.now(),
+            cumulative: snapshot.cumulative
+        });
+        
+        snapshot.lastPrice = price;
+        if (!snapshot.startPrice) snapshot.startPrice = price;
+        
+        const maxDeltas = 900;
+        if (snapshot.deltas.length > maxDeltas) {
+            snapshot.deltas = snapshot.deltas.slice(-maxDeltas);
+        }
+        
+        snapshot.lastUpdate = Date.now();
+        
+        const listeners = this.listeners.get(symbol);
+        if (listeners) {
+            listeners.forEach(cb => cb({
+                symbol,
+                price,
+                delta,
+                cumulative: snapshot.cumulative,
+                timestamp: trade.T
+            }));
         }
     }
 
@@ -864,83 +756,67 @@ class RealCVDManager {
         this.listeners.get(symbol).push(callback);
     }
 
-    logProblematicSymbol(symbol, reason) {
-        const problems = problemSymbols.get(symbol) || [];
-        problems.push({ reason, timestamp: Date.now() });
-        const recentProblems = problems.filter(p => Date.now() - p.timestamp < 3600000);
-        problemSymbols.set(symbol, recentProblems);
-        
-        if (recentProblems.length >= 5) {
-            log(`⚠️ ${symbol} - ${recentProblems.length} problemas na última hora: ${reason}`, 'warning');
-        }
-    }
-
     getCVDAnalysis(symbol, currentPrice, isGreenAlert) {
-        try {
-            const snapshot = this.snapshots.get(symbol);
-            
-            if (!snapshot || !snapshot.deltas || snapshot.deltas.length < 10) {
-                return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: false };
-            }
-            
-            const deltas = snapshot.deltas;
-            const recentDeltas = deltas.slice(-50);
-            
-            const cvdValues = recentDeltas.map(d => d.cumulative);
-            const cvdStart = cvdValues[0] || 0;
-            const cvdEnd = cvdValues[cvdValues.length - 1] || 0;
-            const cvdTrend = cvdEnd - cvdStart;
-            
-            const prices = recentDeltas.map(d => d.price);
-            const priceStart = prices[0] || currentPrice;
-            const priceEnd = prices[prices.length - 1] || currentPrice;
-            const priceTrend = priceEnd - priceStart;
-            
-            let divergence = null;
-            
-            if (priceTrend < 0 && cvdTrend > 0) {
-                divergence = {
-                    type: 'bullish',
-                    description: 'Preço caindo, CVD subindo (acumulação)',
-                    strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
-                    score: CONFIG.CVD.SCORE_BONUS.BULLISH_DIVERGENCE
-                };
-            } else if (priceTrend > 0 && cvdTrend < 0) {
-                divergence = {
-                    type: 'bearish',
-                    description: 'Preço subindo, CVD caindo (distribuição)',
-                    strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
-                    score: CONFIG.CVD.SCORE_BONUS.BEARISH_DIVERGENCE
-                };
-            } else if ((priceTrend > 0 && cvdTrend > 0) || (priceTrend < 0 && cvdTrend < 0)) {
-                divergence = {
-                    type: priceTrend > 0 ? 'bullish' : 'bearish',
-                    description: 'CVD alinhado com tendência',
-                    strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
-                    score: CONFIG.CVD.SCORE_BONUS.TREND_BONUS
-                };
-            }
-            
-            if (divergence) {
-                const isAligned = (isGreenAlert && divergence.type === 'bullish') ||
-                                  (!isGreenAlert && divergence.type === 'bearish');
-                
-                return {
-                    cvdConfirmed: isAligned,
-                    cvdScore: divergence.score,
-                    cvdSignal: divergence,
-                    isReal: true,
-                    cvdTrend: cvdTrend,
-                    priceTrend: priceTrend,
-                    deltaCount: recentDeltas.length
-                };
-            }
-            
-            return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: true };
-        } catch (error) {
-            this.logProblematicSymbol(symbol, `getCVDAnalysis error: ${error.message}`);
+        const snapshot = this.snapshots.get(symbol);
+        
+        if (!snapshot || !snapshot.deltas || snapshot.deltas.length < 10) {
             return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: false };
         }
+        
+        const deltas = snapshot.deltas;
+        const recentDeltas = deltas.slice(-50);
+        
+        const cvdValues = recentDeltas.map(d => d.cumulative);
+        const cvdStart = cvdValues[0] || 0;
+        const cvdEnd = cvdValues[cvdValues.length - 1] || 0;
+        const cvdTrend = cvdEnd - cvdStart;
+        
+        const prices = recentDeltas.map(d => d.price);
+        const priceStart = prices[0] || currentPrice;
+        const priceEnd = prices[prices.length - 1] || currentPrice;
+        const priceTrend = priceEnd - priceStart;
+        
+        let divergence = null;
+        
+        if (priceTrend < 0 && cvdTrend > 0) {
+            divergence = {
+                type: 'bullish',
+                description: 'Preço caindo, CVD subindo (acumulação)',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.BULLISH_DIVERGENCE
+            };
+        } else if (priceTrend > 0 && cvdTrend < 0) {
+            divergence = {
+                type: 'bearish',
+                description: 'Preço subindo, CVD caindo (distribuição)',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.BEARISH_DIVERGENCE
+            };
+        } else if ((priceTrend > 0 && cvdTrend > 0) || (priceTrend < 0 && cvdTrend < 0)) {
+            divergence = {
+                type: priceTrend > 0 ? 'bullish' : 'bearish',
+                description: 'CVD alinhado com tendência',
+                strength: Math.abs(cvdTrend / (Math.abs(priceStart) || 1)) * 100,
+                score: CONFIG.CVD.SCORE_BONUS.TREND_BONUS
+            };
+        }
+        
+        if (divergence) {
+            const isAligned = (isGreenAlert && divergence.type === 'bullish') ||
+                              (!isGreenAlert && divergence.type === 'bearish');
+            
+            return {
+                cvdConfirmed: isAligned,
+                cvdScore: divergence.score,
+                cvdSignal: divergence,
+                isReal: true,
+                cvdTrend: cvdTrend,
+                priceTrend: priceTrend,
+                deltaCount: recentDeltas.length
+            };
+        }
+        
+        return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: true };
     }
 
     getStats() {
@@ -958,11 +834,7 @@ class RealCVDManager {
         for (const [symbol, ws] of this.connections) {
             ws.close();
         }
-        for (const [symbol, interval] of this.heartbeatIntervals) {
-            clearInterval(interval);
-        }
         this.connections.clear();
-        this.heartbeatIntervals.clear();
         this.snapshots.clear();
         log('CVD Real desligado', 'info');
     }
@@ -972,16 +844,12 @@ const realCVD = new RealCVDManager();
 
 async function analyzeCVDHybrid(symbol, currentPrice, isGreenAlert) {
     if (CONFIG.CVD.WEBSOCKET.ENABLED && realCVD.isInitialized) {
-        try {
-            const realResult = realCVD.getCVDAnalysis(symbol, currentPrice, isGreenAlert);
-            if (realResult.isReal && realResult.cvdSignal) {
-                if (realResult.cvdConfirmed) {
-                    log(`✅ ${symbol} - CVD REAL ${realResult.cvdSignal.type} +${realResult.cvdScore} (${realResult.deltaCount} trades)`, 'success');
-                }
-                return realResult;
+        const realResult = realCVD.getCVDAnalysis(symbol, currentPrice, isGreenAlert);
+        if (realResult.isReal && realResult.cvdSignal) {
+            if (realResult.cvdConfirmed) {
+                log(`✅ ${symbol} - CVD REAL ${realResult.cvdSignal.type} +${realResult.cvdScore} (${realResult.deltaCount} trades)`, 'success');
             }
-        } catch (error) {
-            log(`Erro no CVD real para ${symbol}: ${error.message}`, 'error');
+            return realResult;
         }
     }
     return await analyzeCVDSimulated(symbol, currentPrice, isGreenAlert);
@@ -1245,28 +1113,22 @@ async function getTopSymbols() {
     try {
         log('Buscando top símbolos por volume...');
         const data = await rateLimiter.makeRequest('https://fapi.binance.com/fapi/v1/ticker/24hr', 'top_symbols_24h');
-        
-        // Filtra símbolos com volume mínimo e ordena
-        const filteredSymbols = data.filter(s => 
-            s.symbol.endsWith('USDT') && 
-            parseFloat(s.volume) > 0 &&
-            parseFloat(s.quoteVolume) > CONFIG.ALERTS.MIN_24H_VOLUME_USDT
-        );
-        
-        const sortedByVolume = filteredSymbols.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-        const topSymbols = sortedByVolume.slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT).map(s => s.symbol);
-        
-        log(`Encontrados ${topSymbols.length} símbolos top por volume (min ${CONFIG.ALERTS.MIN_24H_VOLUME_USDT} USDT)`, 'success');
+        const topSymbols = data
+            .filter(s => s.symbol.endsWith('USDT') && parseFloat(s.volume) > 0)
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+            .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
+            .map(s => s.symbol);
+        log(`Encontrados ${topSymbols.length} símbolos top por volume`);
         return topSymbols;
     } catch (e) {
-        log('Falha ao buscar top symbols, usando lista estática com filtro de volume', 'warning');
-        const fallbackSymbols = [
+        log('Falha ao buscar top symbols, usando lista estática expandida', 'warning');
+        return [
             'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
             'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
             'LTCUSDT','BCHUSDT','ARBUSDT','OPUSDT','INJUSDT','IMXUSDT','STXUSDT','HBARUSDT','VETUSDT','RUNEUSDT',
-            'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT'
+            'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT',
+            'AAVEUSDT','MKRUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','BALUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
         ];
-        return fallbackSymbols;
     }
 }
 
@@ -1908,15 +1770,10 @@ async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, s
 // =====================================================================
 async function getCandles(symbol, interval, limit = 100) {
     try {
-        // Usa cache específico por símbolo e timeframe
-        const cached = cache.getSymbolTimeframe(symbol, interval);
-        if (cached && cached.length >= limit) {
-            return cached.slice(-limit);
-        }
-        
+        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-        const data = await rateLimiter.makeRequest(url);
-        const candles = data.map(candle => ({
+        const data = await rateLimiter.makeRequest(url, cacheKey);
+        return data.map(candle => ({
             open: parseFloat(candle[1]),
             high: parseFloat(candle[2]),
             low: parseFloat(candle[3]),
@@ -1924,9 +1781,6 @@ async function getCandles(symbol, interval, limit = 100) {
             volume: parseFloat(candle[5]),
             time: candle[0]
         }));
-        
-        cache.setSymbolTimeframe(symbol, interval, candles);
-        return candles;
     } catch (error) {
         return [];
     }
@@ -2211,7 +2065,7 @@ async function sendGroupedAlerts(alerts, priority) {
 // =====================================================================
 // === FUNÇÃO PARA IDENTIFICAR CLUSTERS ===
 // =====================================================================
-function findClusterLevels(candles, currentPrice, tolerancePercent = 0.6, maxClusters = 2) {
+function findClusterLevels(candles, currentPrice, tolerancePercent = 0.5, maxClusters = 2) {
     const allSupports = [];
     const allResistances = [];
     const tolerance = tolerancePercent / 100;
@@ -2284,22 +2138,13 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
         const isGreenAlert = bestDiv.type === 'bullish';
         const direction = isGreenAlert ? 'COMPRA' : 'VENDA';
 
-        // Tolerance maior para timeframes maiores (0.6~0.8%)
-        let clusterTolerance = 0.6;
-        if (timeframe === '1d' || timeframe === '3d' || timeframe === '1w') {
-            clusterTolerance = 0.8;
-        } else if (timeframe === '4h' || timeframe === '12h') {
-            clusterTolerance = 0.7;
-        }
-        
-        const clusters = findClusterLevels(candles, currentPrice, clusterTolerance, 2);
+        const clusters = findClusterLevels(candles, currentPrice, 0.5, 2);
 
-        // Obtém os candles adicionais do mapa allCandles (agora inclui todos os timeframes necessários)
-        const candles1h = allCandles['1h'] || await getCandles(symbol, '1h', 100);
-        const candles3m = allCandles['3m'] || await getCandles(symbol, '3m', 100);
-        const candlesDaily = allCandles['1d'] || await getCandles(symbol, '1d', 100);
-        const candles4h = allCandles['4h'] || await getCandles(symbol, '4h', 100);
-        const candles15m = allCandles['15m'] || await getCandles(symbol, '15m', 100);
+        const candles1h = allCandles['1h'];
+        const candles3m = allCandles['3m'];
+        const candlesDaily = allCandles['1d'];
+        const candles4h = allCandles['4h'];
+        const candles15m = allCandles['15m'];
 
         const additional = await getAdditionalData(symbol, currentPrice, candles1h, candles3m, candlesDaily, candles4h, candles15m);
 
@@ -2393,15 +2238,11 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
 // === BUSCAR TODOS OS CANDLES ===
 // =====================================================================
 async function fetchAllCandles(symbol) {
-    // Combina todos os timeframes necessários: principais + adicionais
-    const allTimeframes = [...CONFIG.SCAN.TIMEFRAMES, ...CONFIG.SCAN.ADDITIONAL_TIMEFRAMES];
-    // Remove duplicatas
-    const uniqueTimeframes = [...new Set(allTimeframes)];
-    
-    const promises = uniqueTimeframes.map(interval => getCandles(symbol, interval, 100));
+    const intervals = ['15m', '30m', '1h', '2h', '4h', '12h', '1d', '3d', '1w', '3m'];
+    const promises = intervals.map(interval => getCandles(symbol, interval, 100));
     const results = await Promise.all(promises);
     const map = {};
-    uniqueTimeframes.forEach((interval, idx) => { map[interval] = results[idx]; });
+    intervals.forEach((interval, idx) => { map[interval] = results[idx]; });
     return map;
 }
 
@@ -2628,9 +2469,7 @@ async function analyzeSymbol(symbol) {
                         confirmedAt: Date.now(),
                         ema13: emaConfirmation.ema13,
                         ema34: emaConfirmation.ema34,
-                        ema55: emaConfirmation.ema55,
-                        volumeSpike: emaConfirmation.volumeSpike,
-                        crossDistance: emaConfirmation.crossDistance
+                        ema55: emaConfirmation.ema55
                     }
                 };
                 
@@ -2821,18 +2660,14 @@ function formatAlert(data) {
         const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
         const confirmTime = new Date(data.studyInfo.confirmedAt).toLocaleTimeString();
         const waitMinutes = Math.round((data.studyInfo.confirmedAt - data.studyInfo.studiedAt) / 60000);
-        const volumeInfo = data.studyInfo.volumeSpike ? ' com pico de volume' : '';
-        const distanceInfo = data.studyInfo.crossDistance ? ` (distância ${data.studyInfo.crossDistance.toFixed(2)}%)` : '';
-        studyInfo = `\n📚 Estudo: encontrado às ${studyTime} | Confirmado após ${waitMinutes}min${volumeInfo}${distanceInfo}`;
+        studyInfo = `\nOperação encontrada às ${studyTime} | Confirmado após ${waitMinutes}min }`;
     }
     
     const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
     const timeframeText = data.usedTimeframe === '1w' ? ' Semanal' : 
                           data.usedTimeframe === '1d' ? ' Diário' : 
                           data.usedTimeframe === '4h' ? ' 4 Horas' : 
-                          data.usedTimeframe === '2h' ? ' 2 Horas' :
-                          data.usedTimeframe === '1h' ? ' 1 Hora' : 
-                          data.usedTimeframe === '30m' ? ' 30 Minutos' : ' 15 Minutos';
+                          data.usedTimeframe === '1h' ? ' 1 Hora' : ' 15 Minutos';
     
     return `<i>${data.direction} - ${symbolName} | 💲 ${formatPrice(data.price)}
 ${scoreEmoji} #SCORE: ${finalScore.toFixed(1)} (Pivôs +${totalPivotBonus.toFixed(1)}) | Data: ${formattedDateTime}
@@ -2863,13 +2698,10 @@ Titanium Prime X by @J4Rviz</i>`;
 // =====================================================================
 async function startScanner() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - VERSÃO OTIMIZADA');
+    console.log('🚀 TITANIUM PRIME X');
     console.log('='.repeat(70));
     console.log('📚 Sistema de Memória: Registra toques nas Bollinger + divergências');
     console.log('✅ Confirmação: EMA13/34 (cruzamento) + fechamento acima/abaixo EMA55 (3m)');
-    console.log('🔧 Timeframes: 15m, 30m, 1h, 2h, 4h, 1d, 1w');
-    console.log('💓 Heartbeat: Ativo para WebSocket (30s)');
-    console.log('📊 Cluster: Tolerance ajustada (0.6~0.8% por timeframe)');
     console.log('='.repeat(70));
     
     currentTopSymbols = await getTopSymbols();
@@ -2883,29 +2715,22 @@ async function startScanner() {
         setTimeout(() => {
             const stats = realCVD.getStats();
             log(`CVD Real: ${stats.connected} conexões ativas, ${stats.withData} com dados`, 'success');
-            if (stats.connected < currentTopSymbols.length) {
-                log(`⚠️ Apenas ${stats.connected}/${currentTopSymbols.length} conexões CVD ativas (limite ${CONFIG.CVD.WEBSOCKET.MAX_SYMBOLS})`, 'warning');
-            }
         }, 10000);
     }
     
     log(`CVD (Cumulative Volume Delta) - TIMEFRAME: ${CONFIG.CVD.TIMEFRAME}`, 'success');
     log(`📚 Memória de estudo: ATIVADA | Expira em ${CONFIG.ALERTS.MEMORY.EXPIRY_HOURS}h`, 'success');
     log(`✅ Confirmação EMA: ${CONFIG.ALERTS.MEMORY.EMA_FAST}/${CONFIG.ALERTS.MEMORY.EMA_SLOW} cruzamento | Fechamento EMA${CONFIG.ALERTS.MEMORY.EMA_TREND} (${CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME})`, 'success');
-    log(`🔍 Distância mínima entre EMAs: ${CONFIG.ALERTS.MEMORY.MIN_CROSS_DISTANCE_PERCENT}% | Volume spike: ${CONFIG.ALERTS.MEMORY.REQUIRE_VOLUME_SPIKE ? 'obrigatório' : 'opcional'}`, 'info');
     
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
-        const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? `CVD REAL via WebSocket (${CONFIG.CVD.WEBSOCKET.MAX_SYMBOLS} símbolos)` : 'CVD Simulado';
-        const initMessage = `🚀 Titanium Prime X v5.0 - Versão Otimizada\n` +
+        const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? 'CVD REAL via WebSocket' : 'CVD Simulado';
+        const initMessage = `🚀 Titanium Prime X v4.0 Ativado (COM MEMÓRIA DE ESTUDO)\n` +
             `Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `${cvdStatus}\n` +
             `📚 Estudo: Toque na Bollinger + Divergência → Aguarda confirmação EMA13/34/55 (3m)\n` +
-            `✅ Confirmação adicional: Distância EMA (min ${CONFIG.ALERTS.MEMORY.MIN_CROSS_DISTANCE_PERCENT}%) + ${CONFIG.ALERTS.MEMORY.REQUIRE_VOLUME_SPIKE ? 'Pico de volume' : 'Volume opcional'}\n` +
-            `💓 Heartbeat WebSocket: ${CONFIG.CVD.WEBSOCKET.HEARTBEAT_INTERVAL_MS/1000}s\n` +
-            `⏱️ Cooldown entre batches: ${CONFIG.SCAN.COOLDOWN_AFTER_BATCH_MS/1000}s\n` +
-            `🎯 Timeframes principais: ${CONFIG.SCAN.TIMEFRAMES.join(', ')}\n` +
+            `✅ Alerta só após reversão confirmada\n` +
             `${getBrazilianDateTime().full}`;
         const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
             method: 'POST',
@@ -2929,16 +2754,6 @@ async function startScanner() {
         studyMemory.cleanupExpired();
         const stats = studyMemory.getStats();
         log(`📚 Memória: ${stats.total} estudos ativos (COMPRA: ${stats.byDirection.COMPRA}, VENDA: ${stats.byDirection.VENDA})`, 'info');
-        
-        // Log de símbolos problemáticos
-        if (problemSymbols.size > 0) {
-            const problematic = Array.from(problemSymbols.entries())
-                .filter(([_, problems]) => problems.length >= 3)
-                .map(([symbol, problems]) => `${symbol}(${problems.length})`);
-            if (problematic.length > 0) {
-                log(`⚠️ Símbolos com problemas: ${problematic.join(', ')}`, 'warning');
-            }
-        }
     }, 60000);
     
     setInterval(() => processPriorityQueue(), 30000);
