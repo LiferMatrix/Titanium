@@ -10,15 +10,15 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_DA',
-        CHAT_ID: '-100197'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
-        BATCH_SIZE: 10,
+        BATCH_SIZE: 8,
         SYMBOL_DELAY_MS: 4000,
         REQUEST_TIMEOUT: 10000,
         COOLDOWN_AFTER_BATCH_MS: 2000,
-        MAX_REQUESTS_PER_MINUTE: 1200,
+        MAX_REQUESTS_PER_MINUTE: 1000,
         CACHE_DURATION_SECONDS: 30,
         TOP_SYMBOLS_LIMIT: 400
     },
@@ -51,7 +51,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.5,
+        MIN_VOLUME_RATIO: 1.7,
         MIN_24H_VOLUME_USDT: 100000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 52,
