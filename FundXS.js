@@ -14,16 +14,23 @@ const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8dg',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
-        INTERVAL_MINUTES: 10,
+        INTERVAL_MINUTES: 5,
         TOP_SIZE: 8,
         MIN_VOLUME_USDT: 1000000,
         MAX_SYMBOLS: 100,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
+        RSI: {
+            PERIOD: 14,
+            TIMEFRAMES: ['15m', '1h', '4h'],
+            LOOKBACK_CANDLES: 100,
+            MIN_DIVERGENCE_STRENGTH: 3,
+            MIN_VOLUME_CONFIRMATION: 55
+        },
         CVD: {
             CHECK_INTERVAL_SECONDS: 30,
             CVD_CHANGE_WINDOW: 60
@@ -32,9 +39,10 @@ const CONFIG = {
 };
 
 // =====================================================================
-// === CACHE RSI ===
+// === CACHE RSI E DIVERGÊNCIAS ===
 // =====================================================================
 const rsiCache = new Map();
+const divergenceCache = new Map();
 
 // =====================================================================
 // === CVD MANAGER VIA WEBSOCKET ===
@@ -48,10 +56,8 @@ class CVDManager {
         this.reconnectDelay = 5000;
     }
 
-    subscribeToSymbol(symbol, callback = null) {
-        if (this.subscribedSymbols.has(symbol)) {
-            return;
-        }
+    subscribeToSymbol(symbol) {
+        if (this.subscribedSymbols.has(symbol)) return;
         
         this.subscribedSymbols.add(symbol);
         
@@ -69,7 +75,6 @@ class CVDManager {
         });
         
         this.connectWebSocket(symbol);
-        console.log(`🔌 Conectando CVD para ${symbol}`);
     }
     
     connectWebSocket(symbol) {
@@ -79,9 +84,7 @@ class CVDManager {
         const ws = new WebSocket(wsUrl);
         
         ws.on('open', () => {
-            console.log(`✅ CVD conectado para ${symbol}`);
             this.reconnectAttempts.set(symbol, 0);
-            
             const data = this.cvdData.get(symbol);
             if (data) {
                 data.ws = ws;
@@ -96,7 +99,7 @@ class CVDManager {
             } catch (error) {}
         });
         
-        ws.on('error', (error) => {
+        ws.on('error', () => {
             this.handleDisconnect(symbol);
         });
         
@@ -105,35 +108,23 @@ class CVDManager {
         });
         
         const data = this.cvdData.get(symbol);
-        if (data) {
-            data.ws = ws;
-        }
+        if (data) data.ws = ws;
     }
     
     processTrade(symbol, trade) {
         const volume = parseFloat(trade.q);
         const isBuyerMaker = trade.m;
-        
-        let delta;
-        if (isBuyerMaker) {
-            delta = -volume;
-        } else {
-            delta = +volume;
-        }
+        const delta = isBuyerMaker ? -volume : +volume;
         
         const data = this.cvdData.get(symbol);
         if (!data) return;
         
-        const oldValue = data.value;
         data.value += delta;
         data.lastUpdate = Date.now();
         data.lastPrice = parseFloat(trade.p);
         
-        if (delta > 0) {
-            data.buyVolume += volume;
-        } else {
-            data.sellVolume += volume;
-        }
+        if (delta > 0) data.buyVolume += volume;
+        else data.sellVolume += volume;
         
         data.history.push({
             timestamp: Date.now(),
@@ -142,10 +133,7 @@ class CVDManager {
             cvd: data.value
         });
         
-        if (data.history.length > 1000) {
-            data.history.shift();
-        }
-        
+        if (data.history.length > 1000) data.history.shift();
         this.updateDirection(symbol);
     }
     
@@ -169,16 +157,9 @@ class CVDManager {
         const change = data.value - oldCVD.cvd;
         const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
         
-        if (change > 0 && changePercent >= 1) {
-            data.direction = '⤴️';
-            data.directionChange = changePercent;
-        } else if (change < 0 && changePercent >= 1) {
-            data.direction = '⤵️';
-            data.directionChange = changePercent;
-        } else {
-            data.direction = '⏺';
-            data.directionChange = 0;
-        }
+        if (change > 0 && changePercent >= 1) data.direction = '⤴️';
+        else if (change < 0 && changePercent >= 1) data.direction = '⤵️';
+        else data.direction = '⏺';
     }
     
     handleDisconnect(symbol) {
@@ -193,9 +174,7 @@ class CVDManager {
         } else {
             const data = this.cvdData.get(symbol);
             if (data && data.ws) {
-                try {
-                    data.ws.terminate();
-                } catch(e) {}
+                try { data.ws.terminate(); } catch(e) {}
             }
         }
     }
@@ -203,12 +182,8 @@ class CVDManager {
     unsubscribeFromSymbol(symbol) {
         const data = this.cvdData.get(symbol);
         if (data && data.ws) {
-            try {
-                data.ws.close();
-                data.ws.terminate();
-            } catch(e) {}
+            try { data.ws.close(); data.ws.terminate(); } catch(e) {}
         }
-        
         this.subscribedSymbols.delete(symbol);
         this.cvdData.delete(symbol);
     }
@@ -216,26 +191,44 @@ class CVDManager {
     getCVD(symbol) {
         const data = this.cvdData.get(symbol);
         if (!data) return null;
-        
-        return {
-            symbol,
-            cvd: data.value,
-            direction: data.direction,
-            directionChange: data.directionChange,
-            lastPrice: data.lastPrice
-        };
+        return { direction: data.direction };
     }
     
-    isConnected(symbol) {
+    getVolumeProfile(symbol, minutesAgo = 5) {
         const data = this.cvdData.get(symbol);
-        return data ? data.connected : false;
+        if (!data || data.history.length === 0) return null;
+        
+        const now = Date.now();
+        const cutoff = now - (minutesAgo * 60 * 1000);
+        
+        let buyVolume = 0, sellVolume = 0, totalVolume = 0;
+        
+        for (const trade of data.history) {
+            if (trade.timestamp >= cutoff) {
+                if (trade.delta > 0) buyVolume += trade.volume;
+                else sellVolume += trade.volume;
+                totalVolume += trade.volume;
+            }
+        }
+        
+        if (totalVolume === 0) return null;
+        
+        const buyerRatio = (buyVolume / totalVolume) * 100;
+        const sellerRatio = (sellVolume / totalVolume) * 100;
+        
+        return {
+            buyerRatio: buyerRatio,
+            sellerRatio: sellerRatio,
+            totalVolume: totalVolume,
+            dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
+            dominantRatio: Math.max(buyerRatio, sellerRatio)
+        };
     }
     
     cleanup() {
         for (const symbol of this.subscribedSymbols) {
             this.unsubscribeFromSymbol(symbol);
         }
-        console.log('🧹 CVD Manager limpo');
     }
 }
 
@@ -295,6 +288,188 @@ function calculateRSI(prices, period = 14) {
         rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
     }
     return rsiValues;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA ENCONTRAR PIVÔS (MÁXIMOS E MÍNIMOS LOCAIS) ===
+// =====================================================================
+function findPivots(data, lookback = 3) {
+    const pivots = { highs: [], lows: [] };
+    
+    for (let i = lookback; i < data.length - lookback; i++) {
+        let isHigh = true;
+        let isLow = true;
+        
+        for (let j = 1; j <= lookback; j++) {
+            if (data[i] <= data[i - j] || data[i] <= data[i + j]) isHigh = false;
+            if (data[i] >= data[i - j] || data[i] >= data[i + j]) isLow = false;
+        }
+        
+        if (isHigh) pivots.highs.push({ index: i, value: data[i] });
+        if (isLow) pivots.lows.push({ index: i, value: data[i] });
+    }
+    
+    return pivots;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR DIVERGÊNCIAS DE RSI COM PIVÔS E VOLUME ===
+// =====================================================================
+function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
+    const divergences = { bullish: [], bearish: [] };
+    
+    if (prices.length < 30 || rsiValues.length < 30) return divergences;
+    
+    const pricePivots = findPivots(prices, 3);
+    const rsiPivots = findPivots(rsiValues, 3);
+    
+    // DIVERGÊNCIA DE ALTA (BULLISH)
+    for (let i = 0; i < pricePivots.lows.length; i++) {
+        for (let j = i + 1; j < pricePivots.lows.length; j++) {
+            const priceLow1 = pricePivots.lows[i];
+            const priceLow2 = pricePivots.lows[j];
+            
+            const priceLower = priceLow2.value < priceLow1.value;
+            
+            if (priceLower) {
+                const rsiLow1 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow1.index) <= 2);
+                const rsiLow2 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow2.index) <= 2);
+                
+                if (rsiLow1 && rsiLow2) {
+                    const rsiHigher = rsiLow2.value > rsiLow1.value;
+                    const strength = Math.abs(priceLow2.value - priceLow1.value) / priceLow1.value * 100;
+                    
+                    if (rsiHigher && strength >= CONFIG.MONITOR.RSI.MIN_DIVERGENCE_STRENGTH) {
+                        // Validar volume se disponível
+                        let volumeScore = 0;
+                        let volumeConfirmed = false;
+                        
+                        if (volumeProfile && volumeProfile.dominant === 'buyers') {
+                            volumeScore = Math.floor(volumeProfile.dominantRatio / 10);
+                            volumeScore = Math.min(volumeScore, 9);
+                            volumeConfirmed = volumeProfile.dominantRatio >= CONFIG.MONITOR.RSI.MIN_VOLUME_CONFIRMATION;
+                        }
+                        
+                        divergences.bullish.push({
+                            type: 'bullish',
+                            strength: strength,
+                            volumeScore: volumeScore,
+                            volumeConfirmed: volumeConfirmed
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    // DIVERGÊNCIA DE BAIXA (BEARISH)
+    for (let i = 0; i < pricePivots.highs.length; i++) {
+        for (let j = i + 1; j < pricePivots.highs.length; j++) {
+            const priceHigh1 = pricePivots.highs[i];
+            const priceHigh2 = pricePivots.highs[j];
+            
+            const priceHigher = priceHigh2.value > priceHigh1.value;
+            
+            if (priceHigher) {
+                const rsiHigh1 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh1.index) <= 2);
+                const rsiHigh2 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh2.index) <= 2);
+                
+                if (rsiHigh1 && rsiHigh2) {
+                    const rsiLower = rsiHigh2.value < rsiHigh1.value;
+                    const strength = Math.abs(priceHigh2.value - priceHigh1.value) / priceHigh1.value * 100;
+                    
+                    if (rsiLower && strength >= CONFIG.MONITOR.RSI.MIN_DIVERGENCE_STRENGTH) {
+                        // Validar volume se disponível
+                        let volumeScore = 0;
+                        let volumeConfirmed = false;
+                        
+                        if (volumeProfile && volumeProfile.dominant === 'sellers') {
+                            volumeScore = Math.floor(volumeProfile.dominantRatio / 10);
+                            volumeScore = Math.min(volumeScore, 9);
+                            volumeConfirmed = volumeProfile.dominantRatio >= CONFIG.MONITOR.RSI.MIN_VOLUME_CONFIRMATION;
+                        }
+                        
+                        divergences.bearish.push({
+                            type: 'bearish',
+                            strength: strength,
+                            volumeScore: volumeScore,
+                            volumeConfirmed: volumeConfirmed
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    return divergences;
+}
+
+// =====================================================================
+// === ANALISAR DIVERGÊNCIAS EM MÚLTIPLOS TIMEFRAMES COM VOLUME ===
+// =====================================================================
+async function analyzeDivergences(symbol, cvdManager) {
+    const cacheKey = `${symbol}_divergences`;
+    const now = Date.now();
+    const cached = divergenceCache.get(cacheKey);
+    
+    if (cached && (now - cached.timestamp) < 300000) {
+        return cached.data;
+    }
+    
+    const result = {
+        hasBullishDivergence: false,
+        hasBearishDivergence: false,
+        bullishTimeframes: [],
+        bearishTimeframes: [],
+        bestBullishVolumeScore: 0,
+        bestBearishVolumeScore: 0
+    };
+    
+    // Pega perfil de volume do CVD (últimos 5 minutos)
+    const volumeProfile = cvdManager.getVolumeProfile(symbol, 5);
+    
+    for (const timeframe of CONFIG.MONITOR.RSI.TIMEFRAMES) {
+        try {
+            const candles = await getCandles(symbol, timeframe, CONFIG.MONITOR.RSI.LOOKBACK_CANDLES);
+            if (!candles || candles.length < 50) continue;
+            
+            const prices = candles.map(c => c.close);
+            const rsi = calculateRSI(prices, CONFIG.MONITOR.RSI.PERIOD);
+            if (!rsi || rsi.length < 50) continue;
+            
+            const divergences = findRSIDivergences(prices, rsi, volumeProfile);
+            
+            if (divergences.bullish.length > 0) {
+                result.hasBullishDivergence = true;
+                result.bullishTimeframes.push(timeframe);
+                
+                const maxVolumeScore = Math.max(...divergences.bullish.map(d => d.volumeScore));
+                if (maxVolumeScore > result.bestBullishVolumeScore) {
+                    result.bestBullishVolumeScore = maxVolumeScore;
+                }
+            }
+            
+            if (divergences.bearish.length > 0) {
+                result.hasBearishDivergence = true;
+                result.bearishTimeframes.push(timeframe);
+                
+                const maxVolumeScore = Math.max(...divergences.bearish.map(d => d.volumeScore));
+                if (maxVolumeScore > result.bestBearishVolumeScore) {
+                    result.bestBearishVolumeScore = maxVolumeScore;
+                }
+            }
+            
+        } catch (error) {
+            // continua para próximo timeframe
+        }
+    }
+    
+    divergenceCache.set(cacheKey, {
+        data: result,
+        timestamp: now
+    });
+    
+    return result;
 }
 
 // =====================================================================
@@ -378,8 +553,7 @@ async function get24hData() {
             result[i.symbol] = { 
                 symbol: i.symbol, 
                 price: parseFloat(i.lastPrice), 
-                volume24h: parseFloat(i.quoteVolume), 
-                change24h: parseFloat(i.priceChangePercent) 
+                volume24h: parseFloat(i.quoteVolume)
             };
         }
         return result;
@@ -438,7 +612,7 @@ async function getLSRData(symbols) {
 }
 
 // =====================================================================
-// === ATUALIZAR LISTA DE SÍMBOLOS ===
+// === ATUALIZAR LISTA DE SÍMBOLOS COM CRITÉRIO DE DIVERGÊNCIA ===
 // =====================================================================
 async function updateWatchedSymbols(cvdManager) {
     const ticker = await get24hData();
@@ -448,13 +622,15 @@ async function updateWatchedSymbols(cvdManager) {
     const funding = await getFundingRates(symbols);
     const lsr = await getLSRData(symbols);
     
-    const combined = [];
+    const allSymbols = [];
+    
     for (const s of symbols) {
         if (funding[s] !== undefined && lsr[s] !== null && lsr[s] > 0) {
             const rsiValue = await getRSIForSymbol(s);
+            const divergences = await analyzeDivergences(s, cvdManager);
             const cvd = cvdManager.getCVD(s);
             
-            combined.push({ 
+            allSymbols.push({ 
                 symbol: s.replace('USDT', ''), 
                 fullSymbol: s, 
                 price: ticker[s].price, 
@@ -463,20 +639,23 @@ async function updateWatchedSymbols(cvdManager) {
                 lsr: lsr[s],
                 rsi: rsiValue,
                 rsiEmoji: getRSIEmoji(rsiValue),
-                cvdDirection: cvd ? cvd.direction : '⏺'
+                cvdDirection: cvd ? cvd.direction : '⏺',
+                divergences: divergences
             });
         }
     }
     
-    // Lista POSITIVA: Maior funding + Maior LSR
-    const positive = [...combined]
+    // LISTA POSITIVA (BEAR): Maior funding + Maior LSR + DIVERGÊNCIA DE BAIXA
+    const positive = [...allSymbols]
+        .filter(item => item.divergences.hasBearishDivergence === true)
         .sort((a, b) => b.funding - a.funding)
         .slice(0, CONFIG.MONITOR.TOP_SIZE * 2)
         .sort((a, b) => b.lsr - a.lsr)
         .slice(0, CONFIG.MONITOR.TOP_SIZE);
     
-    // Lista NEGATIVA: Menor funding + Menor LSR
-    const negative = [...combined]
+    // LISTA NEGATIVA (BULL): Menor funding + Menor LSR + DIVERGÊNCIA DE ALTA
+    const negative = [...allSymbols]
+        .filter(item => item.divergences.hasBullishDivergence === true)
         .sort((a, b) => a.funding - b.funding)
         .slice(0, CONFIG.MONITOR.TOP_SIZE * 2)
         .sort((a, b) => a.lsr - b.lsr)
@@ -486,7 +665,7 @@ async function updateWatchedSymbols(cvdManager) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM DA LISTA (FORMATO SUPER COMPACTO) ===
+// === FORMATAR MENSAGEM DA LISTA COM NÚMERO DE VOLUME ===
 // =====================================================================
 function formatListMessage(positive, negative) {
     const dt = getBrazilianDateTime();
@@ -495,28 +674,38 @@ function formatListMessage(positive, negative) {
     const negShow = negative.slice(0, maxDisplay);
     
     let msg = `<i>🎯Scanner: ${dt.full}hs...by @J4Rviz Technology</i>\n`;
-    msg += `<i>🔴 Titanium Setup Bear</i>\n\n`;
+    msg += `\n<i>🔴 Titanium Setup Bear</i>\n`;
     msg += `<i>🔍🤖 Em análise para 🔻Correção...</i>\n`;
-    msg += `<i>Par   Preço    Funding    LSR</i>\n`;
+    msg += `<i>Par    Preço     Funding     LSR   Vol</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     
-    for (const item of posShow) {
-        const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
-        msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}</i>\n`;
+    if (posShow.length === 0) {
+        msg += `<i>⚠️ Nenhum símbolo</i>\n`;
+    } else {
+        for (const item of posShow) {
+            const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
+            const volumeScore = item.divergences.bestBearishVolumeScore || 0;
+            msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
+        }
     }
     
     if (positive.length > maxDisplay) {
         msg += `<i>... e mais ${positive.length - maxDisplay} símbolos</i>\n`;
     }
     
-    msg += `\n<i>🟢 Titanium Setup Bull</i>\n\n`;
+    msg += `\n<i>🟢 Titanium Setup Bull</i>\n`;
     msg += `<i>🔍🤖 Em análise para 💹Compra...</i>\n`;
-    msg += `<i>Par   Preço    Funding    LSR</i>\n`;
+    msg += `<i>Par    Preço     Funding     LSR   Vol</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     
-    for (const item of negShow) {
-        const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
-        msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}</i>\n`;
+    if (negShow.length === 0) {
+        msg += `<i>⚠️ Nenhum símbolo </i>\n`;
+    } else {
+        for (const item of negShow) {
+            const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
+            const volumeScore = item.divergences.bestBullishVolumeScore || 0;
+            msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
+        }
     }
     
     if (negative.length > maxDisplay) {
@@ -539,7 +728,6 @@ async function sendToTelegram(message) {
         
         finalMessage = finalMessage.replace(/<i><\/i>/g, '');
         finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
-        finalMessage = finalMessage.replace(/<b><\/b>/g, '');
         
         const openTags = (finalMessage.match(/<i>/g) || []).length;
         const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
@@ -567,10 +755,8 @@ async function sendToTelegram(message) {
         if (response.ok) {
             console.log(`✅ Mensagem enviada com sucesso!`);
             return true;
-        } else {
-            console.log(`❌ Telegram erro ${response.status}`);
-            return false;
         }
+        return false;
     } catch (error) {
         console.log(`❌ Telegram exception: ${error.message}`);
         return false;
@@ -582,9 +768,9 @@ async function sendToTelegram(message) {
 // =====================================================================
 async function sendInitMessage() {
     let msg = `<i>Titanium Prime X</i>\n\n`;
-    msg += `<i>✅ Monitor de Funding Rate + CVD Real</i>\n`;
+    msg += `<i>✅ Monitor </i>\n`;
     msg += `<i>📊 Lista atualizada a cada 10 minutos</i>\n`;
-    msg += `<i>🔄 CVD: ⤴️ subindo | ⤵️ descendo | ⏺ estável</i>`;
+   
     await sendToTelegram(msg);
 }
 
@@ -603,27 +789,22 @@ class FundingMemory {
                 const data = fs.readFileSync(MEMORY_FILE, 'utf8');
                 const loaded = JSON.parse(data);
                 this.watchedSymbols = loaded.watchedSymbols || { positive: [], negative: [] };
-                console.log(`📂 Memória carregada: ${this.watchedSymbols.positive.length} positivos, ${this.watchedSymbols.negative.length} negativos`);
+                console.log(`📂 Memória carregada`);
             }
-        } catch (error) {
-            console.log(`Erro ao carregar memória: ${error.message}`);
-        }
+        } catch (error) {}
     }
 
     saveToFile() {
         try {
             const data = { watchedSymbols: this.watchedSymbols, lastUpdate: Date.now() };
             fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
-        } catch (error) {
-            console.log(`Erro ao salvar memória: ${error.message}`);
-        }
+        } catch (error) {}
     }
 
     updateWatchedSymbols(positive, negative) {
         this.watchedSymbols.positive = positive;
         this.watchedSymbols.negative = negative;
         this.saveToFile();
-        console.log(`📝 Memória atualizada: ${positive.length} positivos, ${negative.length} negativos`);
     }
 }
 
@@ -635,7 +816,7 @@ const cvdManager = new CVDManager();
 
 async function startMonitor() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - MONITOR DE FUNDING RATE + CVD REAL');
+    console.log('🚀 TITANIUM PRIME X - MONITOR COMPLETO');
     console.log('='.repeat(70));
     
     await sendInitMessage();
