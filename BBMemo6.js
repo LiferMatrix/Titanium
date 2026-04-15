@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs',
-        CHAT_ID: '-1001'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 8,
@@ -2934,7 +2934,7 @@ function formatAlert(data) {
         const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
         const confirmTime = new Date(data.studyInfo.confirmedAt).toLocaleTimeString();
         const waitMinutes = Math.round((data.studyInfo.confirmedAt - data.studyInfo.studiedAt) / 60000);
-        studyInfo = `Operação: ${studyTime} → Confirmada ás ${waitMinutes}min`;
+        studyInfo = `Operação: ${studyTime} → Confirmada a ${waitMinutes}mins`;
     }
     
     const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
