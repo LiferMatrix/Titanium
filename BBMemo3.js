@@ -10,13 +10,13 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs0A',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 8,
         SYMBOL_DELAY_MS: 4000,
-        REQUEST_TIMEOUT: 20000,
+        REQUEST_TIMEOUT: 13000,
         COOLDOWN_AFTER_BATCH_MS: 2000,
         MAX_REQUESTS_PER_MINUTE: 1000,
         CACHE_DURATION_SECONDS: 30,
@@ -50,19 +50,19 @@ const CONFIG = {
             OTHER: 75,
             LOW_VOLUME: 50
         },
-        MIN_VOLUME_USDT: 50000,
-        MIN_VOLUME_RATIO: 1.6,
-        MIN_24H_VOLUME_USDT: 100000,
+        MIN_VOLUME_USDT: 100000,
+        MIN_VOLUME_RATIO: 1.7,
+        MIN_24H_VOLUME_USDT: 300000,
         VOLUME_DIRECTION: {
-            BUY_MIN_PERCENTAGE: 52,
-            SELL_MAX_PERCENTAGE: 45,
+            BUY_MIN_PERCENTAGE: 45,
+            SELL_MAX_PERCENTAGE: 55,
             STRICT_MODE: true,
             REQUIRE_VOLUME_DIRECTION: true
         },
         MIN_TREND_STRENGTH: 3,
         PRICE_DEVIATION: 1.0,
         RSI: {
-            BUY_MAX: 64,
+            BUY_MAX: 62,
             SELL_MIN: 66
         },
         PRIORITY_LEVELS: {
@@ -155,14 +155,13 @@ const CONFIG = {
             EMA_SLOW: 34,
             EMA_TREND: 55
         },
-        // NOVA CONFIGURAÇÃO: PIVÔ DIVERGENCE COM CVD
         PIVOT_DIVERGENCE: {
             ENABLED: true,
-            SCORE_BONUS: 2.5,           // Bônus base para divergência com pivô
-            CVD_ALIGNMENT_BONUS: 1.5,   // Bônus adicional se CVD estiver alinhado
-            CVD_MISALIGN_PENALTY: -2.0, // Penalidade se CVD estiver desalinhado
-            MIN_PIVOT_STRENGTH: 3,      // Mínimo de toques no pivô para considerar
-            CHECK_TIMEFRAMES: ['1h', '4h', '1d', '3d', '1w'] // Timeframes para verificar
+            SCORE_BONUS: 2.5,
+            CVD_ALIGNMENT_BONUS: 1.5,
+            CVD_MISALIGN_PENALTY: -2.0,
+            MIN_PIVOT_STRENGTH: 3,
+            CHECK_TIMEFRAMES: ['1h', '4h', '1d', '3d', '1w']
         }
     },
     VOLUME: { EMA_PERIOD: 9 },
@@ -1073,7 +1072,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
         return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
     }
     
-    // Verifica se o timeframe está na lista de verificação
     if (!CONFIG.ALERTS.PIVOT_DIVERGENCE.CHECK_TIMEFRAMES.includes(timeframe)) {
         return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
     }
@@ -1081,18 +1079,15 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
     try {
         if (!candles || candles.length < 50) return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
         
-        // 1. IDENTIFICAR PIVÔS SIGNIFICATIVOS NO TIMEFRAME
         const closes = candles.map(c => c.close);
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
         
-        // Encontra pivôs de topo (máximas) e fundo (mínimas)
         const pivotHighs = [];
         const pivotLows = [];
         const minStrength = CONFIG.ALERTS.PIVOT_DIVERGENCE.MIN_PIVOT_STRENGTH;
         
         for (let i = 3; i < candles.length - 3; i++) {
-            // Pivô de TOPO (máxima)
             let isPivotHigh = true;
             for (let j = -3; j <= 3; j++) {
                 if (j === 0) continue;
@@ -1102,7 +1097,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
                 }
             }
             if (isPivotHigh) {
-                // Conta quantas vezes este preço foi tocado
                 let touches = 1;
                 const pivotPrice = highs[i];
                 for (let k = 0; k < candles.length; k++) {
@@ -1115,7 +1109,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
                 }
             }
             
-            // Pivô de FUNDO (mínima)
             let isPivotLow = true;
             for (let j = -3; j <= 3; j++) {
                 if (j === 0) continue;
@@ -1138,19 +1131,16 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
             }
         }
         
-        // 2. ENCONTRAR O PIVÔ MAIS RECENTE E SIGNIFICATIVO
         const currentIndex = candles.length - 1;
         let relevantPivot = null;
         
         if (isGreenAlert) {
-            // Para COMPRA: procurar pivô de SUPORTE abaixo do preço atual
             const supportsBelow = pivotLows.filter(p => p.price < currentPrice);
             if (supportsBelow.length > 0) {
                 supportsBelow.sort((a, b) => b.touches - a.touches);
                 relevantPivot = supportsBelow[0];
             }
         } else {
-            // Para VENDA: procurar pivô de RESISTÊNCIA acima do preço atual
             const resistancesAbove = pivotHighs.filter(p => p.price > currentPrice);
             if (resistancesAbove.length > 0) {
                 resistancesAbove.sort((a, b) => b.touches - a.touches);
@@ -1162,8 +1152,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
             return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: 'Nenhum pivô significativo encontrado' };
         }
         
-        // 3. VERIFICAR DIVERGÊNCIA NO PIVÔ
-        // Calcula RSI para verificar divergência
         const rsiValues = [];
         for (let i = CONFIG.RSI.PERIOD; i < candles.length; i++) {
             rsiValues.push(calculateRSI(candles.slice(0, i + 1), CONFIG.RSI.PERIOD));
@@ -1178,7 +1166,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
             const priceAtPivot = relevantPivot.price;
             
             if (isGreenAlert) {
-                // Divergência de alta: Preço faz mínima mais baixa, RSI faz mínima mais alta
                 if (priceAtPivot < currentPrice && rsiAtPivot < currentRSI) {
                     hasDivergence = true;
                     divergenceType = 'bullish_pivot';
@@ -1187,7 +1174,6 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
                     divergenceType = 'hidden_bullish_pivot';
                 }
             } else {
-                // Divergência de baixa: Preço faz máxima mais alta, RSI faz máxima mais baixa
                 if (priceAtPivot > currentPrice && rsiAtPivot > currentRSI) {
                     hasDivergence = true;
                     divergenceType = 'bearish_pivot';
@@ -1202,12 +1188,10 @@ async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreen
             return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: relevantPivot, cvdAligned: false, message: `Pivô ${relevantPivot.type} em ${formatPrice(relevantPivot.price)} (${relevantPivot.touches}x) sem divergência` };
         }
         
-        // 4. VERIFICAR DIREÇÃO DO CVD
         const cvdDirectionData = await getCVDDirection(symbol, currentPrice);
         const isCVDAligned = (isGreenAlert && cvdDirectionData.direction === 'comprador') ||
                              (!isGreenAlert && cvdDirectionData.direction === 'vendedor');
         
-        // 5. CALCULAR BÔNUS
         let scoreBonus = CONFIG.ALERTS.PIVOT_DIVERGENCE.SCORE_BONUS;
         
         if (isCVDAligned) {
@@ -1898,7 +1882,7 @@ function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
 }
 
 // =====================================================================
-// === BOLLINGER BANDS (15m) COM CONFIRMAÇÃO DE CANDLE E MEMÓRIA ===
+// === BOLLINGER BANDS (15m) COM MEMÓRIA ===
 // =====================================================================
 function calculateBollingerBands(candles, period, stdDev) {
     if (!candles || candles.length < period) {
@@ -1928,12 +1912,10 @@ async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, s
         }
         
         const currentCandle = candles[candles.length - 1];
-        const previousCandle = candles[candles.length - 2];
         const currentPrice = currentCandle.close;
         
         let passed = false;
         let message = '';
-        let candleConfirmed = false;
         let shouldStudy = false;
         
         const direction = isGreenAlert ? 'COMPRA' : 'VENDA';
@@ -1941,36 +1923,28 @@ async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, s
         if (isGreenAlert) {
             const touchedLowerBand = currentPrice <= bb.lower;
             
-            if (touchedLowerBand && currentCandle.close > previousCandle.low) {
+            if (touchedLowerBand) {
                 passed = false;
                 shouldStudy = true;
-                candleConfirmed = true;
                 message = `📚 ESTUDO: ${symbol} tocou banda inferior (${formatPrice(currentPrice)} ≤ ${formatPrice(bb.lower)}) com divergência de COMPRA. Aguardando confirmação EMA 3m...`;
                 log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
-            } else if (touchedLowerBand) {
-                shouldStudy = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda inferior mas candle não confirmado. Aguardando...`;
             } else {
                 message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)})`;
             }
         } else {
             const touchedUpperBand = currentPrice >= bb.upper;
             
-            if (touchedUpperBand && currentCandle.close < previousCandle.high) {
+            if (touchedUpperBand) {
                 passed = false;
                 shouldStudy = true;
-                candleConfirmed = true;
                 message = `📚 ESTUDO: ${symbol} tocou banda superior (${formatPrice(currentPrice)} ≥ ${formatPrice(bb.upper)}) com divergência de VENDA. Aguardando confirmação EMA 3m...`;
                 log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
-            } else if (touchedUpperBand) {
-                shouldStudy = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda superior mas candle não confirmado. Aguardando...`;
             } else {
                 message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)})`;
             }
         }
         
-        return { passed, message, bands: bb, candleConfirmed, shouldStudy, touchedBollinger: (isGreenAlert ? currentPrice <= bb.lower : currentPrice >= bb.upper), bbLower: bb.lower, bbUpper: bb.upper };
+        return { passed, message, bands: bb, candleConfirmed: true, shouldStudy, touchedBollinger: (isGreenAlert ? currentPrice <= bb.lower : currentPrice >= bb.upper), bbLower: bb.lower, bbUpper: bb.upper };
         
     } catch (error) {
         log(`Erro ao verificar Bollinger para ${symbol}: ${error.message}`, 'error');
@@ -2407,7 +2381,6 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
         confirmationScore += cciScoreAdjustment;
         totalPenalty += cciScoreAdjustment;
 
-        // NOVA ANÁLISE: DIVERGÊNCIA COM PIVÔ E CVD
         let pivotDivergenceResult = null;
         let pivotScoreBonus = 0;
         
@@ -2456,7 +2429,6 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
             trendStrength: additional.trendStrength,
             candles1h, candles4h, candlesDaily, candles15m,
             originalCandles: candles,
-            // NOVOS CAMPOS PARA PIVÔ/DIVERGÊNCIA
             pivotDivergenceDetected: pivotDivergenceResult ? pivotDivergenceResult.hasPivotDivergence : false,
             pivotDivergenceBonus: pivotScoreBonus,
             pivotInfo: pivotDivergenceResult ? pivotDivergenceResult.pivotInfo : null,
@@ -2482,6 +2454,8 @@ async function fetchAllCandles(symbol) {
 
 // =====================================================================
 // === ANALISAR SÍMBOLO COM SISTEMA DE MEMÓRIA E PIVÔ ===
+// === ALTERADO: Obrigatoriedade de divergência em 15m, 30m ou 1h ===
+// === REMOVIDA: Verificação de confirmação de candle ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
@@ -2498,6 +2472,17 @@ async function analyzeSymbol(symbol) {
             }
         }
         if (divergences.length === 0) return [];
+
+        // =============================================================
+        // NOVA REGRA: PELO MENOS UMA DIVERGÊNCIA EM 15m, 30m OU 1h
+        // =============================================================
+        const requiredTimeframes = ['15m', '30m', '1h'];
+        const hasRequiredDivergence = divergences.some(d => requiredTimeframes.includes(d.timeframe));
+        
+        if (!hasRequiredDivergence) {
+            log(`❌ ${symbol} - Nenhuma divergência em ${requiredTimeframes.join(', ')}. Alerta bloqueado.`, 'warning');
+            return [];
+        }
 
         const bestDivergence = divergences.reduce((a, b) => a.confirmationScore > b.confirmationScore ? a : b);
         let maxScore = bestDivergence.confirmationScore;
@@ -2578,7 +2563,6 @@ async function analyzeSymbol(symbol) {
         clusterScoreBonus = Math.min(maxClusterBonus * 2, clusterScoreBonus);
         maxScore += clusterScoreBonus;
         
-        // ADICIONA O BÔNUS DO PIVÔ (já incluído no bestDivergence)
         const pivotBonus = bestDivergence.pivotDivergenceBonus || 0;
         if (pivotBonus > 0) {
             log(`🎯 ${symbol} - Bônus Pivô: +${pivotBonus} | Score total: ${maxScore.toFixed(1)}`, 'success');
@@ -2635,7 +2619,6 @@ async function analyzeSymbol(symbol) {
                     allPenaltyMessages.push(...bestDivergence.penaltyMessages);
                 }
                 
-                // Prepara informação do pivô para a mensagem
                 let pivotInfoText = '';
                 if (bestDivergence.pivotDivergenceDetected && bestDivergence.pivotInfo) {
                     const pivot = bestDivergence.pivotInfo;
@@ -2884,7 +2867,6 @@ function formatAlert(data) {
         penaltiesLine = ` ⚠️ Penal: ${data.totalPenalty}`;
     }
     
-    // INFORMAÇÃO DO PIVÔ (NOVO)
     let pivotDivergenceLine = '';
     if (data.pivotDivergenceDetected && data.pivotInfo) {
         const pivot = data.pivotInfo;
@@ -2960,16 +2942,19 @@ async function startScanner() {
     log(`📚 Memória de estudo: ATIVADA | Expira em ${CONFIG.ALERTS.MEMORY.EXPIRY_HOURS}h`, 'success');
     log(`✅ Confirmação EMA: ${CONFIG.ALERTS.MEMORY.EMA_FAST}/${CONFIG.ALERTS.MEMORY.EMA_SLOW} cruzamento | Fechamento EMA${CONFIG.ALERTS.MEMORY.EMA_TREND} (${CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME})`, 'success');
     log(`🎯 Pivô Divergence: ATIVADO | Bônus: ${CONFIG.ALERTS.PIVOT_DIVERGENCE.SCORE_BONUS} | CVD Alinhado: +${CONFIG.ALERTS.PIVOT_DIVERGENCE.CVD_ALIGNMENT_BONUS}`, 'success');
+    log(`📋 NOVA REGRA: Divergência obrigatória em 15m, 30m ou 1h`, 'success');
+    log(`🔧 OTIMIZAÇÃO: Removida verificação de confirmação de candle (apenas EMAs 3m)`, 'success');
     
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
         const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? 'CVD REAL via WebSocket' : 'CVD Simulado';
-        const initMessage = `🚀 Titanium Prime X v4.1 Ativado (COM PIVÔ + CVD DIRECIONAL)\n` +
+        const initMessage = `🚀 Titanium Prime X v4.2 Ativado (COM PIVÔ + CVD DIRECIONAL)\n` +
             `Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `${cvdStatus}\n` +
             `📚 Estudo: Toque na Bollinger + Divergência → Aguarda confirmação EMA13/34/55 (3m)\n` +
-            `🎯 NOVO: Divergência com PIVÔ + validação CVD (bônus +${CONFIG.ALERTS.PIVOT_DIVERGENCE.SCORE_BONUS} / +${CONFIG.ALERTS.PIVOT_DIVERGENCE.CVD_ALIGNMENT_BONUS})\n` +
+            `🎯 NOVO: Divergência obrigatória em 15m/30m/1h\n` +
+            `🔧 OTIMIZAÇÃO: Removida confirmação de candle (apenas EMAs 3m)\n` +
             `✅ Alerta só após reversão confirmada\n` +
             `${getBrazilianDateTime().full}`;
         const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
