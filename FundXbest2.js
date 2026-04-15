@@ -14,8 +14,8 @@ const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6dg',
-        CHAT_ID: '-10029'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         INTERVAL_MINUTES: 3,
@@ -28,7 +28,7 @@ const CONFIG = {
         LSR_TREND_THRESHOLD: 0.05,
         RSI: {
             PERIOD: 14,
-            TIMEFRAMES: ['15m', '1h', '4h'],
+            TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],  // <-- ADICIONADO '30m'
             LOOKBACK_CANDLES: 100,
             MIN_DIVERGENCE_STRENGTH: 3,
             MIN_VOLUME_CONFIRMATION: 55,
@@ -527,7 +527,7 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
 }
 
 // =====================================================================
-// === ANALISAR DIVERGÊNCIAS ===
+// === ANALISAR DIVERGÊNCIAS (COM CRITÉRIO 15m + OUTRO TIMEFRAME) ===
 // =====================================================================
 async function analyzeDivergences(symbol, cvdManager) {
     const cacheKey = `${symbol}_divergences`;
@@ -544,10 +544,17 @@ async function analyzeDivergences(symbol, cvdManager) {
         bullishTimeframes: [],
         bearishTimeframes: [],
         bestBullishVolumeScore: 0,
-        bestBearishVolumeScore: 0
+        bestBearishVolumeScore: 0,
+        hasBullish15mPlusOther: false,
+        hasBearish15mPlusOther: false
     };
     
     const volumeProfile = cvdManager.getVolumeProfile(symbol, 5);
+    
+    let bullishOn15m = false;
+    let bearishOn15m = false;
+    let bullishOtherTimeframes = [];
+    let bearishOtherTimeframes = [];
     
     for (const timeframe of CONFIG.MONITOR.RSI.TIMEFRAMES) {
         try {
@@ -560,6 +567,7 @@ async function analyzeDivergences(symbol, cvdManager) {
             
             const divergences = findRSIDivergences(prices, rsi, volumeProfile);
             
+            // Verifica se tem divergência bullish neste timeframe
             if (divergences.bullish.length > 0) {
                 result.hasBullishDivergence = true;
                 result.bullishTimeframes.push(timeframe);
@@ -568,8 +576,15 @@ async function analyzeDivergences(symbol, cvdManager) {
                 if (maxVolumeScore > result.bestBullishVolumeScore) {
                     result.bestBullishVolumeScore = maxVolumeScore;
                 }
+                
+                if (timeframe === '15m') {
+                    bullishOn15m = true;
+                } else {
+                    bullishOtherTimeframes.push(timeframe);
+                }
             }
             
+            // Verifica se tem divergência bearish neste timeframe
             if (divergences.bearish.length > 0) {
                 result.hasBearishDivergence = true;
                 result.bearishTimeframes.push(timeframe);
@@ -578,12 +593,22 @@ async function analyzeDivergences(symbol, cvdManager) {
                 if (maxVolumeScore > result.bestBearishVolumeScore) {
                     result.bestBearishVolumeScore = maxVolumeScore;
                 }
+                
+                if (timeframe === '15m') {
+                    bearishOn15m = true;
+                } else {
+                    bearishOtherTimeframes.push(timeframe);
+                }
             }
             
         } catch (error) {
             // continua
         }
     }
+    
+    // CRITÉRIO: Divergência no timeframe de 15 minutos E em pelo menos um outro timeframe
+    result.hasBullish15mPlusOther = bullishOn15m && bullishOtherTimeframes.length > 0;
+    result.hasBearish15mPlusOther = bearishOn15m && bearishOtherTimeframes.length > 0;
     
     divergenceCache.set(cacheKey, {
         data: result,
@@ -776,13 +801,13 @@ async function updateWatchedSymbols(cvdManager) {
         }
     }
     
-    // LISTA BEAR (VENDA)
+    // LISTA BEAR (VENDA) - Critério: divergência bearish no 15m + outro timeframe
     const positive = [...allSymbols]
         .filter(item => {
-            if (!item.divergences.hasBearishDivergence) return false;
+            if (!item.divergences.hasBearish15mPlusOther) return false;
             if (item.rsi === null || item.rsi <= CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD) return false;
             if (!item.bollingerSell) return false;
-            if (item.lsr <= 2.8) return false;
+            if (item.lsr <= 2.6) return false;
             if (item.funding <= 0) return false;
             if (item.lsrTrend !== 'rising') return false;
             return true;
@@ -792,13 +817,13 @@ async function updateWatchedSymbols(cvdManager) {
         .sort((a, b) => b.lsr - a.lsr)
         .slice(0, CONFIG.MONITOR.TOP_SIZE);
     
-    // LISTA BULL (COMPRA)
+    // LISTA BULL (COMPRA) - Critério: divergência bullish no 15m + outro timeframe
     const negative = [...allSymbols]
         .filter(item => {
-            if (!item.divergences.hasBullishDivergence) return false;
+            if (!item.divergences.hasBullish15mPlusOther) return false;
             if (item.rsi === null || item.rsi >= CONFIG.MONITOR.RSI.RSI_BUY_THRESHOLD) return false;
             if (!item.bollingerBuy) return false;
-            if (item.lsr >= 1.0) return false;
+            if (item.lsr >= 2.5) return false;
             if (item.funding >= 0) return false;
             if (item.lsrTrend !== 'falling') return false;
             return true;
@@ -812,7 +837,7 @@ async function updateWatchedSymbols(cvdManager) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM DA LISTA (ORIGINAL SEM ALTERAÇÕES) ===
+// === FORMATAR MENSAGEM DA LISTA ===
 // =====================================================================
 function formatListMessage(positive, negative) {
     const dt = getBrazilianDateTime();
@@ -820,18 +845,19 @@ function formatListMessage(positive, negative) {
     const posShow = positive.slice(0, maxDisplay);
     const negShow = negative.slice(0, maxDisplay);
     
-    let msg = `<i>🎯Scanner: ${dt.full}hs...by @J4Rviz Technology</i>\n`;
-    msg += `\n<i>🔴 Titanium Setup Bear</i>\n`;
-    msg += `<i>🔍🤖 Em análise para 🔻Correção...</i>\n`;
-    msg += `<i>RSI/CVD  Par  Preço  Funding  LSR  Vol</i>\n`;
+    let msg = `<i>Titanium ${dt.full}hs</i>\n`;
+    msg += `\n<i>🔴 Setup Bear🔻</i>\n`;
+    msg += `<i>🔍🤖 🔻Correção...</i>\n`;
+    msg += `<i>RSI/CVD Par Preço   Funding LSR Vol</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     
     if (posShow.length === 0) {
-        msg += `<i>Aguarde a próxima análise...</i>\n`;
+        msg += `<i>Nenhum Ativo...</i>\n`;
     } else {
         for (const item of posShow) {
             const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
             const volumeScore = item.divergences.bestBearishVolumeScore || 0;
+            const timeframesStr = item.divergences.bearishTimeframes.join(',');
             msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
         }
     }
@@ -840,17 +866,18 @@ function formatListMessage(positive, negative) {
         msg += `<i>... e mais ${positive.length - maxDisplay} símbolos</i>\n`;
     }
     
-    msg += `\n<i>🟢 Titanium Setup Bull</i>\n`;
-    msg += `<i>🔍🤖 Em análise para 💹Compra...</i>\n`;
-    msg += `<i>RSI/CVD  Par  Preço  Funding  LSR  Vol</i>\n`;
+    msg += `\n<i>🟢 Setup Bull💹</i>\n`;
+    msg += `<i>🔍🤖 💹Compra...</i>\n`;
+    msg += `<i>RSI/CVD Par Preço   Funding LSR Vol</i>\n`;
     msg += `<i>--------------------------------------</i>\n`;
     
     if (negShow.length === 0) {
-        msg += `<i>Aguarde a próxima análise... </i>\n`;
+        msg += `<i>Nenhum Ativo... </i>\n`;
     } else {
         for (const item of negShow) {
             const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
             const volumeScore = item.divergences.bestBullishVolumeScore || 0;
+            const timeframesStr = item.divergences.bullishTimeframes.join(',');
             msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
         }
     }
@@ -918,8 +945,10 @@ async function sendToTelegram(message) {
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
-    let msg = `<i>Titanium Prime X</i>\n\n`;
+    let msg = `<i>Titanium Prime X </i>\n\n`;
     msg += `<i>✅ Monitor Ativo</i>\n`;
+    msg += `<i>📊 Timeframe</i>\n`;
+    msg += `<i>🎯 Critério:</i>\n`;
    
     await sendToTelegram(msg);
 }
@@ -970,7 +999,9 @@ const cvdManager = new CVDManager();
 
 async function startMonitor() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - MONITOR COMPLETO');
+    console.log('🚀 TITANIUM PRIME X ');
+    console.log('📊 Time');
+    console.log('🎯 Critério: ');
     console.log('='.repeat(70));
     
     await sendInitMessage();
