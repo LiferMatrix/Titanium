@@ -17,8 +17,8 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vdg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
@@ -218,7 +218,7 @@ class CVDManager {
             lastPrice: null,
             ws: null,
             connected: false,
-            direction: '⏺',
+            direction: '',
             directionChange: 0
         });
         
@@ -307,7 +307,7 @@ class CVDManager {
         
         if (change > 0 && changePercent >= 1) data.direction = '⤴️';
         else if (change < 0 && changePercent >= 1) data.direction = '⤵️';
-        else data.direction = '⏺';
+        else data.direction = '';
     }
     
     handleDisconnect(symbol) {
@@ -344,7 +344,7 @@ class CVDManager {
     
     getCVDValue(symbol) {
         const data = this.cvdData.get(symbol);
-        if (!data) return '⏺';
+        if (!data) return '';
         return data.direction;
     }
     
@@ -473,13 +473,13 @@ async function calculateStochastic(symbol, timeframe) {
         const prevK = kValues[kValues.length - 2];
         const prevD = slowDValues[slowDValues.length - 2];
         
-        const kTrend = currentK > prevK ? '⤴️' : (currentK < prevK ? '⤵️' : '⏺');
-        const dTrend = currentD > prevD ? '⤴️' : (currentD < prevD ? '⤵️' : '⏺');
+        const kTrend = currentK > prevK ? '⤴️' : (currentK < prevK ? '⤵️' : '');
+        const dTrend = currentD > prevD ? '⤴️' : (currentD < prevD ? '⤵️' : '');
         
         const isOverbought = currentK > 80 && currentD > 80;
         const isOversold = currentK < 20 && currentD < 20;
         
-        let status = '⚪';
+        let status = '🟡';
         if (isOverbought) status = '🔴';
         if (isOversold) status = '🟢';
         
@@ -562,7 +562,7 @@ async function calculateCCI(symbol, timeframe) {
         const prevCCI = cciValues[cciValues.length - 2];
         
         // DIREÇÃO do CCI (para onde está apontando)
-        const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '⏺');
+        const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '');
         
         // STATUS DO CRUZAMENTO (ALTA = CCI acima da EMA, BAIXA = CCI abaixo da EMA)
         let crossStatus = '';
@@ -1288,7 +1288,7 @@ async function checkAndAlert(symbolData, cvdManager) {
             lsrTrend: lsrTrendData.trend,
             rsi: rsiValue,
             rsiEmoji: getRSIEmoji(rsiValue),
-            cvdDirection: cvd ? cvd.direction : '⏺',
+            cvdDirection: cvd ? cvd.direction : '',
             divergences,
             bollingerBuy,
             bollingerSell,
@@ -1360,17 +1360,17 @@ async function sendVolumeMomentumAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `📈 <b>VOLUME MOMENTUM BULL</b> 📈\n\n`;
+        message = `🟢<b>VOLUME MOMENTUM BULL💹</b> \n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n\n`;
-        message += `<i> 🔄 CRUZAMENTO CONFIRMADO NO 4H:</i>\n`;
-        message += `<i>    • Stoch (K/D) cruzou para CIMA</i>\n`;
-        message += `<i>    • CCI cruzou EMA para CIMA (ALTA)</i>\n\n`;
-        message += `<i> 📊 Indicadores:</i>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
+        message += `<i>    • Stoch (K⤴️D) cruzou para CIMA</i>\n`;
+        message += `<i>    • CCI ⤴️ EMA para CIMA (ALTA)</i>\n`;
+        message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
         message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         
         if (asset.stoch4h) {
             message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
@@ -1380,7 +1380,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         }
         
         if (asset.stoch1d || asset.cci1d) {
-            message += `<i>\n 📅 Diário:</i>\n`;
+            message += `<i>  Diário:</i>\n`;
             if (asset.stoch1d) {
                 message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
             }
@@ -1389,19 +1389,19 @@ async function sendVolumeMomentumAlert(asset, type) {
             }
         }
         
-        message += `\n<i> ⏰ ${dt.full}</i>`;
+        message += `<i>  ${dt.full}</i>`;
     } else {
-        message = `📉 <b>VOLUME MOMENTUM BEAR</b> 📉\n\n`;
+        message = `🔴<b>VOLUME MOMENTUM BEAR</b>🔻\n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n\n`;
-        message += `<i> 🔄 CRUZAMENTO CONFIRMADO NO 4H:</i>\n`;
-        message += `<i>    • Stoch (K/D) cruzou para BAIXO</i>\n`;
-        message += `<i>    • CCI cruzou EMA para BAIXO (BAIXA)</i>\n\n`;
-        message += `<i> 📊 Indicadores:</i>\n`;
+        message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
+        message += `<i>    • Stoch (K⤵️D) cruzou para BAIXO</i>\n`;
+        message += `<i>    • CCI ⤵️ EMA para BAIXO (BAIXA)</i>\n`;
+        message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
         message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         
         if (asset.stoch4h) {
             message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
@@ -1411,7 +1411,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         }
         
         if (asset.stoch1d || asset.cci1d) {
-            message += `<i>\n 📅 Diário:</i>\n`;
+            message += `<i>  Diário:</i>\n`;
             if (asset.stoch1d) {
                 message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
             }
@@ -1420,7 +1420,7 @@ async function sendVolumeMomentumAlert(asset, type) {
             }
         }
         
-        message += `\n<i> ⏰ ${dt.full}</i>`;
+        message += `<i>  ${dt.full}</i>`;
     }
     
     await sendToTelegram(message);
@@ -1436,7 +1436,7 @@ async function sendAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `🟢<i>Analisar Compra</i> \n`;
+        message = `🟢<i>Avaliar Reversão💹</i> \n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
@@ -1454,7 +1454,7 @@ async function sendAlert(asset, type) {
         
         message += `<i> ${dt.full}</i>`;
     } else {
-        message = `🔴<i>Analisar Correção</i> \n`;
+        message = `🔴<i>Avaliar Correção🔻</i> \n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
@@ -1520,7 +1520,7 @@ async function checkBTCByTimeframe() {
                     ema,
                     distance: distance.toFixed(2)
                 });
-                console.log(`🔄 MUDANÇA DETECTADA no BTC ${timeframe}: ${wasAbove ? 'ACIMA' : 'ABAIXO'} → ${isAbove ? 'ACIMA' : 'ABAIXO'} (${distance.toFixed(2)}%)`);
+                console.log(` MUDANÇA DETECTADA no BTC ${timeframe}: ${wasAbove ? 'ACIMA' : 'ABAIXO'} → ${isAbove ? 'ACIMA' : 'ABAIXO'} (${distance.toFixed(2)}%)`);
             }
             
             if (btcTimeframeState[timeframe]) {
@@ -1582,7 +1582,7 @@ async function sendBTCAlert(change, btcData) {
     const direction = change.isAbove ? 'ACIMA' : 'ABAIXO';
     const emoji = change.isAbove ? '🔴' : '🟢';
     
-    let message = `<i>\n`;
+    let message = `<i>`;
     message += `${emoji} <b>BTC - EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
     message += ` Sinal: PREÇO ${direction} DA EMA 55\n\n`;
     message += ` Timeframe: ${change.timeframe}\n`;
@@ -1597,14 +1597,14 @@ async function sendBTCAlert(change, btcData) {
         message += `  ${tfEmoji} ${tf}: ${tfStatus} (${data.distance}%)\n`;
     }
     
-    message += `\n Indicadores :\n`;
+    message += ` Indicadores :\n`;
     message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
     message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
     message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
     message += `  CVD: ${btcData.cvdDirection}\n`;
     
     if (btcData.stoch4h || btcData.stoch1d) {
-        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+        message += ` ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
     }
     if (btcData.cci4h || btcData.cci1d) {
         message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
@@ -1614,11 +1614,11 @@ async function sendBTCAlert(change, btcData) {
         message += ` Bollinger: ${btcData.bollingerBuy ? 'Toque na banda inferior ✅' : (btcData.bollingerSell ? 'Toque na banda superior ✅' : 'Neutro')}\n`;
     }
     
-    message += `\n ⏰ ${dt.full}\n`;
+    message += `  ${dt.full}\n`;
     message += `</i>`;
     
     await sendToTelegram(message);
-    log(`📢 ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
+    log(` ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
 }
 
 // =====================================================================
@@ -1628,7 +1628,7 @@ async function sendBTCInitialStatus(btcData) {
     const dt = getBrazilianDateTime();
     
     let message = `<i>\n`;
-    message += `<b>📊 BTC - STATUS INICIAL</b> 📊\n\n`;
+    message += `<b>👑--BTC--👑</b> \n\n`;
     message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n\n`;
     message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
     
@@ -1699,7 +1699,7 @@ async function scanBTC() {
             }
         }
         
-        let statusLog = `📊 BTC Status: `;
+        let statusLog = ` BTC Status: `;
         for (const [tf, data] of Object.entries(btcData.results)) {
             statusLog += `${tf}:${data.isAbove ? '🔼' : '🔽'} `;
         }
@@ -1766,18 +1766,9 @@ async function sendToTelegram(message) {
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
-    let msg = `<b>🚀 TITANIUM PRIME X - ATIVO</b>\n\n`;
-    msg += `<i>✅ Scanner em tempo real ativo</i>\n`;
-    msg += `<i>📊 Critério Altcoins: Divergências RSI + Bollinger + LSR + Funding</i>\n`;
-    msg += `<i>📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)</i>\n`;
-    msg += `<i>📊 Critério BTC: EMA 55 em 15m/1h/4h/12h/1d</i>\n`;
-    msg += `<i>📊 Stoch 5.3.3 (4H/1D) e CCI 20 com EMA 5 (4H/1D)</i>\n`;
-    msg += `<i>⏱️ Cooldown: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos</i>\n`;
-    msg += `<i>🔍 Escaneando a cada ${CONFIG.MONITOR.SCAN_INTERVAL_SECONDS} segundos...</i>\n\n`;
-    msg += `<i>🟢🟡 MONITOR BTC ATIVO - Alerta por TIMEFRAME INDIVIDUAL</i>\n`;
-    msg += `<i>📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55</i>\n`;
-    msg += `<i>🔄 Cooldown de ${CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES} minutos por timeframe</i>\n\n`;
-    msg += `<i>Os alertas serão enviados assim que os critérios forem atendidos!</i>`;
+    let msg = `<b> TITANIUM PRIME X </b>\n\n`;
+    msg += `<i>✅</i>\n`;
+    
    
     await sendToTelegram(msg);
 }
