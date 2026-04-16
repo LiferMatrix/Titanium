@@ -9,20 +9,21 @@ require('dotenv').config();
 // =====================================================================
 const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
 const ALERTED_FILE = path.join(__dirname, 'alertedSymbols.json');
-const BTC_ALERTED_FILE = path.join(__dirname, 'btcAlertedHistory.json');
+const BTC_TF_STATE_FILE = path.join(__dirname, 'btcTimeframeState.json');
+const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 
 // =====================================================================
 // === CONFIGURAÇÃO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vV',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
         MIN_VOLUME_USDT: 1000000,
-        MAX_SYMBOLS: 300,
+        MAX_SYMBOLS: 250,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
         LSR_15M_PERIOD: '15m',
@@ -48,16 +49,82 @@ const CONFIG = {
             CHECK_INTERVAL_SECONDS: 30,
             CVD_CHANGE_WINDOW: 60
         },
-        // CONFIGURAÇÃO ESPECÍFICA DO BTC
         BTC_MONITOR: {
             ENABLED: true,
             TIMEFRAMES: ['15m', '1h', '4h', '12h', '1d'],
             EMA_PERIOD: 55,
-            ALERT_COOLDOWN_MINUTES: 30, // Cooldown de 30 minutos para BTC
-            CHECK_INTERVAL_SECONDS: 120  // Verifica BTC a cada 2 minutos
+            CHECK_INTERVAL_SECONDS: 60,
+            ALERT_COOLDOWN_MINUTES: 5
         }
     }
 };
+
+// =====================================================================
+// === MEMÓRIA DE CRUZAMENTOS (VOLUME MOMENTUM) ===
+// =====================================================================
+let volumeMomentumMemory = {
+    lastStochK: {},      // Último valor de K por símbolo
+    lastStochD: {},      // Último valor de D por símbolo
+    lastCCI: {},         // Último status do CCI por símbolo
+    lastCrossState: {}   // Último estado de cruzamento (null, 'bull', 'bear')
+};
+
+function loadVolumeMomentumMemory() {
+    try {
+        if (fs.existsSync(VOLUME_MOMENTUM_FILE)) {
+            const data = fs.readFileSync(VOLUME_MOMENTUM_FILE, 'utf8');
+            volumeMomentumMemory = JSON.parse(data);
+            console.log(`📂 Memória de Volume Momentum carregada`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar memória de Volume Momentum: ${error.message}`);
+    }
+}
+
+function saveVolumeMomentumMemory() {
+    try {
+        fs.writeFileSync(VOLUME_MOMENTUM_FILE, JSON.stringify(volumeMomentumMemory, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar memória de Volume Momentum: ${error.message}`);
+    }
+}
+
+// =====================================================================
+// === ESTADO DOS TIMEFRAMES DO BTC ===
+// =====================================================================
+let btcTimeframeState = {
+    '15m': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '4h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '12h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1d': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 }
+};
+
+let initialStatusSent = false;
+
+// =====================================================================
+// === CARREGAR ESTADO DOS TIMEFRAMES ===
+// =====================================================================
+function loadBTCTimeframeState() {
+    try {
+        if (fs.existsSync(BTC_TF_STATE_FILE)) {
+            const data = fs.readFileSync(BTC_TF_STATE_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            btcTimeframeState = loaded;
+            console.log(`📂 Estado dos timeframes BTC carregado`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar estado dos TFs BTC: ${error.message}`);
+    }
+}
+
+function saveBTCTimeframeState() {
+    try {
+        fs.writeFileSync(BTC_TF_STATE_FILE, JSON.stringify(btcTimeframeState, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar estado dos TFs BTC: ${error.message}`);
+    }
+}
 
 // =====================================================================
 // === CACHE E CONTROLE DE ALERTAS ===
@@ -66,12 +133,10 @@ const rsiCache = new Map();
 const divergenceCache = new Map();
 const bollingerCache = new Map();
 const lsrTrendCache = new Map();
+const stochCache = new Map();
+const cciCache = new Map();
 const alertedSymbols = new Map();
-const btcAlertedHistory = new Map(); // Histórico de alertas do BTC
 
-// =====================================================================
-// === CARREGAR ALERTAS ANTERIORES ===
-// =====================================================================
 function loadAlertedSymbols() {
     try {
         if (fs.existsSync(ALERTED_FILE)) {
@@ -99,64 +164,6 @@ function saveAlertedSymbols() {
     }
 }
 
-// Carregar histórico de alertas do BTC
-function loadBTCAlertedHistory() {
-    try {
-        if (fs.existsSync(BTC_ALERTED_FILE)) {
-            const data = fs.readFileSync(BTC_ALERTED_FILE, 'utf8');
-            const loaded = JSON.parse(data);
-            for (const [timestamp, alertData] of Object.entries(loaded)) {
-                btcAlertedHistory.set(timestamp, alertData);
-            }
-            console.log(`📂 ${btcAlertedHistory.size} alertas BTC anteriores carregados`);
-        }
-    } catch (error) {
-        console.log(`⚠️ Erro ao carregar alertas BTC: ${error.message}`);
-    }
-}
-
-function saveBTCAlertedHistory(alertData) {
-    try {
-        const data = {};
-        for (const [timestamp, value] of btcAlertedHistory.entries()) {
-            data[timestamp] = value;
-        }
-        // Adicionar novo alerta
-        data[Date.now()] = alertData;
-        
-        // Manter apenas últimos 100 alertas
-        const entries = Object.entries(data);
-        if (entries.length > 100) {
-            const sorted = entries.sort((a, b) => parseInt(b[0]) - parseInt(a[0]));
-            const latest100 = Object.fromEntries(sorted.slice(0, 100));
-            fs.writeFileSync(BTC_ALERTED_FILE, JSON.stringify(latest100, null, 2));
-        } else {
-            fs.writeFileSync(BTC_ALERTED_FILE, JSON.stringify(data, null, 2));
-        }
-    } catch (error) {
-        console.log(`⚠️ Erro ao salvar alerta BTC: ${error.message}`);
-    }
-}
-
-function canAlertBTC() {
-    const now = Date.now();
-    // Verificar último alerta
-    let lastAlertTime = 0;
-    for (const [timestamp] of btcAlertedHistory.entries()) {
-        if (parseInt(timestamp) > lastAlertTime) {
-            lastAlertTime = parseInt(timestamp);
-        }
-    }
-    
-    const cooldownMs = CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
-    return (now - lastAlertTime) > cooldownMs;
-}
-
-function markBTCAlerted(alertData) {
-    saveBTCAlertedHistory(alertData);
-}
-
-// Verifica se o símbolo pode ser alertado novamente
 function canAlert(symbol, type) {
     const key = `${symbol}_${type}`;
     const lastAlert = alertedSymbols.get(key);
@@ -172,197 +179,16 @@ function markAlerted(symbol, type) {
     saveAlertedSymbols();
 }
 
-// =====================================================================
-// === FUNÇÃO PARA CALCULAR EMA ===
-// =====================================================================
-function calculateEMA(prices, period) {
-    if (prices.length < period) return null;
-    
-    const multiplier = 2 / (period + 1);
-    let ema = prices[0];
-    
-    for (let i = 1; i < prices.length; i++) {
-        ema = (prices[i] - ema) * multiplier + ema;
-    }
-    
-    return ema;
+function canAlertBTC(timeframe) {
+    const lastAlert = btcTimeframeState[timeframe]?.lastAlertSent || 0;
+    const cooldownMs = CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+    return (Date.now() - lastAlert) > cooldownMs;
 }
 
-// =====================================================================
-// === VERIFICAR CONDIÇÕES DA EMA PARA BTC ===
-// =====================================================================
-async function checkBTCEMA() {
-    try {
-        const symbol = 'BTCUSDT';
-        const results = {};
-        let allAbove = true;
-        let allBelow = true;
-        let emaData = [];
-        
-        for (const timeframe of CONFIG.MONITOR.BTC_MONITOR.TIMEFRAMES) {
-            // Buscar candles suficientes para calcular EMA 55
-            const candles = await getCandles(symbol, timeframe, 100);
-            if (!candles || candles.length < 60) {
-                console.log(`⚠️ Dados insuficientes para BTC ${timeframe}`);
-                continue;
-            }
-            
-            const prices = candles.map(c => c.close);
-            const currentPrice = prices[prices.length - 1];
-            const ema = calculateEMA(prices, CONFIG.MONITOR.BTC_MONITOR.EMA_PERIOD);
-            
-            if (ema === null) continue;
-            
-            const isAbove = currentPrice > ema;
-            const isBelow = currentPrice < ema;
-            const distance = ((currentPrice - ema) / ema) * 100;
-            
-            results[timeframe] = {
-                currentPrice,
-                ema,
-                isAbove,
-                isBelow,
-                distance: distance.toFixed(2)
-            };
-            
-            emaData.push({
-                timeframe,
-                isAbove,
-                distance: parseFloat(distance)
-            });
-            
-            if (isAbove) allBelow = false;
-            if (isBelow) allAbove = false;
-        }
-        
-        // Buscar dados adicionais para o alerta
-        const [funding, lsr, rsiValue, lsrTrendData, cvd] = await Promise.all([
-            getFundingRates([symbol]).then(r => r[symbol]),
-            getLSRData([symbol]).then(r => r[symbol]),
-            getRSIForSymbol(symbol),
-            getLSRTrend(symbol),
-            getCVDData(symbol)
-        ]);
-        
-        const bollingerBuy = await checkBollingerTouch(symbol, 'buy');
-        const bollingerSell = await checkBollingerTouch(symbol, 'sell');
-        
-        // Determinar sinal
-        let signal = null;
-        let signalType = null;
-        
-        // SINAL DE ALTA (COMPRA) - Preço abaixo da EMA em todos os timeframes
-        if (allBelow && emaData.length >= 3) {
-            // Verificar se está significativamente abaixo (pelo menos -1% em algum timeframe)
-            const hasSignificantBelow = emaData.some(d => d.distance <= -1);
-            if (hasSignificantBelow) {
-                signal = 'BULL';
-                signalType = '🟢 PREÇO ABAIXO DA EMA 55 EM TODOS TIMEFRAMES';
-            }
-        }
-        
-        // SINAL DE BAIXA (VENDA) - Preço acima da EMA em todos os timeframes
-        if (allAbove && emaData.length >= 3) {
-            // Verificar se está significativamente acima (pelo menos +1% em algum timeframe)
-            const hasSignificantAbove = emaData.some(d => d.distance >= 1);
-            if (hasSignificantAbove) {
-                signal = 'BEAR';
-                signalType = '🔴 PREÇO ACIMA DA EMA 55 EM TODOS TIMEFRAMES';
-            }
-        }
-        
-        return {
-            signal,
-            signalType,
-            results,
-            emaData,
-            funding: funding || 0,
-            fundingPercent: (funding || 0) * 100,
-            lsr: lsr || 0,
-            lsrTrend: lsrTrendData.trend,
-            rsi: rsiValue,
-            cvdDirection: cvd || '⏺',
-            bollingerBuy,
-            bollingerSell,
-            currentPrice: results[Object.keys(results)[0]]?.currentPrice || 0
-        };
-        
-    } catch (error) {
-        console.log(`❌ Erro ao verificar EMA BTC: ${error.message}`);
-        return { signal: null };
-    }
-}
-
-// Função auxiliar para buscar CVD
-async function getCVDData(symbol) {
-    try {
-        // CVD já está sendo gerenciado pelo CVDManager
-        // Esta função é apenas para compatibilidade
-        return '⏺';
-    } catch (error) {
-        return '⏺';
-    }
-}
-
-// =====================================================================
-// === ENVIAR ALERTA EXCLUSIVO DO BTC ===
-// =====================================================================
-async function sendBTCAlert(btcData) {
-    const dt = getBrazilianDateTime();
-    
-    let message = `<i>\n`;
-    message += `${btcData.signal === 'BULL' ? '🟢' : '🔴'} BTC - EMA 55 ${btcData.signal === 'BULL' ? '🟢' : '🔴'}\n`;
-    message += ` Sinal: ${btcData.signalType}\n\n`;
-    message += ` Preço : ${formatPrice(btcData.currentPrice)} USDT\n\n`;
-    message += ` EMA 55 por Timeframe:\n`;
-    
-    for (const [tf, data] of Object.entries(btcData.results)) {
-        const emoji = data.isAbove ? '🔼' : (data.isBelow ? '🔽' : '⚪');
-        const status = data.isAbove ? 'ACIMA' : (data.isBelow ? 'ABAIXO' : 'NEUTRO');
-        message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
-    }
-    
-    message += ` Indicadores:\n`;
-    message += `   LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
-    message += `   Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
-    message += `   RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
-    message += `   CVD: ${btcData.cvdDirection}\n`;
-    
-    if (btcData.bollingerBuy || btcData.bollingerSell) {
-        message += `  📊 Bollinger: ${btcData.bollingerBuy ? 'Toque na banda inferior ✅' : (btcData.bollingerSell ? 'Toque na banda superior ✅' : 'Neutro')}\n`;
-    }
-    
-    message += `\n ${dt.full}\n`;
-    message += `</i>`;
-    
-    await sendToTelegram(message);
-    log(`📢 ALERTA BTC ENVIADO: ${btcData.signalType}`, 'alert');
-}
-
-// =====================================================================
-// === MONITOR ESPECÍFICO DO BTC ===
-// =====================================================================
-let lastBTCScan = 0;
-
-async function scanBTC() {
-    const now = Date.now();
-    const intervalMs = CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000;
-    
-    if (now - lastBTCScan < intervalMs) return;
-    lastBTCScan = now;
-    
-    try {
-        const btcData = await checkBTCEMA();
-        
-        if (btcData.signal && canAlertBTC()) {
-            await sendBTCAlert(btcData);
-            markBTCAlerted(btcData);
-        } else if (btcData.signal && !canAlertBTC()) {
-            log(`⏸️ BTC em cooldown - alerta não enviado`, 'info');
-        }
-        
-    } catch (error) {
-        log(`Erro no scan BTC: ${error.message}`, 'error');
+function markBTCAlerted(timeframe) {
+    if (btcTimeframeState[timeframe]) {
+        btcTimeframeState[timeframe].lastAlertSent = Date.now();
+        saveBTCTimeframeState();
     }
 }
 
@@ -516,6 +342,12 @@ class CVDManager {
         return { direction: data.direction };
     }
     
+    getCVDValue(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return '⏺';
+        return data.direction;
+    }
+    
     getVolumeProfile(symbol, minutesAgo = 5) {
         const data = this.cvdData.get(symbol);
         if (!data || data.history.length === 0) return null;
@@ -545,12 +377,6 @@ class CVDManager {
             dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
             dominantRatio: Math.max(buyerRatio, sellerRatio)
         };
-    }
-    
-    getCVDValue(symbol) {
-        const data = this.cvdData.get(symbol);
-        if (!data) return '⏺';
-        return data.direction;
     }
     
     cleanup() {
@@ -588,6 +414,353 @@ function log(message, type = 'info') {
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOCHASTIC (5,3,3) ===
+// =====================================================================
+async function calculateStochastic(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_stoch_${timeframe}`;
+        const now = Date.now();
+        const cached = stochCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const candles = await getCandles(symbol, timeframe, 50);
+        if (!candles || candles.length < 20) return null;
+        
+        const periodK = 5;
+        const periodD = 3;
+        const periodSlow = 3;
+        
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        const kValues = [];
+        
+        for (let i = periodK - 1; i < closes.length; i++) {
+            let highestHigh = Math.max(...highs.slice(i - periodK + 1, i + 1));
+            let lowestLow = Math.min(...lows.slice(i - periodK + 1, i + 1));
+            let currentClose = closes[i];
+            
+            let k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kValues.push(k);
+        }
+        
+        const dValues = [];
+        for (let i = periodD - 1; i < kValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodD; j++) {
+                sum += kValues[i - j];
+            }
+            dValues.push(sum / periodD);
+        }
+        
+        const slowDValues = [];
+        for (let i = periodSlow - 1; i < dValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodSlow; j++) {
+                sum += dValues[i - j];
+            }
+            slowDValues.push(sum / periodSlow);
+        }
+        
+        const currentK = kValues[kValues.length - 1];
+        const currentD = slowDValues[slowDValues.length - 1];
+        const prevK = kValues[kValues.length - 2];
+        const prevD = slowDValues[slowDValues.length - 2];
+        
+        const kTrend = currentK > prevK ? '⤴️' : (currentK < prevK ? '⤵️' : '⏺');
+        const dTrend = currentD > prevD ? '⤴️' : (currentD < prevD ? '⤵️' : '⏺');
+        
+        const isOverbought = currentK > 80 && currentD > 80;
+        const isOversold = currentK < 20 && currentD < 20;
+        
+        let status = '⚪';
+        if (isOverbought) status = '🔴';
+        if (isOversold) status = '🟢';
+        
+        const result = {
+            k: currentK.toFixed(0),
+            d: currentD.toFixed(0),
+            kTrend: kTrend,
+            dTrend: dTrend,
+            status: status,
+            isOverbought,
+            isOversold,
+            rawK: currentK,
+            rawD: currentD
+        };
+        
+        stochCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR CCI COM EMA 5 ===
+// === Status do CRUZAMENTO com UMA seta de direção ===
+// =====================================================================
+async function calculateCCI(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_cci_${timeframe}`;
+        const now = Date.now();
+        const cached = cciCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const period = 20;
+        const emaPeriod = 5;
+        
+        const candles = await getCandles(symbol, timeframe, 100);
+        if (!candles || candles.length < period + emaPeriod) return null;
+        
+        const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
+        
+        const cciValues = [];
+        
+        for (let i = period - 1; i < typicalPrices.length; i++) {
+            const slice = typicalPrices.slice(i - period + 1, i + 1);
+            const sma = slice.reduce((a, b) => a + b, 0) / period;
+            
+            let meanDeviation = 0;
+            for (let j = 0; j < slice.length; j++) {
+                meanDeviation += Math.abs(slice[j] - sma);
+            }
+            meanDeviation = meanDeviation / period;
+            
+            if (meanDeviation === 0) {
+                cciValues.push(0);
+            } else {
+                const cci = (typicalPrices[i] - sma) / (0.015 * meanDeviation);
+                cciValues.push(cci);
+            }
+        }
+        
+        // Calcular EMA 5 do CCI
+        const emaValues = [];
+        if (cciValues.length >= emaPeriod) {
+            const multiplier = 2 / (emaPeriod + 1);
+            let ema = cciValues[0];
+            emaValues.push(ema);
+            
+            for (let i = 1; i < cciValues.length; i++) {
+                ema = (cciValues[i] - ema) * multiplier + ema;
+                emaValues.push(ema);
+            }
+        }
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const currentEMA = emaValues[emaValues.length - 1];
+        const prevCCI = cciValues[cciValues.length - 2];
+        
+        // DIREÇÃO do CCI (para onde está apontando)
+        const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '⏺');
+        
+        // STATUS DO CRUZAMENTO (ALTA = CCI acima da EMA, BAIXA = CCI abaixo da EMA)
+        let crossStatus = '';
+        
+        if (currentCCI > currentEMA) {
+            crossStatus = 'ALTA';
+        } else if (currentCCI < currentEMA) {
+            crossStatus = 'BAIXA';
+        } else {
+            crossStatus = 'NEUTRO';
+        }
+        
+        // CÍRCULO COLORIDO baseado no VALOR do CCI
+        let valueCircle = '';
+        
+        if (currentCCI <= -200) {
+            valueCircle = '🔵';
+        } else if (currentCCI <= -100) {
+            valueCircle = '🟢';
+        } else if (currentCCI <= -50) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 0) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 50) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 100) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 200) {
+            valueCircle = '🔴';
+        } else {
+            valueCircle = '🔥';
+        }
+        
+        const result = {
+            crossStatus: crossStatus,    // ALTA ou BAIXA
+            direction: cciDirection,     // ⤴️ ou ⤵️ (direção do CCI)
+            circle: valueCircle,         // Círculo por valor
+            rawCCI: currentCCI,
+            rawEMA: currentEMA
+        };
+        
+        cciCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR CRUZAMENTO STOCH + CCI (VOLUME MOMENTUM) ===
+// === Retorna: 'bull' (cruzou para cima), 'bear' (cruzou para baixo), ou null ===
+// =====================================================================
+function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
+    if (!stoch4h || !cci4h) return null;
+    
+    const symbolKey = symbol;
+    
+    // Inicializar memória se não existir
+    if (!volumeMomentumMemory.lastStochK[symbolKey]) {
+        volumeMomentumMemory.lastStochK[symbolKey] = stoch4h.rawK;
+        volumeMomentumMemory.lastStochD[symbolKey] = stoch4h.rawD;
+        volumeMomentumMemory.lastCCI[symbolKey] = cci4h.crossStatus;
+        volumeMomentumMemory.lastCrossState[symbolKey] = null;
+        saveVolumeMomentumMemory();
+        return null;
+    }
+    
+    const prevStochK = volumeMomentumMemory.lastStochK[symbolKey];
+    const prevStochD = volumeMomentumMemory.lastStochD[symbolKey];
+    const prevCCIStatus = volumeMomentumMemory.lastCCI[symbolKey];
+    const prevCrossState = volumeMomentumMemory.lastCrossState[symbolKey];
+    
+    const currentStochK = stoch4h.rawK;
+    const currentStochD = stoch4h.rawD;
+    const currentCCIStatus = cci4h.crossStatus;
+    
+    // Detectar CRUZAMENTO do Stoch (K cruzando D para cima ou para baixo)
+    let stochBullCross = false;  // K cruzou D para CIMA
+    let stochBearCross = false;  // K cruzou D para BAIXO
+    
+    // Cruzamento para CIMA: K estava abaixo de D e agora está acima
+    if (prevStochK < prevStochD && currentStochK > currentStochD) {
+        stochBullCross = true;
+    }
+    // Cruzamento para BAIXO: K estava acima de D e agora está abaixo
+    if (prevStochK > prevStochD && currentStochK < currentStochD) {
+        stochBearCross = true;
+    }
+    
+    // Detectar CRUZAMENTO do CCI (CCI cruzando EMA)
+    let cciBullCross = false;  // CCI cruzou EMA para CIMA
+    let cciBearCross = false;  // CCI cruzou EMA para BAIXO
+    
+    // Cruzamento para CIMA: estava BAIXA e agora ALTA
+    if (prevCCIStatus === 'BAIXA' && currentCCIStatus === 'ALTA') {
+        cciBullCross = true;
+    }
+    // Cruzamento para BAIXO: estava ALTA e agora BAIXA
+    if (prevCCIStatus === 'ALTA' && currentCCIStatus === 'BAIXA') {
+        cciBearCross = true;
+    }
+    
+    // ATUALIZAR MEMÓRIA
+    volumeMomentumMemory.lastStochK[symbolKey] = currentStochK;
+    volumeMomentumMemory.lastStochD[symbolKey] = currentStochD;
+    volumeMomentumMemory.lastCCI[symbolKey] = currentCCIStatus;
+    
+    let newCrossState = null;
+    let crossType = null;
+    
+    // VOLUME MOMENTUM BULL: Stoch cruzou para CIMA E CCI cruzou para CIMA (no mesmo período)
+    if (stochBullCross && cciBullCross) {
+        newCrossState = 'bull';
+        crossType = 'BULL';
+    }
+    // VOLUME MOMENTUM BEAR: Stoch cruzou para BAIXO E CCI cruzou para BAIXO (no mesmo período)
+    else if (stochBearCross && cciBearCross) {
+        newCrossState = 'bear';
+        crossType = 'BEAR';
+    } else {
+        newCrossState = null;
+    }
+    
+    // Verificar se o cruzamento ACABOU de acontecer (não estava cruzado antes)
+    const wasCrossed = (prevCrossState === 'bull' || prevCrossState === 'bear');
+    const isNowCrossed = (newCrossState === 'bull' || newCrossState === 'bear');
+    
+    // Só alertar se NÃO estava cruzado antes e AGORA cruzou
+    let shouldAlert = false;
+    let alertType = null;
+    
+    if (!wasCrossed && isNowCrossed) {
+        shouldAlert = true;
+        alertType = newCrossState === 'bull' ? 'VOLUME_MOMENTUM_BULL' : 'VOLUME_MOMENTUM_BEAR';
+    }
+    
+    // Atualizar último estado de cruzamento
+    volumeMomentumMemory.lastCrossState[symbolKey] = newCrossState;
+    saveVolumeMomentumMemory();
+    
+    if (shouldAlert) {
+        return alertType;
+    }
+    
+    return null;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR STOCHASTIC EM MENSAGEM ===
+// =====================================================================
+function formatStochMessage(stoch4h, stoch1d) {
+    let msg = '';
+    
+    if (stoch4h) {
+        msg += `Stoch 4H: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
+    }
+    
+    if (stoch1d) {
+        msg += `Stoch 1D: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}\n`;
+    }
+    
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR CCI EM MENSAGEM ===
+// === Exemplo: CCI 4H: BAIXA ⤵️ 🔴
+// === Exemplo: CCI 1D: ALTA ⤴️ 🔴
+// =====================================================================
+function formatCCIMessage(cci4h, cci1d) {
+    let msg = '';
+    
+    if (cci4h) {
+        msg += `CCI 4H: ${cci4h.crossStatus} ${cci4h.direction} ${cci4h.circle}\n`;
+    }
+    
+    if (cci1d) {
+        msg += `CCI 1D: ${cci1d.crossStatus} ${cci1d.direction} ${cci1d.circle}\n`;
+    }
+    
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR EMA ===
+// =====================================================================
+function calculateEMA(prices, period) {
+    if (prices.length < period) return null;
+    
+    const multiplier = 2 / (period + 1);
+    let ema = prices[0];
+    
+    for (let i = 1; i < prices.length; i++) {
+        ema = (prices[i] - ema) * multiplier + ema;
+    }
+    
+    return ema;
 }
 
 // =====================================================================
@@ -767,7 +940,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
     const pricePivots = findPivots(prices, 3);
     const rsiPivots = findPivots(rsiValues, 3);
     
-    // DIVERGÊNCIA DE ALTA (BULLISH)
     for (let i = 0; i < pricePivots.lows.length; i++) {
         for (let j = i + 1; j < pricePivots.lows.length; j++) {
             const priceLow1 = pricePivots.lows[i];
@@ -805,7 +977,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
         }
     }
     
-    // DIVERGÊNCIA DE BAIXA (BEARISH)
     for (let i = 0; i < pricePivots.highs.length; i++) {
         for (let j = i + 1; j < pricePivots.highs.length; j++) {
             const priceHigh1 = pricePivots.highs[i];
@@ -919,9 +1090,7 @@ async function analyzeDivergences(symbol, cvdManager) {
                 }
             }
             
-        } catch (error) {
-            // continua
-        }
+        } catch (error) {}
     }
     
     result.hasBullish15mPlusOther = bullishOn15m && bullishOtherTimeframes.length > 0;
@@ -1075,14 +1244,14 @@ async function getLSRData(symbols) {
 }
 
 // =====================================================================
-// === VERIFICAR CRITÉRIOS E ENVIAR ALERTA ===
+// === VERIFICAR CRITÉRIOS E ENVIAR ALERTA (ALTCOINS) ===
+// === NOVO: ALERTA DE VOLUME MOMENTUM BULL/BEAR ===
 // =====================================================================
 async function checkAndAlert(symbolData, cvdManager) {
     const { symbol: fullSymbol, price, volume24h } = symbolData;
     const symbol = fullSymbol.replace('USDT', '');
     
     try {
-        // Buscar dados necessários
         const [funding, lsr, rsiValue, divergences, lsrTrendData] = await Promise.all([
             getFundingRates([fullSymbol]).then(r => r[fullSymbol]),
             getLSRData([fullSymbol]).then(r => r[fullSymbol]),
@@ -1097,7 +1266,18 @@ async function checkAndAlert(symbolData, cvdManager) {
         const bollingerSell = await checkBollingerTouch(fullSymbol, 'sell');
         const cvd = cvdManager.getCVD(fullSymbol);
         
-        // Criar objeto do ativo
+        const [stoch4h, stoch1d, cci4h, cci1d] = await Promise.all([
+            calculateStochastic(fullSymbol, '4h'),
+            calculateStochastic(fullSymbol, '1d'),
+            calculateCCI(fullSymbol, '4h'),
+            calculateCCI(fullSymbol, '1d')
+        ]);
+        
+        // =============================================================
+        // NOVO: DETECTAR VOLUME MOMENTUM BULL/BEAR
+        // =============================================================
+        const volumeMomentumSignal = detectVolumeMomentumCross(fullSymbol, stoch4h, cci4h);
+        
         const asset = {
             symbol,
             fullSymbol,
@@ -1111,10 +1291,35 @@ async function checkAndAlert(symbolData, cvdManager) {
             cvdDirection: cvd ? cvd.direction : '⏺',
             divergences,
             bollingerBuy,
-            bollingerSell
+            bollingerSell,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d,
+            volumeMomentumSignal
         };
         
-        // VERIFICAR SETUP BEAR
+        // =============================================================
+        // ALERTA VOLUME MOMENTUM BULL
+        // =============================================================
+        if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BULL' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL')) {
+            await sendVolumeMomentumAlert(asset, 'BULL');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL');
+            log(`🟢 VOLUME MOMENTUM BULL: ${symbol}`, 'alert');
+        }
+        
+        // =============================================================
+        // ALERTA VOLUME MOMENTUM BEAR
+        // =============================================================
+        if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BEAR' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BEAR')) {
+            await sendVolumeMomentumAlert(asset, 'BEAR');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BEAR');
+            log(`🔴 VOLUME MOMENTUM BEAR: ${symbol}`, 'alert');
+        }
+        
+        // =============================================================
+        // ALERTAS TRADICIONAIS (BULL/BEAR)
+        // =============================================================
         const isBear = asset.divergences.hasBearish15mPlusOther &&
                        asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
                        asset.bollingerSell &&
@@ -1122,7 +1327,6 @@ async function checkAndAlert(symbolData, cvdManager) {
                        asset.funding > 0 &&
                        asset.lsrTrend === 'rising';
         
-        // VERIFICAR SETUP BULL
         const isBull = asset.divergences.hasBullish15mPlusOther &&
                        asset.rsi < CONFIG.MONITOR.RSI.RSI_BUY_THRESHOLD &&
                        asset.bollingerBuy &&
@@ -1130,7 +1334,6 @@ async function checkAndAlert(symbolData, cvdManager) {
                        asset.funding < 0 &&
                        asset.lsrTrend === 'falling';
         
-        // Enviar alerta se aplicável
         if (isBear && canAlert(fullSymbol, 'BEAR')) {
             await sendAlert(asset, 'BEAR');
             markAlerted(fullSymbol, 'BEAR');
@@ -1149,7 +1352,83 @@ async function checkAndAlert(symbolData, cvdManager) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA INDIVIDUAL PARA TELEGRAM ===
+// === NOVO: ENVIAR ALERTA DE VOLUME MOMENTUM ===
+// =====================================================================
+async function sendVolumeMomentumAlert(asset, type) {
+    const dt = getBrazilianDateTime();
+    
+    let message = '';
+    
+    if (type === 'BULL') {
+        message = `📈 <b>VOLUME MOMENTUM BULL</b> 📈\n\n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n\n`;
+        message += `<i> 🔄 CRUZAMENTO CONFIRMADO NO 4H:</i>\n`;
+        message += `<i>    • Stoch (K/D) cruzou para CIMA</i>\n`;
+        message += `<i>    • CCI cruzou EMA para CIMA (ALTA)</i>\n\n`;
+        message += `<i> 📊 Indicadores:</i>\n`;
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
+        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n\n`;
+        
+        if (asset.stoch4h) {
+            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+        }
+        if (asset.cci4h) {
+            message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
+        }
+        
+        if (asset.stoch1d || asset.cci1d) {
+            message += `<i>\n 📅 Diário:</i>\n`;
+            if (asset.stoch1d) {
+                message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
+            }
+            if (asset.cci1d) {
+                message += `<i> CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}</i>\n`;
+            }
+        }
+        
+        message += `\n<i> ⏰ ${dt.full}</i>`;
+    } else {
+        message = `📉 <b>VOLUME MOMENTUM BEAR</b> 📉\n\n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n\n`;
+        message += `<i> 🔄 CRUZAMENTO CONFIRMADO NO 4H:</i>\n`;
+        message += `<i>    • Stoch (K/D) cruzou para BAIXO</i>\n`;
+        message += `<i>    • CCI cruzou EMA para BAIXO (BAIXA)</i>\n\n`;
+        message += `<i> 📊 Indicadores:</i>\n`;
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n\n`;
+        
+        if (asset.stoch4h) {
+            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+        }
+        if (asset.cci4h) {
+            message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
+        }
+        
+        if (asset.stoch1d || asset.cci1d) {
+            message += `<i>\n 📅 Diário:</i>\n`;
+            if (asset.stoch1d) {
+                message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
+            }
+            if (asset.cci1d) {
+                message += `<i> CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}</i>\n`;
+            }
+        }
+        
+        message += `\n<i> ⏰ ${dt.full}</i>`;
+    }
+    
+    await sendToTelegram(message);
+    await delay(CONFIG.MONITOR.TELEGRAM_DELAY_MS);
+}
+
+// =====================================================================
+// === ENVIAR ALERTA INDIVIDUAL PARA TELEGRAM (ALTCOINS) ===
 // =====================================================================
 async function sendAlert(asset, type) {
     const dt = getBrazilianDateTime();
@@ -1165,6 +1444,14 @@ async function sendAlert(asset, type) {
         message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
         message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         message += `<i> Divergência:</i> ${asset.divergences.bullishTimeframes.join(' → ')}\n`;
+        
+        if (asset.stoch4h || asset.stoch1d) {
+            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
+        }
+        if (asset.cci4h || asset.cci1d) {
+            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
+        }
+        
         message += `<i> ${dt.full}</i>`;
     } else {
         message = `🔴<i>Analisar Correção</i> \n`;
@@ -1175,11 +1462,252 @@ async function sendAlert(asset, type) {
         message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
         message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         message += `<i> Divergência:</i> ${asset.divergences.bearishTimeframes.join(' → ')}\n`;
+        
+        if (asset.stoch4h || asset.stoch1d) {
+            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
+        }
+        if (asset.cci4h || asset.cci1d) {
+            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
+        }
+        
         message += `<i> ${dt.full}</i>`;
     }
     
     await sendToTelegram(message);
     await delay(CONFIG.MONITOR.TELEGRAM_DELAY_MS);
+}
+
+// =====================================================================
+// === VERIFICAR BTC POR TIMEFRAME INDIVIDUAL ===
+// =====================================================================
+async function checkBTCByTimeframe() {
+    try {
+        const symbol = 'BTCUSDT';
+        const results = {};
+        let hasChanges = false;
+        let changesList = [];
+        
+        for (const timeframe of CONFIG.MONITOR.BTC_MONITOR.TIMEFRAMES) {
+            const candles = await getCandles(symbol, timeframe, 100);
+            if (!candles || candles.length < 60) continue;
+            
+            const prices = candles.map(c => c.close);
+            const currentPrice = prices[prices.length - 1];
+            const ema = calculateEMA(prices, CONFIG.MONITOR.BTC_MONITOR.EMA_PERIOD);
+            
+            if (ema === null) continue;
+            
+            const isAbove = currentPrice > ema;
+            const distance = ((currentPrice - ema) / ema) * 100;
+            
+            results[timeframe] = {
+                currentPrice,
+                ema,
+                isAbove,
+                isBelow: !isAbove,
+                distance: distance.toFixed(2)
+            };
+            
+            const wasAbove = btcTimeframeState[timeframe]?.isAbove || false;
+            
+            if (wasAbove !== isAbove) {
+                hasChanges = true;
+                changesList.push({
+                    timeframe,
+                    wasAbove,
+                    isAbove,
+                    currentPrice,
+                    ema,
+                    distance: distance.toFixed(2)
+                });
+                console.log(`🔄 MUDANÇA DETECTADA no BTC ${timeframe}: ${wasAbove ? 'ACIMA' : 'ABAIXO'} → ${isAbove ? 'ACIMA' : 'ABAIXO'} (${distance.toFixed(2)}%)`);
+            }
+            
+            if (btcTimeframeState[timeframe]) {
+                btcTimeframeState[timeframe].isAbove = isAbove;
+                btcTimeframeState[timeframe].currentPrice = currentPrice;
+                btcTimeframeState[timeframe].emaValue = ema;
+                btcTimeframeState[timeframe].distance = distance;
+            }
+        }
+        
+        const [funding, lsr, rsiValue, lsrTrendData] = await Promise.all([
+            getFundingRates([symbol]).then(r => r[symbol]),
+            getLSRData([symbol]).then(r => r[symbol]),
+            getRSIForSymbol(symbol),
+            getLSRTrend(symbol)
+        ]);
+        
+        const bollingerBuy = await checkBollingerTouch(symbol, 'buy');
+        const bollingerSell = await checkBollingerTouch(symbol, 'sell');
+        const cvd = cvdManager.getCVDValue(symbol);
+        
+        const [stoch4h, stoch1d, cci4h, cci1d] = await Promise.all([
+            calculateStochastic(symbol, '4h'),
+            calculateStochastic(symbol, '1d'),
+            calculateCCI(symbol, '4h'),
+            calculateCCI(symbol, '1d')
+        ]);
+        
+        return {
+            results,
+            hasChanges,
+            changesList,
+            funding: funding || 0,
+            fundingPercent: (funding || 0) * 100,
+            lsr: lsr || 0,
+            lsrTrend: lsrTrendData.trend,
+            rsi: rsiValue,
+            cvdDirection: cvd,
+            bollingerBuy,
+            bollingerSell,
+            currentPrice: results[Object.keys(results)[0]]?.currentPrice || 0,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d
+        };
+        
+    } catch (error) {
+        console.log(`❌ Erro ao verificar BTC: ${error.message}`);
+        return { hasChanges: false, changesList: [], results: {} };
+    }
+}
+
+// =====================================================================
+// === ENVIAR ALERTA DO BTC POR TIMEFRAME ===
+// =====================================================================
+async function sendBTCAlert(change, btcData) {
+    const dt = getBrazilianDateTime();
+    const direction = change.isAbove ? 'ACIMA' : 'ABAIXO';
+    const emoji = change.isAbove ? '🔴' : '🟢';
+    
+    let message = `<i>\n`;
+    message += `${emoji} <b>BTC - EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
+    message += ` Sinal: PREÇO ${direction} DA EMA 55\n\n`;
+    message += ` Timeframe: ${change.timeframe}\n`;
+    message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
+    message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
+    message += ` Distância: ${change.distance}%\n\n`;
+    
+    message += ` Resumo dos Timeframes:\n`;
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const tfEmoji = data.isAbove ? '🔼' : '🔽';
+        const tfStatus = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${tfEmoji} ${tf}: ${tfStatus} (${data.distance}%)\n`;
+    }
+    
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+    }
+    if (btcData.cci4h || btcData.cci1d) {
+        message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
+    }
+    
+    if (btcData.bollingerBuy || btcData.bollingerSell) {
+        message += ` Bollinger: ${btcData.bollingerBuy ? 'Toque na banda inferior ✅' : (btcData.bollingerSell ? 'Toque na banda superior ✅' : 'Neutro')}\n`;
+    }
+    
+    message += `\n ⏰ ${dt.full}\n`;
+    message += `</i>`;
+    
+    await sendToTelegram(message);
+    log(`📢 ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
+}
+
+// =====================================================================
+// === ENVIAR STATUS INICIAL DO BTC ===
+// =====================================================================
+async function sendBTCInitialStatus(btcData) {
+    const dt = getBrazilianDateTime();
+    
+    let message = `<i>\n`;
+    message += `<b>📊 BTC - STATUS INICIAL</b> 📊\n\n`;
+    message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n\n`;
+    message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
+    
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const emoji = data.isAbove ? '🔼' : '🔽';
+        const status = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
+    }
+    
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+    }
+    if (btcData.cci4h || btcData.cci1d) {
+        message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
+    }
+    
+    message += `\n Sistema monitorando !\n`;
+    message += ` ${dt.full}\n`;
+    message += `</i>`;
+    
+    await sendToTelegram(message);
+    log(`📢 STATUS INICIAL BTC ENVIADO`, 'alert');
+}
+
+// =====================================================================
+// === MONITOR ESPECÍFICO DO BTC ===
+// =====================================================================
+let lastBTCScan = 0;
+
+async function scanBTC() {
+    const now = Date.now();
+    const intervalMs = CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000;
+    
+    if (now - lastBTCScan < intervalMs) return;
+    lastBTCScan = now;
+    
+    try {
+        const btcData = await checkBTCByTimeframe();
+        
+        if (Object.keys(btcData.results).length === 0) {
+            console.log(`⚠️ BTC: Nenhum timeframe válido`);
+            return;
+        }
+        
+        if (!initialStatusSent) {
+            console.log(`📡 Enviando status inicial do BTC...`);
+            await sendBTCInitialStatus(btcData);
+            initialStatusSent = true;
+            saveBTCTimeframeState();
+            console.log(`✅ Status inicial BTC enviado com sucesso!`);
+        }
+        
+        if (btcData.hasChanges && btcData.changesList.length > 0) {
+            for (const change of btcData.changesList) {
+                if (canAlertBTC(change.timeframe)) {
+                    await sendBTCAlert(change, btcData);
+                    markBTCAlerted(change.timeframe);
+                    await delay(2000);
+                } else {
+                    console.log(`⏸️ BTC ${change.timeframe} em cooldown - alerta não enviado`);
+                }
+            }
+        }
+        
+        let statusLog = `📊 BTC Status: `;
+        for (const [tf, data] of Object.entries(btcData.results)) {
+            statusLog += `${tf}:${data.isAbove ? '🔼' : '🔽'} `;
+        }
+        console.log(statusLog);
+        
+    } catch (error) {
+        log(`Erro no scan BTC: ${error.message}`, 'error');
+    }
 }
 
 // =====================================================================
@@ -1240,10 +1768,15 @@ async function sendToTelegram(message) {
 async function sendInitMessage() {
     let msg = `<b>🚀 TITANIUM PRIME X - ATIVO</b>\n\n`;
     msg += `<i>✅ Scanner em tempo real ativo</i>\n`;
-    msg += `<i>📊 Critério: Divergências RSI + Bollinger + LSR + Funding</i>\n`;
-    msg += `<i>⏱️ Cooldown: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos por ativo</i>\n`;
+    msg += `<i>📊 Critério Altcoins: Divergências RSI + Bollinger + LSR + Funding</i>\n`;
+    msg += `<i>📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)</i>\n`;
+    msg += `<i>📊 Critério BTC: EMA 55 em 15m/1h/4h/12h/1d</i>\n`;
+    msg += `<i>📊 Stoch 5.3.3 (4H/1D) e CCI 20 com EMA 5 (4H/1D)</i>\n`;
+    msg += `<i>⏱️ Cooldown: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos</i>\n`;
     msg += `<i>🔍 Escaneando a cada ${CONFIG.MONITOR.SCAN_INTERVAL_SECONDS} segundos...</i>\n\n`;
-    msg += `<i>🟢🟡 MONITOR BTC ATIVO - EMA 55 em 15m/1h/4h/12h/1d</i>\n`;
+    msg += `<i>🟢🟡 MONITOR BTC ATIVO - Alerta por TIMEFRAME INDIVIDUAL</i>\n`;
+    msg += `<i>📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55</i>\n`;
+    msg += `<i>🔄 Cooldown de ${CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES} minutos por timeframe</i>\n\n`;
     msg += `<i>Os alertas serão enviados assim que os critérios forem atendidos!</i>`;
    
     await sendToTelegram(msg);
@@ -1265,14 +1798,12 @@ async function scanAndAlert() {
         
         log(`🔍 Escaneando ${symbols.length} símbolos...`, 'info');
         
-        // Inscrever em todos os símbolos para CVD
         for (const s of symbols) {
             if (!cvdManager.subscribedSymbols.has(s.symbol)) {
                 cvdManager.subscribeToSymbol(s.symbol);
             }
         }
         
-        // Verificar cada símbolo individualmente
         let alertCount = 0;
         for (const symbolData of symbols) {
             await checkAndAlert(symbolData, cvdManager);
@@ -1299,36 +1830,46 @@ async function startMonitor() {
     console.log('\n' + '='.repeat(70));
     console.log('🚀 TITANIUM PRIME X - MODO ALERTA INSTANTÂNEO');
     console.log('📊 Scanner contínuo - Alerta imediato quando critérios são atendidos');
-    console.log(`⏱️ Cooldown: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos por ativo`);
-    console.log(`🟢🟡 MONITOR BTC ATIVO - EMA 55 (15m/1h/4h/12h/1d)`);
+    console.log(`📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)`);
+    console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos`);
+    console.log(`🟢🟡 MONITOR BTC - Alerta por TIMEFRAME INDIVIDUAL`);
+    console.log(`📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55`);
     console.log('='.repeat(70));
     
-    // Carregar históricos
     loadAlertedSymbols();
-    loadBTCAlertedHistory();
+    loadBTCTimeframeState();
+    loadVolumeMomentumMemory();
     
-    // Enviar mensagem de inicialização
     await sendInitMessage();
     
-    // Inscrever BTC para CVD
     cvdManager.subscribeToSymbol('BTCUSDT');
     
-    // Primeiro scan imediato
+    console.log(`📡 Obtendo dados do BTC para status inicial...`);
+    const initialBTCData = await checkBTCByTimeframe();
+    if (Object.keys(initialBTCData.results).length > 0) {
+        console.log(`📡 Enviando status inicial do BTC...`);
+        await sendBTCInitialStatus(initialBTCData);
+        initialStatusSent = true;
+        saveBTCTimeframeState();
+        console.log(`✅ Status inicial BTC enviado com sucesso!`);
+    } else {
+        console.log(`⚠️ Não foi possível obter dados do BTC para status inicial`);
+    }
+    
     await scanAndAlert();
     
-    // Configurar intervalo de scan para outros ativos
     setInterval(async () => {
         await scanAndAlert();
     }, CONFIG.MONITOR.SCAN_INTERVAL_SECONDS * 1000);
     
-    // Configurar monitor específico do BTC (roda separadamente)
     setInterval(async () => {
         await scanBTC();
-    }, 30000); // Verifica BTC a cada 30 segundos
+    }, CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000);
 }
 
 process.on('SIGINT', () => {
     log('🛑 Desligando...', 'warning');
+    saveVolumeMomentumMemory();
     cvdManager.cleanup();
     process.exit(0);
 });
