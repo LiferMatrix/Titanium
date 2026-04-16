@@ -17,8 +17,8 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AGg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
@@ -1627,9 +1627,9 @@ async function sendBTCAlert(change, btcData) {
 async function sendBTCInitialStatus(btcData) {
     const dt = getBrazilianDateTime();
     
-    let message = `<i>\n`;
-    message += `<b>👑--BTC--👑</b> \n\n`;
-    message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n\n`;
+    let message = `<i>`;
+    message += `<b>👑 BTC 👑</b> \n`;
+    message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n`;
     message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
     
     for (const [tf, data] of Object.entries(btcData.results)) {
@@ -1638,20 +1638,20 @@ async function sendBTCInitialStatus(btcData) {
         message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
     }
     
-    message += `\n Indicadores :\n`;
+    message += ` Indicadores :\n`;
     message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
     message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
     message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
     message += `  CVD: ${btcData.cvdDirection}\n`;
     
     if (btcData.stoch4h || btcData.stoch1d) {
-        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+        message += ` ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
     }
     if (btcData.cci4h || btcData.cci1d) {
         message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
     }
     
-    message += `\n Sistema monitorando !\n`;
+    message += ` Sistema monitorando !\n`;
     message += ` ${dt.full}\n`;
     message += `</i>`;
     
