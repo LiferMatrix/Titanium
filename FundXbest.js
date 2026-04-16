@@ -8,30 +8,35 @@ require('dotenv').config();
 // === ARQUIVOS DE MEMÓRIA ===
 // =====================================================================
 const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
+const ALERTED_FILE = path.join(__dirname, 'alertedSymbols.json');
+const BTC_TF_STATE_FILE = path.join(__dirname, 'btcTimeframeState.json');
 
 // =====================================================================
 // === CONFIGURAÇÃO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8dg',
-        CHAT_ID: '-1002559'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
-        INTERVAL_MINUTES: 3,
-        TOP_SIZE: 8,
+        SCAN_INTERVAL_SECONDS: 60,
         MIN_VOLUME_USDT: 1000000,
-        MAX_SYMBOLS: 200,
+        MAX_SYMBOLS: 250,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
+        LSR_15M_PERIOD: '15m',
+        LSR_TREND_THRESHOLD: 0.05,
+        ALERT_COOLDOWN_MINUTES: 5,
+        TELEGRAM_DELAY_MS: 1500,
         RSI: {
             PERIOD: 14,
-            TIMEFRAMES: ['15m', '1h', '4h'],
+            TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],
             LOOKBACK_CANDLES: 100,
             MIN_DIVERGENCE_STRENGTH: 3,
             MIN_VOLUME_CONFIRMATION: 55,
             RSI_BUY_THRESHOLD: 60,
-            RSI_SELL_THRESHOLD: 65
+            RSI_SELL_THRESHOLD: 50
         },
         BOLLINGER: {
             PERIOD: 20,
@@ -42,16 +47,119 @@ const CONFIG = {
         CVD: {
             CHECK_INTERVAL_SECONDS: 30,
             CVD_CHANGE_WINDOW: 60
+        },
+        BTC_MONITOR: {
+            ENABLED: true,
+            TIMEFRAMES: ['15m', '1h', '4h', '12h', '1d'],
+            EMA_PERIOD: 55,
+            CHECK_INTERVAL_SECONDS: 60,
+            ALERT_COOLDOWN_MINUTES: 5
         }
     }
 };
 
 // =====================================================================
-// === CACHE RSI E DIVERGÊNCIAS ===
+// === ESTADO DOS TIMEFRAMES DO BTC ===
+// =====================================================================
+let btcTimeframeState = {
+    '15m': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '4h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '12h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1d': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 }
+};
+
+let initialStatusSent = false;
+
+// =====================================================================
+// === CARREGAR ESTADO DOS TIMEFRAMES ===
+// =====================================================================
+function loadBTCTimeframeState() {
+    try {
+        if (fs.existsSync(BTC_TF_STATE_FILE)) {
+            const data = fs.readFileSync(BTC_TF_STATE_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            btcTimeframeState = loaded;
+            console.log(`📂 Estado dos timeframes BTC carregado`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar estado dos TFs BTC: ${error.message}`);
+    }
+}
+
+function saveBTCTimeframeState() {
+    try {
+        fs.writeFileSync(BTC_TF_STATE_FILE, JSON.stringify(btcTimeframeState, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar estado dos TFs BTC: ${error.message}`);
+    }
+}
+
+// =====================================================================
+// === CACHE E CONTROLE DE ALERTAS ===
 // =====================================================================
 const rsiCache = new Map();
 const divergenceCache = new Map();
 const bollingerCache = new Map();
+const lsrTrendCache = new Map();
+const stochCache = new Map();
+const cciCache = new Map();
+const alertedSymbols = new Map();
+
+function loadAlertedSymbols() {
+    try {
+        if (fs.existsSync(ALERTED_FILE)) {
+            const data = fs.readFileSync(ALERTED_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            for (const [symbol, timestamp] of Object.entries(loaded)) {
+                alertedSymbols.set(symbol, timestamp);
+            }
+            console.log(`📂 ${alertedSymbols.size} alertas anteriores carregados`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar alertas: ${error.message}`);
+    }
+}
+
+function saveAlertedSymbols() {
+    try {
+        const data = {};
+        for (const [symbol, timestamp] of alertedSymbols.entries()) {
+            data[symbol] = timestamp;
+        }
+        fs.writeFileSync(ALERTED_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar alertas: ${error.message}`);
+    }
+}
+
+function canAlert(symbol, type) {
+    const key = `${symbol}_${type}`;
+    const lastAlert = alertedSymbols.get(key);
+    if (!lastAlert) return true;
+    
+    const cooldownMs = CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+    return (Date.now() - lastAlert) > cooldownMs;
+}
+
+function markAlerted(symbol, type) {
+    const key = `${symbol}_${type}`;
+    alertedSymbols.set(key, Date.now());
+    saveAlertedSymbols();
+}
+
+function canAlertBTC(timeframe) {
+    const lastAlert = btcTimeframeState[timeframe]?.lastAlertSent || 0;
+    const cooldownMs = CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+    return (Date.now() - lastAlert) > cooldownMs;
+}
+
+function markBTCAlerted(timeframe) {
+    if (btcTimeframeState[timeframe]) {
+        btcTimeframeState[timeframe].lastAlertSent = Date.now();
+        saveBTCTimeframeState();
+    }
+}
 
 // =====================================================================
 // === CVD MANAGER VIA WEBSOCKET ===
@@ -203,6 +311,12 @@ class CVDManager {
         return { direction: data.direction };
     }
     
+    getCVDValue(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return '⏺';
+        return data.direction;
+    }
+    
     getVolumeProfile(symbol, minutesAgo = 5) {
         const data = this.cvdData.get(symbol);
         if (!data || data.history.length === 0) return null;
@@ -248,7 +362,7 @@ function getBrazilianDateTime() {
     const now = new Date();
     const brazilTime = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
-    const time = brazilTime.toISOString().split('T')[1].split('.')[0].substring(0, 5);
+    const time = brazilTime.toISOString().split('T')[1].split('.')[0];
     return { date, time, full: `${date} ${time}` };
 }
 
@@ -263,8 +377,256 @@ function formatPrice(price) {
 
 function log(message, type = 'info') {
     const timestamp = new Date().toISOString();
-    const icons = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️' };
-    console.log(`${icons[timestamp]} - ${message}`);
+    const icons = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️', alert: '🚨' };
+    console.log(`${icons[type] || 'ℹ️'} [${timestamp}] ${message}`);
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOCHASTIC (5,3,3) ===
+// =====================================================================
+async function calculateStochastic(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_stoch_${timeframe}`;
+        const now = Date.now();
+        const cached = stochCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const candles = await getCandles(symbol, timeframe, 50);
+        if (!candles || candles.length < 20) return null;
+        
+        const periodK = 5;
+        const periodD = 3;
+        const periodSlow = 3;
+        
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        const kValues = [];
+        
+        for (let i = periodK - 1; i < closes.length; i++) {
+            let highestHigh = Math.max(...highs.slice(i - periodK + 1, i + 1));
+            let lowestLow = Math.min(...lows.slice(i - periodK + 1, i + 1));
+            let currentClose = closes[i];
+            
+            let k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kValues.push(k);
+        }
+        
+        const dValues = [];
+        for (let i = periodD - 1; i < kValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodD; j++) {
+                sum += kValues[i - j];
+            }
+            dValues.push(sum / periodD);
+        }
+        
+        const slowDValues = [];
+        for (let i = periodSlow - 1; i < dValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodSlow; j++) {
+                sum += dValues[i - j];
+            }
+            slowDValues.push(sum / periodSlow);
+        }
+        
+        const currentK = kValues[kValues.length - 1];
+        const currentD = slowDValues[slowDValues.length - 1];
+        const prevK = kValues[kValues.length - 2];
+        const prevD = slowDValues[slowDValues.length - 2];
+        
+        const kTrend = currentK > prevK ? '⤴️' : (currentK < prevK ? '⤵️' : '⏺');
+        const dTrend = currentD > prevD ? '⤴️' : (currentD < prevD ? '⤵️' : '⏺');
+        
+        const isOverbought = currentK > 80 && currentD > 80;
+        const isOversold = currentK < 20 && currentD < 20;
+        
+        let status = '⚪';
+        if (isOverbought) status = '🔴';
+        if (isOversold) status = '🟢';
+        
+        const result = {
+            k: currentK.toFixed(0),
+            d: currentD.toFixed(0),
+            kTrend: kTrend,
+            dTrend: dTrend,
+            status: status,
+            isOverbought,
+            isOversold
+        };
+        
+        stochCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR CCI COM EMA 5 (SIMPLIFICADA) ===
+// === Status do CRUZAMENTO com UMA seta de direção ===
+// =====================================================================
+async function calculateCCI(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_cci_${timeframe}`;
+        const now = Date.now();
+        const cached = cciCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const period = 20;
+        const emaPeriod = 5;
+        
+        const candles = await getCandles(symbol, timeframe, 100);
+        if (!candles || candles.length < period + emaPeriod) return null;
+        
+        const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
+        
+        const cciValues = [];
+        
+        for (let i = period - 1; i < typicalPrices.length; i++) {
+            const slice = typicalPrices.slice(i - period + 1, i + 1);
+            const sma = slice.reduce((a, b) => a + b, 0) / period;
+            
+            let meanDeviation = 0;
+            for (let j = 0; j < slice.length; j++) {
+                meanDeviation += Math.abs(slice[j] - sma);
+            }
+            meanDeviation = meanDeviation / period;
+            
+            if (meanDeviation === 0) {
+                cciValues.push(0);
+            } else {
+                const cci = (typicalPrices[i] - sma) / (0.015 * meanDeviation);
+                cciValues.push(cci);
+            }
+        }
+        
+        // Calcular EMA 5 do CCI
+        const emaValues = [];
+        if (cciValues.length >= emaPeriod) {
+            const multiplier = 2 / (emaPeriod + 1);
+            let ema = cciValues[0];
+            emaValues.push(ema);
+            
+            for (let i = 1; i < cciValues.length; i++) {
+                ema = (cciValues[i] - ema) * multiplier + ema;
+                emaValues.push(ema);
+            }
+        }
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const currentEMA = emaValues[emaValues.length - 1];
+        const prevCCI = cciValues[cciValues.length - 2];
+        
+        // DIREÇÃO do CCI (para onde está apontando)
+        const cciDirection = currentCCI > prevCCI ? ',⤴️subinndo' : (currentCCI < prevCCI ? ',⤵️descendo' : '');
+        
+        // STATUS DO CRUZAMENTO (ALTA = CCI acima da EMA, BAIXA = CCI abaixo da EMA)
+        let crossStatus = '';
+        
+        if (currentCCI > currentEMA) {
+            crossStatus = 'ALTA';
+        } else if (currentCCI < currentEMA) {
+            crossStatus = 'BAIXA';
+        } else {
+            crossStatus = 'NEUTRO';
+        }
+        
+        // CÍRCULO COLORIDO baseado no VALOR do CCI
+        let valueCircle = '';
+        
+        if (currentCCI <= -200) {
+            valueCircle = '🔵';
+        } else if (currentCCI <= -100) {
+            valueCircle = '🟢';
+        } else if (currentCCI <= -50) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 0) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 50) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 100) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 200) {
+            valueCircle = '🔴';
+        } else {
+            valueCircle = '🔥';
+        }
+        
+        const result = {
+            crossStatus: crossStatus,    // ALTA ou BAIXA
+            direction: cciDirection,     // ⤴️ ou ⤵️ (direção do CCI)
+            circle: valueCircle          // Círculo por valor
+        };
+        
+        cciCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR STOCHASTIC EM MENSAGEM ===
+// =====================================================================
+function formatStochMessage(stoch4h, stoch1d) {
+    let msg = '';
+    
+    if (stoch4h) {
+        msg += `Stoch 4H: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
+    }
+    
+    if (stoch1d) {
+        msg += `Stoch 1D: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}\n`;
+    }
+    
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR CCI EM MENSAGEM (SIMPLIFICADA) ===
+// === Exemplo: CCI 4H: BAIXA ⤵️ 🔴
+// === Exemplo: CCI 1D: ALTA ⤴️ 🔴
+// =====================================================================
+function formatCCIMessage(cci4h, cci1d) {
+    let msg = '';
+    
+    if (cci4h) {
+        msg += `CCI 4H: ${cci4h.crossStatus} ${cci4h.direction} ${cci4h.circle}\n`;
+    }
+    
+    if (cci1d) {
+        msg += `CCI 1D: ${cci1d.crossStatus} ${cci1d.direction} ${cci1d.circle}\n`;
+    }
+    
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR EMA ===
+// =====================================================================
+function calculateEMA(prices, period) {
+    if (prices.length < period) return null;
+    
+    const multiplier = 2 / (period + 1);
+    let ema = prices[0];
+    
+    for (let i = 1; i < prices.length; i++) {
+        ema = (prices[i] - ema) * multiplier + ema;
+    }
+    
+    return ema;
 }
 
 // =====================================================================
@@ -283,7 +645,8 @@ function calculateRSI(prices, period = 14) {
     let avgGain = gains / period;
     let avgLoss = losses / period;
     const rsiValues = [null];
-    rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+    const firstRSI = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+    rsiValues.push(firstRSI);
     
     for (let i = period + 1; i < prices.length; i++) {
         const change = prices[i] - prices[i - 1];
@@ -294,7 +657,8 @@ function calculateRSI(prices, period = 14) {
             avgGain = (avgGain * (period - 1)) / period;
             avgLoss = (avgLoss * (period - 1) - change) / period;
         }
-        rsiValues.push(avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss)));
+        const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+        rsiValues.push(rsi);
     }
     return rsiValues;
 }
@@ -364,7 +728,53 @@ async function checkBollingerTouch(symbol, type) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA ENCONTRAR PIVÔS (MÁXIMOS E MÍNIMOS LOCAIS) ===
+// === FUNÇÃO PARA VERIFICAR TENDÊNCIA DO LSR ===
+// =====================================================================
+async function getLSRTrend(symbol) {
+    try {
+        const now = Date.now();
+        const cached = lsrTrendCache.get(symbol);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const period = CONFIG.MONITOR.LSR_15M_PERIOD;
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (!data || data.length < 2) {
+            return { trend: 'stable', changePercent: 0 };
+        }
+        
+        const currentLSR = parseFloat(data[0].longShortRatio);
+        const previousLSR = parseFloat(data[1].longShortRatio);
+        
+        const changePercent = ((currentLSR - previousLSR) / previousLSR) * 100;
+        
+        let trend = 'stable';
+        if (changePercent > CONFIG.MONITOR.LSR_TREND_THRESHOLD) {
+            trend = 'rising';
+        } else if (changePercent < -CONFIG.MONITOR.LSR_TREND_THRESHOLD) {
+            trend = 'falling';
+        }
+        
+        const result = { trend, changePercent, currentLSR, previousLSR };
+        
+        lsrTrendCache.set(symbol, {
+            data: result,
+            timestamp: now
+        });
+        
+        return result;
+    } catch (error) {
+        return { trend: 'stable', changePercent: 0 };
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA ENCONTRAR PIVÔS ===
 // =====================================================================
 function findPivots(data, lookback = 3) {
     const pivots = { highs: [], lows: [] };
@@ -386,7 +796,7 @@ function findPivots(data, lookback = 3) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA DETECTAR DIVERGÊNCIAS DE RSI COM PIVÔS E VOLUME ===
+// === FUNÇÃO PARA DETECTAR DIVERGÊNCIAS ===
 // =====================================================================
 function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
     const divergences = { bullish: [], bearish: [] };
@@ -396,7 +806,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
     const pricePivots = findPivots(prices, 3);
     const rsiPivots = findPivots(rsiValues, 3);
     
-    // DIVERGÊNCIA DE ALTA (BULLISH)
     for (let i = 0; i < pricePivots.lows.length; i++) {
         for (let j = i + 1; j < pricePivots.lows.length; j++) {
             const priceLow1 = pricePivots.lows[i];
@@ -434,7 +843,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
         }
     }
     
-    // DIVERGÊNCIA DE BAIXA (BEARISH)
     for (let i = 0; i < pricePivots.highs.length; i++) {
         for (let j = i + 1; j < pricePivots.highs.length; j++) {
             const priceHigh1 = pricePivots.highs[i];
@@ -476,7 +884,7 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
 }
 
 // =====================================================================
-// === ANALISAR DIVERGÊNCIAS EM MÚLTIPLOS TIMEFRAMES COM VOLUME ===
+// === ANALISAR DIVERGÊNCIAS ===
 // =====================================================================
 async function analyzeDivergences(symbol, cvdManager) {
     const cacheKey = `${symbol}_divergences`;
@@ -493,10 +901,17 @@ async function analyzeDivergences(symbol, cvdManager) {
         bullishTimeframes: [],
         bearishTimeframes: [],
         bestBullishVolumeScore: 0,
-        bestBearishVolumeScore: 0
+        bestBearishVolumeScore: 0,
+        hasBullish15mPlusOther: false,
+        hasBearish15mPlusOther: false
     };
     
     const volumeProfile = cvdManager.getVolumeProfile(symbol, 5);
+    
+    let bullishOn15m = false;
+    let bearishOn15m = false;
+    let bullishOtherTimeframes = [];
+    let bearishOtherTimeframes = [];
     
     for (const timeframe of CONFIG.MONITOR.RSI.TIMEFRAMES) {
         try {
@@ -517,6 +932,12 @@ async function analyzeDivergences(symbol, cvdManager) {
                 if (maxVolumeScore > result.bestBullishVolumeScore) {
                     result.bestBullishVolumeScore = maxVolumeScore;
                 }
+                
+                if (timeframe === '15m') {
+                    bullishOn15m = true;
+                } else {
+                    bullishOtherTimeframes.push(timeframe);
+                }
             }
             
             if (divergences.bearish.length > 0) {
@@ -527,12 +948,19 @@ async function analyzeDivergences(symbol, cvdManager) {
                 if (maxVolumeScore > result.bestBearishVolumeScore) {
                     result.bestBearishVolumeScore = maxVolumeScore;
                 }
+                
+                if (timeframe === '15m') {
+                    bearishOn15m = true;
+                } else {
+                    bearishOtherTimeframes.push(timeframe);
+                }
             }
             
-        } catch (error) {
-            // continua para próximo timeframe
-        }
+        } catch (error) {}
     }
+    
+    result.hasBullish15mPlusOther = bullishOn15m && bullishOtherTimeframes.length > 0;
+    result.hasBearish15mPlusOther = bearishOn15m && bearishOtherTimeframes.length > 0;
     
     divergenceCache.set(cacheKey, {
         data: result,
@@ -553,8 +981,12 @@ async function getCandles(symbol, interval, limit = 100) {
         if (!Array.isArray(data)) return [];
         
         return data.map(candle => ({
-            open: parseFloat(candle[1]), high: parseFloat(candle[2]), low: parseFloat(candle[3]),
-            close: parseFloat(candle[4]), volume: parseFloat(candle[5]), time: candle[0]
+            open: parseFloat(candle[1]), 
+            high: parseFloat(candle[2]), 
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]), 
+            volume: parseFloat(candle[5]), 
+            time: candle[0]
         }));
     } catch (error) {
         return [];
@@ -562,7 +994,7 @@ async function getCandles(symbol, interval, limit = 100) {
 }
 
 // =====================================================================
-// === OBTER RSI 1h COM CACHE ===
+// === OBTER RSI 1h ===
 // =====================================================================
 async function getRSIForSymbol(symbol) {
     try {
@@ -606,9 +1038,9 @@ function getRSIEmoji(rsiValue) {
 }
 
 // =====================================================================
-// === BUSCAR DADOS 24h ===
+// === BUSCAR TODOS OS SÍMBOLOS ===
 // =====================================================================
-async function get24hData() {
+async function getAllSymbols() {
     try {
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const data = await res.json();
@@ -618,18 +1050,14 @@ async function get24hData() {
             !CONFIG.MONITOR.EXCLUDE_SYMBOLS.includes(i.symbol)
         ).slice(0, CONFIG.MONITOR.MAX_SYMBOLS);
         
-        const result = {};
-        for (const i of filtered) {
-            result[i.symbol] = { 
-                symbol: i.symbol, 
-                price: parseFloat(i.lastPrice), 
-                volume24h: parseFloat(i.quoteVolume)
-            };
-        }
-        return result;
+        return filtered.map(i => ({
+            symbol: i.symbol,
+            price: parseFloat(i.lastPrice),
+            volume24h: parseFloat(i.quoteVolume)
+        }));
     } catch (error) {
-        log(`Erro 24h: ${error.message}`, 'error');
-        return {};
+        log(`Erro ao buscar símbolos: ${error.message}`, 'error');
+        return [];
     }
 }
 
@@ -682,125 +1110,366 @@ async function getLSRData(symbols) {
 }
 
 // =====================================================================
-// === ATUALIZAR LISTA DE SÍMBOLOS COM CRITÉRIO DE DIVERGÊNCIA, RSI, BOLLINGER, LSR E FUNDING ===
+// === VERIFICAR CRITÉRIOS E ENVIAR ALERTA (ALTCOINS) ===
 // =====================================================================
-async function updateWatchedSymbols(cvdManager) {
-    const ticker = await get24hData();
-    const symbols = Object.keys(ticker);
-    if (!symbols.length) return null;
+async function checkAndAlert(symbolData, cvdManager) {
+    const { symbol: fullSymbol, price, volume24h } = symbolData;
+    const symbol = fullSymbol.replace('USDT', '');
     
-    const funding = await getFundingRates(symbols);
-    const lsr = await getLSRData(symbols);
-    
-    const allSymbols = [];
-    
-    for (const s of symbols) {
-        if (funding[s] !== undefined && lsr[s] !== null && lsr[s] > 0) {
-            const rsiValue = await getRSIForSymbol(s);
-            const divergences = await analyzeDivergences(s, cvdManager);
-            const cvd = cvdManager.getCVD(s);
-            const bollingerBuy = await checkBollingerTouch(s, 'buy');
-            const bollingerSell = await checkBollingerTouch(s, 'sell');
-            
-            allSymbols.push({ 
-                symbol: s.replace('USDT', ''), 
-                fullSymbol: s, 
-                price: ticker[s].price, 
-                funding: funding[s], 
-                fundingPercent: funding[s] * 100, 
-                lsr: lsr[s],
-                rsi: rsiValue,
-                rsiEmoji: getRSIEmoji(rsiValue),
-                cvdDirection: cvd ? cvd.direction : '⏺',
-                divergences: divergences,
-                bollingerBuy: bollingerBuy,
-                bollingerSell: bollingerSell
-            });
+    try {
+        const [funding, lsr, rsiValue, divergences, lsrTrendData] = await Promise.all([
+            getFundingRates([fullSymbol]).then(r => r[fullSymbol]),
+            getLSRData([fullSymbol]).then(r => r[fullSymbol]),
+            getRSIForSymbol(fullSymbol),
+            analyzeDivergences(fullSymbol, cvdManager),
+            getLSRTrend(fullSymbol)
+        ]);
+        
+        if (funding === undefined || !lsr || !rsiValue) return;
+        
+        const bollingerBuy = await checkBollingerTouch(fullSymbol, 'buy');
+        const bollingerSell = await checkBollingerTouch(fullSymbol, 'sell');
+        const cvd = cvdManager.getCVD(fullSymbol);
+        
+        const [stoch4h, stoch1d, cci4h, cci1d] = await Promise.all([
+            calculateStochastic(fullSymbol, '4h'),
+            calculateStochastic(fullSymbol, '1d'),
+            calculateCCI(fullSymbol, '4h'),
+            calculateCCI(fullSymbol, '1d')
+        ]);
+        
+        const asset = {
+            symbol,
+            fullSymbol,
+            price,
+            funding,
+            fundingPercent: funding * 100,
+            lsr,
+            lsrTrend: lsrTrendData.trend,
+            rsi: rsiValue,
+            rsiEmoji: getRSIEmoji(rsiValue),
+            cvdDirection: cvd ? cvd.direction : '⏺',
+            divergences,
+            bollingerBuy,
+            bollingerSell,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d
+        };
+        
+        const isBear = asset.divergences.hasBearish15mPlusOther &&
+                       asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
+                       asset.bollingerSell &&
+                       asset.lsr > 2.6 &&
+                       asset.funding > 0 &&
+                       asset.lsrTrend === 'rising';
+        
+        const isBull = asset.divergences.hasBullish15mPlusOther &&
+                       asset.rsi < CONFIG.MONITOR.RSI.RSI_BUY_THRESHOLD &&
+                       asset.bollingerBuy &&
+                       asset.lsr < 2.5 &&
+                       asset.funding < 0 &&
+                       asset.lsrTrend === 'falling';
+        
+        if (isBear && canAlert(fullSymbol, 'BEAR')) {
+            await sendAlert(asset, 'BEAR');
+            markAlerted(fullSymbol, 'BEAR');
+            log(`🔴 ALERTA BEAR: ${symbol}`, 'alert');
         }
+        
+        if (isBull && canAlert(fullSymbol, 'BULL')) {
+            await sendAlert(asset, 'BULL');
+            markAlerted(fullSymbol, 'BULL');
+            log(`🟢 ALERTA BULL: ${symbol}`, 'alert');
+        }
+        
+    } catch (error) {
+        log(`Erro ao verificar ${fullSymbol}: ${error.message}`, 'error');
     }
-    
-    // LISTA POSITIVA (BEAR): Divergência de BAIXA + RSI 1h > 65 + TOQUE NA BANDA SUPERIOR + LSR > 2.8 + FUNDING RATE POSITIVO (>0)
-    const positive = [...allSymbols]
-        .filter(item => {
-            if (!item.divergences.hasBearishDivergence) return false;
-            if (item.rsi === null || item.rsi <= CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD) return false;
-            if (!item.bollingerSell) return false;
-            if (item.lsr <= 2.8) return false;
-            if (item.funding <= 0) return false; // FUNDING RATE POSITIVO OBRIGATÓRIO
-            return true;
-        })
-        .sort((a, b) => b.funding - a.funding)
-        .slice(0, CONFIG.MONITOR.TOP_SIZE * 2)
-        .sort((a, b) => b.lsr - a.lsr)
-        .slice(0, CONFIG.MONITOR.TOP_SIZE);
-    
-    // LISTA NEGATIVA (BULL): Divergência de ALTA + RSI 1h < 60 + TOQUE NA BANDA INFERIOR + LSR < 2.8 + FUNDING RATE NEGATIVO (<0)
-    const negative = [...allSymbols]
-        .filter(item => {
-            if (!item.divergences.hasBullishDivergence) return false;
-            if (item.rsi === null || item.rsi >= CONFIG.MONITOR.RSI.RSI_BUY_THRESHOLD) return false;
-            if (!item.bollingerBuy) return false;
-            if (item.lsr >= 2.8) return false;
-            if (item.funding >= 0) return false; // FUNDING RATE NEGATIVO OBRIGATÓRIO
-            return true;
-        })
-        .sort((a, b) => a.funding - b.funding)
-        .slice(0, CONFIG.MONITOR.TOP_SIZE * 2)
-        .sort((a, b) => a.lsr - b.lsr)
-        .slice(0, CONFIG.MONITOR.TOP_SIZE);
-    
-    return { positive, negative };
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM DA LISTA ===
+// === ENVIAR ALERTA INDIVIDUAL PARA TELEGRAM (ALTCOINS) ===
 // =====================================================================
-function formatListMessage(positive, negative) {
+async function sendAlert(asset, type) {
     const dt = getBrazilianDateTime();
-    const maxDisplay = 8;
-    const posShow = positive.slice(0, maxDisplay);
-    const negShow = negative.slice(0, maxDisplay);
     
-    let msg = `<i>🎯Scanner: ${dt.full}hs...by @J4Rviz Technology</i>\n`;
-    msg += `\n<i>🔴 Titanium Setup Bear</i>\n`;
-    msg += `<i>🔍🤖 Em análise para 🔻Correção...</i>\n`;
-    msg += `<i>Par    Preço     Funding     LSR   Vol</i>\n`;
-    msg += `<i>--------------------------------------</i>\n`;
+    let message = '';
     
-    if (posShow.length === 0) {
-        msg += `<i>Aguarde a próxima análise...</i>\n`;
-    } else {
-        for (const item of posShow) {
-            const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
-            const volumeScore = item.divergences.bestBearishVolumeScore || 0;
-            msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
+    if (type === 'BULL') {
+        message = `🟢<i>Analisar Compra</i> \n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message += `<i> Divergência:</i> ${asset.divergences.bullishTimeframes.join(' → ')}\n`;
+        
+        if (asset.stoch4h || asset.stoch1d) {
+            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
         }
-    }
-    
-    if (positive.length > maxDisplay) {
-        msg += `<i>... e mais ${positive.length - maxDisplay} símbolos</i>\n`;
-    }
-    
-    msg += `\n<i>🟢 Titanium Setup Bull</i>\n`;
-    msg += `<i>🔍🤖 Em análise para 💹Compra...</i>\n`;
-    msg += `<i>Par    Preço     Funding     LSR   Vol</i>\n`;
-    msg += `<i>--------------------------------------</i>\n`;
-    
-    if (negShow.length === 0) {
-        msg += `<i>Aguarde a próxima análise... </i>\n`;
-    } else {
-        for (const item of negShow) {
-            const funding = `${item.funding >= 0 ? '+' : ''}${item.fundingPercent.toFixed(4)}%`;
-            const volumeScore = item.divergences.bestBullishVolumeScore || 0;
-            msg += `<i>${item.rsiEmoji}${item.cvdDirection}${item.symbol.padEnd(6)} ${formatPrice(item.price).padEnd(10)} ${funding.padEnd(10)} ${item.lsr.toFixed(2)}  ${volumeScore}</i>\n`;
+        if (asset.cci4h || asset.cci1d) {
+            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
         }
+        
+        message += `<i> ${dt.full}</i>`;
+    } else {
+        message = `🔴<i>Analisar Correção</i> \n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message += `<i> Divergência:</i> ${asset.divergences.bearishTimeframes.join(' → ')}\n`;
+        
+        if (asset.stoch4h || asset.stoch1d) {
+            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
+        }
+        if (asset.cci4h || asset.cci1d) {
+            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
+        }
+        
+        message += `<i> ${dt.full}</i>`;
     }
     
-    if (negative.length > maxDisplay) {
-        msg += `<i>... e mais ${negative.length - maxDisplay} símbolos</i>\n`;
+    await sendToTelegram(message);
+    await delay(CONFIG.MONITOR.TELEGRAM_DELAY_MS);
+}
+
+// =====================================================================
+// === VERIFICAR BTC POR TIMEFRAME INDIVIDUAL ===
+// =====================================================================
+async function checkBTCByTimeframe() {
+    try {
+        const symbol = 'BTCUSDT';
+        const results = {};
+        let hasChanges = false;
+        let changesList = [];
+        
+        for (const timeframe of CONFIG.MONITOR.BTC_MONITOR.TIMEFRAMES) {
+            const candles = await getCandles(symbol, timeframe, 100);
+            if (!candles || candles.length < 60) continue;
+            
+            const prices = candles.map(c => c.close);
+            const currentPrice = prices[prices.length - 1];
+            const ema = calculateEMA(prices, CONFIG.MONITOR.BTC_MONITOR.EMA_PERIOD);
+            
+            if (ema === null) continue;
+            
+            const isAbove = currentPrice > ema;
+            const distance = ((currentPrice - ema) / ema) * 100;
+            
+            results[timeframe] = {
+                currentPrice,
+                ema,
+                isAbove,
+                isBelow: !isAbove,
+                distance: distance.toFixed(2)
+            };
+            
+            const wasAbove = btcTimeframeState[timeframe]?.isAbove || false;
+            
+            if (wasAbove !== isAbove) {
+                hasChanges = true;
+                changesList.push({
+                    timeframe,
+                    wasAbove,
+                    isAbove,
+                    currentPrice,
+                    ema,
+                    distance: distance.toFixed(2)
+                });
+                console.log(`🔄 MUDANÇA DETECTADA no BTC ${timeframe}: ${wasAbove ? 'ACIMA' : 'ABAIXO'} → ${isAbove ? 'ACIMA' : 'ABAIXO'} (${distance.toFixed(2)}%)`);
+            }
+            
+            if (btcTimeframeState[timeframe]) {
+                btcTimeframeState[timeframe].isAbove = isAbove;
+                btcTimeframeState[timeframe].currentPrice = currentPrice;
+                btcTimeframeState[timeframe].emaValue = ema;
+                btcTimeframeState[timeframe].distance = distance;
+            }
+        }
+        
+        const [funding, lsr, rsiValue, lsrTrendData] = await Promise.all([
+            getFundingRates([symbol]).then(r => r[symbol]),
+            getLSRData([symbol]).then(r => r[symbol]),
+            getRSIForSymbol(symbol),
+            getLSRTrend(symbol)
+        ]);
+        
+        const bollingerBuy = await checkBollingerTouch(symbol, 'buy');
+        const bollingerSell = await checkBollingerTouch(symbol, 'sell');
+        const cvd = cvdManager.getCVDValue(symbol);
+        
+        const [stoch4h, stoch1d, cci4h, cci1d] = await Promise.all([
+            calculateStochastic(symbol, '4h'),
+            calculateStochastic(symbol, '1d'),
+            calculateCCI(symbol, '4h'),
+            calculateCCI(symbol, '1d')
+        ]);
+        
+        return {
+            results,
+            hasChanges,
+            changesList,
+            funding: funding || 0,
+            fundingPercent: (funding || 0) * 100,
+            lsr: lsr || 0,
+            lsrTrend: lsrTrendData.trend,
+            rsi: rsiValue,
+            cvdDirection: cvd,
+            bollingerBuy,
+            bollingerSell,
+            currentPrice: results[Object.keys(results)[0]]?.currentPrice || 0,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d
+        };
+        
+    } catch (error) {
+        console.log(`❌ Erro ao verificar BTC: ${error.message}`);
+        return { hasChanges: false, changesList: [], results: {} };
+    }
+}
+
+// =====================================================================
+// === ENVIAR ALERTA DO BTC POR TIMEFRAME ===
+// =====================================================================
+async function sendBTCAlert(change, btcData) {
+    const dt = getBrazilianDateTime();
+    const direction = change.isAbove ? 'ACIMA' : 'ABAIXO';
+    const emoji = change.isAbove ? '🔴' : '🟢';
+    
+    let message = `<i>\n`;
+    message += `${emoji} <b>BTC - EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
+    message += ` Sinal: PREÇO ${direction} DA EMA 55\n\n`;
+    message += ` Timeframe: ${change.timeframe}\n`;
+    message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
+    message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
+    message += ` Distância: ${change.distance}%\n\n`;
+    
+    message += ` Resumo dos Timeframes:\n`;
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const tfEmoji = data.isAbove ? '🔼' : '🔽';
+        const tfStatus = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${tfEmoji} ${tf}: ${tfStatus} (${data.distance}%)\n`;
     }
     
-    return msg;
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+    }
+    if (btcData.cci4h || btcData.cci1d) {
+        message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
+    }
+    
+    if (btcData.bollingerBuy || btcData.bollingerSell) {
+        message += ` Bollinger: ${btcData.bollingerBuy ? 'Toque na banda inferior ✅' : (btcData.bollingerSell ? 'Toque na banda superior ✅' : 'Neutro')}\n`;
+    }
+    
+    message += `\n ⏰ ${dt.full}\n`;
+    message += `</i>`;
+    
+    await sendToTelegram(message);
+    log(`📢 ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
+}
+
+// =====================================================================
+// === ENVIAR STATUS INICIAL DO BTC ===
+// =====================================================================
+async function sendBTCInitialStatus(btcData) {
+    const dt = getBrazilianDateTime();
+    
+    let message = `<i>\n`;
+    message += `<b>📊 BTC - STATUS INICIAL</b> 📊\n\n`;
+    message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n\n`;
+    message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
+    
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const emoji = data.isAbove ? '🔼' : '🔽';
+        const status = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
+    }
+    
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        message += `\n ${formatStochMessage(btcData.stoch4h, btcData.stoch1d)}`;
+    }
+    if (btcData.cci4h || btcData.cci1d) {
+        message += ` ${formatCCIMessage(btcData.cci4h, btcData.cci1d)}`;
+    }
+    
+    message += `\n Sistema monitorando !\n`;
+    message += ` ${dt.full}\n`;
+    message += `</i>`;
+    
+    await sendToTelegram(message);
+    log(`📢 STATUS INICIAL BTC ENVIADO`, 'alert');
+}
+
+// =====================================================================
+// === MONITOR ESPECÍFICO DO BTC ===
+// =====================================================================
+let lastBTCScan = 0;
+
+async function scanBTC() {
+    const now = Date.now();
+    const intervalMs = CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000;
+    
+    if (now - lastBTCScan < intervalMs) return;
+    lastBTCScan = now;
+    
+    try {
+        const btcData = await checkBTCByTimeframe();
+        
+        if (Object.keys(btcData.results).length === 0) {
+            console.log(`⚠️ BTC: Nenhum timeframe válido`);
+            return;
+        }
+        
+        if (!initialStatusSent) {
+            console.log(`📡 Enviando status inicial do BTC...`);
+            await sendBTCInitialStatus(btcData);
+            initialStatusSent = true;
+            saveBTCTimeframeState();
+            console.log(`✅ Status inicial BTC enviado com sucesso!`);
+        }
+        
+        if (btcData.hasChanges && btcData.changesList.length > 0) {
+            for (const change of btcData.changesList) {
+                if (canAlertBTC(change.timeframe)) {
+                    await sendBTCAlert(change, btcData);
+                    markBTCAlerted(change.timeframe);
+                    await delay(2000);
+                } else {
+                    console.log(`⏸️ BTC ${change.timeframe} em cooldown - alerta não enviado`);
+                }
+            }
+        }
+        
+        let statusLog = `📊 BTC Status: `;
+        for (const [tf, data] of Object.entries(btcData.results)) {
+            statusLog += `${tf}:${data.isAbove ? '🔼' : '🔽'} `;
+        }
+        console.log(statusLog);
+        
+    } catch (error) {
+        log(`Erro no scan BTC: ${error.message}`, 'error');
+    }
 }
 
 // =====================================================================
@@ -840,11 +1509,15 @@ async function sendToTelegram(message) {
             })
         });
         
+        const responseText = await response.text();
+        
         if (response.ok) {
-            console.log(`✅ Mensagem enviada com sucesso!`);
+            console.log(`✅ Alerta enviado com sucesso!`);
             return true;
+        } else {
+            console.log(`❌ Erro Telegram: ${responseText}`);
+            return false;
         }
-        return false;
     } catch (error) {
         console.log(`❌ Telegram exception: ${error.message}`);
         return false;
@@ -855,99 +1528,102 @@ async function sendToTelegram(message) {
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
-    let msg = `<i>Titanium Prime X</i>\n\n`;
-    msg += `<i>✅ Monitor Ativo</i>\n`;
-   
+    let msg = `<b>🚀 TITANIUM PRIME X - ATIVO</b>\n\n`;
+    msg += `<i>✅ Scanner em tempo real ativo</i>\n`;
+    msg += `<i>📊 Critério Altcoins: Divergências RSI + Bollinger + LSR + Funding</i>\n`;
+    msg += `<i>📊 Critério BTC: EMA 55 em 15m/1h/4h/12h/1d</i>\n`;
+    msg += `<i>📊 Stoch 5.3.3 (4H/1D) e CCI 20 com EMA 5 (4H/1D)</i>\n`;
+    msg += `<i>⏱️ Cooldown: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos</i>\n`;
+    msg += `<i>🔍 Escaneando a cada ${CONFIG.MONITOR.SCAN_INTERVAL_SECONDS} segundos...</i>\n\n`;
+    msg += `<i>🟢🟡 MONITOR BTC ATIVO - Alerta por TIMEFRAME INDIVIDUAL</i>\n`;
+    msg += `<i>📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55</i>\n`;
+    msg += `<i>🔄 Cooldown de ${CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES} minutos por timeframe</i>\n\n`;
+    msg += `<i>Os alertas serão enviados assim que os critérios forem atendidos!</i>`;
    
     await sendToTelegram(msg);
 }
 
 // =====================================================================
-// === SISTEMA DE MEMÓRIA ===
+// === MONITOR PRINCIPAL (SCAN CONTÍNUO) ===
 // =====================================================================
-class FundingMemory {
-    constructor() {
-        this.watchedSymbols = { positive: [], negative: [] };
-        this.loadFromFile();
-    }
+const cvdManager = new CVDManager();
+let isScanning = false;
 
-    loadFromFile() {
-        try {
-            if (fs.existsSync(MEMORY_FILE)) {
-                const data = fs.readFileSync(MEMORY_FILE, 'utf8');
-                const loaded = JSON.parse(data);
-                this.watchedSymbols = loaded.watchedSymbols || { positive: [], negative: [] };
-                console.log(`📂 Memória carregada`);
+async function scanAndAlert() {
+    if (isScanning) return;
+    isScanning = true;
+    
+    try {
+        const symbols = await getAllSymbols();
+        if (!symbols.length) return;
+        
+        log(`🔍 Escaneando ${symbols.length} símbolos...`, 'info');
+        
+        for (const s of symbols) {
+            if (!cvdManager.subscribedSymbols.has(s.symbol)) {
+                cvdManager.subscribeToSymbol(s.symbol);
             }
-        } catch (error) {}
-    }
-
-    saveToFile() {
-        try {
-            const data = { watchedSymbols: this.watchedSymbols, lastUpdate: Date.now() };
-            fs.writeFileSync(MEMORY_FILE, JSON.stringify(data, null, 2));
-        } catch (error) {}
-    }
-
-    updateWatchedSymbols(positive, negative) {
-        this.watchedSymbols.positive = positive;
-        this.watchedSymbols.negative = negative;
-        this.saveToFile();
+        }
+        
+        let alertCount = 0;
+        for (const symbolData of symbols) {
+            await checkAndAlert(symbolData, cvdManager);
+            alertCount++;
+            
+            if (alertCount % 10 === 0) {
+                await delay(100);
+            }
+        }
+        
+        log(`✅ Scan completo. ${alertCount} ativos verificados.`, 'success');
+        
+    } catch (error) {
+        log(`Erro no scan: ${error.message}`, 'error');
+    } finally {
+        isScanning = false;
     }
 }
 
 // =====================================================================
-// === MONITOR PRINCIPAL ===
+// === INICIAR MONITOR ===
 // =====================================================================
-const fundingMemory = new FundingMemory();
-const cvdManager = new CVDManager();
-
 async function startMonitor() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - MONITOR COMPLETO');
+    console.log('🚀 TITANIUM PRIME X - MODO ALERTA INSTANTÂNEO');
+    console.log('📊 Scanner contínuo - Alerta imediato quando critérios são atendidos');
+    console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos`);
+    console.log(`🟢🟡 MONITOR BTC - Alerta por TIMEFRAME INDIVIDUAL`);
+    console.log(`📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55`);
     console.log('='.repeat(70));
+    
+    loadAlertedSymbols();
+    loadBTCTimeframeState();
     
     await sendInitMessage();
     
-    let currentPositive = [], currentNegative = [];
+    cvdManager.subscribeToSymbol('BTCUSDT');
     
-    const initial = await updateWatchedSymbols(cvdManager);
-    if (initial) {
-        currentPositive = initial.positive;
-        currentNegative = initial.negative;
-        fundingMemory.updateWatchedSymbols(currentPositive, currentNegative);
-        
-        for (const item of [...currentPositive, ...currentNegative]) {
-            cvdManager.subscribeToSymbol(item.fullSymbol);
-        }
-        
-        await sendToTelegram(formatListMessage(currentPositive, currentNegative));
+    console.log(`📡 Obtendo dados do BTC para status inicial...`);
+    const initialBTCData = await checkBTCByTimeframe();
+    if (Object.keys(initialBTCData.results).length > 0) {
+        console.log(`📡 Enviando status inicial do BTC...`);
+        await sendBTCInitialStatus(initialBTCData);
+        initialStatusSent = true;
+        saveBTCTimeframeState();
+        console.log(`✅ Status inicial BTC enviado com sucesso!`);
+    } else {
+        console.log(`⚠️ Não foi possível obter dados do BTC para status inicial`);
     }
     
+    await scanAndAlert();
+    
     setInterval(async () => {
-        const result = await updateWatchedSymbols(cvdManager);
-        if (result) {
-            const oldSymbols = [...currentPositive.map(s => s.fullSymbol), ...currentNegative.map(s => s.fullSymbol)];
-            const newSymbols = [...result.positive.map(p => p.fullSymbol), ...result.negative.map(n => n.fullSymbol)];
-            
-            for (const s of oldSymbols) {
-                if (!newSymbols.includes(s)) {
-                    cvdManager.unsubscribeFromSymbol(s);
-                }
-            }
-            
-            for (const item of [...result.positive, ...result.negative]) {
-                if (!cvdManager.subscribedSymbols.has(item.fullSymbol)) {
-                    cvdManager.subscribeToSymbol(item.fullSymbol);
-                }
-            }
-            
-            currentPositive = result.positive;
-            currentNegative = result.negative;
-            fundingMemory.updateWatchedSymbols(currentPositive, currentNegative);
-            await sendToTelegram(formatListMessage(currentPositive, currentNegative));
-        }
-    }, CONFIG.MONITOR.INTERVAL_MINUTES * 60 * 1000);
+        await scanAndAlert();
+    }, CONFIG.MONITOR.SCAN_INTERVAL_SECONDS * 1000);
+    
+    setInterval(async () => {
+        await scanBTC();
+    }, CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000);
 }
 
 process.on('SIGINT', () => {
