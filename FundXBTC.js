@@ -17,8 +17,14 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vdg',
-        CHAT_ID: '-100259'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
+        // NOVAS CONFIGURAÇÕES DE RATE LIMITING
+        MESSAGE_DELAY_MS: 3000,        // Delay entre mensagens (3 segundos)
+        MAX_MESSAGES_PER_MINUTE: 20,    // Máximo de mensagens por minuto
+        BURST_DELAY_MS: 5000,           // Delay extra após burst de mensagens
+        RETRY_COUNT: 3,                 // Tentativas de reenvio
+        RETRY_DELAY_MS: 5000            // Delay entre tentativas
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
@@ -30,6 +36,9 @@ const CONFIG = {
         LSR_TREND_THRESHOLD: 0.05,
         ALERT_COOLDOWN_MINUTES: 5,
         TELEGRAM_DELAY_MS: 1500,
+        VOLUME_BULL_THRESHOLD: 1.5,
+        VOLUME_BEAR_THRESHOLD: 1.5,
+        FVG_PROXIMITY_THRESHOLD: 2.0,
         RSI: {
             PERIOD: 14,
             TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],
@@ -60,13 +69,178 @@ const CONFIG = {
 };
 
 // =====================================================================
+// === SISTEMA DE FILA PARA TELEGRAM (RATE LIMITING) ===
+// =====================================================================
+class TelegramQueue {
+    constructor() {
+        this.queue = [];
+        this.isProcessing = false;
+        this.messageCount = 0;
+        this.lastMessageTime = 0;
+        this.minuteResetTime = Date.now();
+    }
+
+    async add(message, priority = false) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ message, resolve, reject, priority, timestamp: Date.now() });
+            
+            // Ordenar por prioridade (priority primeiro) e depois por timestamp
+            this.queue.sort((a, b) => {
+                if (a.priority && !b.priority) return -1;
+                if (!a.priority && b.priority) return 1;
+                return a.timestamp - b.timestamp;
+            });
+            
+            if (!this.isProcessing) {
+                this.processQueue();
+            }
+        });
+    }
+
+    async processQueue() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        this.isProcessing = true;
+
+        while (this.queue.length > 0) {
+            // Verificar rate limit por minuto
+            const now = Date.now();
+            
+            // Resetar contador a cada minuto
+            if (now - this.minuteResetTime >= 60000) {
+                this.messageCount = 0;
+                this.minuteResetTime = now;
+                console.log(`📊 Rate limit resetado. Próximo minuto.`);
+            }
+            
+            // Verificar se excedeu o limite de mensagens por minuto
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE) {
+                const waitTime = 60000 - (now - this.minuteResetTime);
+                console.log(`⏳ Rate limit atingido (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE}). Aguardando ${Math.ceil(waitTime / 1000)}s...`);
+                await delay(waitTime + 1000);
+                continue;
+            }
+            
+            // Delay entre mensagens
+            const timeSinceLastMessage = now - this.lastMessageTime;
+            if (timeSinceLastMessage < CONFIG.TELEGRAM.MESSAGE_DELAY_MS) {
+                const waitTime = CONFIG.TELEGRAM.MESSAGE_DELAY_MS - timeSinceLastMessage;
+                await delay(waitTime);
+            }
+            
+            // Pega o próximo item da fila
+            const item = this.queue.shift();
+            
+            try {
+                await this.sendWithRetry(item.message);
+                item.resolve(true);
+                this.messageCount++;
+                this.lastMessageTime = Date.now();
+                console.log(`✅ Mensagem enviada (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE})`);
+            } catch (error) {
+                console.log(`❌ Erro ao enviar mensagem: ${error.message}`);
+                item.reject(error);
+            }
+            
+            // Delay extra se estiver perto do limite
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE * 0.8) {
+                console.log(`⚠️ Próximo do rate limit. Aguardando ${CONFIG.TELEGRAM.BURST_DELAY_MS / 1000}s...`);
+                await delay(CONFIG.TELEGRAM.BURST_DELAY_MS);
+            }
+        }
+        
+        this.isProcessing = false;
+    }
+
+    async sendWithRetry(message, attempt = 1) {
+        try {
+            const token = CONFIG.TELEGRAM.BOT_TOKEN;
+            const chatId = CONFIG.TELEGRAM.CHAT_ID;
+            const url = `https://api.telegram.org/bot${token}/sendMessage`;
+            
+            let finalMessage = message;
+            
+            // Limpar tags HTML mal formatadas
+            finalMessage = finalMessage.replace(/<i><\/i>/g, '');
+            finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
+            
+            const openTags = (finalMessage.match(/<i>/g) || []).length;
+            const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
+            if (openTags !== closeTags) {
+                finalMessage = finalMessage.replace(/<[^>]*>/g, '');
+            }
+            
+            if (finalMessage.length > 4000) {
+                finalMessage = finalMessage.substring(0, 3950) + '\n\n... mensagem truncada';
+            }
+            
+            finalMessage = finalMessage.replace(/&(?!(amp;|lt;|gt;|quot;|apos;))/g, '&amp;');
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos timeout
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    text: finalMessage,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true,
+                    disable_notification: false
+                }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                return true;
+            } else {
+                const errorText = await response.text();
+                
+                // Verificar se é erro de rate limit (429)
+                if (response.status === 429) {
+                    const retryAfter = parseInt(errorText.match(/retry after (\d+)/)?.[1] || '5');
+                    console.log(`⚠️ Rate limit 429! Aguardando ${retryAfter}s antes de tentar novamente...`);
+                    
+                    if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                        await delay(retryAfter * 1000 + 1000);
+                        return this.sendWithRetry(message, attempt + 1);
+                    }
+                }
+                
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log(`⏰ Timeout na requisição Telegram (tentativa ${attempt})`);
+            } else {
+                console.log(`❌ Erro na tentativa ${attempt}: ${error.message}`);
+            }
+            
+            if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                const waitTime = CONFIG.TELEGRAM.RETRY_DELAY_MS * attempt;
+                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s... (tentativa ${attempt + 1}/${CONFIG.TELEGRAM.RETRY_COUNT + 1})`);
+                await delay(waitTime);
+                return this.sendWithRetry(message, attempt + 1);
+            }
+            
+            throw error;
+        }
+    }
+}
+
+// Instância global da fila do Telegram
+const telegramQueue = new TelegramQueue();
+
+// =====================================================================
 // === MEMÓRIA DE CRUZAMENTOS (VOLUME MOMENTUM) ===
 // =====================================================================
 let volumeMomentumMemory = {
-    lastStochK: {},      // Último valor de K por símbolo
-    lastStochD: {},      // Último valor de D por símbolo
-    lastCCI: {},         // Último status do CCI por símbolo
-    lastCrossState: {}   // Último estado de cruzamento (null, 'bull', 'bear')
+    lastStochK: {},
+    lastStochD: {},
+    lastCCI: {},
+    lastCrossState: {}
 };
 
 function loadVolumeMomentumMemory() {
@@ -193,227 +367,360 @@ function markBTCAlerted(timeframe) {
 }
 
 // =====================================================================
-// === CVD MANAGER VIA WEBSOCKET ===
+// === FUNÇÕES PARA DETECÇÃO DE FVG (FAIR VALUE GAP) ===
 // =====================================================================
-class CVDManager {
-    constructor() {
-        this.cvdData = new Map();
-        this.subscribedSymbols = new Set();
-        this.reconnectAttempts = new Map();
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 5000;
-    }
 
-    subscribeToSymbol(symbol) {
-        if (this.subscribedSymbols.has(symbol)) return;
+function detectFVG(candles) {
+    if (!candles || candles.length < 3) return { bull: [], bear: [] };
+    
+    const fvgBull = [];
+    const fvgBear = [];
+    
+    for (let i = 0; i < candles.length - 2; i++) {
+        const candle1 = candles[i];
+        const candle2 = candles[i + 1];
+        const candle3 = candles[i + 2];
         
-        this.subscribedSymbols.add(symbol);
+        if (candle1.low > candle3.high) {
+            fvgBull.push({
+                top: candle1.low,
+                bottom: candle3.high,
+                index: i,
+                time: candle1.time,
+                type: 'bull'
+            });
+        }
         
-        this.cvdData.set(symbol, {
-            value: 0,
-            history: [],
-            lastUpdate: Date.now(),
-            buyVolume: 0,
-            sellVolume: 0,
-            lastPrice: null,
-            ws: null,
-            connected: false,
-            direction: '',
-            directionChange: 0
-        });
-        
-        this.connectWebSocket(symbol);
+        if (candle1.high < candle3.low) {
+            fvgBear.push({
+                top: candle3.low,
+                bottom: candle1.high,
+                index: i,
+                time: candle1.time,
+                type: 'bear'
+            });
+        }
     }
     
-    connectWebSocket(symbol) {
-        const symbolLower = symbol.toLowerCase();
-        const wsUrl = `wss://fstream.binance.com/ws/${symbolLower}@aggTrade`;
+    return { bull: fvgBull, bear: fvgBear };
+}
+
+function findClosestFVG(fvgs, currentPrice, type = null) {
+    let closest = null;
+    let minDistance = Infinity;
+    
+    const fvgsToCheck = type === 'bull' ? fvgs.bull : (type === 'bear' ? fvgs.bear : [...fvgs.bull, ...fvgs.bear]);
+    
+    for (const fvg of fvgsToCheck) {
+        let distance;
+        let isAbove = false;
+        let isBelow = false;
         
-        const ws = new WebSocket(wsUrl);
-        
-        ws.on('open', () => {
-            this.reconnectAttempts.set(symbol, 0);
-            const data = this.cvdData.get(symbol);
-            if (data) {
-                data.ws = ws;
-                data.connected = true;
+        if (fvg.type === 'bull') {
+            if (currentPrice < fvg.bottom) {
+                distance = ((fvg.bottom - currentPrice) / currentPrice) * 100;
+                isBelow = true;
+            } else if (currentPrice > fvg.top) {
+                distance = ((currentPrice - fvg.top) / currentPrice) * 100;
+                isAbove = true;
+            } else if (currentPrice >= fvg.bottom && currentPrice <= fvg.top) {
+                distance = 0;
+            } else {
+                continue;
             }
-        });
+        } else {
+            if (currentPrice > fvg.top) {
+                distance = ((currentPrice - fvg.top) / currentPrice) * 100;
+                isAbove = true;
+            } else if (currentPrice < fvg.bottom) {
+                distance = ((fvg.bottom - currentPrice) / currentPrice) * 100;
+                isBelow = true;
+            } else if (currentPrice >= fvg.bottom && currentPrice <= fvg.top) {
+                distance = 0;
+            } else {
+                continue;
+            }
+        }
         
-        ws.on('message', (data) => {
-            try {
-                const trade = JSON.parse(data);
-                this.processTrade(symbol, trade);
-            } catch (error) {}
-        });
-        
-        ws.on('error', () => {
-            this.handleDisconnect(symbol);
-        });
-        
-        ws.on('close', () => {
-            this.handleDisconnect(symbol);
-        });
-        
-        const data = this.cvdData.get(symbol);
-        if (data) data.ws = ws;
+        if (distance < minDistance) {
+            minDistance = distance;
+            closest = {
+                ...fvg,
+                distancePercent: distance,
+                isAbove,
+                isBelow,
+                isInside: distance === 0
+            };
+        }
     }
     
-    processTrade(symbol, trade) {
-        const volume = parseFloat(trade.q);
-        const isBuyerMaker = trade.m;
-        const delta = isBuyerMaker ? -volume : +volume;
-        
-        const data = this.cvdData.get(symbol);
-        if (!data) return;
-        
-        data.value += delta;
-        data.lastUpdate = Date.now();
-        data.lastPrice = parseFloat(trade.p);
-        
-        if (delta > 0) data.buyVolume += volume;
-        else data.sellVolume += volume;
-        
-        data.history.push({
-            timestamp: Date.now(),
-            delta: delta,
-            volume: volume,
-            cvd: data.value
-        });
-        
-        if (data.history.length > 1000) data.history.shift();
-        this.updateDirection(symbol);
-    }
+    return closest;
+}
+
+function detectSupportResistance(candles, lookback = 5) {
+    if (!candles || candles.length < lookback * 2) return { supports: [], resistances: [] };
     
-    updateDirection(symbol) {
-        const data = this.cvdData.get(symbol);
-        if (!data || data.history.length < 10) return;
-        
-        const now = Date.now();
-        const cutoff = now - (CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW * 1000);
-        
-        let oldCVD = null;
-        for (let i = data.history.length - 1; i >= 0; i--) {
-            if (data.history[i].timestamp <= cutoff) {
-                oldCVD = data.history[i];
+    const supports = [];
+    const resistances = [];
+    const prices = candles.map(c => c.close);
+    
+    for (let i = lookback; i < prices.length - lookback; i++) {
+        let isLocalLow = true;
+        for (let j = 1; j <= lookback; j++) {
+            if (prices[i] >= prices[i - j] || prices[i] >= prices[i + j]) {
+                isLocalLow = false;
                 break;
             }
         }
-        
-        if (!oldCVD) return;
-        
-        const change = data.value - oldCVD.cvd;
-        const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
-        
-        if (change > 0 && changePercent >= 1) data.direction = '⤴️';
-        else if (change < 0 && changePercent >= 1) data.direction = '⤵️';
-        else data.direction = '';
+        if (isLocalLow) {
+            supports.push({
+                price: prices[i],
+                index: i,
+                time: candles[i].time,
+                strength: 1
+            });
+        }
     }
     
-    handleDisconnect(symbol) {
-        const attempts = this.reconnectAttempts.get(symbol) || 0;
+    for (let i = lookback; i < prices.length - lookback; i++) {
+        let isLocalHigh = true;
+        for (let j = 1; j <= lookback; j++) {
+            if (prices[i] <= prices[i - j] || prices[i] <= prices[i + j]) {
+                isLocalHigh = false;
+                break;
+            }
+        }
+        if (isLocalHigh) {
+            resistances.push({
+                price: prices[i],
+                index: i,
+                time: candles[i].time,
+                strength: 1
+            });
+        }
+    }
+    
+    const consolidatedSupports = consolidateLevels(supports, 0.005);
+    const consolidatedResistances = consolidateLevels(resistances, 0.005);
+    
+    return { supports: consolidatedSupports, resistances: consolidatedResistances };
+}
+
+function consolidateLevels(levels, tolerancePercent) {
+    if (levels.length === 0) return [];
+    
+    const sorted = [...levels].sort((a, b) => a.price - b.price);
+    const consolidated = [];
+    
+    for (const level of sorted) {
+        if (consolidated.length === 0) {
+            consolidated.push({ ...level, strength: level.strength });
+            continue;
+        }
         
-        if (attempts < this.maxReconnectAttempts) {
-            const delay = this.reconnectDelay * Math.pow(2, attempts);
-            setTimeout(() => {
-                this.reconnectAttempts.set(symbol, attempts + 1);
-                this.connectWebSocket(symbol);
-            }, delay);
+        const last = consolidated[consolidated.length - 1];
+        const diffPercent = Math.abs((level.price - last.price) / last.price) * 100;
+        
+        if (diffPercent < tolerancePercent) {
+            last.strength += level.strength;
+            last.price = (last.price + level.price) / 2;
         } else {
-            const data = this.cvdData.get(symbol);
-            if (data && data.ws) {
-                try { data.ws.terminate(); } catch(e) {}
-            }
+            consolidated.push({ ...level, strength: level.strength });
         }
     }
     
-    unsubscribeFromSymbol(symbol) {
-        const data = this.cvdData.get(symbol);
-        if (data && data.ws) {
-            try { data.ws.close(); data.ws.terminate(); } catch(e) {}
+    return consolidated;
+}
+
+function checkProximityToLevel(price, levels, thresholdPercent = 0.5) {
+    if (!levels || levels.length === 0) return null;
+    
+    let closest = null;
+    let minDistance = Infinity;
+    
+    for (const level of levels) {
+        const distance = Math.abs(price - level.price);
+        const distancePercent = (distance / price) * 100;
+        
+        if (distancePercent < thresholdPercent && distancePercent < minDistance) {
+            minDistance = distancePercent;
+            closest = {
+                ...level,
+                distancePercent,
+                isAbove: price > level.price,
+                isBelow: price < level.price
+            };
         }
-        this.subscribedSymbols.delete(symbol);
-        this.cvdData.delete(symbol);
     }
     
-    getCVD(symbol) {
-        const data = this.cvdData.get(symbol);
-        if (!data) return null;
-        return { direction: data.direction };
-    }
-    
-    getCVDValue(symbol) {
-        const data = this.cvdData.get(symbol);
-        if (!data) return '';
-        return data.direction;
-    }
-    
-    getVolumeProfile(symbol, minutesAgo = 5) {
-        const data = this.cvdData.get(symbol);
-        if (!data || data.history.length === 0) return null;
+    return closest;
+}
+
+async function analyzeStructure(symbol, timeframe, currentPrice) {
+    try {
+        const candles = await getCandles(symbol, timeframe, 100);
+        if (!candles || candles.length < 50) return null;
         
-        const now = Date.now();
-        const cutoff = now - (minutesAgo * 60 * 1000);
+        const fvgs = detectFVG(candles);
+        const { supports, resistances } = detectSupportResistance(candles);
         
-        let buyVolume = 0, sellVolume = 0, totalVolume = 0;
+        const closestBullFVG = findClosestFVG(fvgs, currentPrice, 'bull');
+        const closestBearFVG = findClosestFVG(fvgs, currentPrice, 'bear');
+        const closestSupport = checkProximityToLevel(currentPrice, supports, 0.75);
+        const closestResistance = checkProximityToLevel(currentPrice, resistances, 0.75);
         
-        for (const trade of data.history) {
-            if (trade.timestamp >= cutoff) {
-                if (trade.delta > 0) buyVolume += trade.volume;
-                else sellVolume += trade.volume;
-                totalVolume += trade.volume;
-            }
+        let zoneType = 'NEUTRO';
+        let zoneDescription = '';
+        
+        if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
+            zoneType = 'COMPRA';
+            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}% (${closestBullFVG.isBelow ? 'abaixo' : closestBullFVG.isInside ? 'dentro' : 'acima'})`;
+        } else if (closestSupport && closestSupport.distancePercent <= 0.75) {
+            zoneType = 'COMPRA';
+            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}% (${closestSupport.isAbove ? 'acima' : 'abaixo'})`;
         }
         
-        if (totalVolume === 0) return null;
-        
-        const buyerRatio = (buyVolume / totalVolume) * 100;
-        const sellerRatio = (sellVolume / totalVolume) * 100;
+        if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
+            zoneType = 'VENDA';
+            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}% (${closestBearFVG.isAbove ? 'acima' : closestBearFVG.isInside ? 'dentro' : 'abaixo'})`;
+        } else if (closestResistance && closestResistance.distancePercent <= 0.75) {
+            zoneType = 'VENDA';
+            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}% (${closestResistance.isBelow ? 'abaixo' : 'acima'})`;
+        }
         
         return {
-            buyerRatio: buyerRatio,
-            sellerRatio: sellerRatio,
-            totalVolume: totalVolume,
-            dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
-            dominantRatio: Math.max(buyerRatio, sellerRatio)
+            timeframe,
+            fvgs,
+            supports,
+            resistances,
+            closestBullFVG,
+            closestBearFVG,
+            closestSupport,
+            closestResistance,
+            zoneType,
+            zoneDescription
         };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao analisar estrutura ${symbol} ${timeframe}: ${error.message}`);
+        return null;
     }
-    
-    cleanup() {
-        for (const symbol of this.subscribedSymbols) {
-            this.unsubscribeFromSymbol(symbol);
+}
+
+async function detectVolumeAnomaly(symbol, timeframe = '1h') {
+    try {
+        const candles = await getCandles(symbol, timeframe, 30);
+        if (!candles || candles.length < 20) return null;
+        
+        const volumes = candles.map(c => c.volume);
+        const currentVolume = volumes[volumes.length - 1];
+        const prevVolumes = volumes.slice(0, -1);
+        
+        const avgVolume = prevVolumes.reduce((a, b) => a + b, 0) / prevVolumes.length;
+        const volumeRatio = currentVolume / avgVolume;
+        
+        let type = null;
+        let intensity = '';
+        
+        if (volumeRatio >= CONFIG.MONITOR.VOLUME_BULL_THRESHOLD) {
+            type = 'bull';
+            if (volumeRatio >= 3) intensity = '🔥🔥🔥';
+            else if (volumeRatio >= 2) intensity = '🔥🔥';
+            else intensity = '🔥';
+        } else if (volumeRatio <= (1 / CONFIG.MONITOR.VOLUME_BEAR_THRESHOLD)) {
+            type = 'bear';
+            if (volumeRatio <= 0.33) intensity = '❄️❄️❄️';
+            else if (volumeRatio <= 0.5) intensity = '❄️❄️';
+            else intensity = '❄️';
         }
+        
+        return {
+            type,
+            volumeRatio,
+            currentVolume,
+            avgVolume,
+            intensity,
+            isHighVolume: volumeRatio >= CONFIG.MONITOR.VOLUME_BULL_THRESHOLD,
+            isLowVolume: volumeRatio <= (1 / CONFIG.MONITOR.VOLUME_BEAR_THRESHOLD)
+        };
+        
+    } catch (error) {
+        return null;
     }
 }
 
-// =====================================================================
-// === FUNÇÕES AUXILIARES ===
-// =====================================================================
-function getBrazilianDateTime() {
-    const now = new Date();
-    const brazilTime = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-    const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
-    const time = brazilTime.toISOString().split('T')[1].split('.')[0];
-    return { date, time, full: `${date} ${time}` };
-}
-
-function formatPrice(price) {
-    if (!price || isNaN(price)) return '-';
-    if (price > 1000) return price.toFixed(2);
-    if (price > 1) return price.toFixed(4);
-    if (price > 0.1) return price.toFixed(5);
-    if (price > 0.01) return price.toFixed(6);
-    return price.toFixed(8);
-}
-
-function log(message, type = 'info') {
-    const timestamp = new Date().toISOString();
-    const icons = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️', alert: '🚨' };
-    console.log(`${icons[type] || 'ℹ️'} [${timestamp}] ${message}`);
-}
-
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+async function analyzeVolumeAlert(symbol, currentPrice) {
+    try {
+        const volume1h = await detectVolumeAnomaly(symbol, '1h');
+        const volume4h = await detectVolumeAnomaly(symbol, '4h');
+        
+        const structure1h = await analyzeStructure(symbol, '1h', currentPrice);
+        const structure4h = await analyzeStructure(symbol, '4h', currentPrice);
+        
+        let alertType = null;
+        let mainTimeframe = null;
+        let volumeData = null;
+        let structureData = null;
+        
+        if (volume4h && volume4h.type) {
+            alertType = volume4h.type === 'bull' ? 'VOLUME_BULL' : 'VOLUME_BEAR';
+            mainTimeframe = '4h';
+            volumeData = volume4h;
+            structureData = structure4h;
+        } else if (volume1h && volume1h.type) {
+            alertType = volume1h.type === 'bull' ? 'VOLUME_BULL' : 'VOLUME_BEAR';
+            mainTimeframe = '1h';
+            volumeData = volume1h;
+            structureData = structure1h;
+        }
+        
+        if (!alertType) return null;
+        
+        let alignment = '';
+        let tradeSignal = '';
+        
+        if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'COMPRA') {
+            alignment = '✅ ALINHADO - Zona de Compra identificada';
+            tradeSignal = '🟢 CONSIDERAR COMPRA';
+        }
+        else if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'NEUTRO') {
+            alignment = '⚠️ ATENÇÃO - Sem zona clara, aguardar confirmação';
+            tradeSignal = '🟡 OBSERVAR';
+        }
+        else if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'VENDA') {
+            alignment = '❌ DIVERGENTE - Volume Bull mas em zona de venda';
+            tradeSignal = '🔴 EVITAR COMPRA';
+        }
+        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'VENDA') {
+            alignment = '✅ ALINHADO - Zona de Venda identificada';
+            tradeSignal = '🔴 CONSIDERAR VENDA';
+        }
+        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'NEUTRO') {
+            alignment = '⚠️ ATENÇÃO - Sem zona clara, aguardar confirmação';
+            tradeSignal = '🟡 OBSERVAR';
+        }
+        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'COMPRA') {
+            alignment = '❌ DIVERGENTE - Volume Bear mas em zona de compra';
+            tradeSignal = '🟢 EVITAR VENDA';
+        }
+        
+        return {
+            alertType,
+            mainTimeframe,
+            volume: volumeData,
+            structure: structureData,
+            alignment,
+            tradeSignal,
+            volume1h,
+            volume4h,
+            structure1h,
+            structure4h
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro analyzeVolumeAlert ${symbol}: ${error.message}`);
+        return null;
+    }
 }
 
 // =====================================================================
@@ -505,7 +812,6 @@ async function calculateStochastic(symbol, timeframe) {
 
 // =====================================================================
 // === FUNÇÃO PARA CALCULAR CCI COM EMA 5 ===
-// === Status do CRUZAMENTO com UMA seta de direção ===
 // =====================================================================
 async function calculateCCI(symbol, timeframe) {
     try {
@@ -544,7 +850,6 @@ async function calculateCCI(symbol, timeframe) {
             }
         }
         
-        // Calcular EMA 5 do CCI
         const emaValues = [];
         if (cciValues.length >= emaPeriod) {
             const multiplier = 2 / (emaPeriod + 1);
@@ -561,10 +866,8 @@ async function calculateCCI(symbol, timeframe) {
         const currentEMA = emaValues[emaValues.length - 1];
         const prevCCI = cciValues[cciValues.length - 2];
         
-        // DIREÇÃO do CCI (para onde está apontando)
         const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '');
         
-        // STATUS DO CRUZAMENTO (ALTA = CCI acima da EMA, BAIXA = CCI abaixo da EMA)
         let crossStatus = '';
         
         if (currentCCI > currentEMA) {
@@ -575,7 +878,6 @@ async function calculateCCI(symbol, timeframe) {
             crossStatus = 'NEUTRO';
         }
         
-        // CÍRCULO COLORIDO baseado no VALOR do CCI
         let valueCircle = '';
         
         if (currentCCI <= -200) {
@@ -597,9 +899,9 @@ async function calculateCCI(symbol, timeframe) {
         }
         
         const result = {
-            crossStatus: crossStatus,    // ALTA ou BAIXA
-            direction: cciDirection,     // ⤴️ ou ⤵️ (direção do CCI)
-            circle: valueCircle,         // Círculo por valor
+            crossStatus: crossStatus,
+            direction: cciDirection,
+            circle: valueCircle,
             rawCCI: currentCCI,
             rawEMA: currentEMA
         };
@@ -614,14 +916,12 @@ async function calculateCCI(symbol, timeframe) {
 
 // =====================================================================
 // === FUNÇÃO PARA DETECTAR CRUZAMENTO STOCH + CCI (VOLUME MOMENTUM) ===
-// === Retorna: 'bull' (cruzou para cima), 'bear' (cruzou para baixo), ou null ===
 // =====================================================================
 function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
     if (!stoch4h || !cci4h) return null;
     
     const symbolKey = symbol;
     
-    // Inicializar memória se não existir
     if (!volumeMomentumMemory.lastStochK[symbolKey]) {
         volumeMomentumMemory.lastStochK[symbolKey] = stoch4h.rawK;
         volumeMomentumMemory.lastStochD[symbolKey] = stoch4h.rawD;
@@ -640,33 +940,26 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
     const currentStochD = stoch4h.rawD;
     const currentCCIStatus = cci4h.crossStatus;
     
-    // Detectar CRUZAMENTO do Stoch (K cruzando D para cima ou para baixo)
-    let stochBullCross = false;  // K cruzou D para CIMA
-    let stochBearCross = false;  // K cruzou D para BAIXO
+    let stochBullCross = false;
+    let stochBearCross = false;
     
-    // Cruzamento para CIMA: K estava abaixo de D e agora está acima
     if (prevStochK < prevStochD && currentStochK > currentStochD) {
         stochBullCross = true;
     }
-    // Cruzamento para BAIXO: K estava acima de D e agora está abaixo
     if (prevStochK > prevStochD && currentStochK < currentStochD) {
         stochBearCross = true;
     }
     
-    // Detectar CRUZAMENTO do CCI (CCI cruzando EMA)
-    let cciBullCross = false;  // CCI cruzou EMA para CIMA
-    let cciBearCross = false;  // CCI cruzou EMA para BAIXO
+    let cciBullCross = false;
+    let cciBearCross = false;
     
-    // Cruzamento para CIMA: estava BAIXA e agora ALTA
     if (prevCCIStatus === 'BAIXA' && currentCCIStatus === 'ALTA') {
         cciBullCross = true;
     }
-    // Cruzamento para BAIXO: estava ALTA e agora BAIXA
     if (prevCCIStatus === 'ALTA' && currentCCIStatus === 'BAIXA') {
         cciBearCross = true;
     }
     
-    // ATUALIZAR MEMÓRIA
     volumeMomentumMemory.lastStochK[symbolKey] = currentStochK;
     volumeMomentumMemory.lastStochD[symbolKey] = currentStochD;
     volumeMomentumMemory.lastCCI[symbolKey] = currentCCIStatus;
@@ -674,12 +967,10 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
     let newCrossState = null;
     let crossType = null;
     
-    // VOLUME MOMENTUM BULL: Stoch cruzou para CIMA E CCI cruzou para CIMA (no mesmo período)
     if (stochBullCross && cciBullCross) {
         newCrossState = 'bull';
         crossType = 'BULL';
     }
-    // VOLUME MOMENTUM BEAR: Stoch cruzou para BAIXO E CCI cruzou para BAIXO (no mesmo período)
     else if (stochBearCross && cciBearCross) {
         newCrossState = 'bear';
         crossType = 'BEAR';
@@ -687,11 +978,9 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
         newCrossState = null;
     }
     
-    // Verificar se o cruzamento ACABOU de acontecer (não estava cruzado antes)
     const wasCrossed = (prevCrossState === 'bull' || prevCrossState === 'bear');
     const isNowCrossed = (newCrossState === 'bull' || newCrossState === 'bear');
     
-    // Só alertar se NÃO estava cruzado antes e AGORA cruzou
     let shouldAlert = false;
     let alertType = null;
     
@@ -700,7 +989,6 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
         alertType = newCrossState === 'bull' ? 'VOLUME_MOMENTUM_BULL' : 'VOLUME_MOMENTUM_BEAR';
     }
     
-    // Atualizar último estado de cruzamento
     volumeMomentumMemory.lastCrossState[symbolKey] = newCrossState;
     saveVolumeMomentumMemory();
     
@@ -730,8 +1018,6 @@ function formatStochMessage(stoch4h, stoch1d) {
 
 // =====================================================================
 // === FUNÇÃO PARA FORMATAR CCI EM MENSAGEM ===
-// === Exemplo: CCI 4H: BAIXA ⤵️ 🔴
-// === Exemplo: CCI 1D: ALTA ⤴️ 🔴
 // =====================================================================
 function formatCCIMessage(cci4h, cci1d) {
     let msg = '';
@@ -745,6 +1031,63 @@ function formatCCIMessage(cci4h, cci1d) {
     }
     
     return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR ESTRUTURA EM MENSAGEM ===
+// =====================================================================
+function formatStructureMessage(structure, timeframe) {
+    if (!structure) return '';
+    
+    let msg = `📐 Estrutura ${timeframe}:\n`;
+    
+    if (structure.closestBullFVG) {
+        const fvg = structure.closestBullFVG;
+        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}% `;
+        if (fvg.isBelow) msg += `(abaixo)`;
+        else if (fvg.isInside) msg += `(dentro)`;
+        else msg += `(acima)`;
+        msg += `\n`;
+    }
+    
+    if (structure.closestBearFVG) {
+        const fvg = structure.closestBearFVG;
+        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}% `;
+        if (fvg.isAbove) msg += `(acima)`;
+        else if (fvg.isInside) msg += `(dentro)`;
+        else msg += `(abaixo)`;
+        msg += `\n`;
+    }
+    
+    if (structure.closestSupport) {
+        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}% `;
+        if (structure.closestSupport.isAbove) msg += `(acima)`;
+        else msg += `(abaixo)`;
+        msg += `\n`;
+    }
+    
+    if (structure.closestResistance) {
+        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}% `;
+        if (structure.closestResistance.isBelow) msg += `(abaixo)`;
+        else msg += `(acima)`;
+        msg += `\n`;
+    }
+    
+    msg += `  🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription || 'Nenhuma zona próxima'}\n`;
+    
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA FORMATAR VOLUME EM MENSAGEM ===
+// =====================================================================
+function formatVolumeMessage(volume, timeframe) {
+    if (!volume || !volume.type) return '';
+    
+    const volumeEmoji = volume.type === 'bull' ? '🔥' : '❄️';
+    const volumeText = volume.type === 'bull' ? 'ALTO' : 'BAIXO';
+    
+    return `${volumeEmoji} Volume ${timeframe}: ${volumeText} (${volume.volumeRatio.toFixed(2)}x média) ${volume.intensity}\n`;
 }
 
 // =====================================================================
@@ -1244,8 +1587,231 @@ async function getLSRData(symbols) {
 }
 
 // =====================================================================
+// === CVD MANAGER VIA WEBSOCKET ===
+// =====================================================================
+class CVDManager {
+    constructor() {
+        this.cvdData = new Map();
+        this.subscribedSymbols = new Set();
+        this.reconnectAttempts = new Map();
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 5000;
+    }
+
+    subscribeToSymbol(symbol) {
+        if (this.subscribedSymbols.has(symbol)) return;
+        
+        this.subscribedSymbols.add(symbol);
+        
+        this.cvdData.set(symbol, {
+            value: 0,
+            history: [],
+            lastUpdate: Date.now(),
+            buyVolume: 0,
+            sellVolume: 0,
+            lastPrice: null,
+            ws: null,
+            connected: false,
+            direction: '',
+            directionChange: 0
+        });
+        
+        this.connectWebSocket(symbol);
+    }
+    
+    connectWebSocket(symbol) {
+        const symbolLower = symbol.toLowerCase();
+        const wsUrl = `wss://fstream.binance.com/ws/${symbolLower}@aggTrade`;
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.on('open', () => {
+            this.reconnectAttempts.set(symbol, 0);
+            const data = this.cvdData.get(symbol);
+            if (data) {
+                data.ws = ws;
+                data.connected = true;
+            }
+        });
+        
+        ws.on('message', (data) => {
+            try {
+                const trade = JSON.parse(data);
+                this.processTrade(symbol, trade);
+            } catch (error) {}
+        });
+        
+        ws.on('error', () => {
+            this.handleDisconnect(symbol);
+        });
+        
+        ws.on('close', () => {
+            this.handleDisconnect(symbol);
+        });
+        
+        const data = this.cvdData.get(symbol);
+        if (data) data.ws = ws;
+    }
+    
+    processTrade(symbol, trade) {
+        const volume = parseFloat(trade.q);
+        const isBuyerMaker = trade.m;
+        const delta = isBuyerMaker ? -volume : +volume;
+        
+        const data = this.cvdData.get(symbol);
+        if (!data) return;
+        
+        data.value += delta;
+        data.lastUpdate = Date.now();
+        data.lastPrice = parseFloat(trade.p);
+        
+        if (delta > 0) data.buyVolume += volume;
+        else data.sellVolume += volume;
+        
+        data.history.push({
+            timestamp: Date.now(),
+            delta: delta,
+            volume: volume,
+            cvd: data.value
+        });
+        
+        if (data.history.length > 1000) data.history.shift();
+        this.updateDirection(symbol);
+    }
+    
+    updateDirection(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data || data.history.length < 10) return;
+        
+        const now = Date.now();
+        const cutoff = now - (CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW * 1000);
+        
+        let oldCVD = null;
+        for (let i = data.history.length - 1; i >= 0; i--) {
+            if (data.history[i].timestamp <= cutoff) {
+                oldCVD = data.history[i];
+                break;
+            }
+        }
+        
+        if (!oldCVD) return;
+        
+        const change = data.value - oldCVD.cvd;
+        const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
+        
+        if (change > 0 && changePercent >= 1) data.direction = '⤴️';
+        else if (change < 0 && changePercent >= 1) data.direction = '⤵️';
+        else data.direction = '';
+    }
+    
+    handleDisconnect(symbol) {
+        const attempts = this.reconnectAttempts.get(symbol) || 0;
+        
+        if (attempts < this.maxReconnectAttempts) {
+            const delay = this.reconnectDelay * Math.pow(2, attempts);
+            setTimeout(() => {
+                this.reconnectAttempts.set(symbol, attempts + 1);
+                this.connectWebSocket(symbol);
+            }, delay);
+        } else {
+            const data = this.cvdData.get(symbol);
+            if (data && data.ws) {
+                try { data.ws.terminate(); } catch(e) {}
+            }
+        }
+    }
+    
+    unsubscribeFromSymbol(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (data && data.ws) {
+            try { data.ws.close(); data.ws.terminate(); } catch(e) {}
+        }
+        this.subscribedSymbols.delete(symbol);
+        this.cvdData.delete(symbol);
+    }
+    
+    getCVD(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return null;
+        return { direction: data.direction };
+    }
+    
+    getCVDValue(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return '';
+        return data.direction;
+    }
+    
+    getVolumeProfile(symbol, minutesAgo = 5) {
+        const data = this.cvdData.get(symbol);
+        if (!data || data.history.length === 0) return null;
+        
+        const now = Date.now();
+        const cutoff = now - (minutesAgo * 60 * 1000);
+        
+        let buyVolume = 0, sellVolume = 0, totalVolume = 0;
+        
+        for (const trade of data.history) {
+            if (trade.timestamp >= cutoff) {
+                if (trade.delta > 0) buyVolume += trade.volume;
+                else sellVolume += trade.volume;
+                totalVolume += trade.volume;
+            }
+        }
+        
+        if (totalVolume === 0) return null;
+        
+        const buyerRatio = (buyVolume / totalVolume) * 100;
+        const sellerRatio = (sellVolume / totalVolume) * 100;
+        
+        return {
+            buyerRatio: buyerRatio,
+            sellerRatio: sellerRatio,
+            totalVolume: totalVolume,
+            dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
+            dominantRatio: Math.max(buyerRatio, sellerRatio)
+        };
+    }
+    
+    cleanup() {
+        for (const symbol of this.subscribedSymbols) {
+            this.unsubscribeFromSymbol(symbol);
+        }
+    }
+}
+
+// =====================================================================
+// === FUNÇÕES AUXILIARES ===
+// =====================================================================
+function getBrazilianDateTime() {
+    const now = new Date();
+    const brazilTime = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
+    const time = brazilTime.toISOString().split('T')[1].split('.')[0];
+    return { date, time, full: `${date} ${time}` };
+}
+
+function formatPrice(price) {
+    if (!price || isNaN(price)) return '-';
+    if (price > 1000) return price.toFixed(2);
+    if (price > 1) return price.toFixed(4);
+    if (price > 0.1) return price.toFixed(5);
+    if (price > 0.01) return price.toFixed(6);
+    return price.toFixed(8);
+}
+
+function log(message, type = 'info') {
+    const timestamp = new Date().toISOString();
+    const icons = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️', alert: '🚨' };
+    console.log(`${icons[type] || 'ℹ️'} [${timestamp}] ${message}`);
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// =====================================================================
 // === VERIFICAR CRITÉRIOS E ENVIAR ALERTA (ALTCOINS) ===
-// === NOVO: ALERTA DE VOLUME MOMENTUM BULL/BEAR ===
 // =====================================================================
 async function checkAndAlert(symbolData, cvdManager) {
     const { symbol: fullSymbol, price, volume24h } = symbolData;
@@ -1273,9 +1839,7 @@ async function checkAndAlert(symbolData, cvdManager) {
             calculateCCI(fullSymbol, '1d')
         ]);
         
-        // =============================================================
-        // NOVO: DETECTAR VOLUME MOMENTUM BULL/BEAR
-        // =============================================================
+        const volumeAlert = await analyzeVolumeAlert(fullSymbol, price);
         const volumeMomentumSignal = detectVolumeMomentumCross(fullSymbol, stoch4h, cci4h);
         
         const asset = {
@@ -1296,30 +1860,40 @@ async function checkAndAlert(symbolData, cvdManager) {
             stoch1d,
             cci4h,
             cci1d,
-            volumeMomentumSignal
+            volumeMomentumSignal,
+            volumeAlert
         };
         
-        // =============================================================
-        // ALERTA VOLUME MOMENTUM BULL
-        // =============================================================
+        // Enviar alertas com prioridade (usando a fila do Telegram)
+        
+        if (volumeAlert && volumeAlert.alertType === 'VOLUME_BULL' && canAlert(fullSymbol, 'VOLUME_BULL')) {
+            await sendVolumeStructureAlert(asset, 'BULL');
+            markAlerted(fullSymbol, 'VOLUME_BULL');
+            log(`🟢 VOLUME BULL: ${symbol} - ${volumeAlert.alignment}`, 'alert');
+            await delay(500); // Delay pequeno entre alertas do mesmo scan
+        }
+        
+        if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
+            await sendVolumeStructureAlert(asset, 'BEAR');
+            markAlerted(fullSymbol, 'VOLUME_BEAR');
+            log(`🔴 VOLUME BEAR: ${symbol} - ${volumeAlert.alignment}`, 'alert');
+            await delay(500);
+        }
+        
         if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BULL' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL')) {
             await sendVolumeMomentumAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL');
             log(`🟢 VOLUME MOMENTUM BULL: ${symbol}`, 'alert');
+            await delay(500);
         }
         
-        // =============================================================
-        // ALERTA VOLUME MOMENTUM BEAR
-        // =============================================================
         if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BEAR' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BEAR')) {
             await sendVolumeMomentumAlert(asset, 'BEAR');
             markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BEAR');
             log(`🔴 VOLUME MOMENTUM BEAR: ${symbol}`, 'alert');
+            await delay(500);
         }
         
-        // =============================================================
-        // ALERTAS TRADICIONAIS (BULL/BEAR)
-        // =============================================================
         const isBear = asset.divergences.hasBearish15mPlusOther &&
                        asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
                        asset.bollingerSell &&
@@ -1352,7 +1926,89 @@ async function checkAndAlert(symbolData, cvdManager) {
 }
 
 // =====================================================================
-// === NOVO: ENVIAR ALERTA DE VOLUME MOMENTUM ===
+// === ENVIAR ALERTA DE VOLUME COM ANÁLISE DE ESTRUTURA ===
+// =====================================================================
+async function sendVolumeStructureAlert(asset, type) {
+    const dt = getBrazilianDateTime();
+    const volumeAlert = asset.volumeAlert;
+    
+    let message = '';
+    
+    if (type === 'BULL') {
+        message = `🟢<b>📊 VOLUME BULL DETECTADO!</b> \n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        
+        if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bull') {
+            message += formatVolumeMessage(volumeAlert.volume1h, '1h');
+        }
+        if (volumeAlert.volume4h && volumeAlert.volume4h.type === 'bull') {
+            message += formatVolumeMessage(volumeAlert.volume4h, '4h');
+        }
+        
+        message += `\n<i> Análise de Estrutura:</i>\n`;
+        if (volumeAlert.structure4h) {
+            message += formatStructureMessage(volumeAlert.structure4h, '4h');
+        }
+        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
+            message += formatStructureMessage(volumeAlert.structure1h, '1h');
+        }
+        
+        message += `\n<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
+        message += `<i> 🔍 ${volumeAlert.alignment}</i>\n\n`;
+        
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
+        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        
+        if (asset.stoch4h) {
+            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+        }
+        
+        message += `<i>  ${dt.full}</i>`;
+        
+    } else {
+        message = `🔴<b>📊 VOLUME BEAR DETECTADO!</b> \n`;
+        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        
+        if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bear') {
+            message += formatVolumeMessage(volumeAlert.volume1h, '1h');
+        }
+        if (volumeAlert.volume4h && volumeAlert.volume4h.type === 'bear') {
+            message += formatVolumeMessage(volumeAlert.volume4h, '4h');
+        }
+        
+        message += `<i> Análise de Estrutura:</i>\n`;
+        if (volumeAlert.structure4h) {
+            message += formatStructureMessage(volumeAlert.structure4h, '4h');
+        }
+        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
+            message += formatStructureMessage(volumeAlert.structure1h, '1h');
+        }
+        
+        message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
+        message += `<i> 🔍 ${volumeAlert.alignment}</i>\n`;
+        
+        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
+        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        
+        if (asset.stoch4h) {
+            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+        }
+        
+        message += `<i>  ${dt.full}</i>`;
+    }
+    
+    // Usar a fila do Telegram
+    await telegramQueue.add(message);
+}
+
+// =====================================================================
+// === ENVIAR ALERTA DE VOLUME MOMENTUM ===
 // =====================================================================
 async function sendVolumeMomentumAlert(asset, type) {
     const dt = getBrazilianDateTime();
@@ -1365,7 +2021,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
         message += `<i>    • Stoch (K⤴️D) cruzou para CIMA</i>\n`;
-        message += `<i>    • CCI ⤴️ EMA para CIMA (ALTA)</i>\n`;
+        message += `<i>    • CCI ⤴️ cruzou EMA para CIMA</i>\n`;
         message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
@@ -1396,7 +2052,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
         message += `<i>    • Stoch (K⤵️D) cruzou para BAIXO</i>\n`;
-        message += `<i>    • CCI ⤵️ EMA para BAIXO (BAIXA)</i>\n`;
+        message += `<i>    • CCI ⤵️ cruzou EMA para BAIXO </i>\n`;
         message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
@@ -1423,8 +2079,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         message += `<i>  ${dt.full}</i>`;
     }
     
-    await sendToTelegram(message);
-    await delay(CONFIG.MONITOR.TELEGRAM_DELAY_MS);
+    await telegramQueue.add(message);
 }
 
 // =====================================================================
@@ -1473,8 +2128,7 @@ async function sendAlert(asset, type) {
         message += `<i> ${dt.full}</i>`;
     }
     
-    await sendToTelegram(message);
-    await delay(CONFIG.MONITOR.TELEGRAM_DELAY_MS);
+    await telegramQueue.add(message);
 }
 
 // =====================================================================
@@ -1588,7 +2242,7 @@ async function sendBTCAlert(change, btcData) {
     message += ` Timeframe: ${change.timeframe}\n`;
     message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
     message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
-    message += ` Distância: ${change.distance}%\n\n`;
+    message += ` Distância: ${change.distance}%\n`;
     
     message += ` Timeframes:\n`;
     for (const [tf, data] of Object.entries(btcData.results)) {
@@ -1617,7 +2271,7 @@ async function sendBTCAlert(change, btcData) {
     message += `  ${dt.full}\n`;
     message += `</i>`;
     
-    await sendToTelegram(message);
+    await telegramQueue.add(message, true); // Prioridade alta para BTC
     log(` ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
 }
 
@@ -1655,7 +2309,7 @@ async function sendBTCInitialStatus(btcData) {
     message += ` ${dt.full}\n`;
     message += `</i>`;
     
-    await sendToTelegram(message);
+    await telegramQueue.add(message, true);
     log(`📢 STATUS INICIAL BTC ENVIADO`, 'alert');
 }
 
@@ -1711,66 +2365,21 @@ async function scanBTC() {
 }
 
 // =====================================================================
-// === ENVIAR MENSAGEM TELEGRAM ===
-// =====================================================================
-async function sendToTelegram(message) {
-    try {
-        const token = CONFIG.TELEGRAM.BOT_TOKEN;
-        const chatId = CONFIG.TELEGRAM.CHAT_ID;
-        const url = `https://api.telegram.org/bot${token}/sendMessage`;
-        
-        let finalMessage = message;
-        
-        finalMessage = finalMessage.replace(/<i><\/i>/g, '');
-        finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
-        
-        const openTags = (finalMessage.match(/<i>/g) || []).length;
-        const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
-        if (openTags !== closeTags) {
-            finalMessage = finalMessage.replace(/<[^>]*>/g, '');
-        }
-        
-        if (finalMessage.length > 4000) {
-            finalMessage = finalMessage.substring(0, 3950) + '\n\n... mensagem truncada';
-        }
-        
-        finalMessage = finalMessage.replace(/&(?!(amp;|lt;|gt;|quot;|apos;))/g, '&amp;');
-        
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: finalMessage,
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-            })
-        });
-        
-        const responseText = await response.text();
-        
-        if (response.ok) {
-            console.log(`✅ Alerta enviado com sucesso!`);
-            return true;
-        } else {
-            console.log(`❌ Erro Telegram: ${responseText}`);
-            return false;
-        }
-    } catch (error) {
-        console.log(`❌ Telegram exception: ${error.message}`);
-        return false;
-    }
-}
-
-// =====================================================================
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
     let msg = `<b> TITANIUM PRIME X </b>\n\n`;
-    msg += `<i>✅</i>\n`;
+    msg += `<i>✅ Sistema Iniciado!</i>\n`;
+    msg += `<i>📊 Monitorando:</i>\n`;
+    msg += `<i>  • Volume Bull/Bear com análise FVG 1h/4h</i>\n`;
+    msg += `<i>  • Suportes e Resistências</i>\n`;
+    msg += `<i>  • Volume Momentum (Stoch + CCI 4H)</i>\n`;
+    msg += `<i>  • Divergências RSI</i>\n`;
+    msg += `<i>  • BTC EMA 55 por timeframe</i>\n`;
+    msg += `<i>⏱️ Rate limit: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min</i>\n`;
+    msg += `<i>⏱️ Delay entre msgs: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s</i>\n`;
     
-   
-    await sendToTelegram(msg);
+    await telegramQueue.add(msg, true);
 }
 
 // =====================================================================
@@ -1821,10 +2430,13 @@ async function startMonitor() {
     console.log('\n' + '='.repeat(70));
     console.log('🚀 TITANIUM PRIME X - MODO ALERTA INSTANTÂNEO');
     console.log('📊 Scanner contínuo - Alerta imediato quando critérios são atendidos');
+    console.log(`📊 NOVO: Volume Bull/Bear com análise de FVG 1h/4h`);
     console.log(`📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)`);
+    console.log(`📊 NOVO: Detecção de Suportes e Resistências`);
     console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos`);
     console.log(`🟢🟡 MONITOR BTC - Alerta por TIMEFRAME INDIVIDUAL`);
-    console.log(`📌 Alertará SEMPRE que QUALQUER timeframe cruzar a EMA 55`);
+    console.log(`📨 TELEGRAM - Rate limit: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min`);
+    console.log(`📨 TELEGRAM - Delay entre mensagens: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s`);
     console.log('='.repeat(70));
     
     loadAlertedSymbols();
