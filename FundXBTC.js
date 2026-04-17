@@ -17,8 +17,8 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8dg',
-        CHAT_ID: '-1002554',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         MESSAGE_DELAY_MS: 3000,
         MAX_MESSAGES_PER_MINUTE: 20,
         BURST_DELAY_MS: 5000,
@@ -33,11 +33,12 @@ const CONFIG = {
         LSRS_PERIOD: '5m',
         LSR_15M_PERIOD: '15m',
         LSR_TREND_THRESHOLD: 0.05,
-        ALERT_COOLDOWN_MINUTES: 30,  // ALTERADO: 30 minutos para mesma moeda
+        ALERT_COOLDOWN_MINUTES: 30,
         TELEGRAM_DELAY_MS: 1500,
         VOLUME_BULL_THRESHOLD: 1.5,
         VOLUME_BEAR_THRESHOLD: 1.5,
-        FVG_PROXIMITY_THRESHOLD: 2.0,
+        FVG_PROXIMITY_THRESHOLD: 1.0,
+        ZONE_PROXIMITY_THRESHOLD: 1.0,
         RSI: {
             PERIOD: 14,
             TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],
@@ -404,27 +405,30 @@ function findClosestFVG(fvgs, currentPrice, type = null) {
         let distance;
         let isAbove = false;
         let isBelow = false;
+        let targetPrice = null;
         
         if (fvg.type === 'bull') {
-            if (currentPrice < fvg.bottom) {
-                distance = ((fvg.bottom - currentPrice) / currentPrice) * 100;
+            targetPrice = fvg.bottom;
+            if (currentPrice < targetPrice) {
+                distance = ((targetPrice - currentPrice) / currentPrice) * 100;
                 isBelow = true;
             } else if (currentPrice > fvg.top) {
                 distance = ((currentPrice - fvg.top) / currentPrice) * 100;
                 isAbove = true;
-            } else if (currentPrice >= fvg.bottom && currentPrice <= fvg.top) {
+            } else if (currentPrice >= targetPrice && currentPrice <= fvg.top) {
                 distance = 0;
             } else {
                 continue;
             }
         } else {
-            if (currentPrice > fvg.top) {
-                distance = ((currentPrice - fvg.top) / currentPrice) * 100;
+            targetPrice = fvg.top;
+            if (currentPrice > targetPrice) {
+                distance = ((currentPrice - targetPrice) / currentPrice) * 100;
                 isAbove = true;
             } else if (currentPrice < fvg.bottom) {
                 distance = ((fvg.bottom - currentPrice) / currentPrice) * 100;
                 isBelow = true;
-            } else if (currentPrice >= fvg.bottom && currentPrice <= fvg.top) {
+            } else if (currentPrice >= fvg.bottom && currentPrice <= targetPrice) {
                 distance = 0;
             } else {
                 continue;
@@ -436,6 +440,7 @@ function findClosestFVG(fvgs, currentPrice, type = null) {
             closest = {
                 ...fvg,
                 distancePercent: distance,
+                targetPrice: targetPrice,
                 isAbove,
                 isBelow,
                 isInside: distance === 0
@@ -536,6 +541,7 @@ function checkProximityToLevel(price, levels, thresholdPercent = 0.5) {
             closest = {
                 ...level,
                 distancePercent,
+                targetPrice: level.price,
                 isAbove: price > level.price,
                 isBelow: price < level.price
             };
@@ -555,26 +561,26 @@ async function analyzeStructure(symbol, timeframe, currentPrice) {
         
         const closestBullFVG = findClosestFVG(fvgs, currentPrice, 'bull');
         const closestBearFVG = findClosestFVG(fvgs, currentPrice, 'bear');
-        const closestSupport = checkProximityToLevel(currentPrice, supports, 0.75);
-        const closestResistance = checkProximityToLevel(currentPrice, resistances, 0.75);
+        const closestSupport = checkProximityToLevel(currentPrice, supports, CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD);
+        const closestResistance = checkProximityToLevel(currentPrice, resistances, CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD);
         
         let zoneType = 'NEUTRO';
         let zoneDescription = '';
         
-        if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
+        if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'COMPRA';
-            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}%`;
-        } else if (closestSupport && closestSupport.distancePercent <= 0.75) {
+            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}% (Preço alvo: ${formatPrice(closestBullFVG.targetPrice)})`;
+        } else if (closestSupport && closestSupport.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'COMPRA';
-            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}%`;
+            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}% (Preço: ${formatPrice(closestSupport.targetPrice)})`;
         }
         
-        if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
+        if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'VENDA';
-            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}%`;
-        } else if (closestResistance && closestResistance.distancePercent <= 0.75) {
+            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}% (Preço alvo: ${formatPrice(closestBearFVG.targetPrice)})`;
+        } else if (closestResistance && closestResistance.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'VENDA';
-            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}%`;
+            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}% (Preço: ${formatPrice(closestResistance.targetPrice)})`;
         }
         
         return {
@@ -639,7 +645,7 @@ async function detectVolumeAnomaly(symbol, timeframe = '1h') {
 }
 
 // =====================================================================
-// === NOVA FUNÇÃO: ANALISA VOLUME APENAS SE ESTIVER EM ZONA BOA ===
+// === ANÁLISE DE VOLUME - SÓ ALERTA SE ESTIVER NA ZONA (1%) ===
 // =====================================================================
 async function analyzeVolumeAlert(symbol, currentPrice) {
     try {
@@ -654,9 +660,7 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
         let volumeData = null;
         let structureData = null;
         
-        // Verificar volume 4h primeiro (mais relevante)
         if (volume4h && volume4h.type) {
-            // SÓ ALERTA SE ESTIVER EM ZONA DE COMPRA/VENDA
             if (volume4h.type === 'bull' && structure4h && structure4h.zoneType === 'COMPRA') {
                 alertType = 'VOLUME_BULL';
                 mainTimeframe = '4h';
@@ -670,7 +674,6 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
             }
         }
         
-        // Se não teve alerta no 4h, verificar 1h
         if (!alertType && volume1h && volume1h.type) {
             if (volume1h.type === 'bull' && structure1h && structure1h.zoneType === 'COMPRA') {
                 alertType = 'VOLUME_BULL';
@@ -685,17 +688,16 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
             }
         }
         
-        // Só retorna alerta se tiver volume anormal E estiver em zona boa
         if (!alertType) return null;
         
         let alignment = '';
         let tradeSignal = '';
         
         if (alertType === 'VOLUME_BULL') {
-            alignment = '✅ ALINHADO - Zona de Compra identificada';
+            alignment = '✅ ALINHADO - Zona de Compra identificada (≤1%)';
             tradeSignal = '🟢 CONSIDERAR COMPRA';
         } else if (alertType === 'VOLUME_BEAR') {
-            alignment = '✅ ALINHADO - Zona de Venda identificada';
+            alignment = '✅ ALINHADO - Zona de Venda identificada (≤1%)';
             tradeSignal = '🔴 CONSIDERAR VENDA';
         }
         
@@ -1020,20 +1022,20 @@ function formatStructureMessage(structure, timeframe) {
     
     if (structure.closestBullFVG) {
         const fvg = structure.closestBullFVG;
-        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}%\n`;
+        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}% ➜ ${formatPrice(fvg.targetPrice)} USDT\n`;
     }
     
     if (structure.closestBearFVG) {
         const fvg = structure.closestBearFVG;
-        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}%\n`;
+        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}% ➜ ${formatPrice(fvg.targetPrice)} USDT\n`;
     }
     
     if (structure.closestSupport) {
-        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}%\n`;
+        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}% ➜ ${formatPrice(structure.closestSupport.targetPrice)} USDT\n`;
     }
     
     if (structure.closestResistance) {
-        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}%\n`;
+        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}% ➜ ${formatPrice(structure.closestResistance.targetPrice)} USDT\n`;
     }
     
     msg += `  🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription}\n`;
@@ -1794,7 +1796,6 @@ async function checkAndAlert(symbolData, cvdManager) {
             calculateCCI(fullSymbol, '1d')
         ]);
         
-        // NOVO: Volume alert só retorna se estiver em zona boa (COMPRA ou VENDA)
         const volumeAlert = await analyzeVolumeAlert(fullSymbol, price);
         const volumeMomentumSignal = detectVolumeMomentumCross(fullSymbol, stoch4h, cci4h);
         
@@ -1820,29 +1821,20 @@ async function checkAndAlert(symbolData, cvdManager) {
             volumeAlert
         };
         
-        // =============================================================
-        // ALERTA VOLUME BULL - SÓ SE TIVER ZONA DE COMPRA
-        // =============================================================
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BULL' && canAlert(fullSymbol, 'VOLUME_BULL')) {
             await sendVolumeStructureAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_BULL');
-            log(`🟢 VOLUME BULL (ZONA COMPRA): ${symbol}`, 'alert');
+            log(`🟢 VOLUME BULL (ZONA COMPRA ≤1%): ${symbol}`, 'alert');
             await delay(500);
         }
         
-        // =============================================================
-        // ALERTA VOLUME BEAR - SÓ SE TIVER ZONA DE VENDA
-        // =============================================================
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
             await sendVolumeStructureAlert(asset, 'BEAR');
             markAlerted(fullSymbol, 'VOLUME_BEAR');
-            log(`🔴 VOLUME BEAR (ZONA VENDA): ${symbol}`, 'alert');
+            log(`🔴 VOLUME BEAR (ZONA VENDA ≤1%): ${symbol}`, 'alert');
             await delay(500);
         }
         
-        // =============================================================
-        // ALERTA VOLUME MOMENTUM BULL/BEAR (mantém)
-        // =============================================================
         if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BULL' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL')) {
             await sendVolumeMomentumAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL');
@@ -1857,9 +1849,6 @@ async function checkAndAlert(symbolData, cvdManager) {
             await delay(500);
         }
         
-        // =============================================================
-        // ALERTAS TRADICIONAIS (mantém)
-        // =============================================================
         const isBear = asset.divergences.hasBearish15mPlusOther &&
                        asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
                        asset.bollingerSell &&
@@ -1892,7 +1881,7 @@ async function checkAndAlert(symbolData, cvdManager) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA DE VOLUME COM ANÁLISE DE ESTRUTURA ===
+// === ENVIAR ALERTA DE VOLUME COM ANÁLISE DE ESTRUTURA (TUDO EM ITÁLICO) ===
 // =====================================================================
 async function sendVolumeStructureAlert(asset, type) {
     const dt = getBrazilianDateTime();
@@ -1901,9 +1890,9 @@ async function sendVolumeStructureAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `🟢<b>📊 VOLUME BULL - ZONA DE COMPRA!</b> \n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message = `<i>🟢<b>📊COMPRA FVG🔥!</b> \n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
         if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bull') {
             message += formatVolumeMessage(volumeAlert.volume1h, '1h');
@@ -1912,25 +1901,32 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatVolumeMessage(volumeAlert.volume4h, '4h');
         }
         
-        message += `<i> Análise de Estrutura:</i>\n`;
+        message += ` Análise de Estrutura:\n`;
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
+        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
+            message += formatStructureMessage(volumeAlert.structure1h, '1h');
+        }
         
-        message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
-        message += `<i> 🔍 ${volumeAlert.alignment}</i>\n\n`;
+        message += ` 🤖✨ Decisão: <b>${volumeAlert.tradeSignal}</b>\n`;
+        message += ` 🔍 ${volumeAlert.alignment}\n`;
         
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
-        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
-        message += `<i>  ${dt.full}</i>`;
+        if (asset.stoch4h) {
+            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        
+        message += `  ${dt.full}</i>`;
         
     } else {
-        message = `🔴<b>📊 VOLUME BEAR - ZONA DE VENDA!</b> \n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message = `<i>🔴<b>📊CORREÇÃO FVG🔥!</b> \n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
         if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bear') {
             message += formatVolumeMessage(volumeAlert.volume1h, '1h');
@@ -1939,20 +1935,27 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatVolumeMessage(volumeAlert.volume4h, '4h');
         }
         
-        message += `<i> Análise de Estrutura:</i>\n`;
+        message += ` Análise de Estrutura:\n`;
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
+        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
+            message += formatStructureMessage(volumeAlert.structure1h, '1h');
+        }
         
-        message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
-        message += `<i> 🔍 ${volumeAlert.alignment}</i>\n`;
+        message += ` 🤖✨ Decisão: <b>${volumeAlert.tradeSignal}</b>\n`;
+        message += ` 🔍 ${volumeAlert.alignment}\n`;
         
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
-        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
-        message += `<i>  ${dt.full}</i>`;
+        if (asset.stoch4h) {
+            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        
+        message += `  ${dt.full}</i>`;
     }
     
     await telegramQueue.add(message);
@@ -1967,47 +1970,47 @@ async function sendVolumeMomentumAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `🟢<b>VOLUME MOMENTUM BULL💹</b> \n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
-        message += `<i>    • Stoch (K⤴️D) cruzou para CIMA</i>\n`;
-        message += `<i>    • CCI  cruzou ⤴️ EMA para CIMA</i>\n`;
-        message += `<i>  Indicadores:</i>\n`;
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
-        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message = `<i>🟢<b>VOLUME MOMENTUM BULL💹</b> \n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += `  CRUZAMENTO NO 4H:\n`;
+        message += `    • Stoch (K⤴️D) cruzou para CIMA\n`;
+        message += `    • CCI ⤴️ EMA para CIMA (ALTA)\n`;
+        message += `  Indicadores:\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
         if (asset.stoch4h) {
-            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
         }
         if (asset.cci4h) {
-            message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
+            message += ` CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
         }
         
-        message += `<i>  ${dt.full}</i>`;
+        message += `  ${dt.full}</i>`;
     } else {
-        message = `🔴<b>VOLUME MOMENTUM BEAR</b>🔻\n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
-        message += `<i>    • Stoch (K⤵️D) cruzou para BAIXO</i>\n`;
-        message += `<i>    • CCI cruzou ⤵️ EMA para BAIXO</i>\n`;
-        message += `<i>  Indicadores:</i>\n`;
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
-        message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
+        message = `<i>🔴<b>VOLUME MOMENTUM BEAR</b>🔻\n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += `  CRUZAMENTO NO 4H:\n`;
+        message += `    • Stoch (K⤵️D) cruzou para BAIXO\n`;
+        message += `    • CCI ⤵️ EMA para BAIXO (BAIXA)\n`;
+        message += `  Indicadores:\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
         if (asset.stoch4h) {
-            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
+            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
         }
         if (asset.cci4h) {
-            message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
+            message += ` CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
         }
         
-        message += `<i>  ${dt.full}</i>`;
+        message += `  ${dt.full}</i>`;
     }
     
     await telegramQueue.add(message);
@@ -2022,41 +2025,41 @@ async function sendAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `🟢<i>Avaliar Reversão💹</i> \n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
-        message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
-        message += `<i> Divergência:</i> ${asset.divergences.bullishTimeframes.join(' → ')}\n`;
+        message = `<i>🟢Avaliar Reversão💹 \n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += ` RSI: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` Divergência: ${asset.divergences.bullishTimeframes.join(' → ')}\n`;
         
         if (asset.stoch4h || asset.stoch1d) {
-            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
+            message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}`;
         }
         if (asset.cci4h || asset.cci1d) {
-            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
+            message += `${formatCCIMessage(asset.cci4h, asset.cci1d)}`;
         }
         
-        message += `<i> ${dt.full}</i>`;
+        message += ` ${dt.full}</i>`;
     } else {
-        message = `🔴<i>Avaliar Correção🔻</i> \n`;
-        message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
-        message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
-        message += `<i> RSI:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
-        message += `<i> Divergência:</i> ${asset.divergences.bearishTimeframes.join(' → ')}\n`;
+        message = `<i>🔴Avaliar Correção🔻 \n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += ` RSI: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` Divergência: ${asset.divergences.bearishTimeframes.join(' → ')}\n`;
         
         if (asset.stoch4h || asset.stoch1d) {
-            message += `<i> ${formatStochMessage(asset.stoch4h, asset.stoch1d)}</i>`;
+            message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}`;
         }
         if (asset.cci4h || asset.cci1d) {
-            message += `<i> ${formatCCIMessage(asset.cci4h, asset.cci1d)}</i>`;
+            message += `${formatCCIMessage(asset.cci4h, asset.cci1d)}`;
         }
         
-        message += `<i> ${dt.full}</i>`;
+        message += ` ${dt.full}</i>`;
     }
     
     await telegramQueue.add(message);
@@ -2299,10 +2302,19 @@ async function scanBTC() {
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
-    let msg = `<b> TITANIUM PRIME X </b>\n\n`;
-    msg += `<i>✅ Sistema Iniciado!</i>\n`;
-   
-    msg += `<i>⏱️ Rate limit Telegram: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min</i>\n`;
+    let msg = `<i><b> TITANIUM PRIME X </b>\n\n`;
+    msg += `✅ Sistema Iniciado!\n`;
+    msg += `📊 Monitorando:\n`;
+    msg += `  • Volume Bull/Bear (SOMENTE em zonas de Compra/Venda a ≤1%)\n`;
+    msg += `  • Análise de FVG 1h/4h com PREÇO alvo\n`;
+    msg += `  • Suportes e Resistências\n`;
+    msg += `  • Volume Momentum (Stoch + CCI 4H)\n`;
+    msg += `  • Divergências RSI\n`;
+    msg += `  • BTC EMA 55 por timeframe\n`;
+    msg += `⏱️ Cooldown por moeda: 30 minutos\n`;
+    msg += `🎯 Alerta apenas quando preço estiver a ≤1% da zona\n`;
+    msg += `⏱️ Rate limit Telegram: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min\n`;
+    msg += `⏱️ Delay entre mensagens: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s</i>`;
     
     await telegramQueue.add(msg, true);
 }
@@ -2355,11 +2367,13 @@ async function startMonitor() {
     console.log('\n' + '='.repeat(70));
     console.log('🚀 TITANIUM PRIME X - MODO ALERTA INSTANTÂNEO');
     console.log('📊 Scanner contínuo - Alerta imediato quando critérios são atendidos');
-    console.log(`📊 NOVO: Volume Bull/Bear com análise de FVG 1h/4h`);
-    console.log(`📊 NOVO: Só alerta se estiver em ZONA DE COMPRA ou VENDA`);
-    console.log(`📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)`);
-    console.log(`📊 NOVO: Detecção de Suportes e Resistências`);
+    console.log(`📊 Volume Bull/Bear com análise de FVG 1h/4h`);
+    console.log(`📊 Só alerta se estiver em ZONA DE COMPRA ou VENDA a ≤1%`);
+    console.log(`📊 PREÇO do FVG exibido nos alertas`);
+    console.log(`📊 Volume Momentum Bull/Bear (Stoch + CCI 4H)`);
+    console.log(`📊 Detecção de Suportes e Resistências`);
     console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos por moeda`);
+    console.log(`🎯 Distância máxima da zona: ${CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD}%`);
     console.log(`🟢🟡 MONITOR BTC - Alerta por TIMEFRAME INDIVIDUAL`);
     console.log(`📨 TELEGRAM - Rate limit: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min`);
     console.log(`📨 TELEGRAM - Delay entre mensagens: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s`);
