@@ -17,8 +17,8 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6g',
-        CHAT_ID: '-1002559',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         // NOVAS CONFIGURAÇÕES DE RATE LIMITING
         MESSAGE_DELAY_MS: 3000,        // Delay entre mensagens (3 segundos)
         MAX_MESSAGES_PER_MINUTE: 20,    // Máximo de mensagens por minuto
@@ -1946,7 +1946,7 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatVolumeMessage(volumeAlert.volume4h, '4h');
         }
         
-        message += `\n<i> Análise de Estrutura:</i>\n`;
+        message += `<i> Análise de Estrutura:</i>\n`;
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
@@ -1954,7 +1954,7 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatStructureMessage(volumeAlert.structure1h, '1h');
         }
         
-        message += `\n<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
+        message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
         message += `<i> 🔍 ${volumeAlert.alignment}</i>\n\n`;
         
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
