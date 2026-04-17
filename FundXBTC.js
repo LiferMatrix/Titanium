@@ -17,13 +17,13 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-10029'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
         MIN_VOLUME_USDT: 1000000,
-        MAX_SYMBOLS: 250,
+        MAX_SYMBOLS: 270,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
         LSR_15M_PERIOD: '15m',
@@ -1393,7 +1393,7 @@ async function sendVolumeMomentumAlert(asset, type) {
     } else {
         message = `🔴<b>VOLUME MOMENTUM BEAR</b>🔻\n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
-        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n\n`;
+        message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
         message += `<i>    • Stoch (K⤵️D) cruzou para BAIXO</i>\n`;
         message += `<i>    • CCI ⤵️ EMA para BAIXO (BAIXA)</i>\n`;
@@ -1580,19 +1580,19 @@ async function checkBTCByTimeframe() {
 async function sendBTCAlert(change, btcData) {
     const dt = getBrazilianDateTime();
     const direction = change.isAbove ? 'ACIMA' : 'ABAIXO';
-    const emoji = change.isAbove ? '🔴' : '🟢';
+    const emoji = change.isAbove ? '🔴⤴️' : '🟢⤵️';
     
     let message = `<i>`;
-    message += `${emoji} <b>BTC - EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
-    message += ` Sinal: PREÇO ${direction} DA EMA 55\n\n`;
+    message += `${emoji} <b>👑❅✧❅ BTC ❅✧❅👑  EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
+    message += ` PREÇO ${direction} DA EMA 55\n\n`;
     message += ` Timeframe: ${change.timeframe}\n`;
     message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
     message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
     message += ` Distância: ${change.distance}%\n\n`;
     
-    message += ` Resumo dos Timeframes:\n`;
+    message += ` Timeframes:\n`;
     for (const [tf, data] of Object.entries(btcData.results)) {
-        const tfEmoji = data.isAbove ? '🔼' : '🔽';
+        const tfEmoji = data.isAbove ? '⤴️' : '⤵️';
         const tfStatus = data.isAbove ? 'ACIMA' : 'ABAIXO';
         message += `  ${tfEmoji} ${tf}: ${tfStatus} (${data.distance}%)\n`;
     }
@@ -1628,12 +1628,12 @@ async function sendBTCInitialStatus(btcData) {
     const dt = getBrazilianDateTime();
     
     let message = `<i>`;
-    message += `<b>👑 BTC 👑</b> \n`;
+    message += `<b>👑❅✧❅ BTC ❅✧❅👑</b> \n`;
     message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n`;
     message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
     
     for (const [tf, data] of Object.entries(btcData.results)) {
-        const emoji = data.isAbove ? '🔼' : '🔽';
+        const emoji = data.isAbove ? '⤴️' : '⤵️';
         const status = data.isAbove ? 'ACIMA' : 'ABAIXO';
         message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
     }
