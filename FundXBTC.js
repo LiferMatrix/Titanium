@@ -17,14 +17,13 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vdg',
-        CHAT_ID: '-1002559',
-        // NOVAS CONFIGURAÇÕES DE RATE LIMITING
-        MESSAGE_DELAY_MS: 3000,        // Delay entre mensagens (3 segundos)
-        MAX_MESSAGES_PER_MINUTE: 20,    // Máximo de mensagens por minuto
-        BURST_DELAY_MS: 5000,           // Delay extra após burst de mensagens
-        RETRY_COUNT: 3,                 // Tentativas de reenvio
-        RETRY_DELAY_MS: 5000            // Delay entre tentativas
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
+        MESSAGE_DELAY_MS: 3000,
+        MAX_MESSAGES_PER_MINUTE: 20,
+        BURST_DELAY_MS: 5000,
+        RETRY_COUNT: 3,
+        RETRY_DELAY_MS: 5000
     },
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
@@ -34,7 +33,7 @@ const CONFIG = {
         LSRS_PERIOD: '5m',
         LSR_15M_PERIOD: '15m',
         LSR_TREND_THRESHOLD: 0.05,
-        ALERT_COOLDOWN_MINUTES: 5,
+        ALERT_COOLDOWN_MINUTES: 30,  // ALTERADO: 30 minutos para mesma moeda
         TELEGRAM_DELAY_MS: 1500,
         VOLUME_BULL_THRESHOLD: 1.5,
         VOLUME_BEAR_THRESHOLD: 1.5,
@@ -67,171 +66,6 @@ const CONFIG = {
         }
     }
 };
-
-// =====================================================================
-// === SISTEMA DE FILA PARA TELEGRAM (RATE LIMITING) ===
-// =====================================================================
-class TelegramQueue {
-    constructor() {
-        this.queue = [];
-        this.isProcessing = false;
-        this.messageCount = 0;
-        this.lastMessageTime = 0;
-        this.minuteResetTime = Date.now();
-    }
-
-    async add(message, priority = false) {
-        return new Promise((resolve, reject) => {
-            this.queue.push({ message, resolve, reject, priority, timestamp: Date.now() });
-            
-            // Ordenar por prioridade (priority primeiro) e depois por timestamp
-            this.queue.sort((a, b) => {
-                if (a.priority && !b.priority) return -1;
-                if (!a.priority && b.priority) return 1;
-                return a.timestamp - b.timestamp;
-            });
-            
-            if (!this.isProcessing) {
-                this.processQueue();
-            }
-        });
-    }
-
-    async processQueue() {
-        if (this.isProcessing || this.queue.length === 0) return;
-        this.isProcessing = true;
-
-        while (this.queue.length > 0) {
-            // Verificar rate limit por minuto
-            const now = Date.now();
-            
-            // Resetar contador a cada minuto
-            if (now - this.minuteResetTime >= 60000) {
-                this.messageCount = 0;
-                this.minuteResetTime = now;
-                console.log(`📊 Rate limit resetado. Próximo minuto.`);
-            }
-            
-            // Verificar se excedeu o limite de mensagens por minuto
-            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE) {
-                const waitTime = 60000 - (now - this.minuteResetTime);
-                console.log(`⏳ Rate limit atingido (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE}). Aguardando ${Math.ceil(waitTime / 1000)}s...`);
-                await delay(waitTime + 1000);
-                continue;
-            }
-            
-            // Delay entre mensagens
-            const timeSinceLastMessage = now - this.lastMessageTime;
-            if (timeSinceLastMessage < CONFIG.TELEGRAM.MESSAGE_DELAY_MS) {
-                const waitTime = CONFIG.TELEGRAM.MESSAGE_DELAY_MS - timeSinceLastMessage;
-                await delay(waitTime);
-            }
-            
-            // Pega o próximo item da fila
-            const item = this.queue.shift();
-            
-            try {
-                await this.sendWithRetry(item.message);
-                item.resolve(true);
-                this.messageCount++;
-                this.lastMessageTime = Date.now();
-                console.log(`✅ Mensagem enviada (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE})`);
-            } catch (error) {
-                console.log(`❌ Erro ao enviar mensagem: ${error.message}`);
-                item.reject(error);
-            }
-            
-            // Delay extra se estiver perto do limite
-            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE * 0.8) {
-                console.log(`⚠️ Próximo do rate limit. Aguardando ${CONFIG.TELEGRAM.BURST_DELAY_MS / 1000}s...`);
-                await delay(CONFIG.TELEGRAM.BURST_DELAY_MS);
-            }
-        }
-        
-        this.isProcessing = false;
-    }
-
-    async sendWithRetry(message, attempt = 1) {
-        try {
-            const token = CONFIG.TELEGRAM.BOT_TOKEN;
-            const chatId = CONFIG.TELEGRAM.CHAT_ID;
-            const url = `https://api.telegram.org/bot${token}/sendMessage`;
-            
-            let finalMessage = message;
-            
-            // Limpar tags HTML mal formatadas
-            finalMessage = finalMessage.replace(/<i><\/i>/g, '');
-            finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
-            
-            const openTags = (finalMessage.match(/<i>/g) || []).length;
-            const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
-            if (openTags !== closeTags) {
-                finalMessage = finalMessage.replace(/<[^>]*>/g, '');
-            }
-            
-            if (finalMessage.length > 4000) {
-                finalMessage = finalMessage.substring(0, 3950) + '\n\n... mensagem truncada';
-            }
-            
-            finalMessage = finalMessage.replace(/&(?!(amp;|lt;|gt;|quot;|apos;))/g, '&amp;');
-            
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos timeout
-            
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: chatId,
-                    text: finalMessage,
-                    parse_mode: 'HTML',
-                    disable_web_page_preview: true,
-                    disable_notification: false
-                }),
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (response.ok) {
-                return true;
-            } else {
-                const errorText = await response.text();
-                
-                // Verificar se é erro de rate limit (429)
-                if (response.status === 429) {
-                    const retryAfter = parseInt(errorText.match(/retry after (\d+)/)?.[1] || '5');
-                    console.log(`⚠️ Rate limit 429! Aguardando ${retryAfter}s antes de tentar novamente...`);
-                    
-                    if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
-                        await delay(retryAfter * 1000 + 1000);
-                        return this.sendWithRetry(message, attempt + 1);
-                    }
-                }
-                
-                throw new Error(`HTTP ${response.status}: ${errorText}`);
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log(`⏰ Timeout na requisição Telegram (tentativa ${attempt})`);
-            } else {
-                console.log(`❌ Erro na tentativa ${attempt}: ${error.message}`);
-            }
-            
-            if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
-                const waitTime = CONFIG.TELEGRAM.RETRY_DELAY_MS * attempt;
-                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s... (tentativa ${attempt + 1}/${CONFIG.TELEGRAM.RETRY_COUNT + 1})`);
-                await delay(waitTime);
-                return this.sendWithRetry(message, attempt + 1);
-            }
-            
-            throw error;
-        }
-    }
-}
-
-// Instância global da fila do Telegram
-const telegramQueue = new TelegramQueue();
 
 // =====================================================================
 // === MEMÓRIA DE CRUZAMENTOS (VOLUME MOMENTUM) ===
@@ -365,6 +199,161 @@ function markBTCAlerted(timeframe) {
         saveBTCTimeframeState();
     }
 }
+
+// =====================================================================
+// === SISTEMA DE FILA PARA TELEGRAM (RATE LIMITING) ===
+// =====================================================================
+class TelegramQueue {
+    constructor() {
+        this.queue = [];
+        this.isProcessing = false;
+        this.messageCount = 0;
+        this.lastMessageTime = 0;
+        this.minuteResetTime = Date.now();
+    }
+
+    async add(message, priority = false) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ message, resolve, reject, priority, timestamp: Date.now() });
+            
+            this.queue.sort((a, b) => {
+                if (a.priority && !b.priority) return -1;
+                if (!a.priority && b.priority) return 1;
+                return a.timestamp - b.timestamp;
+            });
+            
+            if (!this.isProcessing) {
+                this.processQueue();
+            }
+        });
+    }
+
+    async processQueue() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        this.isProcessing = true;
+
+        while (this.queue.length > 0) {
+            const now = Date.now();
+            
+            if (now - this.minuteResetTime >= 60000) {
+                this.messageCount = 0;
+                this.minuteResetTime = now;
+                console.log(`📊 Rate limit resetado. Próximo minuto.`);
+            }
+            
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE) {
+                const waitTime = 60000 - (now - this.minuteResetTime);
+                console.log(`⏳ Rate limit atingido (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE}). Aguardando ${Math.ceil(waitTime / 1000)}s...`);
+                await delay(waitTime + 1000);
+                continue;
+            }
+            
+            const timeSinceLastMessage = now - this.lastMessageTime;
+            if (timeSinceLastMessage < CONFIG.TELEGRAM.MESSAGE_DELAY_MS) {
+                const waitTime = CONFIG.TELEGRAM.MESSAGE_DELAY_MS - timeSinceLastMessage;
+                await delay(waitTime);
+            }
+            
+            const item = this.queue.shift();
+            
+            try {
+                await this.sendWithRetry(item.message);
+                item.resolve(true);
+                this.messageCount++;
+                this.lastMessageTime = Date.now();
+                console.log(`✅ Mensagem enviada (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE})`);
+            } catch (error) {
+                console.log(`❌ Erro ao enviar mensagem: ${error.message}`);
+                item.reject(error);
+            }
+            
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE * 0.8) {
+                console.log(`⚠️ Próximo do rate limit. Aguardando ${CONFIG.TELEGRAM.BURST_DELAY_MS / 1000}s...`);
+                await delay(CONFIG.TELEGRAM.BURST_DELAY_MS);
+            }
+        }
+        
+        this.isProcessing = false;
+    }
+
+    async sendWithRetry(message, attempt = 1) {
+        try {
+            const token = CONFIG.TELEGRAM.BOT_TOKEN;
+            const chatId = CONFIG.TELEGRAM.CHAT_ID;
+            const url = `https://api.telegram.org/bot${token}/sendMessage`;
+            
+            let finalMessage = message;
+            
+            finalMessage = finalMessage.replace(/<i><\/i>/g, '');
+            finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
+            
+            const openTags = (finalMessage.match(/<i>/g) || []).length;
+            const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
+            if (openTags !== closeTags) {
+                finalMessage = finalMessage.replace(/<[^>]*>/g, '');
+            }
+            
+            if (finalMessage.length > 4000) {
+                finalMessage = finalMessage.substring(0, 3950) + '\n\n... mensagem truncada';
+            }
+            
+            finalMessage = finalMessage.replace(/&(?!(amp;|lt;|gt;|quot;|apos;))/g, '&amp;');
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    text: finalMessage,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true,
+                    disable_notification: false
+                }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                return true;
+            } else {
+                const errorText = await response.text();
+                
+                if (response.status === 429) {
+                    const retryAfter = parseInt(errorText.match(/retry after (\d+)/)?.[1] || '5');
+                    console.log(`⚠️ Rate limit 429! Aguardando ${retryAfter}s...`);
+                    
+                    if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                        await delay(retryAfter * 1000 + 1000);
+                        return this.sendWithRetry(message, attempt + 1);
+                    }
+                }
+                
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log(`⏰ Timeout na requisição Telegram (tentativa ${attempt})`);
+            } else {
+                console.log(`❌ Erro na tentativa ${attempt}: ${error.message}`);
+            }
+            
+            if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                const waitTime = CONFIG.TELEGRAM.RETRY_DELAY_MS * attempt;
+                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s... (tentativa ${attempt + 1}/${CONFIG.TELEGRAM.RETRY_COUNT + 1})`);
+                await delay(waitTime);
+                return this.sendWithRetry(message, attempt + 1);
+            }
+            
+            throw error;
+        }
+    }
+}
+
+const telegramQueue = new TelegramQueue();
 
 // =====================================================================
 // === FUNÇÕES PARA DETECÇÃO DE FVG (FAIR VALUE GAP) ===
@@ -574,18 +563,18 @@ async function analyzeStructure(symbol, timeframe, currentPrice) {
         
         if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
             zoneType = 'COMPRA';
-            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}% (${closestBullFVG.isBelow ? 'abaixo' : closestBullFVG.isInside ? 'dentro' : 'acima'})`;
+            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}%`;
         } else if (closestSupport && closestSupport.distancePercent <= 0.75) {
             zoneType = 'COMPRA';
-            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}% (${closestSupport.isAbove ? 'acima' : 'abaixo'})`;
+            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}%`;
         }
         
         if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.FVG_PROXIMITY_THRESHOLD) {
             zoneType = 'VENDA';
-            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}% (${closestBearFVG.isAbove ? 'acima' : closestBearFVG.isInside ? 'dentro' : 'abaixo'})`;
+            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}%`;
         } else if (closestResistance && closestResistance.distancePercent <= 0.75) {
             zoneType = 'VENDA';
-            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}% (${closestResistance.isBelow ? 'abaixo' : 'acima'})`;
+            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}%`;
         }
         
         return {
@@ -649,6 +638,9 @@ async function detectVolumeAnomaly(symbol, timeframe = '1h') {
     }
 }
 
+// =====================================================================
+// === NOVA FUNÇÃO: ANALISA VOLUME APENAS SE ESTIVER EM ZONA BOA ===
+// =====================================================================
 async function analyzeVolumeAlert(symbol, currentPrice) {
     try {
         const volume1h = await detectVolumeAnomaly(symbol, '1h');
@@ -662,46 +654,49 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
         let volumeData = null;
         let structureData = null;
         
+        // Verificar volume 4h primeiro (mais relevante)
         if (volume4h && volume4h.type) {
-            alertType = volume4h.type === 'bull' ? 'VOLUME_BULL' : 'VOLUME_BEAR';
-            mainTimeframe = '4h';
-            volumeData = volume4h;
-            structureData = structure4h;
-        } else if (volume1h && volume1h.type) {
-            alertType = volume1h.type === 'bull' ? 'VOLUME_BULL' : 'VOLUME_BEAR';
-            mainTimeframe = '1h';
-            volumeData = volume1h;
-            structureData = structure1h;
+            // SÓ ALERTA SE ESTIVER EM ZONA DE COMPRA/VENDA
+            if (volume4h.type === 'bull' && structure4h && structure4h.zoneType === 'COMPRA') {
+                alertType = 'VOLUME_BULL';
+                mainTimeframe = '4h';
+                volumeData = volume4h;
+                structureData = structure4h;
+            } else if (volume4h.type === 'bear' && structure4h && structure4h.zoneType === 'VENDA') {
+                alertType = 'VOLUME_BEAR';
+                mainTimeframe = '4h';
+                volumeData = volume4h;
+                structureData = structure4h;
+            }
         }
         
+        // Se não teve alerta no 4h, verificar 1h
+        if (!alertType && volume1h && volume1h.type) {
+            if (volume1h.type === 'bull' && structure1h && structure1h.zoneType === 'COMPRA') {
+                alertType = 'VOLUME_BULL';
+                mainTimeframe = '1h';
+                volumeData = volume1h;
+                structureData = structure1h;
+            } else if (volume1h.type === 'bear' && structure1h && structure1h.zoneType === 'VENDA') {
+                alertType = 'VOLUME_BEAR';
+                mainTimeframe = '1h';
+                volumeData = volume1h;
+                structureData = structure1h;
+            }
+        }
+        
+        // Só retorna alerta se tiver volume anormal E estiver em zona boa
         if (!alertType) return null;
         
         let alignment = '';
         let tradeSignal = '';
         
-        if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'COMPRA') {
+        if (alertType === 'VOLUME_BULL') {
             alignment = '✅ ALINHADO - Zona de Compra identificada';
             tradeSignal = '🟢 CONSIDERAR COMPRA';
-        }
-        else if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'NEUTRO') {
-            alignment = '⚠️ ATENÇÃO - Sem zona clara, aguardar confirmação';
-            tradeSignal = '🟡 OBSERVAR';
-        }
-        else if (alertType === 'VOLUME_BULL' && structureData && structureData.zoneType === 'VENDA') {
-            alignment = '❌ DIVERGENTE - Volume Bull mas em zona de venda';
-            tradeSignal = '🔴 EVITAR COMPRA';
-        }
-        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'VENDA') {
+        } else if (alertType === 'VOLUME_BEAR') {
             alignment = '✅ ALINHADO - Zona de Venda identificada';
             tradeSignal = '🔴 CONSIDERAR VENDA';
-        }
-        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'NEUTRO') {
-            alignment = '⚠️ ATENÇÃO - Sem zona clara, aguardar confirmação';
-            tradeSignal = '🟡 OBSERVAR';
-        }
-        else if (alertType === 'VOLUME_BEAR' && structureData && structureData.zoneType === 'COMPRA') {
-            alignment = '❌ DIVERGENTE - Volume Bear mas em zona de compra';
-            tradeSignal = '🟢 EVITAR VENDA';
         }
         
         return {
@@ -965,17 +960,11 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
     volumeMomentumMemory.lastCCI[symbolKey] = currentCCIStatus;
     
     let newCrossState = null;
-    let crossType = null;
     
     if (stochBullCross && cciBullCross) {
         newCrossState = 'bull';
-        crossType = 'BULL';
-    }
-    else if (stochBearCross && cciBearCross) {
+    } else if (stochBearCross && cciBearCross) {
         newCrossState = 'bear';
-        crossType = 'BEAR';
-    } else {
-        newCrossState = null;
     }
     
     const wasCrossed = (prevCrossState === 'bull' || prevCrossState === 'bear');
@@ -1000,42 +989,30 @@ function detectVolumeMomentumCross(symbol, stoch4h, cci4h) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA FORMATAR STOCHASTIC EM MENSAGEM ===
+// === FUNÇÕES PARA FORMATAR MENSAGENS ===
 // =====================================================================
 function formatStochMessage(stoch4h, stoch1d) {
     let msg = '';
-    
     if (stoch4h) {
         msg += `Stoch 4H: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
     }
-    
     if (stoch1d) {
         msg += `Stoch 1D: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}\n`;
     }
-    
     return msg;
 }
 
-// =====================================================================
-// === FUNÇÃO PARA FORMATAR CCI EM MENSAGEM ===
-// =====================================================================
 function formatCCIMessage(cci4h, cci1d) {
     let msg = '';
-    
     if (cci4h) {
         msg += `CCI 4H: ${cci4h.crossStatus} ${cci4h.direction} ${cci4h.circle}\n`;
     }
-    
     if (cci1d) {
         msg += `CCI 1D: ${cci1d.crossStatus} ${cci1d.direction} ${cci1d.circle}\n`;
     }
-    
     return msg;
 }
 
-// =====================================================================
-// === FUNÇÃO PARA FORMATAR ESTRUTURA EM MENSAGEM ===
-// =====================================================================
 function formatStructureMessage(structure, timeframe) {
     if (!structure) return '';
     
@@ -1043,50 +1020,31 @@ function formatStructureMessage(structure, timeframe) {
     
     if (structure.closestBullFVG) {
         const fvg = structure.closestBullFVG;
-        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}% `;
-        if (fvg.isBelow) msg += `(abaixo)`;
-        else if (fvg.isInside) msg += `(dentro)`;
-        else msg += `(acima)`;
-        msg += `\n`;
+        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}%\n`;
     }
     
     if (structure.closestBearFVG) {
         const fvg = structure.closestBearFVG;
-        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}% `;
-        if (fvg.isAbove) msg += `(acima)`;
-        else if (fvg.isInside) msg += `(dentro)`;
-        else msg += `(abaixo)`;
-        msg += `\n`;
+        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}%\n`;
     }
     
     if (structure.closestSupport) {
-        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}% `;
-        if (structure.closestSupport.isAbove) msg += `(acima)`;
-        else msg += `(abaixo)`;
-        msg += `\n`;
+        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}%\n`;
     }
     
     if (structure.closestResistance) {
-        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}% `;
-        if (structure.closestResistance.isBelow) msg += `(abaixo)`;
-        else msg += `(acima)`;
-        msg += `\n`;
+        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}%\n`;
     }
     
-    msg += `  🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription || 'Nenhuma zona próxima'}\n`;
+    msg += `  🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription}\n`;
     
     return msg;
 }
 
-// =====================================================================
-// === FUNÇÃO PARA FORMATAR VOLUME EM MENSAGEM ===
-// =====================================================================
 function formatVolumeMessage(volume, timeframe) {
     if (!volume || !volume.type) return '';
-    
     const volumeEmoji = volume.type === 'bull' ? '🔥' : '❄️';
     const volumeText = volume.type === 'bull' ? 'ALTO' : 'BAIXO';
-    
     return `${volumeEmoji} Volume ${timeframe}: ${volumeText} (${volume.volumeRatio.toFixed(2)}x média) ${volume.intensity}\n`;
 }
 
@@ -1095,14 +1053,11 @@ function formatVolumeMessage(volume, timeframe) {
 // =====================================================================
 function calculateEMA(prices, period) {
     if (prices.length < period) return null;
-    
     const multiplier = 2 / (period + 1);
     let ema = prices[0];
-    
     for (let i = 1; i < prices.length; i++) {
         ema = (prices[i] - ema) * multiplier + ema;
     }
-    
     return ema;
 }
 
@@ -1839,6 +1794,7 @@ async function checkAndAlert(symbolData, cvdManager) {
             calculateCCI(fullSymbol, '1d')
         ]);
         
+        // NOVO: Volume alert só retorna se estiver em zona boa (COMPRA ou VENDA)
         const volumeAlert = await analyzeVolumeAlert(fullSymbol, price);
         const volumeMomentumSignal = detectVolumeMomentumCross(fullSymbol, stoch4h, cci4h);
         
@@ -1864,22 +1820,29 @@ async function checkAndAlert(symbolData, cvdManager) {
             volumeAlert
         };
         
-        // Enviar alertas com prioridade (usando a fila do Telegram)
-        
+        // =============================================================
+        // ALERTA VOLUME BULL - SÓ SE TIVER ZONA DE COMPRA
+        // =============================================================
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BULL' && canAlert(fullSymbol, 'VOLUME_BULL')) {
             await sendVolumeStructureAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_BULL');
-            log(`🟢 VOLUME BULL: ${symbol} - ${volumeAlert.alignment}`, 'alert');
-            await delay(500); // Delay pequeno entre alertas do mesmo scan
-        }
-        
-        if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
-            await sendVolumeStructureAlert(asset, 'BEAR');
-            markAlerted(fullSymbol, 'VOLUME_BEAR');
-            log(`🔴 VOLUME BEAR: ${symbol} - ${volumeAlert.alignment}`, 'alert');
+            log(`🟢 VOLUME BULL (ZONA COMPRA): ${symbol}`, 'alert');
             await delay(500);
         }
         
+        // =============================================================
+        // ALERTA VOLUME BEAR - SÓ SE TIVER ZONA DE VENDA
+        // =============================================================
+        if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
+            await sendVolumeStructureAlert(asset, 'BEAR');
+            markAlerted(fullSymbol, 'VOLUME_BEAR');
+            log(`🔴 VOLUME BEAR (ZONA VENDA): ${symbol}`, 'alert');
+            await delay(500);
+        }
+        
+        // =============================================================
+        // ALERTA VOLUME MOMENTUM BULL/BEAR (mantém)
+        // =============================================================
         if (volumeMomentumSignal === 'VOLUME_MOMENTUM_BULL' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL')) {
             await sendVolumeMomentumAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL');
@@ -1894,6 +1857,9 @@ async function checkAndAlert(symbolData, cvdManager) {
             await delay(500);
         }
         
+        // =============================================================
+        // ALERTAS TRADICIONAIS (mantém)
+        // =============================================================
         const isBear = asset.divergences.hasBearish15mPlusOther &&
                        asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
                        asset.bollingerSell &&
@@ -1935,7 +1901,7 @@ async function sendVolumeStructureAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `🟢<b>📊 VOLUME BULL DETECTADO!</b> \n`;
+        message = `🟢<b>📊 VOLUME BULL - ZONA DE COMPRA!</b> \n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         
@@ -1950,9 +1916,6 @@ async function sendVolumeStructureAlert(asset, type) {
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
-        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
-            message += formatStructureMessage(volumeAlert.structure1h, '1h');
-        }
         
         message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
         message += `<i> 🔍 ${volumeAlert.alignment}</i>\n\n`;
@@ -1962,14 +1925,10 @@ async function sendVolumeStructureAlert(asset, type) {
         message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
         message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         
-        if (asset.stoch4h) {
-            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
-        }
-        
         message += `<i>  ${dt.full}</i>`;
         
     } else {
-        message = `🔴<b>📊 VOLUME BEAR DETECTADO!</b> \n`;
+        message = `🔴<b>📊 VOLUME BEAR - ZONA DE VENDA!</b> \n`;
         message += `<i> Ativo:</i> <code>${asset.symbol}</code>\n`;
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         
@@ -1984,9 +1943,6 @@ async function sendVolumeStructureAlert(asset, type) {
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
-        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
-            message += formatStructureMessage(volumeAlert.structure1h, '1h');
-        }
         
         message += `<i> 🤖✨ Decisão:</i> <b>${volumeAlert.tradeSignal}</b>\n`;
         message += `<i> 🔍 ${volumeAlert.alignment}</i>\n`;
@@ -1996,14 +1952,9 @@ async function sendVolumeStructureAlert(asset, type) {
         message += `<i> RSI 1h:</i> <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
         message += `<i> CVD:</i> ${asset.cvdDirection}\n`;
         
-        if (asset.stoch4h) {
-            message += `<i> Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}</i>\n`;
-        }
-        
         message += `<i>  ${dt.full}</i>`;
     }
     
-    // Usar a fila do Telegram
     await telegramQueue.add(message);
 }
 
@@ -2021,7 +1972,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
         message += `<i>    • Stoch (K⤴️D) cruzou para CIMA</i>\n`;
-        message += `<i>    • CCI ⤴️ cruzou EMA para CIMA</i>\n`;
+        message += `<i>    • CCI  cruzou ⤴️ EMA para CIMA</i>\n`;
         message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
@@ -2035,16 +1986,6 @@ async function sendVolumeMomentumAlert(asset, type) {
             message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
         }
         
-        if (asset.stoch1d || asset.cci1d) {
-            message += `<i>  Diário:</i>\n`;
-            if (asset.stoch1d) {
-                message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
-            }
-            if (asset.cci1d) {
-                message += `<i> CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}</i>\n`;
-            }
-        }
-        
         message += `<i>  ${dt.full}</i>`;
     } else {
         message = `🔴<b>VOLUME MOMENTUM BEAR</b>🔻\n`;
@@ -2052,7 +1993,7 @@ async function sendVolumeMomentumAlert(asset, type) {
         message += `<i> Preço:</i> <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `<i>  CRUZAMENTO NO 4H:</i>\n`;
         message += `<i>    • Stoch (K⤵️D) cruzou para BAIXO</i>\n`;
-        message += `<i>    • CCI ⤵️ cruzou EMA para BAIXO </i>\n`;
+        message += `<i>    • CCI cruzou ⤵️ EMA para BAIXO</i>\n`;
         message += `<i>  Indicadores:</i>\n`;
         message += `<i> LSR:</i> <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += `<i> Funding:</i> <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
@@ -2064,16 +2005,6 @@ async function sendVolumeMomentumAlert(asset, type) {
         }
         if (asset.cci4h) {
             message += `<i> CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}</i>\n`;
-        }
-        
-        if (asset.stoch1d || asset.cci1d) {
-            message += `<i>  Diário:</i>\n`;
-            if (asset.stoch1d) {
-                message += `<i> Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}</i>\n`;
-            }
-            if (asset.cci1d) {
-                message += `<i> CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}</i>\n`;
-            }
         }
         
         message += `<i>  ${dt.full}</i>`;
@@ -2242,7 +2173,7 @@ async function sendBTCAlert(change, btcData) {
     message += ` Timeframe: ${change.timeframe}\n`;
     message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
     message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
-    message += ` Distância: ${change.distance}%\n`;
+    message += ` Distância: ${change.distance}%\n\n`;
     
     message += ` Timeframes:\n`;
     for (const [tf, data] of Object.entries(btcData.results)) {
@@ -2271,7 +2202,7 @@ async function sendBTCAlert(change, btcData) {
     message += `  ${dt.full}\n`;
     message += `</i>`;
     
-    await telegramQueue.add(message, true); // Prioridade alta para BTC
+    await telegramQueue.add(message, true);
     log(` ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
 }
 
@@ -2370,14 +2301,8 @@ async function scanBTC() {
 async function sendInitMessage() {
     let msg = `<b> TITANIUM PRIME X </b>\n\n`;
     msg += `<i>✅ Sistema Iniciado!</i>\n`;
-    msg += `<i>📊 Monitorando:</i>\n`;
-    msg += `<i>  • Volume Bull/Bear com análise FVG 1h/4h</i>\n`;
-    msg += `<i>  • Suportes e Resistências</i>\n`;
-    msg += `<i>  • Volume Momentum (Stoch + CCI 4H)</i>\n`;
-    msg += `<i>  • Divergências RSI</i>\n`;
-    msg += `<i>  • BTC EMA 55 por timeframe</i>\n`;
-    msg += `<i>⏱️ Rate limit: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min</i>\n`;
-    msg += `<i>⏱️ Delay entre msgs: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s</i>\n`;
+   
+    msg += `<i>⏱️ Rate limit Telegram: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min</i>\n`;
     
     await telegramQueue.add(msg, true);
 }
@@ -2431,9 +2356,10 @@ async function startMonitor() {
     console.log('🚀 TITANIUM PRIME X - MODO ALERTA INSTANTÂNEO');
     console.log('📊 Scanner contínuo - Alerta imediato quando critérios são atendidos');
     console.log(`📊 NOVO: Volume Bull/Bear com análise de FVG 1h/4h`);
+    console.log(`📊 NOVO: Só alerta se estiver em ZONA DE COMPRA ou VENDA`);
     console.log(`📊 NOVO: Volume Momentum Bull/Bear (Stoch + CCI 4H)`);
     console.log(`📊 NOVO: Detecção de Suportes e Resistências`);
-    console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos`);
+    console.log(`⏱️ Cooldown Altcoins: ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos por moeda`);
     console.log(`🟢🟡 MONITOR BTC - Alerta por TIMEFRAME INDIVIDUAL`);
     console.log(`📨 TELEGRAM - Rate limit: ${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE} msg/min`);
     console.log(`📨 TELEGRAM - Delay entre mensagens: ${CONFIG.TELEGRAM.MESSAGE_DELAY_MS / 1000}s`);
