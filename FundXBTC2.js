@@ -17,10 +17,10 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Ag',
-        CHAT_ID: '-100259',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         MESSAGE_DELAY_MS: 18000,
-        MAX_MESSAGES_PER_MINUTE: 12,
+        MAX_MESSAGES_PER_MINUTE: 20,
         BURST_DELAY_MS: 10000,
         RETRY_COUNT: 3,
         RETRY_DELAY_MS: 5000
@@ -1121,51 +1121,51 @@ function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
     
     if (zoneType === 'COMPRA') {
         if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = `🟢 STOCH 4H OVERSOLD (K${stoch4h.k}) - BAIXO.`;
+            alertaStoch = ` STOCH 4H  (K${stoch4h.k}) - BAIXO.`;
             condicaoFavoravel = true;
         } else if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = `🔴 STOCH 4H SOBRECOMPRADO (K${stoch4h.k}) - ALTO.`;
+            alertaStoch = ` STOCH 4H  (K${stoch4h.k}) - ALTO.`;
             condicaoFavoravel = false;
         } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = `🟡 STOCH 4H EM ${stoch4h.k} - NEUTRO. .`;
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO. .`;
             condicaoFavoravel = true;
         } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = `🟠 STOCH 4H EM ${stoch4h.k} - NEUTRO!`;
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO!`;
             condicaoFavoravel = false;
         } else {
-            alertaStoch = `🟡 STOCH 4H EM ${stoch4h.k} - NEUTRO.`;
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO.`;
             condicaoFavoravel = true;
         }
         
         if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n🟢 STOCH 1D BAIXO (K${stoch1d.k}) - FORTALECE COMPRA!`;
+            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - FORTALECE COMPRA!`;
         } else if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n🔴 STOCH 1D ALTO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
+            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
             condicaoFavoravel = false;
         }
         
     } else if (zoneType === 'VENDA') {
         if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = `🔴 STOCH 4H ALTO (K${stoch4h.k}) - FAVORÁVEL PARA VENDA!.`;
+            alertaStoch = ` STOCH 4H ALTO (K${stoch4h.k}) - FAVORÁVEL PARA VENDA!.`;
             condicaoFavoravel = true;
         } else if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = `🟢 STOCH 4H BAIXO (K${stoch4h.k}) - NÃO FAVORÁVEL PARA VENDA!.`;
+            alertaStoch = ` STOCH 4H BAIXO (K${stoch4h.k}) - NÃO FAVORÁVEL PARA VENDA!.`;
             condicaoFavoravel = false;
         } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = `🟡 STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE VENDA.`;
+            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE VENDA.`;
             condicaoFavoravel = true;
         } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = `🟠 STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE COMPRA!`;
+            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE COMPRA!`;
             condicaoFavoravel = false;
         } else {
-            alertaStoch = `🟡 STOCH 4H ${stoch4h.k} - Sem confirmação.`;
+            alertaStoch = ` STOCH 4H ${stoch4h.k} .`;
             condicaoFavoravel = true;
         }
         
         if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n🔴 STOCH 1D ALTO (K${stoch1d.k}) - FORTALECE VENDA!`;
+            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - FORTALECE VENDA!`;
         } else if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n🟢 STOCH 1D BAIXO (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
+            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
             condicaoFavoravel = false;
         }
     }
@@ -2068,6 +2068,7 @@ async function sendVolumeStructureAlert(asset, type) {
     if (type === 'BULL') {
         message = `<i>💹<b> COMPRA FVG 🔥!</b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += `  ${dt.full}hs\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
         if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bull') {
@@ -2077,7 +2078,6 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatVolumeMessage(volumeAlert.volume4h, '4h');
         }
         
-        message += ` Análise de Estrutura:\n`;
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
@@ -2096,18 +2096,24 @@ async function sendVolumeStructureAlert(asset, type) {
         
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
-        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji} | CVD: ${asset.cvdDirection}\n`;
+        
         
         if (asset.stoch4h) {
             message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
         }
         
-        message += `  ${dt.full}</i>`;
+        
+        if (asset.stoch1d) {
+            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        message += ` Titanium Prime X by @J4Rviz</i>\n`;
         
     } else {
         message = `<i>🛑<b> CORREÇÃO FVG 🔥!</b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += `  ${dt.full}hs\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
         if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bear') {
@@ -2117,7 +2123,6 @@ async function sendVolumeStructureAlert(asset, type) {
             message += formatVolumeMessage(volumeAlert.volume4h, '4h');
         }
         
-        message += ` Análise de Estrutura:\n`;
         if (volumeAlert.structure4h) {
             message += formatStructureMessage(volumeAlert.structure4h, '4h');
         }
@@ -2136,19 +2141,23 @@ async function sendVolumeStructureAlert(asset, type) {
         
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
-        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
-        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji} | CVD: ${asset.cvdDirection}\n`;
+        
         
         if (asset.stoch4h) {
             message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
         }
         
-        message += `  ${dt.full}</i>`;
+    
+        if (asset.stoch1d) {
+            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        message += ` Titanium Prime X by @J4Rviz</i>\n`;
     }
     
     await telegramQueue.add(message);
 }
-
 // =====================================================================
 // === ENVIAR ALERTA DE VOLUME MOMENTUM ===
 // =====================================================================
@@ -2160,10 +2169,11 @@ async function sendVolumeMomentumAlert(asset, type) {
     if (type === 'BULL') {
         message = `<i>🟢<b>📊 VOLUME BULL </b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` ${dt.full}hs\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `  CRUZAMENTO NO 4H:\n`;
-        message += `    • Stoch (K⤴️D) cruzou para CIMA\n`;
-        message += `    • CCI cruzou ⤴️ EMA para CIMA\n`;
+        message += ` CRUZAMENTO NO 4H:\n`;
+        message += ` • Stoch (K⤴️D) cruzou para CIMA\n`;
+        message += ` • CCI cruzou ⤴️ EMA para CIMA\n`;
         message += `  Indicadores:\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
@@ -2176,15 +2186,18 @@ async function sendVolumeMomentumAlert(asset, type) {
         if (asset.cci4h) {
             message += ` CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
         }
-        
-        message += `  ${dt.full}</i>`;
+         if (asset.stoch1d) {
+            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        message += ` Titanium Prime X by @J4Rviz</i>\n`;
     } else {
         message = `<i>🔴<b>📊 VOLUME BEAR </b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` ${dt.full}hs\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
-        message += `  CRUZAMENTO NO 4H:\n`;
-        message += `    • Stoch (K⤵️D) cruzou para BAIXO\n`;
-        message += `    • CCI cruzou ⤵️ EMA para BAIXO\n`;
+        message += ` CRUZAMENTO NO 4H:\n`;
+        message += ` • Stoch (K⤵️D) cruzou para BAIXO\n`;
+        message += ` • CCI cruzou ⤵️ EMA para BAIXO\n`;
         message += `  Indicadores:\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
@@ -2197,8 +2210,11 @@ async function sendVolumeMomentumAlert(asset, type) {
         if (asset.cci4h) {
             message += ` CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
         }
+         if (asset.stoch1d) {
+            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
         
-        message += `\n  ${dt.full}</i>`;
+        message += ` Titanium Prime X by @J4Rviz</i>\n`;
     }
     
     await telegramQueue.add(message);
