@@ -17,9 +17,9 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8g',
-        CHAT_ID: '-100255',
-        MESSAGE_DELAY_MS: 15000,
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
+        MESSAGE_DELAY_MS: 18000,
         MAX_MESSAGES_PER_MINUTE: 12,
         BURST_DELAY_MS: 10000,
         RETRY_COUNT: 3,
@@ -1135,11 +1135,10 @@ function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
         let dica = `💡🤖 DICA de Compra:\n`;
         dica += `• Aguarde um PULLBACK até próximo de ${targetPrice} USDT\n`;
         dica += `• Use STOP abaixo da Compra (${(currentPrice * 0.98).toFixed(4)} USDT)\n`;
-        dica += `• Take Profit: 2-3%, DESFAVORÁVEL, próximo a RESISTÊNCIA, 💬aguarde a operação de VENDA\n`;
         dica += `• ${stochAnalysis.alertaStoch}\n`;
         
         if (!stochAnalysis.condicaoFavoravel) {
-            dica += `⚠️ ATENÇÃO: Stoch Muito Alto.\n`;
+            
         }
         
         return dica;
@@ -1158,11 +1157,10 @@ function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
         let dica = `💡🤖 DICA na Correção:\n`;
         dica += `• Aguarde um PULLBACK (subida) até próximo de ${targetPrice} USDT\n`;
         dica += `• Use STOP acima da Venda (${(currentPrice * 1.02).toFixed(4)} USDT)\n`;
-        dica += `• Take Profit: 2-3%, DESFAVORÁVEL, próximo ao SUPORTE, 💬aguarde a operação de COMPRA\n`;
         dica += `• ${stochAnalysis.alertaStoch}\n`;
         
         if (!stochAnalysis.condicaoFavoravel) {
-            dica += `⚠️ ATENÇÃO: Stoch Muito Baixo.\n`;
+            
         }
         
         return dica;
