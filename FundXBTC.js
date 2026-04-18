@@ -17,11 +17,11 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG',
-        CHAT_ID: '-100255',
-        MESSAGE_DELAY_MS: 13000,
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
+        MESSAGE_DELAY_MS: 15000,
         MAX_MESSAGES_PER_MINUTE: 20,
-        BURST_DELAY_MS: 8000,
+        BURST_DELAY_MS: 10000,
         RETRY_COUNT: 3,
         RETRY_DELAY_MS: 5000
     },
