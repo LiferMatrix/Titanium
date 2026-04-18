@@ -17,8 +17,8 @@ const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AGg',
-        CHAT_ID: '-10025',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         MESSAGE_DELAY_MS: 18000,
         MAX_MESSAGES_PER_MINUTE: 12,
         BURST_DELAY_MS: 10000,
@@ -28,7 +28,7 @@ const CONFIG = {
     MONITOR: {
         SCAN_INTERVAL_SECONDS: 60,
         MIN_VOLUME_USDT: 1000000,
-        MAX_SYMBOLS: 270,
+        MAX_SYMBOLS: 280,
         EXCLUDE_SYMBOLS: ['USDCUSDT'],
         LSRS_PERIOD: '5m',
         LSR_15M_PERIOD: '15m',
@@ -37,6 +37,8 @@ const CONFIG = {
         TELEGRAM_DELAY_MS: 1500,
         VOLUME_BULL_THRESHOLD: 1.5,
         VOLUME_BEAR_THRESHOLD: 1.5,
+        VOLUME_3M_BUYER_THRESHOLD: 1.8,
+        VOLUME_3M_SELLER_THRESHOLD: 1.8,
         FVG_PROXIMITY_THRESHOLD: 1.0,
         ZONE_PROXIMITY_THRESHOLD: 1.0,
         RSI: {
@@ -645,12 +647,56 @@ async function detectVolumeAnomaly(symbol, timeframe = '1h') {
 }
 
 // =====================================================================
-// === ANÁLISE DE VOLUME - SÓ ALERTA SE ESTIVER NA ZONA (1%) ===
+// === NOVA FUNÇÃO: DETECTAR VOLUME ANORMAL COMPRADOR/VENDEDOR 3 MIN ===
+// =====================================================================
+async function detectVolume3mAnomaly(symbol, type = 'buyer') {
+    try {
+        const candles = await getCandles(symbol, '3m', 30);
+        if (!candles || candles.length < 20) return null;
+        
+        const volumes = candles.map(c => c.volume);
+        const currentVolume = volumes[volumes.length - 1];
+        const prevVolumes = volumes.slice(0, -1);
+        
+        const avgVolume = prevVolumes.reduce((a, b) => a + b, 0) / prevVolumes.length;
+        const volumeRatio = currentVolume / avgVolume;
+        
+        if (type === 'buyer') {
+            const isAnomaly = volumeRatio >= CONFIG.MONITOR.VOLUME_3M_BUYER_THRESHOLD;
+            return {
+                isAnomaly,
+                volumeRatio,
+                currentVolume,
+                avgVolume,
+                type: 'buyer'
+            };
+        } else if (type === 'seller') {
+            const isAnomaly = volumeRatio >= CONFIG.MONITOR.VOLUME_3M_SELLER_THRESHOLD;
+            return {
+                isAnomaly,
+                volumeRatio,
+                currentVolume,
+                avgVolume,
+                type: 'seller'
+            };
+        }
+        
+        return null;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === ANÁLISE DE VOLUME - AGORA COM VOLUME 3M ===
 // =====================================================================
 async function analyzeVolumeAlert(symbol, currentPrice) {
     try {
         const volume1h = await detectVolumeAnomaly(symbol, '1h');
         const volume4h = await detectVolumeAnomaly(symbol, '4h');
+        const volume3mBuyer = await detectVolume3mAnomaly(symbol, 'buyer');
+        const volume3mSeller = await detectVolume3mAnomaly(symbol, 'seller');
         
         const structure1h = await analyzeStructure(symbol, '1h', currentPrice);
         const structure4h = await analyzeStructure(symbol, '4h', currentPrice);
@@ -660,30 +706,32 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
         let volumeData = null;
         let structureData = null;
         
-        if (volume4h && volume4h.type) {
-            if (volume4h.type === 'bull' && structure4h && structure4h.zoneType === 'COMPRA') {
+        // ALERTA DE COMPRA: Volume anormal comprador 3m + FVG Bull ou Suporte
+        if (volume3mBuyer && volume3mBuyer.isAnomaly) {
+            if (structure4h && structure4h.zoneType === 'COMPRA') {
                 alertType = 'VOLUME_BULL';
                 mainTimeframe = '4h';
-                volumeData = volume4h;
+                volumeData = { ...volume4h, volume3mAnomaly: volume3mBuyer };
                 structureData = structure4h;
-            } else if (volume4h.type === 'bear' && structure4h && structure4h.zoneType === 'VENDA') {
-                alertType = 'VOLUME_BEAR';
-                mainTimeframe = '4h';
-                volumeData = volume4h;
-                structureData = structure4h;
+            } else if (structure1h && structure1h.zoneType === 'COMPRA') {
+                alertType = 'VOLUME_BULL';
+                mainTimeframe = '1h';
+                volumeData = { ...volume1h, volume3mAnomaly: volume3mBuyer };
+                structureData = structure1h;
             }
         }
         
-        if (!alertType && volume1h && volume1h.type) {
-            if (volume1h.type === 'bull' && structure1h && structure1h.zoneType === 'COMPRA') {
-                alertType = 'VOLUME_BULL';
-                mainTimeframe = '1h';
-                volumeData = volume1h;
-                structureData = structure1h;
-            } else if (volume1h.type === 'bear' && structure1h && structure1h.zoneType === 'VENDA') {
+        // ALERTA DE VENDA: Volume anormal vendedor 3m + FVG Bear ou Resistência
+        if (volume3mSeller && volume3mSeller.isAnomaly) {
+            if (structure4h && structure4h.zoneType === 'VENDA') {
+                alertType = 'VOLUME_BEAR';
+                mainTimeframe = '4h';
+                volumeData = { ...volume4h, volume3mAnomaly: volume3mSeller };
+                structureData = structure4h;
+            } else if (structure1h && structure1h.zoneType === 'VENDA') {
                 alertType = 'VOLUME_BEAR';
                 mainTimeframe = '1h';
-                volumeData = volume1h;
+                volumeData = { ...volume1h, volume3mAnomaly: volume3mSeller };
                 structureData = structure1h;
             }
         }
@@ -694,11 +742,11 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
         let tradeSignal = '';
         
         if (alertType === 'VOLUME_BULL') {
-            alignment = '✅ ALINHADO - Zona de Compra identificada (≤1%)';
+            alignment = '✅ ALINHADO ';
             tradeSignal = '🟢 CONSIDERAR COMPRA';
         } else if (alertType === 'VOLUME_BEAR') {
-            alignment = '✅ ALINHADO - Zona de Venda identificada (≤1%)';
-            tradeSignal = '🔴 CONSIDERAR VENDA';
+            alignment = '✅ ALINHADO';
+            tradeSignal = '🔴 CONSIDERAR CORREÇÃO';
         }
         
         return {
@@ -710,6 +758,8 @@ async function analyzeVolumeAlert(symbol, currentPrice) {
             tradeSignal,
             volume1h,
             volume4h,
+            volume3mBuyer,
+            volume3mSeller,
             structure1h,
             structure4h
         };
@@ -783,9 +833,21 @@ async function calculateStochastic(symbol, timeframe) {
         const isOverbought = currentK > 80 && currentD > 80;
         const isOversold = currentK < 20 && currentD < 20;
         
-        let status = '🟡';
-        if (isOverbought) status = '🔴';
-        if (isOversold) status = '🟢';
+        // NOVO SISTEMA DE CORES PARA O ESTOCÁSTICO
+        let status = '';
+        const kValue = currentK;
+        
+        if (kValue < 15) {
+            status = '🔵'; // Azul - Extremamente oversold
+        } else if (kValue >= 15 && kValue < 25) {
+            status = '🟢'; // Verde - Oversold moderado
+        } else if (kValue >= 25 && kValue < 45) {
+            status = '🟡'; // Amarelo - Neutro baixo
+        } else if (kValue >= 45 && kValue < 70) {
+            status = '🟠'; // Laranja - Neutro alto
+        } else {
+            status = '🔴'; // Vermelho - Overbought
+        }
         
         const result = {
             k: currentK.toFixed(0),
@@ -1047,7 +1109,7 @@ function formatVolumeMessage(volume, timeframe) {
     if (!volume || !volume.type) return '';
     const volumeEmoji = volume.type === 'bull' ? '🔥' : '❄️';
     const volumeText = volume.type === 'bull' ? 'ALTO' : 'BAIXO';
-    return `${volumeEmoji} Volume ${timeframe}: ${volumeText} (${volume.volumeRatio.toFixed(2)}x média) ${volume.intensity}\n`;
+    return `${volumeEmoji} Vol ${timeframe}: ${volumeText} ${volume.volumeRatio.toFixed(2)} ${volume.intensity}\n`;
 }
 
 // =====================================================================
@@ -1058,7 +1120,6 @@ function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
     let condicaoFavoravel = true;
     
     if (zoneType === 'COMPRA') {
-        // Para COMPRA: Stoch oversold (abaixo de 20) é favorável
         if (stoch4h && stoch4h.isOversold) {
             alertaStoch = `🟢 STOCH 4H OVERSOLD (K${stoch4h.k}) - BAIXO.`;
             condicaoFavoravel = true;
@@ -1076,16 +1137,14 @@ function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
             condicaoFavoravel = true;
         }
         
-        // Verifica também diário
         if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n🟢 STOCH 1D TAMBÉM OVERSOLD (K${stoch1d.k}) - FORTALECE COMPRA!`;
+            alertaStoch += `\n🟢 STOCH 1D BAIXO (K${stoch1d.k}) - FORTALECE COMPRA!`;
         } else if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n🔴 STOCH 1D SOBRECOMPRADO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
+            alertaStoch += `\n🔴 STOCH 1D ALTO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
             condicaoFavoravel = false;
         }
         
     } else if (zoneType === 'VENDA') {
-        // Para VENDA: Stoch overbought (acima de 80) é favorável
         if (stoch4h && stoch4h.isOverbought) {
             alertaStoch = `🔴 STOCH 4H ALTO (K${stoch4h.k}) - FAVORÁVEL PARA VENDA!.`;
             condicaoFavoravel = true;
@@ -1103,11 +1162,10 @@ function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
             condicaoFavoravel = true;
         }
         
-        // Verifica também diário
         if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n🔴 STOCH 1D TAMBÉM SOBRECOMPRADO (K${stoch1d.k}) - FORTALECE VENDA!`;
+            alertaStoch += `\n🔴 STOCH 1D ALTO (K${stoch1d.k}) - FORTALECE VENDA!`;
         } else if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n🟢 STOCH 1D OVERSOLD (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
+            alertaStoch += `\n🟢 STOCH 1D BAIXO (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
             condicaoFavoravel = false;
         }
     }
@@ -1129,7 +1187,6 @@ function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
             targetPrice = formatPrice(structureData.closestSupport.targetPrice);
         }
         
-        // Analisa Stoch para compra
         const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'COMPRA');
         
         let dica = `💡🤖 DICA de Compra:\n`;
@@ -1151,7 +1208,6 @@ function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
             targetPrice = formatPrice(structureData.closestResistance.targetPrice);
         }
         
-        // Analisa Stoch para venda
         const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'VENDA');
         
         let dica = `💡🤖 DICA na Correção:\n`;
@@ -1943,14 +1999,14 @@ async function checkAndAlert(symbolData, cvdManager) {
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BULL' && canAlert(fullSymbol, 'VOLUME_BULL')) {
             await sendVolumeStructureAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_BULL');
-            log(`🟢 VOLUME BULL (ZONA COMPRA ≤1%): ${symbol}`, 'alert');
+            log(`🟢 VOLUME BULL (ZONA COMPRA ≤1% + VOLUME 3M COMPRADOR): ${symbol}`, 'alert');
             await delay(500);
         }
         
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
             await sendVolumeStructureAlert(asset, 'BEAR');
             markAlerted(fullSymbol, 'VOLUME_BEAR');
-            log(`🔴 VOLUME BEAR (ZONA VENDA ≤1%): ${symbol}`, 'alert');
+            log(`🔴 VOLUME BEAR (ZONA VENDA ≤1% + VOLUME 3M VENDEDOR): ${symbol}`, 'alert');
             await delay(500);
         }
         
@@ -2001,6 +2057,7 @@ async function checkAndAlert(symbolData, cvdManager) {
 
 // =====================================================================
 // === ENVIAR ALERTA DE VOLUME COM ANÁLISE DE ESTRUTURA (COM DICA E STOCH) ===
+// === MANTIDO EXATAMENTE COMO ESTAVA - SEM INFORMAÇÃO DO VOLUME 3M ===
 // =====================================================================
 async function sendVolumeStructureAlert(asset, type) {
     const dt = getBrazilianDateTime();
@@ -2009,7 +2066,7 @@ async function sendVolumeStructureAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `<i>🟢<b>📊 COMPRA FVG 🔥!</b>\n`;
+        message = `<i>💹<b> COMPRA FVG 🔥!</b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
@@ -2029,15 +2086,13 @@ async function sendVolumeStructureAlert(asset, type) {
         }
         
         message += ` 🤖✨ Decisão da IA: <b>${volumeAlert.tradeSignal}</b>\n`;
-        message += ` 🔍 ${volumeAlert.alignment}\n\n`;
         
-        // ADICIONA A DICA ESTRATÉGICA COM ANÁLISE DO STOCH
+        
         if (volumeAlert.structure4h) {
             message += getTradeDica('COMPRA', volumeAlert.structure4h, asset.price, asset.stoch4h, asset.stoch1d);
         } else if (volumeAlert.structure1h) {
             message += getTradeDica('COMPRA', volumeAlert.structure1h, asset.price, asset.stoch4h, asset.stoch1d);
         }
-        
         
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
@@ -2051,7 +2106,7 @@ async function sendVolumeStructureAlert(asset, type) {
         message += `  ${dt.full}</i>`;
         
     } else {
-        message = `<i>🔴<b>📊 CORREÇÃO FVG 🔥!</b>\n`;
+        message = `<i>🛑<b> CORREÇÃO FVG 🔥!</b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         
@@ -2071,15 +2126,13 @@ async function sendVolumeStructureAlert(asset, type) {
         }
         
         message += ` 🤖✨ Decisão da IA: <b>${volumeAlert.tradeSignal}</b>\n`;
-        message += ` 🔍 ${volumeAlert.alignment}\n\n`;
+       
         
-        // ADICIONA A DICA ESTRATÉGICA COM ANÁLISE DO STOCH
         if (volumeAlert.structure4h) {
             message += getTradeDica('VENDA', volumeAlert.structure4h, asset.price, asset.stoch4h, asset.stoch1d);
         } else if (volumeAlert.structure1h) {
             message += getTradeDica('VENDA', volumeAlert.structure1h, asset.price, asset.stoch4h, asset.stoch1d);
         }
-        
         
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
@@ -2105,12 +2158,12 @@ async function sendVolumeMomentumAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `<i>🟢<b>📊 VOLUME BULL 💹</b>\n`;
+        message = `<i>🟢<b>📊 VOLUME BULL </b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `  CRUZAMENTO NO 4H:\n`;
         message += `    • Stoch (K⤴️D) cruzou para CIMA\n`;
-        message += `    • CCI ⤴️ EMA para CIMA (ALTA)\n`;
+        message += `    • CCI cruzou ⤴️ EMA para CIMA\n`;
         message += `  Indicadores:\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
@@ -2126,12 +2179,12 @@ async function sendVolumeMomentumAlert(asset, type) {
         
         message += `  ${dt.full}</i>`;
     } else {
-        message = `<i>🔴<b>📊 VOLUME BEAR 🔻</b>\n`;
+        message = `<i>🔴<b>📊 VOLUME BEAR </b>\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += `  CRUZAMENTO NO 4H:\n`;
         message += `    • Stoch (K⤵️D) cruzou para BAIXO\n`;
-        message += `    • CCI ⤵️ EMA para BAIXO (BAIXA)\n`;
+        message += `    • CCI cruzou ⤵️ EMA para BAIXO\n`;
         message += `  Indicadores:\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
         message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
@@ -2160,7 +2213,7 @@ async function sendAlert(asset, type) {
     let message = '';
     
     if (type === 'BULL') {
-        message = `<i>🟢 Avaliar Reversão, Pontos de Entrada 💹\n`;
+        message = `<i>🟢 Avaliar Reversão e Pontos de Entrada💹\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
@@ -2178,7 +2231,7 @@ async function sendAlert(asset, type) {
         
         message += ` ${dt.full}</i>`;
     } else {
-        message = `<i>🔴 Avaliar Correção, Pontos de Entrada 🔻\n`;
+        message = `<i>🔴 Avaliar Correção e Pontos de Entrada🔻\n`;
         message += ` Ativo: <code>${asset.symbol}</code>\n`;
         message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
         message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
@@ -2509,7 +2562,7 @@ async function startMonitor() {
         await sendBTCInitialStatus(initialBTCData);
         initialStatusSent = true;
         saveBTCTimeframeState();
-        console.log(`✅ Status inicial BTC enviado com sucesso!`);
+        console.log(`✅ Status inicial BTC enviado !`);
     } else {
         console.log(`⚠️ Não foi possível obter dados do BTC para status inicial`);
     }
