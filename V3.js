@@ -1,1233 +1,2104 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
-const z = require('zod');
+const WebSocket = require('ws');
 require('dotenv').config();
-if (!globalThis.fetch) globalThis.fetch = fetch;
 
 // =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS ===
+// === ARQUIVOS DE MEMÓRIA ===
+// =====================================================================
+const MEMORY_FILE = path.join(__dirname, 'fundingMonitorMemory.json');
+const ALERTED_FILE = path.join(__dirname, 'alertedSymbols.json');
+const BTC_TF_STATE_FILE = path.join(__dirname, 'btcTimeframeState.json');
+const VOLUME_MOMENTUM_FILE = path.join(__dirname, 'volumeMomentumMemory.json');
+
+// =====================================================================
+// === CONFIGURAÇÃO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZf',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
+        MESSAGE_DELAY_MS: 18000,
+        MAX_MESSAGES_PER_MINUTE: 20,
+        BURST_DELAY_MS: 10000,
+        RETRY_COUNT: 3,
+        RETRY_DELAY_MS: 5000
     },
-    PERFORMANCE: {
-        SYMBOL_DELAY_MS: 200,
-        SCAN_INTERVAL_SECONDS: 120,
-        CANDLE_CACHE_TTL: 300000,
-        BATCH_SIZE: 15,
-        REQUEST_TIMEOUT: 15000,
-        COOLDOWN_MINUTES: 30,
-        PRICE_DEVIATION_THRESHOLD: 0.5,
-        TELEGRAM_RETRY_ATTEMPTS: 3,
-        TELEGRAM_RETRY_DELAY: 2000
-    },
-    VOLUME: {
-        TIMEFRAME: '1h',
-        EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
-        BUYER_THRESHOLD: 52,
-        SELLER_THRESHOLD: 48,
-        CONFIRMATION_CANDLES: 2
-    },
-    RATE_LIMITER: {
-        INITIAL_DELAY: 200,
-        MAX_DELAY: 5000,
-        BACKOFF_FACTOR: 2
-    },
-    TRADE: {
-        RISK_REWARD_RATIO: 2.5,
-        STOP_PERCENTAGE: 2,
-        TAKE_PROFIT_LEVELS: [2, 3, 4],
-        PARTIAL_CLOSE: [30, 30, 40]
-    },
-    ALERTS: {
-        MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.5,
-        ENABLE_SOUND: true,
-        MAX_ALERTS_PER_SCAN: 5,
-        MAX_DAILY_ALERTS_PER_SYMBOL: 10,
-        PRIORITY_LEVELS: {
-            ALTA: 85,
-            MEDIA: 75,
-            BAIXA: 70
+    MONITOR: {
+        SCAN_INTERVAL_SECONDS: 60,
+        MIN_VOLUME_USDT: 1000000,
+        MAX_SYMBOLS: 280,
+        EXCLUDE_SYMBOLS: ['USDCUSDT'],
+        LSRS_PERIOD: '5m',
+        LSR_15M_PERIOD: '15m',
+        LSR_TREND_THRESHOLD: 0.05,
+        ALERT_COOLDOWN_MINUTES: 30,
+        TELEGRAM_DELAY_MS: 1500,
+        RSI: {
+            PERIOD: 14,
+            TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],
+            LOOKBACK_CANDLES: 100,
+            MIN_DIVERGENCE_STRENGTH: 3,
+            MIN_VOLUME_CONFIRMATION: 55,
+            RSI_BUY_THRESHOLD: 60,
+            RSI_SELL_THRESHOLD: 50
+        },
+        BOLLINGER: {
+            PERIOD: 20,
+            STD_DEVIATION: 2.2,
+            TIMEFRAME: '15m',
+            TOUCH_THRESHOLD: 0.04
+        },
+        CVD: {
+            CHECK_INTERVAL_SECONDS: 30,
+            CVD_CHANGE_WINDOW: 60
+        },
+        BTC_MONITOR: {
+            ENABLED: true,
+            TIMEFRAMES: ['15m', '1h', '4h', '12h', '1d'],
+            EMA_PERIOD: 55,
+            CHECK_INTERVAL_SECONDS: 60,
+            ALERT_COOLDOWN_MINUTES: 5
         }
-    },
-    RSI: {
-        BUY_MAX: 64,      // RSI máximo para compra
-        SELL_MIN: 55,     // RSI mínimo para venda
-        PERIOD: 14
-    },
-    DEBUG: {
-        VERBOSE: false
     }
 };
 
 // =====================================================================
-// === SCHEMAS DE VALIDAÇÃO ZOD ===
+// === FUNÇÃO PARA INICIALIZAR MEMÓRIA CORRETAMENTE ===
 // =====================================================================
-const CandleSchema = z.object({
-    open: z.number().positive(),
-    high: z.number().positive(),
-    low: z.number().positive(),
-    close: z.number().positive(),
-    volume: z.number().positive(),
-    time: z.number().int()
-});
-
-const KlineResponseSchema = z.array(
-    z.tuple([
-        z.number(), z.string(), z.string(), z.string(), z.string(),
-        z.string(), z.number(), z.string(), z.number(), z.string(),
-        z.string(), z.string()
-    ])
-);
-
-const LSRResponseSchema = z.array(
-    z.object({
-        longShortRatio: z.string(),
-        longAccount: z.string(),
-        shortAccount: z.string()
-    })
-);
-
-const FundingRateSchema = z.array(
-    z.object({
-        symbol: z.string(),
-        fundingRate: z.string(),
-        fundingTime: z.number()
-    })
-);
-
-const ExchangeInfoSchema = z.object({
-    symbols: z.array(
-        z.object({
-            symbol: z.string(),
-            status: z.string()
-        })
-    )
-});
-
-const TradeAlertSchema = z.object({
-    symbol: z.string(),
-    direction: z.enum(['COMPRA', 'VENDA']),
-    entryPrice: z.number(),
-    stopLoss: z.number(),
-    takeProfit1: z.number(),
-    takeProfit2: z.number(),
-    takeProfit3: z.number(),
-    riskReward: z.number(),
-    confidence: z.number(),
-    score: z.number(),
-    volumeRatio: z.number(),
-    buyerPercentage: z.number(),
-    sellerPercentage: z.number(),
-    lsr: z.number().optional().nullable(),
-    funding: z.number().optional().nullable(),
-    rsi: z.number().optional().nullable(),
-    cciDaily: z.string().optional().nullable(), // Adicionado campo para CCI Diário
-    support: z.number(),
-    resistance: z.number(),
-    emoji: z.string(),
-    timestamp: z.number()
-});
+function initializeMemoryStructure() {
+    const defaultMemory = {
+        // Para timeframe 4h
+        lastStochK_4h: {},
+        lastStochD_4h: {},
+        lastCCI_4h: {},
+        lastCrossState_4h: {},
+        // Para timeframe 1h
+        lastStochK_1h: {},
+        lastStochD_1h: {},
+        lastCCI_1h: {},
+        lastCrossState_1h: {}
+    };
+    
+    return defaultMemory;
+}
 
 // =====================================================================
-// === DIRETÓRIOS ===
+// === MEMÓRIA DE CRUZAMENTOS (VOLUME MOMENTUM) ===
 // =====================================================================
-const LOG_DIR = './logs';
-const CACHE_DIR = './cache';
-const ALERTS_DIR = './alerts';
+let volumeMomentumMemory = initializeMemoryStructure();
 
-if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
-if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
+function loadVolumeMomentumMemory() {
+    try {
+        if (fs.existsSync(VOLUME_MOMENTUM_FILE)) {
+            const data = fs.readFileSync(VOLUME_MOMENTUM_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            
+            // Garantir que todas as propriedades existem
+            volumeMomentumMemory = {
+                lastStochK_4h: loaded.lastStochK_4h || {},
+                lastStochD_4h: loaded.lastStochD_4h || {},
+                lastCCI_4h: loaded.lastCCI_4h || {},
+                lastCrossState_4h: loaded.lastCrossState_4h || {},
+                lastStochK_1h: loaded.lastStochK_1h || {},
+                lastStochD_1h: loaded.lastStochD_1h || {},
+                lastCCI_1h: loaded.lastCCI_1h || {},
+                lastCrossState_1h: loaded.lastCrossState_1h || {}
+            };
+            console.log(`📂 Memória de Volume Momentum carregada`);
+        } else {
+            volumeMomentumMemory = initializeMemoryStructure();
+            console.log(`📂 Nova memória de Volume Momentum criada`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar memória de Volume Momentum: ${error.message}`);
+        volumeMomentumMemory = initializeMemoryStructure();
+    }
+}
+
+function saveVolumeMomentumMemory() {
+    try {
+        fs.writeFileSync(VOLUME_MOMENTUM_FILE, JSON.stringify(volumeMomentumMemory, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar memória de Volume Momentum: ${error.message}`);
+    }
+}
+
+// =====================================================================
+// === ESTADO DOS TIMEFRAMES DO BTC ===
+// =====================================================================
+let btcTimeframeState = {
+    '15m': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '4h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '12h': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 },
+    '1d': { isAbove: false, lastAlertSent: 0, currentPrice: 0, emaValue: 0, distance: 0 }
+};
+
+let initialStatusSent = false;
+
+// =====================================================================
+// === CARREGAR ESTADO DOS TIMEFRAMES ===
+// =====================================================================
+function loadBTCTimeframeState() {
+    try {
+        if (fs.existsSync(BTC_TF_STATE_FILE)) {
+            const data = fs.readFileSync(BTC_TF_STATE_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            btcTimeframeState = loaded;
+            console.log(`📂 Estado dos timeframes BTC carregado`);
+        }
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar estado dos TFs BTC: ${error.message}`);
+    }
+}
+
+function saveBTCTimeframeState() {
+    try {
+        fs.writeFileSync(BTC_TF_STATE_FILE, JSON.stringify(btcTimeframeState, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar estado dos TFs BTC: ${error.message}`);
+    }
+}
 
 // =====================================================================
 // === CACHE E CONTROLE DE ALERTAS ===
 // =====================================================================
-const candleCache = new Map();
-const alertCooldown = new Map();
-const lastAlertPrices = new Map();
-const fundingRateCache = new Map();
-const dailyMessageCounter = new Map();
-let dailyResetPerformed = false;
+const rsiCache = new Map();
+const divergenceCache = new Map();
+const bollingerCache = new Map();
+const lsrTrendCache = new Map();
+const stochCache = new Map();
+const cciCache = new Map();
+const alertedSymbols = new Map();
 
-class CacheManager {
-    static get(symbol, timeframe, limit) {
-        const key = `${symbol}_${timeframe}_${limit}`;
-        const cached = candleCache.get(key);
-        if (cached && Date.now() - cached.timestamp < CONFIG.PERFORMANCE.CANDLE_CACHE_TTL) {
-            return cached.data;
+function loadAlertedSymbols() {
+    try {
+        if (fs.existsSync(ALERTED_FILE)) {
+            const data = fs.readFileSync(ALERTED_FILE, 'utf8');
+            const loaded = JSON.parse(data);
+            for (const [symbol, timestamp] of Object.entries(loaded)) {
+                alertedSymbols.set(symbol, timestamp);
+            }
+            console.log(`📂 ${alertedSymbols.size} alertas anteriores carregados`);
         }
-        return null;
+    } catch (error) {
+        console.log(`⚠️ Erro ao carregar alertas: ${error.message}`);
     }
+}
 
-    static set(symbol, timeframe, limit, data) {
-        const key = `${symbol}_${timeframe}_${limit}`;
-        candleCache.set(key, { data, timestamp: Date.now() });
+function saveAlertedSymbols() {
+    try {
+        const data = {};
+        for (const [symbol, timestamp] of alertedSymbols.entries()) {
+            data[symbol] = timestamp;
+        }
+        fs.writeFileSync(ALERTED_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.log(`⚠️ Erro ao salvar alertas: ${error.message}`);
+    }
+}
+
+function canAlert(symbol, type) {
+    const key = `${symbol}_${type}`;
+    const lastAlert = alertedSymbols.get(key);
+    if (!lastAlert) return true;
+    
+    const cooldownMs = CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+    return (Date.now() - lastAlert) > cooldownMs;
+}
+
+function markAlerted(symbol, type) {
+    const key = `${symbol}_${type}`;
+    alertedSymbols.set(key, Date.now());
+    saveAlertedSymbols();
+}
+
+function canAlertBTC(timeframe) {
+    const lastAlert = btcTimeframeState[timeframe]?.lastAlertSent || 0;
+    const cooldownMs = CONFIG.MONITOR.BTC_MONITOR.ALERT_COOLDOWN_MINUTES * 60 * 1000;
+    return (Date.now() - lastAlert) > cooldownMs;
+}
+
+function markBTCAlerted(timeframe) {
+    if (btcTimeframeState[timeframe]) {
+        btcTimeframeState[timeframe].lastAlertSent = Date.now();
+        saveBTCTimeframeState();
     }
 }
 
 // =====================================================================
-// === RATE LIMITER MELHORADO ===
+// === SISTEMA DE FILA PARA TELEGRAM (RATE LIMITING) ===
 // =====================================================================
-class RateLimiter {
+class TelegramQueue {
     constructor() {
-        this.currentDelay = CONFIG.RATE_LIMITER.INITIAL_DELAY;
-        this.consecutiveErrors = 0;
-        this.lastRequestTime = 0;
-        this.requestCount = 0;
-        this.minuteRequests = 0;
-        this.lastMinuteReset = Date.now();
-        this.errorLog = new Map();
+        this.queue = [];
+        this.isProcessing = false;
+        this.messageCount = 0;
+        this.lastMessageTime = 0;
+        this.minuteResetTime = Date.now();
     }
 
-    checkRateLimit() {
-        const now = Date.now();
-        if (now - this.lastMinuteReset > 60000) {
-            this.minuteRequests = 0;
-            this.lastMinuteReset = now;
-        }
-        
-        if (this.minuteRequests >= 1000) {
-            const waitTime = 60000 - (now - this.lastMinuteReset);
-            if (waitTime > 0) {
-                console.log(`⏳ Rate limit atingido, aguardando ${Math.ceil(waitTime/1000)}s`);
-                return waitTime;
-            }
-        }
-        return 0;
-    }
-
-    async makeRequest(url, options = {}, type = 'klines') {
-        const rateLimitWait = this.checkRateLimit();
-        if (rateLimitWait > 0) {
-            await new Promise(r => setTimeout(r, rateLimitWait));
-        }
-
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        
-        if (timeSinceLastRequest < this.currentDelay) {
-            await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
-        }
-
-        const maxRetries = 3;
-        let lastError;
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
-
-                const response = await fetch(url, { ...options, signal: controller.signal });
-                clearTimeout(timeoutId);
-                
-                this.lastRequestTime = Date.now();
-                this.minuteRequests++;
-                this.requestCount++;
-
-                if (!response.ok) {
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('retry-after') || 60;
-                        console.log(`⏳ Rate limit 429, aguardando ${retryAfter}s`);
-                        await new Promise(r => setTimeout(r, retryAfter * 1000));
-                        continue;
-                    }
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                
-                this.consecutiveErrors = 0;
-                this.currentDelay = Math.max(CONFIG.RATE_LIMITER.INITIAL_DELAY, this.currentDelay * 0.9);
-                
-                return await response.json();
-                
-            } catch (error) {
-                lastError = error;
-                this.consecutiveErrors++;
-                
-                if (error.name === 'AbortError') {
-                    console.log(`⏱️ Timeout na requisição ${type} (tentativa ${attempt}/${maxRetries})`);
-                } else {
-                    console.log(`⚠️ Erro na requisição ${type} (tentativa ${attempt}/${maxRetries}): ${error.message}`);
-                }
-                
-                if (attempt < maxRetries) {
-                    const waitTime = this.currentDelay * Math.pow(2, attempt - 1);
-                    console.log(`⏳ Aguardando ${Math.ceil(waitTime/1000)}s antes de tentar novamente...`);
-                    await new Promise(r => setTimeout(r, waitTime));
-                }
-            }
-        }
-        
-        this.currentDelay = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, this.currentDelay * CONFIG.RATE_LIMITER.BACKOFF_FACTOR);
-        throw lastError;
-    }
-}
-
-const rateLimiter = new RateLimiter();
-
-// =====================================================================
-// === FUNÇÕES AUXILIARES ===
-// =====================================================================
-function getBrazilianDateTime() {
-    const now = new Date();
-    const offset = -3;
-    const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
-    const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
-    const time = brazilTime.toISOString().split('T')[1].split('.')[0].substring(0, 5);
-    const fullTime = brazilTime.toISOString().split('T')[1].split('.')[0];
-    return { date, time, full: `${date} ${time}`, fullTime };
-}
-
-function formatNumber(num, decimals = 2) {
-    if (num === undefined || num === null) return 'N/A';
-    if (Math.abs(num) > 1000) return num.toFixed(decimals);
-    if (Math.abs(num) > 1) return num.toFixed(decimals);
-    return num.toFixed(decimals);
-}
-
-function formatPrice(price) {
-    if (!price) return '-';
-    if (price > 1000) return price.toFixed(2);
-    if (price > 1) return price.toFixed(3);
-    if (price > 0.1) return price.toFixed(4);
-    if (price > 0.01) return price.toFixed(5);
-    if (price > 0.001) return price.toFixed(6);
-    return price.toFixed(8);
-}
-
-function getConfidenceEmoji(score) {
-    if (score >= 90) return '🔥🔥';
-    if (score >= 85) return '🔥';
-    if (score >= 80) return '⚡';
-    if (score >= 75) return '✅';
-    if (score >= 70) return '⚠️';
-    return '📊';
-}
-
-function getDirectionEmoji(direction) {
-    return direction === 'COMPRA' ? '🟢' : '🔴';
-}
-
-// =====================================================================
-// === RESET CONTADOR DIÁRIO ÀS 21H ===
-// =====================================================================
-function resetDailyCounterIfNeeded() {
-    const now = getBrazilianDateTime();
-    const currentHour = parseInt(now.fullTime.split(':')[0]);
-    
-    if (currentHour === 21 && !dailyResetPerformed) {
-        const totalReset = dailyMessageCounter.size;
-        dailyMessageCounter.clear();
-        dailyResetPerformed = true;
-        console.log(`🔄 Contadores diários resetados às 21:00 - ${totalReset} moedas com alertas hoje`);
-        
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log('📊 Status do reset diário:', {
-                hora: currentHour,
-                resetPerformed: dailyResetPerformed,
-                contadoresResetados: totalReset
+    async add(message, priority = false) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ message, resolve, reject, priority, timestamp: Date.now() });
+            
+            this.queue.sort((a, b) => {
+                if (a.priority && !b.priority) return -1;
+                if (!a.priority && b.priority) return 1;
+                return a.timestamp - b.timestamp;
             });
-        }
-    }
-    
-    if (currentHour !== 21) {
-        dailyResetPerformed = false;
-    }
-}
-
-// =====================================================================
-// === VERIFICAR LIMITE DIÁRIO POR MOEDA ===
-// =====================================================================
-function canSendDailyAlert(symbol) {
-    resetDailyCounterIfNeeded();
-    
-    const currentCount = dailyMessageCounter.get(symbol) || 0;
-    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
-    
-    if (currentCount >= maxDaily) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⏸️ ${symbol} já recebeu ${currentCount}/${maxDaily} alertas hoje - limite diário atingido`);
-        }
-        return false;
-    }
-    
-    return true;
-}
-
-// =====================================================================
-// === CÁLCULOS TÉCNICOS ===
-// =====================================================================
-function calculateEMA(values, period) {
-    if (values.length < period) {
-        return values.reduce((a, b) => a + b, 0) / values.length;
-    }
-    const multiplier = 2 / (period + 1);
-    let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < values.length; i++) {
-        ema = (values[i] - ema) * multiplier + ema;
-    }
-    return ema;
-}
-
-function calculateATR(candles, period = 14) {
-    if (candles.length < period + 1) return null;
-    
-    const tr = [];
-    for (let i = 1; i < candles.length; i++) {
-        const high = candles[i].high;
-        const low = candles[i].low;
-        const prevClose = candles[i-1].close;
-        
-        const tr1 = high - low;
-        const tr2 = Math.abs(high - prevClose);
-        const tr3 = Math.abs(low - prevClose);
-        
-        tr.push(Math.max(tr1, tr2, tr3));
-    }
-    
-    const atr = tr.slice(-period).reduce((a, b) => a + b, 0) / period;
-    return atr;
-}
-
-function calculateRSI(candles, period = 14) {
-    if (candles.length < period + 1) return null;
-    
-    const closes = candles.map(c => c.close);
-    let gains = 0, losses = 0;
-    
-    for (let i = closes.length - period; i < closes.length; i++) {
-        const diff = closes[i] - closes[i - 1];
-        if (diff > 0) gains += diff;
-        else losses += Math.abs(diff);
-    }
-    
-    const avgGain = gains / period;
-    const avgLoss = losses / period || 0.001;
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-}
-
-// Função para calcular CCI (Commodity Channel Index)
-function calculateCCI(candles, period = 20) {
-    if (candles.length < period) return null;
-    
-    const typ = [];
-    for (let i = 0; i < candles.length; i++) {
-        typ.push((candles[i].high + candles[i].low + candles[i].close) / 3);
-    }
-    
-    const recentTyp = typ.slice(-period);
-    const sma = recentTyp.reduce((a, b) => a + b, 0) / period;
-    
-    let meanDeviation = 0;
-    for (let i = 0; i < recentTyp.length; i++) {
-        meanDeviation += Math.abs(recentTyp[i] - sma);
-    }
-    meanDeviation = meanDeviation / period;
-    
-    if (meanDeviation === 0) return 0;
-    
-    const cci = (recentTyp[recentTyp.length - 1] - sma) / (0.015 * meanDeviation);
-    return cci;
-}
-
-function calculateSupportResistance(candles) {
-    if (candles.length < 50) return { support: null, resistance: null };
-    
-    const highs = candles.map(c => c.high);
-    const lows = candles.map(c => c.low);
-    
-    const pivotHighs = [];
-    const pivotLows = [];
-    
-    for (let i = 2; i < highs.length - 2; i++) {
-        if (highs[i] > highs[i-1] && highs[i] > highs[i-2] && 
-            highs[i] > highs[i+1] && highs[i] > highs[i+2]) {
-            pivotHighs.push(highs[i]);
-        }
-        if (lows[i] < lows[i-1] && lows[i] < lows[i-2] && 
-            lows[i] < lows[i+1] && lows[i] < lows[i+2]) {
-            pivotLows.push(lows[i]);
-        }
-    }
-    
-    const resistance = pivotHighs.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, pivotHighs.length);
-    const support = pivotLows.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, pivotLows.length);
-    
-    return { 
-        support: support || lows[lows.length - 1] * 0.98, 
-        resistance: resistance || highs[highs.length - 1] * 1.02 
-    };
-}
-
-// =====================================================================
-// === COOLDOWN CHECK ===
-// =====================================================================
-function canSendAlert(symbol, currentPrice, direction) {
-    const now = Date.now();
-    const cooldownKey = `${symbol}_${direction}`;
-    const priceKey = `${symbol}_price`;
-    
-    const lastAlert = alertCooldown.get(cooldownKey);
-    if (lastAlert) {
-        const timeDiff = (now - lastAlert) / (1000 * 60);
-        if (timeDiff < CONFIG.PERFORMANCE.COOLDOWN_MINUTES) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} em cooldown por mais ${(CONFIG.PERFORMANCE.COOLDOWN_MINUTES - timeDiff).toFixed(1)}min`);
-            }
-            return false;
-        }
-    }
-    
-    const lastPrice = lastAlertPrices.get(priceKey);
-    if (lastPrice) {
-        const priceDiff = Math.abs((currentPrice - lastPrice) / lastPrice * 100);
-        if (priceDiff < CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} preço variou apenas ${priceDiff.toFixed(2)}% (mínimo ${CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD}%)`);
-            }
-            return false;
-        }
-    }
-    
-    if (!canSendDailyAlert(symbol)) {
-        return false;
-    }
-    
-    return true;
-}
-
-function registerAlert(symbol, price, direction) {
-    const now = Date.now();
-    const cooldownKey = `${symbol}_${direction}`;
-    const priceKey = `${symbol}_price`;
-    
-    alertCooldown.set(cooldownKey, now);
-    lastAlertPrices.set(priceKey, price);
-    
-    const currentCount = dailyMessageCounter.get(symbol) || 0;
-    const newCount = currentCount + 1;
-    dailyMessageCounter.set(symbol, newCount);
-    
-    console.log(`📊 ${symbol}: ${newCount}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alerta(s) hoje`);
-    
-    for (const [key, timestamp] of alertCooldown) {
-        if (now - timestamp > 2 * 60 * 60 * 1000) {
-            alertCooldown.delete(key);
-        }
-    }
-}
-
-// =====================================================================
-// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
-// =====================================================================
-async function getCandles(symbol, timeframe, limit = 100) {
-    const cached = CacheManager.get(symbol, timeframe, limit);
-    if (cached) return cached;
-
-    const intervalMap = {
-        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-        '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
-    };
-    
-    const interval = intervalMap[timeframe] || '1h';
-    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    
-    try {
-        const data = await rateLimiter.makeRequest(url, {}, 'klines');
-        
-        const candles = data.map(candle => ({
-            open: parseFloat(candle[1]),
-            high: parseFloat(candle[2]),
-            low: parseFloat(candle[3]),
-            close: parseFloat(candle[4]),
-            volume: parseFloat(candle[5]),
-            time: candle[0]
-        }));
-        
-        CacheManager.set(symbol, timeframe, limit, candles);
-        return candles;
-    } catch (error) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⚠️ Erro ao buscar candles ${symbol}: ${error.message}`);
-        }
-        return [];
-    }
-}
-
-async function getLSR(symbol) {
-    try {
-        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`;
-        const data = await rateLimiter.makeRequest(url, {}, 'lsr');
-        return data.length > 0 ? parseFloat(data[0].longShortRatio) : null;
-    } catch {
-        return null;
-    }
-}
-
-async function getFundingRate(symbol) {
-    try {
-        const cached = fundingRateCache.get(symbol);
-        if (cached && Date.now() - cached.timestamp < 3600000) {
-            return cached.rate;
-        }
-
-        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
-        const data = await rateLimiter.makeRequest(url, {}, 'funding');
-        
-        let fundingRate = parseFloat(data.lastFundingRate) || null;
-        
-        if (CONFIG.DEBUG.VERBOSE && fundingRate !== null) {
-            console.log(`💰 Funding ${symbol}: ${(fundingRate * 100).toFixed(4)}%`);
-        }
-        
-        if (fundingRate !== null) {
-            fundingRateCache.set(symbol, {
-                rate: fundingRate,
-                timestamp: Date.now()
-            });
-        }
-        
-        return fundingRate;
-        
-    } catch (error) {
-        try {
-            const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
-            const data = await rateLimiter.makeRequest(url, {}, 'funding_alt');
-            const fundingRate = data.length > 0 ? parseFloat(data[0].fundingRate) : null;
             
-            if (fundingRate !== null) {
-                fundingRateCache.set(symbol, {
-                    rate: fundingRate,
-                    timestamp: Date.now()
-                });
-            }
-            
-            return fundingRate;
-        } catch {
-            return null;
-        }
-    }
-}
-
-function calculateTradeLevels(price, atr, direction, support, resistance) {
-    let stopLoss, takeProfit1, takeProfit2, takeProfit3;
-    
-    if (direction === 'COMPRA') {
-        stopLoss = Math.min(
-            support * 0.995,
-            price - (atr * 1.5)
-        );
-        
-        const risk = price - stopLoss;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.min(price + reward1, resistance * 0.99);
-        takeProfit2 = Math.min(price + reward2, resistance * 1.02);
-        takeProfit3 = price + reward3;
-        
-    } else {
-        stopLoss = Math.max(
-            resistance * 1.005,
-            price + (atr * 1.5)
-        );
-        
-        const risk = stopLoss - price;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.max(price - reward1, support * 1.01);
-        takeProfit2 = Math.max(price - reward2, support * 0.98);
-        takeProfit3 = price - reward3;
-    }
-    
-    return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
-}
-
-async function analyzeForAlerts(symbol) {
-    try {
-        const [candles1h, candles15m, candlesDaily] = await Promise.all([
-            getCandles(symbol, '1h', 100),
-            getCandles(symbol, '15m', 50),
-            getCandles(symbol, '1d', 50) // Adicionado candles diários para CCI
-        ]);
-        
-        if (candles1h.length < 30 || candles15m.length < 20 || candlesDaily.length < 25) return null;
-        
-        const currentPrice = candles1h[candles1h.length - 1].close;
-        const currentCandle15m = candles15m[candles15m.length - 1];
-        
-        const volumes = candles1h.map(c => c.volume);
-        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const currentVolume = volumes[volumes.length - 1];
-        const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
-        
-        const closes = candles1h.map(c => c.close);
-        const ema9 = calculateEMA(closes.slice(-20), 9);
-        
-        let buyerVolume = 0, sellerVolume = 0, totalVolume = 0;
-        const recentCandles = candles1h.slice(-24);
-        
-        recentCandles.forEach(candle => {
-            const vol = candle.volume;
-            totalVolume += vol;
-            
-            if (candle.close > ema9) {
-                buyerVolume += vol;
-            } else if (candle.close < ema9) {
-                sellerVolume += vol;
-            } else {
-                buyerVolume += vol / 2;
-                sellerVolume += vol / 2;
+            if (!this.isProcessing) {
+                this.processQueue();
             }
         });
-        
-        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
-        const sellerPercentage = 100 - buyerPercentage;
-        
-        // Calcular CCI diário
-        const cciDaily = calculateCCI(candlesDaily, 20);
-        const cciValuesDaily = [];
-        for (let i = candlesDaily.length - 26; i < candlesDaily.length; i++) {
-            const slice = candlesDaily.slice(0, i + 1);
-            cciValuesDaily.push(calculateCCI(slice, 20) || 0);
-        }
-        const cciEma5 = cciValuesDaily.length >= 5 ? calculateEMA(cciValuesDaily, 5) : null;
-        
-        // Determinar tendência do CCI diário
-        let cciDailyTrend = "NEUTRO";
-        if (cciDaily !== null && cciEma5 !== null) {
-            if (cciDaily > cciEma5) {
-                cciDailyTrend = "CCI 💹ALTA";
-            } else if (cciDaily < cciEma5) {
-                cciDailyTrend = "CCI 🔴BAIXA";
+    }
+
+    async processQueue() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        this.isProcessing = true;
+
+        while (this.queue.length > 0) {
+            const now = Date.now();
+            
+            if (now - this.minuteResetTime >= 60000) {
+                this.messageCount = 0;
+                this.minuteResetTime = now;
+                console.log(`📊 Rate limit resetado. Próximo minuto.`);
+            }
+            
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE) {
+                const waitTime = 60000 - (now - this.minuteResetTime);
+                console.log(`⏳ Rate limit atingido (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE}). Aguardando ${Math.ceil(waitTime / 1000)}s...`);
+                await delay(waitTime + 1000);
+                continue;
+            }
+            
+            const timeSinceLastMessage = now - this.lastMessageTime;
+            if (timeSinceLastMessage < CONFIG.TELEGRAM.MESSAGE_DELAY_MS) {
+                const waitTime = CONFIG.TELEGRAM.MESSAGE_DELAY_MS - timeSinceLastMessage;
+                await delay(waitTime);
+            }
+            
+            const item = this.queue.shift();
+            
+            try {
+                await this.sendWithRetry(item.message);
+                item.resolve(true);
+                this.messageCount++;
+                this.lastMessageTime = Date.now();
+                console.log(`✅ Mensagem enviada (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE})`);
+            } catch (error) {
+                console.log(`❌ Erro ao enviar mensagem: ${error.message}`);
+                item.reject(error);
+            }
+            
+            if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE * 0.8) {
+                console.log(`⚠️ Próximo do rate limit. Aguardando ${CONFIG.TELEGRAM.BURST_DELAY_MS / 1000}s...`);
+                await delay(CONFIG.TELEGRAM.BURST_DELAY_MS);
             }
         }
         
-        const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
-            getLSR(symbol),
-            getFundingRate(symbol),
-            Promise.resolve(calculateRSI(candles1h, CONFIG.RSI.PERIOD)),
-            Promise.resolve(calculateSupportResistance(candles1h)),
-            Promise.resolve(calculateATR(candles1h, 14))
-        ]);
-        
-        if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
-        
-        let direction = null;
-        let score = 0;
-        let confidence = 0;
-        
-       // ANÁLISE PARA COMPRA - VERSÃO OTIMIZADA
-if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
-    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-    rsi1h < CONFIG.RSI.BUY_MAX) {
-    
-    direction = 'COMPRA';
-    score = 50;
-    
-    // 1. VOLUME COMPRADOR (máx 20)
-    if (buyerPercentage > 60) score += 15;
-    else if (buyerPercentage > 55) score += 10;
-    else if (buyerPercentage > 52) score += 5;
-    
-    // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 15;
-    else if (volumeRatio > 2.0) score += 12;
-    else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 8;
-    
-    // 3. LSR (máx 20, com penalidade)
-    if (lsr) {
-        if (lsr < 1.5) score += 20;      // Muito bom (pouca gente comprada)
-        else if (lsr < 2.0) score += 12;  // Bom
-        else if (lsr < 2.3) score += 10;  // Moderado
-        else if (lsr < 2.6) score += 5;   // Pouco favorável
-        else if (lsr > 3.0) score -= 20;  // PENALIDADE: Muita gente comprada
-        else if (lsr > 2.8) score -= 15;   // Penalidade leve
+        this.isProcessing = false;
     }
-    
-    // 4. FUNDING (máx 15)
-    if (funding) {
-        if (funding < -0.001) score += 12;      // Muito negativo
-        else if (funding < -0.0005) score += 8; // Moderadamente negativo
-        else if (funding < -0.0001) score += 3;  // Levemente negativo
-    }
-    
-    // 5. RSI (máx 20)
-    if (rsi1h) {
-        if (rsi1h < 35) score += 12;      // Extremamente oversold
-        else if (rsi1h < 40) score += 10;  // Muito oversold
-        else if (rsi1h < 45) score += 8;  // Oversold moderado
-        else if (rsi1h < 50) score += 5;   // Levemente oversold
-    }
-    
-    // 6. CCI DIÁRIO (pontuação/penalidade)
-    if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score += 10;      // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score -= 15; // CCI cruzando abaixo da EMA5
-    }
-    
-    // 7. POSIÇÃO PREÇO (máx 5)
-    if (currentPrice < sr.resistance) {
-        const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-        if (distanceToResistance > 5) score += 5;       // Muito espaço
-        else if (distanceToResistance > 2) score += 3;  // Bom espaço
-    }
-    
-    confidence = Math.min(100, Math.max(0, score));
-}
 
-// ANÁLISE PARA VENDA - VERSÃO OTIMIZADA
-if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
-    volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-    rsi1h > CONFIG.RSI.SELL_MIN) {
-    
-    direction = 'VENDA';
-    score = 50;
-    
-    // 1. VOLUME VENDEDOR (máx 20)
-    if (sellerPercentage > 60) score += 15;
-    else if (sellerPercentage > 55) score += 10;
-    else if (sellerPercentage > 52) score += 5;
-    
-    // 2. VOLUME RATIO (máx 20)
-    if (volumeRatio > 2.5) score += 15;
-    else if (volumeRatio > 2.0) score += 12;
-    else if (volumeRatio > 1.8) score += 10;
-    else if (volumeRatio > 1.6) score += 8;
-    
-    // 3. LSR (máx 20, com penalidade)
-    if (lsr) {
-        if (lsr > 4.0) score += 20;        // Muito bom (muita gente comprada)
-        else if (lsr > 3.5) score += 12;    // Bom
-        else if (lsr > 3.0) score += 10;    // Moderado
-        else if (lsr > 2.7) score += 5;     // Pouco favorável
-        else if (lsr < 1.0) score -= 20;    // PENALIDADE: Muita gente vendida
-        else if (lsr < 1.2) score -= 15;     // Penalidade leve
-    }
-    
-    // 4. FUNDING (máx 15)
-    if (funding) {
-        if (funding > 0.001) score += 12;       // Muito positivo
-        else if (funding > 0.0005) score += 8;  // Moderadamente positivo
-        else if (funding > 0.0001) score += 3;   // Levemente positivo
-    }
-    
-    // 5. RSI (máx 20)
-    if (rsi1h) {
-        if (rsi1h > 75) score += 12;       // Extremamente overbought
-        else if (rsi1h > 70) score += 10;   // Muito overbought
-        else if (rsi1h > 65) score += 8;   // Overbought moderado
-        else if (rsi1h > 60) score += 5;    // Levemente overbought
-    }
-    
-    // 6. CCI DIÁRIO (pontuação/penalidade)
-    if (cciDailyTrend) {
-        if (cciDailyTrend === "CCI ALTA") score -= 15;     // CCI cruzando acima da EMA5
-        else if (cciDailyTrend === "CCI BAIXA") score += 10; // CCI cruzando abaixo da EMA5
-    }
-    
-    // 7. POSIÇÃO PREÇO (máx 5)
-    if (currentPrice > sr.support) {
-        const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-        if (distanceToSupport > 5) score += 5;       // Muito espaço
-        else if (distanceToSupport > 2) score += 3;  // Bom espaço
-    }
-    
-    confidence = Math.min(100, Math.max(0, score));
-}
-        
-        if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
-        
-        if (!canSendAlert(symbol, currentPrice, direction)) return null;
-        
-        const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
-            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance);
-        
-        const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
-        
-        const emoji = getConfidenceEmoji(confidence);
-        
-        const alert = {
-            symbol,
-            direction,
-            entryPrice: currentPrice,
-            stopLoss,
-            takeProfit1,
-            takeProfit2,
-            takeProfit3,
-            riskReward: parseFloat(riskReward.toFixed(2)),
-            confidence,
-            score: confidence,
-            volumeRatio,
-            buyerPercentage,
-            sellerPercentage,
-            lsr,
-            funding,
-            rsi: rsi1h,
-            cciDaily: cciDailyTrend, // Adicionando tendência do CCI diário
-            support: sr.support,
-            resistance: sr.resistance,
-            emoji,
-            timestamp: Date.now()
-        };
-        
+    async sendWithRetry(message, attempt = 1) {
         try {
-            TradeAlertSchema.parse(alert);
-            return alert;
-        } catch (error) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⚠️ Alerta inválido para ${symbol}:`, error.errors);
+            const token = CONFIG.TELEGRAM.BOT_TOKEN;
+            const chatId = CONFIG.TELEGRAM.CHAT_ID;
+            const url = `https://api.telegram.org/bot${token}/sendMessage`;
+            
+            let finalMessage = message;
+            
+            finalMessage = finalMessage.replace(/<i><\/i>/g, '');
+            finalMessage = finalMessage.replace(/<i>\s*<\/i>/g, '');
+            
+            const openTags = (finalMessage.match(/<i>/g) || []).length;
+            const closeTags = (finalMessage.match(/<\/i>/g) || []).length;
+            if (openTags !== closeTags) {
+                finalMessage = finalMessage.replace(/<[^>]*>/g, '');
             }
-            return null;
-        }
-        
-    } catch (error) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⚠️ Erro ao analisar ${symbol}: ${error.message}`);
-        }
-        return null;
-    }
-}
-
-// =====================================================================
-// === TELEGRAM MELHORADO COM RETRY ===
-// =====================================================================
-async function sendTelegramAlert(message, parseMode = 'HTML') {
-    let attempts = 0;
-    const maxAttempts = CONFIG.PERFORMANCE.TELEGRAM_RETRY_ATTEMPTS;
-    
-    while (attempts < maxAttempts) {
-        attempts++;
-        
-        try {
-            if (!CONFIG.TELEGRAM.BOT_TOKEN || !CONFIG.TELEGRAM.CHAT_ID) {
-                console.log('⚠️ Telegram não configurado');
-                return false;
+            
+            if (finalMessage.length > 4000) {
+                finalMessage = finalMessage.substring(0, 3950) + '\n\n... mensagem truncada';
             }
-
-            const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+            
+            finalMessage = finalMessage.replace(/&(?!(amp;|lt;|gt;|quot;|apos;))/g, '&amp;');
+            
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
             
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    chat_id: CONFIG.TELEGRAM.CHAT_ID,
-                    text: message,
-                    parse_mode: parseMode,
-                    disable_web_page_preview: true
+                    chat_id: chatId,
+                    text: finalMessage,
+                    parse_mode: 'HTML',
+                    disable_web_page_preview: true,
+                    disable_notification: false
                 }),
                 signal: controller.signal
             });
             
             clearTimeout(timeoutId);
             
-            if (!response.ok) {
+            if (response.ok) {
+                return true;
+            } else {
                 const errorText = await response.text();
                 
                 if (response.status === 429) {
-                    const retryAfter = parseInt(response.headers.get('retry-after')) || 30;
-                    console.log(`⏳ Rate limit Telegram, aguardando ${retryAfter}s (tentativa ${attempts}/${maxAttempts})`);
-                    await new Promise(r => setTimeout(r, retryAfter * 1000));
-                    continue;
+                    const retryAfter = parseInt(errorText.match(/retry after (\d+)/)?.[1] || '5');
+                    console.log(`⚠️ Rate limit 429! Aguardando ${retryAfter}s...`);
+                    
+                    if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                        await delay(retryAfter * 1000 + 1000);
+                        return this.sendWithRetry(message, attempt + 1);
+                    }
                 }
                 
-                console.log(`❌ Erro Telegram (tentativa ${attempts}/${maxAttempts}): ${errorText}`);
-                
-                if (attempts < maxAttempts) {
-                    await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY * attempts));
-                    continue;
-                }
-                
-                return false;
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
-            
-            return true;
-            
         } catch (error) {
-            console.log(`❌ Erro Telegram (tentativa ${attempts}/${maxAttempts}): ${error.message}`);
-            
-            if (attempts < maxAttempts) {
-                console.log(`⏳ Tentando novamente em ${CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY/1000 * attempts}s...`);
-                await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY * attempts));
-            }
-        }
-    }
-    
-    console.log('❌ Todas as tentativas de envio ao Telegram falharam');
-    return false;
-}
-
-function formatTradeAlert(alert) {
-    const time = getBrazilianDateTime();
-    const symbolName = alert.symbol.replace('USDT', '');
-    const dirEmoji = getDirectionEmoji(alert.direction);
-    const direction = alert.direction === 'COMPRA' ? 'Compra' : 'Correção';
-    
-    const volPct = alert.direction === 'COMPRA' ? 
-        alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
-    
-    const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
-    const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
-    
-    const entry = formatPrice(alert.entryPrice);
-    const stop = formatPrice(alert.stopLoss);
-    const tp1 = formatPrice(alert.takeProfit1);
-    const tp2 = formatPrice(alert.takeProfit2);
-    const tp3 = formatPrice(alert.takeProfit3);
-    
-    const dailyCount = dailyMessageCounter.get(alert.symbol) || 1;
-    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
-    
-    let r1, r2, r3;
-    if (alert.direction === 'COMPRA') {
-        r1 = ((alert.takeProfit1 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        r2 = ((alert.takeProfit2 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-        r3 = ((alert.takeProfit3 - alert.entryPrice) / (alert.entryPrice - alert.stopLoss) * 100).toFixed(0);
-    } else {
-        r1 = ((alert.entryPrice - alert.takeProfit1) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        r2 = ((alert.entryPrice - alert.takeProfit2) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-        r3 = ((alert.entryPrice - alert.takeProfit3) / (alert.stopLoss - alert.entryPrice) * 100).toFixed(0);
-    }
-    
-    // Adicionar indicador visual do RSI
-    const rsiStatus = alert.direction === 'COMPRA' ? 
-        (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
-        (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
-    
-    // Definir a mensagem da IA Dica baseada na direção
-    const iaDica = alert.direction === 'COMPRA' 
-        ? '💡 <b>🤖 IA Dica...</b>\n• Observar Zona do Suporte...' 
-        : '💡 <b>🤖 IA Dica...</b>\n• Realizar Lucro ou Parcial...';
-    
-    return `<i>${alert.emoji} <b>${dirEmoji} Analisar ${direction} - ${symbolName}</b> ${alert.emoji}
- <b>Indicadores</b>
- Alerta:${dailyCount} | ${time.full}hs
- Preço: $${entry}
- Vol: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)
- RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus}
- #LSR: ${formatNumber(alert.lsr, 2)}
- Fund: ${fundingSign}${fundingPct}%
- Tendência Gráfico Diário: ${alert.cciDaily || 'NEUTRO'}
- Suporte: ${formatPrice(alert.support)}
- Resistência: ${formatPrice(alert.resistance)}
- #SCORE: ${alert.score} | Confiança: ${alert.confidence}%
- <b>Alvos</b>
- TP1: ${tp1} 
- TP2: ${tp2} 
- TP3: ${tp3} 
- 🛑 Stop : ${stop}
- ${iaDica}
-Alerta Educativo, não é recomendação de investimento
- Titanium Prime by @J4Rviz</i>`;
-}
-
-// =====================================================================
-// === FETCH SYMBOLS ===
-// =====================================================================
-async function fetchAllFuturesSymbols() {
-    try {
-        const data = await rateLimiter.makeRequest(
-            'https://fapi.binance.com/fapi/v1/exchangeInfo',
-            {},
-            'exchangeInfo'
-        );
-        
-        const symbols = data.symbols
-            .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
-            .map(s => s.symbol);
-            
-        console.log(`📊 Encontrados ${symbols.length} símbolos USDT`);
-        return symbols;
-    } catch (error) {
-        console.log('❌ Erro ao buscar símbolos, usando lista básica');
-        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT', 'AVAXUSDT'];
-    }
-}
-
-// =====================================================================
-// === SCANNER EM TEMPO REAL MELHORADO ===
-// =====================================================================
-async function realTimeScanner() {
-    console.log('\n🔍 Iniciando scanner em tempo real...');
-    
-    const symbols = await fetchAllFuturesSymbols();
-    console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`📊 Limite diário: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alertas por moeda (reset às 21:00)`);
-    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    
-    let scanCount = 0;
-    let alertsSent = 0;
-    let consecutiveEmptyScans = 0;
-    let lastAlertTime = Date.now();
-    
-    while (true) {
-        const startTime = Date.now();
-        scanCount++;
-        
-        resetDailyCounterIfNeeded();
-        
-        console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
-        
-        if (dailyMessageCounter.size > 0 && CONFIG.DEBUG.VERBOSE) {
-            console.log('📊 Alertas enviados hoje:');
-            const sortedCounts = Array.from(dailyMessageCounter.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5);
-            sortedCounts.forEach(([symbol, count]) => {
-                console.log(`   ${symbol}: ${count}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL}`);
-            });
-        }
-        
-        const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
-        const alerts = [];
-        
-        for (let i = 0; i < symbols.length; i += batchSize) {
-            const batch = symbols.slice(i, i + batchSize);
-            const batchPromises = batch.map(symbol => analyzeForAlerts(symbol));
-            
-            const batchResults = await Promise.allSettled(batchPromises);
-            
-            batchResults.forEach(result => {
-                if (result.status === 'fulfilled' && result.value) {
-                    alerts.push(result.value);
-                }
-            });
-            
-            if (i + batchSize < symbols.length) {
-                await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.SYMBOL_DELAY_MS));
-            }
-        }
-        
-        alerts.sort((a, b) => b.confidence - a.confidence);
-        
-        const topAlerts = alerts.slice(0, CONFIG.ALERTS.MAX_ALERTS_PER_SCAN);
-        let successfulAlerts = 0;
-        
-        for (const alert of topAlerts) {
-            const message = formatTradeAlert(alert);
-            const sent = await sendTelegramAlert(message);
-            
-            if (sent) {
-                registerAlert(alert.symbol, alert.entryPrice, alert.direction);
-                alertsSent++;
-                successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%) - RSI: ${alert.rsi.toFixed(0)} - CCI Diário: ${alert.cciDaily}`);
-                lastAlertTime = Date.now();
+            if (error.name === 'AbortError') {
+                console.log(`⏰ Timeout na requisição Telegram (tentativa ${attempt})`);
             } else {
-                console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
+                console.log(`❌ Erro na tentativa ${attempt}: ${error.message}`);
             }
             
-            await new Promise(r => setTimeout(r, 1500));
+            if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
+                const waitTime = CONFIG.TELEGRAM.RETRY_DELAY_MS * attempt;
+                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s... (tentativa ${attempt + 1}/${CONFIG.TELEGRAM.RETRY_COUNT + 1})`);
+                await delay(waitTime);
+                return this.sendWithRetry(message, attempt + 1);
+            }
+            
+            throw error;
+        }
+    }
+}
+
+const telegramQueue = new TelegramQueue();
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOCHASTIC (5,3,3) ===
+// =====================================================================
+async function calculateStochastic(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_stoch_${timeframe}`;
+        const now = Date.now();
+        const cached = stochCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
         }
         
-        if (topAlerts.length === 0) {
-            console.log('📭 Nenhum alerta no momento');
-            consecutiveEmptyScans++;
+        const candles = await getCandles(symbol, timeframe, 50);
+        if (!candles || candles.length < 20) return null;
+        
+        const periodK = 5;
+        const periodD = 3;
+        const periodSlow = 3;
+        
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        
+        const kValues = [];
+        
+        for (let i = periodK - 1; i < closes.length; i++) {
+            let highestHigh = Math.max(...highs.slice(i - periodK + 1, i + 1));
+            let lowestLow = Math.min(...lows.slice(i - periodK + 1, i + 1));
+            let currentClose = closes[i];
+            
+            let k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+            kValues.push(k);
+        }
+        
+        const dValues = [];
+        for (let i = periodD - 1; i < kValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodD; j++) {
+                sum += kValues[i - j];
+            }
+            dValues.push(sum / periodD);
+        }
+        
+        const slowDValues = [];
+        for (let i = periodSlow - 1; i < dValues.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < periodSlow; j++) {
+                sum += dValues[i - j];
+            }
+            slowDValues.push(sum / periodSlow);
+        }
+        
+        const currentK = kValues[kValues.length - 1];
+        const currentD = slowDValues[slowDValues.length - 1];
+        const prevK = kValues[kValues.length - 2];
+        const prevD = slowDValues[slowDValues.length - 2];
+        
+        const kTrend = currentK > prevK ? '⤴️' : (currentK < prevK ? '⤵️' : '');
+        const dTrend = currentD > prevD ? '⤴️' : (currentD < prevD ? '⤵️' : '');
+        
+        const isOverbought = currentK > 80 && currentD > 80;
+        const isOversold = currentK < 20 && currentD < 20;
+        
+        let status = '';
+        const kValue = currentK;
+        
+        if (kValue < 15) {
+            status = '🔵';
+        } else if (kValue >= 15 && kValue < 25) {
+            status = '🟢';
+        } else if (kValue >= 25 && kValue < 45) {
+            status = '🟡';
+        } else if (kValue >= 45 && kValue < 70) {
+            status = '🟠';
         } else {
-            console.log(`📨 Alertas enviados com sucesso: ${successfulAlerts}/${topAlerts.length}`);
-            consecutiveEmptyScans = 0;
+            status = '🔴';
         }
         
-        const scanTime = Date.now() - startTime;
-        console.log(`⏱️ Scan concluído em ${(scanTime/1000).toFixed(1)}s`);
-        console.log(`📊 Total alertas enviados: ${alertsSent}`);
-        console.log(`📊 Moedas com alerta hoje: ${dailyMessageCounter.size}`);
+        const result = {
+            k: currentK.toFixed(0),
+            d: currentD.toFixed(0),
+            kTrend: kTrend,
+            dTrend: dTrend,
+            status: status,
+            isOverbought,
+            isOversold,
+            rawK: currentK,
+            rawD: currentD
+        };
         
-        let nextScanInterval = CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS * 1000;
-        if (consecutiveEmptyScans > 5) {
-            nextScanInterval = Math.min(nextScanInterval * 1.5, 300000);
-            console.log(`⏳ ${consecutiveEmptyScans} scans sem alertas, aumentando intervalo...`);
+        stochCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR CCI COM EMA 5 ===
+// =====================================================================
+async function calculateCCI(symbol, timeframe) {
+    try {
+        const cacheKey = `${symbol}_cci_${timeframe}`;
+        const now = Date.now();
+        const cached = cciCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
         }
         
-        const waitTime = nextScanInterval - scanTime;
-        if (waitTime > 0) {
-            console.log(`⏳ Próximo scan em ${(waitTime/1000).toFixed(0)}s`);
-            await new Promise(r => setTimeout(r, waitTime));
+        const period = 20;
+        const emaPeriod = 5;
+        
+        const candles = await getCandles(symbol, timeframe, 100);
+        if (!candles || candles.length < period + emaPeriod) return null;
+        
+        const typicalPrices = candles.map(c => (c.high + c.low + c.close) / 3);
+        
+        const cciValues = [];
+        
+        for (let i = period - 1; i < typicalPrices.length; i++) {
+            const slice = typicalPrices.slice(i - period + 1, i + 1);
+            const sma = slice.reduce((a, b) => a + b, 0) / period;
+            
+            let meanDeviation = 0;
+            for (let j = 0; j < slice.length; j++) {
+                meanDeviation += Math.abs(slice[j] - sma);
+            }
+            meanDeviation = meanDeviation / period;
+            
+            if (meanDeviation === 0) {
+                cciValues.push(0);
+            } else {
+                const cci = (typicalPrices[i] - sma) / (0.015 * meanDeviation);
+                cciValues.push(cci);
+            }
+        }
+        
+        const emaValues = [];
+        if (cciValues.length >= emaPeriod) {
+            const multiplier = 2 / (emaPeriod + 1);
+            let ema = cciValues[0];
+            emaValues.push(ema);
+            
+            for (let i = 1; i < cciValues.length; i++) {
+                ema = (cciValues[i] - ema) * multiplier + ema;
+                emaValues.push(ema);
+            }
+        }
+        
+        const currentCCI = cciValues[cciValues.length - 1];
+        const currentEMA = emaValues[emaValues.length - 1];
+        const prevCCI = cciValues[cciValues.length - 2];
+        
+        const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '');
+        
+        let crossStatus = '';
+        
+        if (currentCCI > currentEMA) {
+            crossStatus = 'ALTA';
+        } else if (currentCCI < currentEMA) {
+            crossStatus = 'BAIXA';
+        } else {
+            crossStatus = 'NEUTRO';
+        }
+        
+        let valueCircle = '';
+        
+        if (currentCCI <= -200) {
+            valueCircle = '🔵';
+        } else if (currentCCI <= -100) {
+            valueCircle = '🟢';
+        } else if (currentCCI <= -50) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 0) {
+            valueCircle = '🟡';
+        } else if (currentCCI <= 50) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 100) {
+            valueCircle = '🟠';
+        } else if (currentCCI <= 200) {
+            valueCircle = '🔴';
+        } else {
+            valueCircle = '🔥';
+        }
+        
+        const result = {
+            crossStatus: crossStatus,
+            direction: cciDirection,
+            circle: valueCircle,
+            rawCCI: currentCCI,
+            rawEMA: currentEMA
+        };
+        
+        cciCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR CRUZAMENTO STOCH + CCI (VOLUME MOMENTUM) ===
+// === VERSÃO PARA TIMEFRAME ESPECÍFICO (4h ou 1h) ===
+// =====================================================================
+function detectVolumeMomentumCross(symbol, stochData, cciData, timeframe) {
+    if (!stochData || !cciData) return null;
+    
+    const symbolKey = `${symbol}_${timeframe}`;
+    const memPrefix = timeframe === '4h' ? '_4h' : '_1h';
+    
+    // Garantir que as propriedades existem antes de acessar
+    const lastStochK = volumeMomentumMemory[`lastStochK${memPrefix}`];
+    const lastStochD = volumeMomentumMemory[`lastStochD${memPrefix}`];
+    const lastCCI = volumeMomentumMemory[`lastCCI${memPrefix}`];
+    const lastCrossState = volumeMomentumMemory[`lastCrossState${memPrefix}`];
+    
+    if (!lastStochK[symbolKey]) {
+        lastStochK[symbolKey] = stochData.rawK;
+        lastStochD[symbolKey] = stochData.rawD;
+        lastCCI[symbolKey] = cciData.crossStatus;
+        lastCrossState[symbolKey] = null;
+        saveVolumeMomentumMemory();
+        return null;
+    }
+    
+    const prevStochK = lastStochK[symbolKey];
+    const prevStochD = lastStochD[symbolKey];
+    const prevCCIStatus = lastCCI[symbolKey];
+    const prevCrossState = lastCrossState[symbolKey];
+    
+    const currentStochK = stochData.rawK;
+    const currentStochD = stochData.rawD;
+    const currentCCIStatus = cciData.crossStatus;
+    
+    let stochBullCross = false;
+    let stochBearCross = false;
+    
+    if (prevStochK < prevStochD && currentStochK > currentStochD) {
+        stochBullCross = true;
+    }
+    if (prevStochK > prevStochD && currentStochK < currentStochD) {
+        stochBearCross = true;
+    }
+    
+    let cciBullCross = false;
+    let cciBearCross = false;
+    
+    if (prevCCIStatus === 'BAIXA' && currentCCIStatus === 'ALTA') {
+        cciBullCross = true;
+    }
+    if (prevCCIStatus === 'ALTA' && currentCCIStatus === 'BAIXA') {
+        cciBearCross = true;
+    }
+    
+    // Atualizar valores
+    lastStochK[symbolKey] = currentStochK;
+    lastStochD[symbolKey] = currentStochD;
+    lastCCI[symbolKey] = currentCCIStatus;
+    
+    let newCrossState = null;
+    
+    if (stochBullCross && cciBullCross) {
+        newCrossState = 'bull';
+    } else if (stochBearCross && cciBearCross) {
+        newCrossState = 'bear';
+    }
+    
+    const wasCrossed = (prevCrossState === 'bull' || prevCrossState === 'bear');
+    const isNowCrossed = (newCrossState === 'bull' || newCrossState === 'bear');
+    
+    let shouldAlert = false;
+    let alertType = null;
+    
+    if (!wasCrossed && isNowCrossed) {
+        shouldAlert = true;
+        if (timeframe === '4h') {
+            alertType = newCrossState === 'bull' ? 'VOLUME_MOMENTUM_BULL_4H' : 'VOLUME_MOMENTUM_BEAR_4H';
+        } else {
+            alertType = newCrossState === 'bull' ? 'VOLUME_MOMENTUM_BULL_1H' : 'VOLUME_MOMENTUM_BEAR_1H';
+        }
+    }
+    
+    lastCrossState[symbolKey] = newCrossState;
+    saveVolumeMomentumMemory();
+    
+    if (shouldAlert) {
+        return alertType;
+    }
+    
+    return null;
+}
+
+// =====================================================================
+// === FUNÇÕES PARA FORMATAR MENSAGENS ===
+// =====================================================================
+function formatStochMessage(stoch4h, stoch1d) {
+    let msg = '';
+    if (stoch4h) {
+        msg += `Stoch 4H: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
+    }
+    if (stoch1d) {
+        msg += `Stoch 1D: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}\n`;
+    }
+    return msg;
+}
+
+function formatCCIMessage(cci4h, cci1d) {
+    let msg = '';
+    if (cci4h) {
+        msg += `CCI 4H: ${cci4h.crossStatus} ${cci4h.direction} ${cci4h.circle}\n`;
+    }
+    if (cci1d) {
+        msg += `CCI 1D: ${cci1d.crossStatus} ${cci1d.direction} ${cci1d.circle}\n`;
+    }
+    return msg;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA ANALISAR STOCH E GERAR ALERTA DE CONDIÇÃO ===
+// =====================================================================
+function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
+    let alertaStoch = '';
+    let condicaoFavoravel = true;
+    
+    if (zoneType === 'COMPRA') {
+        if (stoch4h && stoch4h.isOversold) {
+            alertaStoch = ` STOCH 4H  (K${stoch4h.k}) - BAIXO.`;
+            condicaoFavoravel = true;
+        } else if (stoch4h && stoch4h.isOverbought) {
+            alertaStoch = ` STOCH 4H  (K${stoch4h.k}) - ALTO.`;
+            condicaoFavoravel = false;
+        } else if (stoch4h && stoch4h.rawK < 30) {
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO. .`;
+            condicaoFavoravel = true;
+        } else if (stoch4h && stoch4h.rawK > 70) {
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO!`;
+            condicaoFavoravel = false;
+        } else {
+            alertaStoch = ` STOCH 4H  ${stoch4h.k} - NEUTRO.`;
+            condicaoFavoravel = true;
+        }
+        
+        if (stoch1d && stoch1d.isOversold) {
+            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - FORTALECE COMPRA!`;
+        } else if (stoch1d && stoch1d.isOverbought) {
+            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
+            condicaoFavoravel = false;
+        }
+        
+    } else if (zoneType === 'VENDA') {
+        if (stoch4h && stoch4h.isOverbought) {
+            alertaStoch = ` STOCH 4H ALTO (K${stoch4h.k}) - FAVORÁVEL PARA VENDA!.`;
+            condicaoFavoravel = true;
+        } else if (stoch4h && stoch4h.isOversold) {
+            alertaStoch = ` STOCH 4H BAIXO (K${stoch4h.k}) - NÃO FAVORÁVEL PARA VENDA!.`;
+            condicaoFavoravel = false;
+        } else if (stoch4h && stoch4h.rawK > 70) {
+            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE VENDA.`;
+            condicaoFavoravel = true;
+        } else if (stoch4h && stoch4h.rawK < 30) {
+            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE COMPRA!`;
+            condicaoFavoravel = false;
+        } else {
+            alertaStoch = ` STOCH 4H ${stoch4h.k} .`;
+            condicaoFavoravel = true;
+        }
+        
+        if (stoch1d && stoch1d.isOverbought) {
+            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - FORTALECE VENDA!`;
+        } else if (stoch1d && stoch1d.isOversold) {
+            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
+            condicaoFavoravel = false;
+        }
+    }
+    
+    return { alertaStoch, condicaoFavoravel };
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR EMA ===
+// =====================================================================
+function calculateEMA(prices, period) {
+    if (prices.length < period) return null;
+    const multiplier = 2 / (period + 1);
+    let ema = prices[0];
+    for (let i = 1; i < prices.length; i++) {
+        ema = (prices[i] - ema) * multiplier + ema;
+    }
+    return ema;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR RSI ===
+// =====================================================================
+function calculateRSI(prices, period = 14) {
+    if (prices.length < period + 1) return null;
+    
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+        const change = prices[i] - prices[i - 1];
+        if (change >= 0) gains += change;
+        else losses -= change;
+    }
+    
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    const rsiValues = [null];
+    const firstRSI = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+    rsiValues.push(firstRSI);
+    
+    for (let i = period + 1; i < prices.length; i++) {
+        const change = prices[i] - prices[i - 1];
+        if (change >= 0) {
+            avgGain = (avgGain * (period - 1) + change) / period;
+            avgLoss = (avgLoss * (period - 1)) / period;
+        } else {
+            avgGain = (avgGain * (period - 1)) / period;
+            avgLoss = (avgLoss * (period - 1) - change) / period;
+        }
+        const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+        rsiValues.push(rsi);
+    }
+    return rsiValues;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR BOLLINGER BANDS ===
+// =====================================================================
+function calculateBollingerBands(prices, period = 20, stdDev = 2.2) {
+    if (prices.length < period) return null;
+    
+    const recentPrices = prices.slice(-period);
+    const sma = recentPrices.reduce((a, b) => a + b, 0) / period;
+    
+    const squaredDiffs = recentPrices.map(p => Math.pow(p - sma, 2));
+    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / period;
+    const standardDeviation = Math.sqrt(variance);
+    
+    return {
+        sma: sma,
+        upper: sma + (stdDev * standardDeviation),
+        lower: sma - (stdDev * standardDeviation)
+    };
+}
+
+// =====================================================================
+// === FUNÇÃO PARA VERIFICAR BOLLINGER TOUCH ===
+// =====================================================================
+async function checkBollingerTouch(symbol, type) {
+    try {
+        const now = Date.now();
+        const cached = bollingerCache.get(symbol);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const candles = await getCandles(symbol, CONFIG.MONITOR.BOLLINGER.TIMEFRAME, CONFIG.MONITOR.BOLLINGER.PERIOD + 10);
+        if (!candles || candles.length < CONFIG.MONITOR.BOLLINGER.PERIOD) return false;
+        
+        const prices = candles.map(c => c.close);
+        const bollinger = calculateBollingerBands(prices, CONFIG.MONITOR.BOLLINGER.PERIOD, CONFIG.MONITOR.BOLLINGER.STD_DEVIATION);
+        if (!bollinger) return false;
+        
+        const currentPrice = prices[prices.length - 1];
+        const threshold = CONFIG.MONITOR.BOLLINGER.TOUCH_THRESHOLD;
+        
+        let result = false;
+        
+        if (type === 'buy') {
+            const lowerBand = bollinger.lower;
+            const distance = (lowerBand - currentPrice) / currentPrice;
+            result = currentPrice <= lowerBand || (distance > 0 && distance <= threshold);
+        } else {
+            const upperBand = bollinger.upper;
+            const distance = (currentPrice - upperBand) / currentPrice;
+            result = currentPrice >= upperBand || (distance > 0 && distance <= threshold);
+        }
+        
+        bollingerCache.set(symbol, {
+            data: result,
+            timestamp: now
+        });
+        
+        return result;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA VERIFICAR TENDÊNCIA DO LSR ===
+// =====================================================================
+async function getLSRTrend(symbol) {
+    try {
+        const now = Date.now();
+        const cached = lsrTrendCache.get(symbol);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const period = CONFIG.MONITOR.LSR_15M_PERIOD;
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (!data || data.length < 2) {
+            return { trend: 'stable', changePercent: 0 };
+        }
+        
+        const currentLSR = parseFloat(data[0].longShortRatio);
+        const previousLSR = parseFloat(data[1].longShortRatio);
+        
+        const changePercent = ((currentLSR - previousLSR) / previousLSR) * 100;
+        
+        let trend = 'stable';
+        if (changePercent > CONFIG.MONITOR.LSR_TREND_THRESHOLD) {
+            trend = 'rising';
+        } else if (changePercent < -CONFIG.MONITOR.LSR_TREND_THRESHOLD) {
+            trend = 'falling';
+        }
+        
+        const result = { trend, changePercent, currentLSR, previousLSR };
+        
+        lsrTrendCache.set(symbol, {
+            data: result,
+            timestamp: now
+        });
+        
+        return result;
+    } catch (error) {
+        return { trend: 'stable', changePercent: 0 };
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA ENCONTRAR PIVÔS ===
+// =====================================================================
+function findPivots(data, lookback = 3) {
+    const pivots = { highs: [], lows: [] };
+    
+    for (let i = lookback; i < data.length - lookback; i++) {
+        let isHigh = true;
+        let isLow = true;
+        
+        for (let j = 1; j <= lookback; j++) {
+            if (data[i] <= data[i - j] || data[i] <= data[i + j]) isHigh = false;
+            if (data[i] >= data[i - j] || data[i] >= data[i + j]) isLow = false;
+        }
+        
+        if (isHigh) pivots.highs.push({ index: i, value: data[i] });
+        if (isLow) pivots.lows.push({ index: i, value: data[i] });
+    }
+    
+    return pivots;
+}
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR DIVERGÊNCIAS ===
+// =====================================================================
+function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
+    const divergences = { bullish: [], bearish: [] };
+    
+    if (prices.length < 30 || rsiValues.length < 30) return divergences;
+    
+    const pricePivots = findPivots(prices, 3);
+    const rsiPivots = findPivots(rsiValues, 3);
+    
+    for (let i = 0; i < pricePivots.lows.length; i++) {
+        for (let j = i + 1; j < pricePivots.lows.length; j++) {
+            const priceLow1 = pricePivots.lows[i];
+            const priceLow2 = pricePivots.lows[j];
+            
+            const priceLower = priceLow2.value < priceLow1.value;
+            
+            if (priceLower) {
+                const rsiLow1 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow1.index) <= 2);
+                const rsiLow2 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow2.index) <= 2);
+                
+                if (rsiLow1 && rsiLow2) {
+                    const rsiHigher = rsiLow2.value > rsiLow1.value;
+                    const strength = Math.abs(priceLow2.value - priceLow1.value) / priceLow1.value * 100;
+                    
+                    if (rsiHigher && strength >= CONFIG.MONITOR.RSI.MIN_DIVERGENCE_STRENGTH) {
+                        let volumeScore = 0;
+                        let volumeConfirmed = false;
+                        
+                        if (volumeProfile && volumeProfile.dominant === 'buyers') {
+                            volumeScore = Math.floor(volumeProfile.dominantRatio / 10);
+                            volumeScore = Math.min(volumeScore, 9);
+                            volumeConfirmed = volumeProfile.dominantRatio >= CONFIG.MONITOR.RSI.MIN_VOLUME_CONFIRMATION;
+                        }
+                        
+                        divergences.bullish.push({
+                            type: 'bullish',
+                            strength: strength,
+                            volumeScore: volumeScore,
+                            volumeConfirmed: volumeConfirmed
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    for (let i = 0; i < pricePivots.highs.length; i++) {
+        for (let j = i + 1; j < pricePivots.highs.length; j++) {
+            const priceHigh1 = pricePivots.highs[i];
+            const priceHigh2 = pricePivots.highs[j];
+            
+            const priceHigher = priceHigh2.value > priceHigh1.value;
+            
+            if (priceHigher) {
+                const rsiHigh1 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh1.index) <= 2);
+                const rsiHigh2 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh2.index) <= 2);
+                
+                if (rsiHigh1 && rsiHigh2) {
+                    const rsiLower = rsiHigh2.value < rsiHigh1.value;
+                    const strength = Math.abs(priceHigh2.value - priceHigh1.value) / priceHigh1.value * 100;
+                    
+                    if (rsiLower && strength >= CONFIG.MONITOR.RSI.MIN_DIVERGENCE_STRENGTH) {
+                        let volumeScore = 0;
+                        let volumeConfirmed = false;
+                        
+                        if (volumeProfile && volumeProfile.dominant === 'sellers') {
+                            volumeScore = Math.floor(volumeProfile.dominantRatio / 10);
+                            volumeScore = Math.min(volumeScore, 9);
+                            volumeConfirmed = volumeProfile.dominantRatio >= CONFIG.MONITOR.RSI.MIN_VOLUME_CONFIRMATION;
+                        }
+                        
+                        divergences.bearish.push({
+                            type: 'bearish',
+                            strength: strength,
+                            volumeScore: volumeScore,
+                            volumeConfirmed: volumeConfirmed
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    return divergences;
+}
+
+// =====================================================================
+// === ANALISAR DIVERGÊNCIAS ===
+// =====================================================================
+async function analyzeDivergences(symbol, cvdManager) {
+    const cacheKey = `${symbol}_divergences`;
+    const now = Date.now();
+    const cached = divergenceCache.get(cacheKey);
+    
+    if (cached && (now - cached.timestamp) < 300000) {
+        return cached.data;
+    }
+    
+    const result = {
+        hasBullishDivergence: false,
+        hasBearishDivergence: false,
+        bullishTimeframes: [],
+        bearishTimeframes: [],
+        bestBullishVolumeScore: 0,
+        bestBearishVolumeScore: 0,
+        hasBullish15mPlusOther: false,
+        hasBearish15mPlusOther: false
+    };
+    
+    const volumeProfile = cvdManager.getVolumeProfile(symbol, 5);
+    
+    let bullishOn15m = false;
+    let bearishOn15m = false;
+    let bullishOtherTimeframes = [];
+    let bearishOtherTimeframes = [];
+    
+    for (const timeframe of CONFIG.MONITOR.RSI.TIMEFRAMES) {
+        try {
+            const candles = await getCandles(symbol, timeframe, CONFIG.MONITOR.RSI.LOOKBACK_CANDLES);
+            if (!candles || candles.length < 50) continue;
+            
+            const prices = candles.map(c => c.close);
+            const rsi = calculateRSI(prices, CONFIG.MONITOR.RSI.PERIOD);
+            if (!rsi || rsi.length < 50) continue;
+            
+            const divergences = findRSIDivergences(prices, rsi, volumeProfile);
+            
+            if (divergences.bullish.length > 0) {
+                result.hasBullishDivergence = true;
+                result.bullishTimeframes.push(timeframe);
+                
+                const maxVolumeScore = Math.max(...divergences.bullish.map(d => d.volumeScore));
+                if (maxVolumeScore > result.bestBullishVolumeScore) {
+                    result.bestBullishVolumeScore = maxVolumeScore;
+                }
+                
+                if (timeframe === '15m') {
+                    bullishOn15m = true;
+                } else {
+                    bullishOtherTimeframes.push(timeframe);
+                }
+            }
+            
+            if (divergences.bearish.length > 0) {
+                result.hasBearishDivergence = true;
+                result.bearishTimeframes.push(timeframe);
+                
+                const maxVolumeScore = Math.max(...divergences.bearish.map(d => d.volumeScore));
+                if (maxVolumeScore > result.bestBearishVolumeScore) {
+                    result.bestBearishVolumeScore = maxVolumeScore;
+                }
+                
+                if (timeframe === '15m') {
+                    bearishOn15m = true;
+                } else {
+                    bearishOtherTimeframes.push(timeframe);
+                }
+            }
+            
+        } catch (error) {}
+    }
+    
+    result.hasBullish15mPlusOther = bullishOn15m && bullishOtherTimeframes.length > 0;
+    result.hasBearish15mPlusOther = bearishOn15m && bearishOtherTimeframes.length > 0;
+    
+    divergenceCache.set(cacheKey, {
+        data: result,
+        timestamp: now
+    });
+    
+    return result;
+}
+
+// =====================================================================
+// === BUSCAR CANDLES ===
+// =====================================================================
+async function getCandles(symbol, interval, limit = 100) {
+    try {
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!Array.isArray(data)) return [];
+        
+        return data.map(candle => ({
+            open: parseFloat(candle[1]), 
+            high: parseFloat(candle[2]), 
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]), 
+            volume: parseFloat(candle[5]), 
+            time: candle[0]
+        }));
+    } catch (error) {
+        return [];
+    }
+}
+
+// =====================================================================
+// === OBTER RSI 1h ===
+// =====================================================================
+async function getRSIForSymbol(symbol) {
+    try {
+        const now = Date.now();
+        const cached = rsiCache.get(symbol);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.value;
+        }
+        
+        const candles = await getCandles(symbol, '1h', 50);
+        if (!candles || candles.length < 30) return null;
+        
+        const prices = candles.map(c => c.close);
+        const rsi = calculateRSI(prices, 14);
+        if (!rsi || rsi.length === 0) return null;
+        
+        const rsiValue = rsi[rsi.length - 1];
+        
+        rsiCache.set(symbol, {
+            value: rsiValue,
+            timestamp: now
+        });
+        
+        return rsiValue;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =====================================================================
+// === EMOJI BASEADO NO RSI ===
+// =====================================================================
+function getRSIEmoji(rsiValue) {
+    if (rsiValue === null || rsiValue === undefined) return '⚪';
+    if (rsiValue < 20) return '🔵';
+    if (rsiValue <= 30) return '🟢';
+    if (rsiValue <= 45) return '🟡';
+    if (rsiValue <= 58) return '🟠';
+    if (rsiValue <= 75) return '🔴';
+    return '🔥';
+}
+
+// =====================================================================
+// === BUSCAR TODOS OS SÍMBOLOS ===
+// =====================================================================
+async function getAllSymbols() {
+    try {
+        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+        const data = await res.json();
+        const filtered = data.filter(i => 
+            i.symbol.endsWith('USDT') && 
+            parseFloat(i.quoteVolume) >= CONFIG.MONITOR.MIN_VOLUME_USDT && 
+            !CONFIG.MONITOR.EXCLUDE_SYMBOLS.includes(i.symbol)
+        ).slice(0, CONFIG.MONITOR.MAX_SYMBOLS);
+        
+        return filtered.map(i => ({
+            symbol: i.symbol,
+            price: parseFloat(i.lastPrice),
+            volume24h: parseFloat(i.quoteVolume)
+        }));
+    } catch (error) {
+        log(`Erro ao buscar símbolos: ${error.message}`, 'error');
+        return [];
+    }
+}
+
+// =====================================================================
+// === BUSCAR FUNDING RATES ===
+// =====================================================================
+async function getFundingRates(symbols) {
+    try {
+        const res = await fetch('https://fapi.binance.com/fapi/v1/premiumIndex');
+        const data = await res.json();
+        const result = {};
+        for (const i of data) {
+            if (symbols.includes(i.symbol)) {
+                result[i.symbol] = parseFloat(i.lastFundingRate);
+            }
+        }
+        return result;
+    } catch (error) {
+        log(`Erro funding: ${error.message}`, 'error');
+        return {};
+    }
+}
+
+// =====================================================================
+// === BUSCAR LSR ===
+// =====================================================================
+async function getLSRData(symbols) {
+    try {
+        const period = CONFIG.MONITOR.LSRS_PERIOD;
+        const promises = symbols.map(async s => {
+            try {
+                const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${s}&period=${period}&limit=1`;
+                const res = await fetch(url);
+                const data = await res.json();
+                return { symbol: s, lsr: data && data.length ? parseFloat(data[0].longShortRatio) : null };
+            } catch {
+                return { symbol: s, lsr: null };
+            }
+        });
+        const results = await Promise.all(promises);
+        const result = {};
+        for (const i of results) {
+            result[i.symbol] = i.lsr;
+        }
+        return result;
+    } catch (error) {
+        log(`Erro LSR: ${error.message}`, 'error');
+        return {};
+    }
+}
+
+// =====================================================================
+// === CVD MANAGER VIA WEBSOCKET ===
+// =====================================================================
+class CVDManager {
+    constructor() {
+        this.cvdData = new Map();
+        this.subscribedSymbols = new Set();
+        this.reconnectAttempts = new Map();
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 5000;
+    }
+
+    subscribeToSymbol(symbol) {
+        if (this.subscribedSymbols.has(symbol)) return;
+        
+        this.subscribedSymbols.add(symbol);
+        
+        this.cvdData.set(symbol, {
+            value: 0,
+            history: [],
+            lastUpdate: Date.now(),
+            buyVolume: 0,
+            sellVolume: 0,
+            lastPrice: null,
+            ws: null,
+            connected: false,
+            direction: '',
+            directionChange: 0
+        });
+        
+        this.connectWebSocket(symbol);
+    }
+    
+    connectWebSocket(symbol) {
+        const symbolLower = symbol.toLowerCase();
+        const wsUrl = `wss://fstream.binance.com/ws/${symbolLower}@aggTrade`;
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.on('open', () => {
+            this.reconnectAttempts.set(symbol, 0);
+            const data = this.cvdData.get(symbol);
+            if (data) {
+                data.ws = ws;
+                data.connected = true;
+            }
+        });
+        
+        ws.on('message', (data) => {
+            try {
+                const trade = JSON.parse(data);
+                this.processTrade(symbol, trade);
+            } catch (error) {}
+        });
+        
+        ws.on('error', () => {
+            this.handleDisconnect(symbol);
+        });
+        
+        ws.on('close', () => {
+            this.handleDisconnect(symbol);
+        });
+        
+        const data = this.cvdData.get(symbol);
+        if (data) data.ws = ws;
+    }
+    
+    processTrade(symbol, trade) {
+        const volume = parseFloat(trade.q);
+        const isBuyerMaker = trade.m;
+        const delta = isBuyerMaker ? -volume : +volume;
+        
+        const data = this.cvdData.get(symbol);
+        if (!data) return;
+        
+        data.value += delta;
+        data.lastUpdate = Date.now();
+        data.lastPrice = parseFloat(trade.p);
+        
+        if (delta > 0) data.buyVolume += volume;
+        else data.sellVolume += volume;
+        
+        data.history.push({
+            timestamp: Date.now(),
+            delta: delta,
+            volume: volume,
+            cvd: data.value
+        });
+        
+        if (data.history.length > 1000) data.history.shift();
+        this.updateDirection(symbol);
+    }
+    
+    updateDirection(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data || data.history.length < 10) return;
+        
+        const now = Date.now();
+        const cutoff = now - (CONFIG.MONITOR.CVD.CVD_CHANGE_WINDOW * 1000);
+        
+        let oldCVD = null;
+        for (let i = data.history.length - 1; i >= 0; i--) {
+            if (data.history[i].timestamp <= cutoff) {
+                oldCVD = data.history[i];
+                break;
+            }
+        }
+        
+        if (!oldCVD) return;
+        
+        const change = data.value - oldCVD.cvd;
+        const changePercent = Math.abs(change / (Math.abs(oldCVD.cvd) || 1)) * 100;
+        
+        if (change > 0 && changePercent >= 1) data.direction = '⤴️';
+        else if (change < 0 && changePercent >= 1) data.direction = '⤵️';
+        else data.direction = '';
+    }
+    
+    handleDisconnect(symbol) {
+        const attempts = this.reconnectAttempts.get(symbol) || 0;
+        
+        if (attempts < this.maxReconnectAttempts) {
+            const delay = this.reconnectDelay * Math.pow(2, attempts);
+            setTimeout(() => {
+                this.reconnectAttempts.set(symbol, attempts + 1);
+                this.connectWebSocket(symbol);
+            }, delay);
+        } else {
+            const data = this.cvdData.get(symbol);
+            if (data && data.ws) {
+                try { data.ws.terminate(); } catch(e) {}
+            }
+        }
+    }
+    
+    unsubscribeFromSymbol(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (data && data.ws) {
+            try { data.ws.close(); data.ws.terminate(); } catch(e) {}
+        }
+        this.subscribedSymbols.delete(symbol);
+        this.cvdData.delete(symbol);
+    }
+    
+    getCVD(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return null;
+        return { direction: data.direction };
+    }
+    
+    getCVDValue(symbol) {
+        const data = this.cvdData.get(symbol);
+        if (!data) return '';
+        return data.direction;
+    }
+    
+    getVolumeProfile(symbol, minutesAgo = 5) {
+        const data = this.cvdData.get(symbol);
+        if (!data || data.history.length === 0) return null;
+        
+        const now = Date.now();
+        const cutoff = now - (minutesAgo * 60 * 1000);
+        
+        let buyVolume = 0, sellVolume = 0, totalVolume = 0;
+        
+        for (const trade of data.history) {
+            if (trade.timestamp >= cutoff) {
+                if (trade.delta > 0) buyVolume += trade.volume;
+                else sellVolume += trade.volume;
+                totalVolume += trade.volume;
+            }
+        }
+        
+        if (totalVolume === 0) return null;
+        
+        const buyerRatio = (buyVolume / totalVolume) * 100;
+        const sellerRatio = (sellVolume / totalVolume) * 100;
+        
+        return {
+            buyerRatio: buyerRatio,
+            sellerRatio: sellerRatio,
+            totalVolume: totalVolume,
+            dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
+            dominantRatio: Math.max(buyerRatio, sellerRatio)
+        };
+    }
+    
+    cleanup() {
+        for (const symbol of this.subscribedSymbols) {
+            this.unsubscribeFromSymbol(symbol);
         }
     }
 }
 
 // =====================================================================
-// === INICIALIZAÇÃO ===
+// === FUNÇÕES AUXILIARES ===
 // =====================================================================
-async function startBot() {
-    console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM - Real-Time Alert System');
-    console.log('='.repeat(70) + '\n');
-    
-    console.log('📅 Inicializando...');
-    console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`📱 Telegram Chat ID: ${CONFIG.TELEGRAM.CHAT_ID ? '✅' : '❌'}`);
-    console.log(`⏱️ Scan a cada: ${CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS}s`);
-    console.log(`🎯 Score mínimo: ${CONFIG.ALERTS.MIN_SCORE}`);
-    console.log(`📊 Filtro RSI: Compra < ${CONFIG.RSI.BUY_MAX} | Venda > ${CONFIG.RSI.SELL_MIN}`);
-    console.log(`🛡️ Cooldown: ${CONFIG.PERFORMANCE.COOLDOWN_MINUTES}min`);
-    console.log(`📊 Máx alertas/scan: ${CONFIG.ALERTS.MAX_ALERTS_PER_SCAN}`);
-    console.log(`📊 Máx alertas/dia/moeda: ${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} (reset às 21:00)`);
-    console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}\n`);
-    
-    // Mensagem de inicialização SUPER SIMPLES
-    const initMessage = `🤖 Titanium Ativado - Sistema pronto!`;
-    
-    const sent = await sendTelegramAlert(initMessage);
-    if (sent) {
-        console.log('✅ Bot inicializado! Mensagem de confirmação enviada.');
-    } else {
-        console.log('⚠️ Bot inicializado mas falha ao enviar mensagem de confirmação.');
-    }
-    
-    console.log('\n🔍 Iniciando scanner em tempo real...\n');
-    
-    await realTimeScanner();
+function getBrazilianDateTime() {
+    const now = new Date();
+    const brazilTime = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
+    const time = brazilTime.toISOString().split('T')[1].split('.')[0];
+    return { date, time, full: `${date} ${time}` };
+}
+
+function formatPrice(price) {
+    if (!price || isNaN(price)) return '-';
+    if (price > 1000) return price.toFixed(2);
+    if (price > 1) return price.toFixed(4);
+    if (price > 0.1) return price.toFixed(5);
+    if (price > 0.01) return price.toFixed(6);
+    return price.toFixed(8);
+}
+
+function log(message, type = 'info') {
+    const timestamp = new Date().toISOString();
+    const icons = { error: '❌', success: '✅', warning: '⚠️', info: 'ℹ️', alert: '🚨' };
+    console.log(`${icons[type] || 'ℹ️'} [${timestamp}] ${message}`);
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // =====================================================================
-// === HANDLERS DE ERRO MELHORADOS ===
+// === VERIFICAR CRITÉRIOS E ENVIAR ALERTA (ALTCOINS) ===
 // =====================================================================
-process.on('uncaughtException', async (err) => {
-    console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
-    console.error('Stack:', err.stack);
-    
-    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s`;
-    
-    await sendTelegramAlert(errorMessage);
-    
-    setTimeout(() => {
-        console.log('🔄 Reiniciando bot...');
-        process.exit(1);
-    }, 60000);
-});
-
-process.on('unhandledRejection', async (reason) => {
-    console.error('\n❌ UNHANDLED REJECTION:', reason);
-    
-    if (reason.message && reason.message.includes('telegram')) {
-        console.log('⚠️ Erro no Telegram ignorado, continuando execução...');
-    }
-});
-
-// =====================================================================
-// === START ===
-// =====================================================================
-console.log('🚀 Iniciando Titanium Real-Time Alert System...');
-startBot().catch(async error => {
-    console.error('❌ Erro fatal:', error);
+async function checkAndAlert(symbolData, cvdManager) {
+    const { symbol: fullSymbol, price, volume24h } = symbolData;
+    const symbol = fullSymbol.replace('USDT', '');
     
     try {
-        await sendTelegramAlert(`❌ ERRO FATAL`);
-    } catch {}
+        const [funding, lsr, rsiValue, divergences, lsrTrendData] = await Promise.all([
+            getFundingRates([fullSymbol]).then(r => r[fullSymbol]),
+            getLSRData([fullSymbol]).then(r => r[fullSymbol]),
+            getRSIForSymbol(fullSymbol),
+            analyzeDivergences(fullSymbol, cvdManager),
+            getLSRTrend(fullSymbol)
+        ]);
+        
+        if (funding === undefined || !lsr || !rsiValue) return;
+        
+        const bollingerBuy = await checkBollingerTouch(fullSymbol, 'buy');
+        const bollingerSell = await checkBollingerTouch(fullSymbol, 'sell');
+        const cvd = cvdManager.getCVD(fullSymbol);
+        
+        // Buscar dados para 4h, 1h, 1d
+        const [stoch4h, stoch1d, cci4h, cci1d, stoch1h, cci1h] = await Promise.all([
+            calculateStochastic(fullSymbol, '4h'),
+            calculateStochastic(fullSymbol, '1d'),
+            calculateCCI(fullSymbol, '4h'),
+            calculateCCI(fullSymbol, '1d'),
+            calculateStochastic(fullSymbol, '1h'),
+            calculateCCI(fullSymbol, '1h')
+        ]);
+        
+        // Detectar cruzamentos para 4h e 1h
+        const volumeMomentumSignal4h = detectVolumeMomentumCross(fullSymbol, stoch4h, cci4h, '4h');
+        const volumeMomentumSignal1h = detectVolumeMomentumCross(fullSymbol, stoch1h, cci1h, '1h');
+        
+        const asset = {
+            symbol,
+            fullSymbol,
+            price,
+            funding,
+            fundingPercent: funding * 100,
+            lsr,
+            lsrTrend: lsrTrendData.trend,
+            rsi: rsiValue,
+            rsiEmoji: getRSIEmoji(rsiValue),
+            cvdDirection: cvd ? cvd.direction : '',
+            divergences,
+            bollingerBuy,
+            bollingerSell,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d,
+            stoch1h,
+            cci1h,
+            volumeMomentumSignal4h,
+            volumeMomentumSignal1h
+        };
+        
+        // Alertas para 4h
+        if (volumeMomentumSignal4h === 'VOLUME_MOMENTUM_BULL_4H' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL_4H')) {
+            await sendVolumeMomentumAlert(asset, 'BULL', '4h');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL_4H');
+            log(`🟢 VOLUME MOMENTUM BULL 4H: ${symbol}`, 'alert');
+            await delay(500);
+        }
+        
+        if (volumeMomentumSignal4h === 'VOLUME_MOMENTUM_BEAR_4H' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BEAR_4H')) {
+            await sendVolumeMomentumAlert(asset, 'BEAR', '4h');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BEAR_4H');
+            log(`🔴 VOLUME MOMENTUM BEAR 4H: ${symbol}`, 'alert');
+            await delay(500);
+        }
+        
+        // Alertas para 1h
+        if (volumeMomentumSignal1h === 'VOLUME_MOMENTUM_BULL_1H' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BULL_1H')) {
+            await sendVolumeMomentumAlert(asset, 'BULL', '1h');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BULL_1H');
+            log(`🟢 VOLUME MOMENTUM BULL 1H: ${symbol}`, 'alert');
+            await delay(500);
+        }
+        
+        if (volumeMomentumSignal1h === 'VOLUME_MOMENTUM_BEAR_1H' && canAlert(fullSymbol, 'VOLUME_MOMENTUM_BEAR_1H')) {
+            await sendVolumeMomentumAlert(asset, 'BEAR', '1h');
+            markAlerted(fullSymbol, 'VOLUME_MOMENTUM_BEAR_1H');
+            log(`🔴 VOLUME MOMENTUM BEAR 1H: ${symbol}`, 'alert');
+            await delay(500);
+        }
+        
+        const isBear = asset.divergences.hasBearish15mPlusOther &&
+                       asset.rsi > CONFIG.MONITOR.RSI.RSI_SELL_THRESHOLD &&
+                       asset.bollingerSell &&
+                       asset.lsr > 2.6 &&
+                       asset.funding > 0 &&
+                       asset.lsrTrend === 'rising';
+        
+        const isBull = asset.divergences.hasBullish15mPlusOther &&
+                       asset.rsi < CONFIG.MONITOR.RSI.RSI_BUY_THRESHOLD &&
+                       asset.bollingerBuy &&
+                       asset.lsr < 2.5 &&
+                       asset.funding < 0 &&
+                       asset.lsrTrend === 'falling';
+        
+        if (isBear && canAlert(fullSymbol, 'BEAR')) {
+            await sendAlert(asset, 'BEAR');
+            markAlerted(fullSymbol, 'BEAR');
+            log(`🔴 ALERTA BEAR: ${symbol}`, 'alert');
+        }
+        
+        if (isBull && canAlert(fullSymbol, 'BULL')) {
+            await sendAlert(asset, 'BULL');
+            markAlerted(fullSymbol, 'BULL');
+            log(`🟢 ALERTA BULL: ${symbol}`, 'alert');
+        }
+        
+    } catch (error) {
+        log(`Erro ao verificar ${fullSymbol}: ${error.message}`, 'error');
+    }
+}
+
+// =====================================================================
+// === ENVIAR ALERTA DE VOLUME MOMENTUM ===
+// === (Apenas Stoch 4H, Stoch 1D, CCI 4H, CCI 1D) ===
+// =====================================================================
+async function sendVolumeMomentumAlert(asset, type, timeframe) {
+    const dt = getBrazilianDateTime();
     
-    process.exit(1);
+    let message = '';
+    
+    if (type === 'BULL') {
+        message = `<i>🟢<b> VOLUME BULL ${timeframe.toUpperCase()} </b>\n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` ${dt.full}hs\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` CRUZAMENTO NO ${timeframe.toUpperCase()}:\n`;
+        message += ` • Stoch (K⤴️D) cruzou para CIMA\n`;
+        message += ` • CCI cruzou ⤴️ EMA para CIMA\n`;
+        message += `  Indicadores:\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n\n`;
+        
+        // Stoch 4H e 1D
+        if (asset.stoch4h) {
+            message += `Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        if (asset.stoch1d) {
+            message += `Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        // CCI 4H e 1D
+        if (asset.cci4h) {
+            message += `CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
+        }
+        if (asset.cci1d) {
+            message += `CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}\n`;
+        }
+        
+        message += ` Titanium Prime X by @J4Rviz</i>`;
+    } else {
+        message = `<i>🔴<b> VOLUME BEAR ${timeframe.toUpperCase()} </b>\n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` ${dt.full}hs\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` CRUZAMENTO NO ${timeframe.toUpperCase()}:\n`;
+        message += ` • Stoch (K⤵️D) cruzou para BAIXO\n`;
+        message += ` • CCI cruzou ⤵️ EMA para BAIXO\n`;
+        message += `  Indicadores:\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n\n`;
+        
+        // Stoch 4H e 1D
+        if (asset.stoch4h) {
+            message += `Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        if (asset.stoch1d) {
+            message += `Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        // CCI 4H e 1D
+        if (asset.cci4h) {
+            message += `CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
+        }
+        if (asset.cci1d) {
+            message += `CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}\n`;
+        }
+        
+        message += ` Titanium Prime X by @J4Rviz</i>`;
+    }
+    
+    await telegramQueue.add(message);
+}
+
+// =====================================================================
+// === ENVIAR ALERTA INDIVIDUAL PARA TELEGRAM (ALTCOINS) ===
+// === (Apenas Stoch 4H, Stoch 1D, CCI 4H, CCI 1D) ===
+// =====================================================================
+async function sendAlert(asset, type) {
+    const dt = getBrazilianDateTime();
+    
+    let message = '';
+    
+    if (type === 'BULL') {
+        message = `<i>🟢 Avaliar Reversão e Pontos de Entrada💹\n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 ' : '📈 '})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += ` RSI: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` Divergência: ${asset.divergences.bullishTimeframes.join(' → ')}\n\n`;
+        
+        // Stoch 4H e 1D
+        if (asset.stoch4h) {
+            message += `Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        if (asset.stoch1d) {
+            message += `Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        // CCI 4H e 1D
+        if (asset.cci4h) {
+            message += `CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
+        }
+        if (asset.cci1d) {
+            message += `CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}\n`;
+        }
+        
+        message += ` ${dt.full}</i>`;
+    } else {
+        message = `<i>🔴 Avaliar Correção e Pontos de Entrada🔻\n`;
+        message += ` Ativo: <code>${asset.symbol}</code>\n`;
+        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
+        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 ' : '📉 '})\n`;
+        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> \n`;
+        message += ` RSI: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
+        message += ` Divergência: ${asset.divergences.bearishTimeframes.join(' → ')}\n\n`;
+        
+        // Stoch 4H e 1D
+        if (asset.stoch4h) {
+            message += `Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
+        }
+        if (asset.stoch1d) {
+            message += `Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        }
+        
+        // CCI 4H e 1D
+        if (asset.cci4h) {
+            message += `CCI 4H: ${asset.cci4h.crossStatus} ${asset.cci4h.direction} ${asset.cci4h.circle}\n`;
+        }
+        if (asset.cci1d) {
+            message += `CCI 1D: ${asset.cci1d.crossStatus} ${asset.cci1d.direction} ${asset.cci1d.circle}\n`;
+        }
+        
+        message += ` ${dt.full}</i>`;
+    }
+    
+    await telegramQueue.add(message);
+}
+
+// =====================================================================
+// === VERIFICAR BTC POR TIMEFRAME INDIVIDUAL ===
+// =====================================================================
+async function checkBTCByTimeframe() {
+    try {
+        const symbol = 'BTCUSDT';
+        const results = {};
+        let hasChanges = false;
+        let changesList = [];
+        
+        for (const timeframe of CONFIG.MONITOR.BTC_MONITOR.TIMEFRAMES) {
+            const candles = await getCandles(symbol, timeframe, 100);
+            if (!candles || candles.length < 60) continue;
+            
+            const prices = candles.map(c => c.close);
+            const currentPrice = prices[prices.length - 1];
+            const ema = calculateEMA(prices, CONFIG.MONITOR.BTC_MONITOR.EMA_PERIOD);
+            
+            if (ema === null) continue;
+            
+            const isAbove = currentPrice > ema;
+            const distance = ((currentPrice - ema) / ema) * 100;
+            
+            results[timeframe] = {
+                currentPrice,
+                ema,
+                isAbove,
+                isBelow: !isAbove,
+                distance: distance.toFixed(2)
+            };
+            
+            const wasAbove = btcTimeframeState[timeframe]?.isAbove || false;
+            
+            if (wasAbove !== isAbove) {
+                hasChanges = true;
+                changesList.push({
+                    timeframe,
+                    wasAbove,
+                    isAbove,
+                    currentPrice,
+                    ema,
+                    distance: distance.toFixed(2)
+                });
+                console.log(` MUDANÇA DETECTADA no BTC ${timeframe}: ${wasAbove ? 'ACIMA' : 'ABAIXO'} → ${isAbove ? 'ACIMA' : 'ABAIXO'} (${distance.toFixed(2)}%)`);
+            }
+            
+            if (btcTimeframeState[timeframe]) {
+                btcTimeframeState[timeframe].isAbove = isAbove;
+                btcTimeframeState[timeframe].currentPrice = currentPrice;
+                btcTimeframeState[timeframe].emaValue = ema;
+                btcTimeframeState[timeframe].distance = distance;
+            }
+        }
+        
+        const [funding, lsr, rsiValue, lsrTrendData] = await Promise.all([
+            getFundingRates([symbol]).then(r => r[symbol]),
+            getLSRData([symbol]).then(r => r[symbol]),
+            getRSIForSymbol(symbol),
+            getLSRTrend(symbol)
+        ]);
+        
+        const bollingerBuy = await checkBollingerTouch(symbol, 'buy');
+        const bollingerSell = await checkBollingerTouch(symbol, 'sell');
+        const cvd = cvdManager.getCVDValue(symbol);
+        
+        const [stoch4h, stoch1d, cci4h, cci1d] = await Promise.all([
+            calculateStochastic(symbol, '4h'),
+            calculateStochastic(symbol, '1d'),
+            calculateCCI(symbol, '4h'),
+            calculateCCI(symbol, '1d')
+        ]);
+        
+        return {
+            results,
+            hasChanges,
+            changesList,
+            funding: funding || 0,
+            fundingPercent: (funding || 0) * 100,
+            lsr: lsr || 0,
+            lsrTrend: lsrTrendData.trend,
+            rsi: rsiValue,
+            cvdDirection: cvd,
+            bollingerBuy,
+            bollingerSell,
+            currentPrice: results[Object.keys(results)[0]]?.currentPrice || 0,
+            stoch4h,
+            stoch1d,
+            cci4h,
+            cci1d
+        };
+        
+    } catch (error) {
+        console.log(`❌ Erro ao verificar BTC: ${error.message}`);
+        return { hasChanges: false, changesList: [], results: {} };
+    }
+}
+
+// =====================================================================
+// === ENVIAR ALERTA DO BTC POR TIMEFRAME ===
+// =====================================================================
+async function sendBTCAlert(change, btcData) {
+    const dt = getBrazilianDateTime();
+    const direction = change.isAbove ? 'ACIMA' : 'ABAIXO';
+    const emoji = change.isAbove ? '🔴⤴️' : '🟢⤵️';
+    
+    let message = `<i>`;
+    message += `${emoji} <b>👑❅✧❅ BTC ❅✧❅👑  EMA 55 - ${change.timeframe}</b> ${emoji}\n`;
+    message += ` PREÇO ${direction} DA EMA 55\n\n`;
+    message += ` Timeframe: ${change.timeframe}\n`;
+    message += ` Preço Atual: ${formatPrice(change.currentPrice)} USDT\n`;
+    message += ` EMA 55: ${formatPrice(change.ema)} USDT\n`;
+    message += ` Distância: ${change.distance}%\n\n`;
+    
+    message += ` Timeframes:\n`;
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const tfEmoji = data.isAbove ? '⤴️' : '⤵️';
+        const tfStatus = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${tfEmoji} ${tf}: ${tfStatus} (${data.distance}%)\n`;
+    }
+    
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        if (btcData.stoch4h) {
+            message += `Stoch 4H: K${btcData.stoch4h.k}${btcData.stoch4h.kTrend} D${btcData.stoch4h.d}${btcData.stoch4h.dTrend} ${btcData.stoch4h.status}\n`;
+        }
+        if (btcData.stoch1d) {
+            message += `Stoch 1D: K${btcData.stoch1d.k}${btcData.stoch1d.kTrend} D${btcData.stoch1d.d}${btcData.stoch1d.dTrend} ${btcData.stoch1d.status}\n`;
+        }
+    }
+    
+    if (btcData.cci4h || btcData.cci1d) {
+        if (btcData.cci4h) {
+            message += `CCI 4H: ${btcData.cci4h.crossStatus} ${btcData.cci4h.direction} ${btcData.cci4h.circle}\n`;
+        }
+        if (btcData.cci1d) {
+            message += `CCI 1D: ${btcData.cci1d.crossStatus} ${btcData.cci1d.direction} ${btcData.cci1d.circle}\n`;
+        }
+    }
+    
+    if (btcData.bollingerBuy || btcData.bollingerSell) {
+        message += `\n Bollinger: ${btcData.bollingerBuy ? 'Toque na banda inferior ✅' : (btcData.bollingerSell ? 'Toque na banda superior ✅' : 'Neutro')}\n`;
+    }
+    
+    message += `\n ${dt.full}\n`;
+    message += `</i>`;
+    
+    await telegramQueue.add(message, true);
+    log(` ALERTA BTC ${change.timeframe}: ${direction} da EMA 55`, 'alert');
+}
+
+// =====================================================================
+// === ENVIAR STATUS INICIAL DO BTC ===
+// =====================================================================
+async function sendBTCInitialStatus(btcData) {
+    const dt = getBrazilianDateTime();
+    
+    let message = `<i>`;
+    message += `<b>👑❅✧❅ BTC ❅✧❅👑</b>\n`;
+    message += ` Preço Atual: ${formatPrice(btcData.currentPrice)} USDT\n`;
+    message += ` POSIÇÃO EM RELAÇÃO À EMA 55:\n`;
+    
+    for (const [tf, data] of Object.entries(btcData.results)) {
+        const emoji = data.isAbove ? '⤴️' : '⤵️';
+        const status = data.isAbove ? 'ACIMA' : 'ABAIXO';
+        message += `  ${emoji} ${tf}: ${status} (${data.distance}%)\n`;
+    }
+    
+    message += `\n Indicadores :\n`;
+    message += `  LSR: ${btcData.lsr.toFixed(2)} (${btcData.lsrTrend === 'rising' ? '📈 Subindo' : (btcData.lsrTrend === 'falling' ? '📉 Caindo' : '⏺ Estável')})\n`;
+    message += `  Funding: ${btcData.fundingPercent.toFixed(4)}% ${btcData.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
+    message += `  RSI (1h): ${btcData.rsi?.toFixed(1) || 'N/A'} ${getRSIEmoji(btcData.rsi)}\n`;
+    message += `  CVD: ${btcData.cvdDirection}\n\n`;
+    
+    if (btcData.stoch4h || btcData.stoch1d) {
+        if (btcData.stoch4h) {
+            message += `Stoch 4H: K${btcData.stoch4h.k}${btcData.stoch4h.kTrend} D${btcData.stoch4h.d}${btcData.stoch4h.dTrend} ${btcData.stoch4h.status}\n`;
+        }
+        if (btcData.stoch1d) {
+            message += `Stoch 1D: K${btcData.stoch1d.k}${btcData.stoch1d.kTrend} D${btcData.stoch1d.d}${btcData.stoch1d.dTrend} ${btcData.stoch1d.status}\n`;
+        }
+    }
+    
+    if (btcData.cci4h || btcData.cci1d) {
+        if (btcData.cci4h) {
+            message += `CCI 4H: ${btcData.cci4h.crossStatus} ${btcData.cci4h.direction} ${btcData.cci4h.circle}\n`;
+        }
+        if (btcData.cci1d) {
+            message += `CCI 1D: ${btcData.cci1d.crossStatus} ${btcData.cci1d.direction} ${btcData.cci1d.circle}\n`;
+        }
+    }
+    
+    message += `\nTitanium monitorando!\n`;
+    message += ` ${dt.full}\n`;
+    message += `</i>`;
+    
+    await telegramQueue.add(message, true);
+    log(`📢 STATUS INICIAL BTC ENVIADO`, 'alert');
+}
+
+// =====================================================================
+// === MONITOR ESPECÍFICO DO BTC ===
+// =====================================================================
+let lastBTCScan = 0;
+
+async function scanBTC() {
+    const now = Date.now();
+    const intervalMs = CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000;
+    
+    if (now - lastBTCScan < intervalMs) return;
+    lastBTCScan = now;
+    
+    try {
+        const btcData = await checkBTCByTimeframe();
+        
+        if (Object.keys(btcData.results).length === 0) {
+            console.log(`⚠️ BTC: Nenhum timeframe válido`);
+            return;
+        }
+        
+        if (!initialStatusSent) {
+            console.log(`📡 Enviando status inicial do BTC...`);
+            await sendBTCInitialStatus(btcData);
+            initialStatusSent = true;
+            saveBTCTimeframeState();
+            console.log(`✅ Status inicial BTC enviado com sucesso!`);
+        }
+        
+        if (btcData.hasChanges && btcData.changesList.length > 0) {
+            for (const change of btcData.changesList) {
+                if (canAlertBTC(change.timeframe)) {
+                    await sendBTCAlert(change, btcData);
+                    markBTCAlerted(change.timeframe);
+                    await delay(2000);
+                } else {
+                    console.log(`⏸️ BTC ${change.timeframe} em cooldown - alerta não enviado`);
+                }
+            }
+        }
+        
+        let statusLog = ` BTC Status: `;
+        for (const [tf, data] of Object.entries(btcData.results)) {
+            statusLog += `${tf}:${data.isAbove ? '🔼' : '🔽'} `;
+        }
+        console.log(statusLog);
+        
+    } catch (error) {
+        log(`Erro no scan BTC: ${error.message}`, 'error');
+    }
+}
+
+// =====================================================================
+// === MENSAGEM INICIAL ===
+// =====================================================================
+async function sendInitMessage() {
+    let msg = `<i><b> TITANIUM PRIME X </b>\n\n`;
+    msg += `✅ Sistema Iniciado!\n`;
+    msg += `📊 Monitorando Volume Momentum em 4h e 1h\n`;
+    msg += `📈 Alertas incluem: Stoch 4H/1D e CCI 4H/1D\n`;
+    
+    await telegramQueue.add(msg, true);
+}
+
+// =====================================================================
+// === MONITOR PRINCIPAL (SCAN CONTÍNUO) ===
+// =====================================================================
+const cvdManager = new CVDManager();
+let isScanning = false;
+
+async function scanAndAlert() {
+    if (isScanning) return;
+    isScanning = true;
+    
+    try {
+        const symbols = await getAllSymbols();
+        if (!symbols.length) return;
+        
+        log(`🔍 Escaneando ${symbols.length} símbolos...`, 'info');
+        
+        for (const s of symbols) {
+            if (!cvdManager.subscribedSymbols.has(s.symbol)) {
+                cvdManager.subscribeToSymbol(s.symbol);
+            }
+        }
+        
+        let alertCount = 0;
+        for (const symbolData of symbols) {
+            await checkAndAlert(symbolData, cvdManager);
+            alertCount++;
+            
+            if (alertCount % 10 === 0) {
+                await delay(100);
+            }
+        }
+        
+        log(`✅ Scan completo. ${alertCount} ativos verificados.`, 'success');
+        
+    } catch (error) {
+        log(`Erro no scan: ${error.message}`, 'error');
+    } finally {
+        isScanning = false;
+    }
+}
+
+// =====================================================================
+// === INICIAR MONITOR ===
+// =====================================================================
+async function startMonitor() {
+    console.log('\n' + '='.repeat(70));
+    console.log('🚀 TITANIUM PRIME X - COM ALERTAS 4h E 1h');
+    console.log('📊 Volume Momentum: Stochastic + CCI em 4h e 1h');
+    console.log('📈 Alertas incluem: Stoch 4H/1D e CCI 4H/1D');
+    console.log('='.repeat(70));
+    
+    loadAlertedSymbols();
+    loadBTCTimeframeState();
+    loadVolumeMomentumMemory();
+    
+    await sendInitMessage();
+    
+    cvdManager.subscribeToSymbol('BTCUSDT');
+    
+    console.log(`📡 Obtendo dados do BTC para status inicial...`);
+    const initialBTCData = await checkBTCByTimeframe();
+    if (Object.keys(initialBTCData.results).length > 0) {
+        console.log(`📡 Enviando status inicial do BTC...`);
+        await sendBTCInitialStatus(initialBTCData);
+        initialStatusSent = true;
+        saveBTCTimeframeState();
+        console.log(`✅ Status inicial BTC enviado !`);
+    } else {
+        console.log(`⚠️ Não foi possível obter dados do BTC para status inicial`);
+    }
+    
+    await scanAndAlert();
+    
+    setInterval(async () => {
+        await scanAndAlert();
+    }, CONFIG.MONITOR.SCAN_INTERVAL_SECONDS * 1000);
+    
+    setInterval(async () => {
+        await scanBTC();
+    }, CONFIG.MONITOR.BTC_MONITOR.CHECK_INTERVAL_SECONDS * 1000);
+}
+
+process.on('SIGINT', () => {
+    log('🛑 Desligando...', 'warning');
+    saveVolumeMomentumMemory();
+    cvdManager.cleanup();
+    process.exit(0);
 });
+
+startMonitor().catch(console.error);
