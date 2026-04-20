@@ -1,4 +1,3 @@
-const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
@@ -11,12 +10,12 @@ const ALERTED_FILE = path.join(__dirname, 'alertedSymbols.json');
 const FVG_MEMORY_FILE = path.join(__dirname, 'fvgMemory.json');
 
 // =====================================================================
-// === CONFIGURAÇÃO ===
+// === CONFIGURAÇÃO COM STOP DEFINITIVO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6Aavdg',
-        CHAT_ID: '-1002559',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         MESSAGE_DELAY_MS: 18000,
         MAX_MESSAGES_PER_MINUTE: 20,
         BURST_DELAY_MS: 10000,
@@ -44,6 +43,7 @@ const CONFIG = {
             TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h'],
             LOOKBACK_CANDLES: 100,
             MIN_DIVERGENCE_STRENGTH: 3,
+            MIN_CONVERGENCE_STRENGTH: 2,
             MIN_VOLUME_CONFIRMATION: 55,
             RSI_BUY_THRESHOLD: 60,
             RSI_SELL_THRESHOLD: 50
@@ -55,12 +55,79 @@ const CONFIG = {
         FVG: {
             REQUIRED_CANDLE_CLOSE: true,
             CONFIRMATION_CANDLES: 1
+        },
+        STOP_LOSS: {
+            ATR_PERIOD: 14,
+            ATR_MULTIPLIER: 3.0,
+            MIN_STOP_PERCENT: 3.5,
+            MAX_STOP_PERCENT: 12.0,
+            STRUCTURE_BUFFER: 0.003
+        },
+        TAKE_PROFIT: {
+            RISK_REWARD_RATIOS: [1.5, 2.5, 4.0],
+            PARTIAL_CLOSE_PERCENTS: [25, 25, 50]
         }
     }
 };
 
 // =====================================================================
-// === MEMÓRIA DE FVG (RASTREIA FVGS JÁ CONFIRMADOS) ===
+// === RATE LIMITER GLOBAL ===
+// =====================================================================
+class RateLimiter {
+    constructor(maxRequestsPerMinute = 1200) {
+        this.maxRequests = maxRequestsPerMinute;
+        this.requests = [];
+        this.pendingRequests = [];
+        this.isProcessing = false;
+    }
+
+    async acquire() {
+        return new Promise((resolve) => {
+            this.pendingRequests.push(resolve);
+            if (!this.isProcessing) {
+                this.processQueue();
+            }
+        });
+    }
+
+    async processQueue() {
+        if (this.isProcessing) return;
+        this.isProcessing = true;
+
+        while (this.pendingRequests.length > 0) {
+            const now = Date.now();
+            const windowStart = now - 60000;
+            
+            this.requests = this.requests.filter(t => t > windowStart);
+            
+            if (this.requests.length >= this.maxRequests) {
+                const oldestRequest = this.requests[0];
+                const waitTime = 60000 - (now - oldestRequest);
+                if (waitTime > 0) {
+                    await this.delay(waitTime + 100);
+                }
+                continue;
+            }
+            
+            const resolve = this.pendingRequests.shift();
+            this.requests.push(Date.now());
+            resolve();
+            
+            await this.delay(50);
+        }
+        
+        this.isProcessing = false;
+    }
+
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
+const rateLimiter = new RateLimiter(1100);
+
+// =====================================================================
+// === MEMÓRIA DE FVG ===
 // =====================================================================
 let fvgMemory = {
     confirmedBullFVG: {},
@@ -94,10 +161,13 @@ function saveFVGMemory() {
 // =====================================================================
 const rsiCache = new Map();
 const divergenceCache = new Map();
+const convergenceCache = new Map();
 const lsrTrendCache = new Map();
 const stochCache = new Map();
 const cciCache = new Map();
 const alertedSymbols = new Map();
+const atrCache = new Map();
+const candlesCache = new Map();
 
 function loadAlertedSymbols() {
     try {
@@ -142,7 +212,7 @@ function markAlerted(symbol, type) {
 }
 
 // =====================================================================
-// === SISTEMA DE FILA PARA TELEGRAM (RATE LIMITING) ===
+// === SISTEMA DE FILA PARA TELEGRAM ===
 // =====================================================================
 class TelegramQueue {
     constructor() {
@@ -179,12 +249,12 @@ class TelegramQueue {
             if (now - this.minuteResetTime >= 60000) {
                 this.messageCount = 0;
                 this.minuteResetTime = now;
-                console.log(`📊 Rate limit resetado. Próximo minuto.`);
+                console.log(`📊 Rate limit resetado.`);
             }
             
             if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE) {
                 const waitTime = 60000 - (now - this.minuteResetTime);
-                console.log(`⏳ Rate limit atingido (${this.messageCount}/${CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE}). Aguardando ${Math.ceil(waitTime / 1000)}s...`);
+                console.log(`⏳ Rate limit atingido. Aguardando ${Math.ceil(waitTime / 1000)}s...`);
                 await delay(waitTime + 1000);
                 continue;
             }
@@ -209,7 +279,6 @@ class TelegramQueue {
             }
             
             if (this.messageCount >= CONFIG.TELEGRAM.MAX_MESSAGES_PER_MINUTE * 0.8) {
-                console.log(`⚠️ Próximo do rate limit. Aguardando ${CONFIG.TELEGRAM.BURST_DELAY_MS / 1000}s...`);
                 await delay(CONFIG.TELEGRAM.BURST_DELAY_MS);
             }
         }
@@ -284,7 +353,7 @@ class TelegramQueue {
             
             if (attempt <= CONFIG.TELEGRAM.RETRY_COUNT) {
                 const waitTime = CONFIG.TELEGRAM.RETRY_DELAY_MS * attempt;
-                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s... (tentativa ${attempt + 1}/${CONFIG.TELEGRAM.RETRY_COUNT + 1})`);
+                console.log(`🔄 Tentando novamente em ${waitTime / 1000}s...`);
                 await delay(waitTime);
                 return this.sendWithRetry(message, attempt + 1);
             }
@@ -297,7 +366,162 @@ class TelegramQueue {
 const telegramQueue = new TelegramQueue();
 
 // =====================================================================
-// === FUNÇÕES PARA DETECÇÃO DE FVG (FAIR VALUE GAP) COM CONFIRMAÇÃO ===
+// === FUNÇÃO PARA CALCULAR ATR (AVERAGE TRUE RANGE) ===
+// =====================================================================
+async function calculateATR(symbol, timeframe = '1h', period = 14) {
+    try {
+        const cacheKey = `${symbol}_atr_${timeframe}`;
+        const now = Date.now();
+        const cached = atrCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const candles = await getCandles(symbol, timeframe, period + 10);
+        if (!candles || candles.length < period + 1) return null;
+        
+        const trueRanges = [];
+        
+        for (let i = 1; i < candles.length; i++) {
+            const high = candles[i].high;
+            const low = candles[i].low;
+            const prevClose = candles[i - 1].close;
+            
+            const tr1 = high - low;
+            const tr2 = Math.abs(high - prevClose);
+            const tr3 = Math.abs(low - prevClose);
+            
+            const trueRange = Math.max(tr1, tr2, tr3);
+            trueRanges.push(trueRange);
+        }
+        
+        const recentTR = trueRanges.slice(-period);
+        const atr = recentTR.reduce((a, b) => a + b, 0) / period;
+        const atrPercent = (atr / candles[candles.length - 1].close) * 100;
+        
+        const result = { atr, atrPercent };
+        
+        atrCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular ATR para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR TAKE PROFITS DINÂMICOS ===
+// =====================================================================
+function calculateDynamicTakeProfits(entryPrice, stopPrice, zoneType) {
+    const stopPercent = Math.abs((stopPrice - entryPrice) / entryPrice) * 100;
+    const riskAmount = Math.abs(entryPrice - stopPrice);
+    
+    const targets = [];
+    const ratios = CONFIG.MONITOR.TAKE_PROFIT.RISK_REWARD_RATIOS;
+    const partialPercents = CONFIG.MONITOR.TAKE_PROFIT.PARTIAL_CLOSE_PERCENTS;
+    
+    for (let i = 0; i < ratios.length; i++) {
+        let targetPrice;
+        let profitPercent;
+        
+        if (zoneType === 'COMPRA') {
+            targetPrice = entryPrice + (riskAmount * ratios[i]);
+            profitPercent = ((targetPrice - entryPrice) / entryPrice) * 100;
+        } else {
+            targetPrice = entryPrice - (riskAmount * ratios[i]);
+            profitPercent = ((entryPrice - targetPrice) / entryPrice) * 100;
+        }
+        
+        targets.push({
+            ratio: ratios[i],
+            price: targetPrice,
+            profitPercent: profitPercent,
+            partialClose: partialPercents[i]
+        });
+    }
+    
+    return {
+        targets,
+        stopPercent,
+        maxRatio: ratios[ratios.length - 1]
+    };
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOP LOSS INTELIGENTE (DEFINITIVA) ===
+// =====================================================================
+async function calculateSmartStopLoss(symbol, currentPrice, zoneType, structureData) {
+    try {
+        const atrData = await calculateATR(symbol, '1h', CONFIG.MONITOR.STOP_LOSS.ATR_PERIOD);
+        let atrStopPercent = CONFIG.MONITOR.STOP_LOSS.MIN_STOP_PERCENT;
+        
+        if (atrData && atrData.atrPercent) {
+            atrStopPercent = Math.min(
+                Math.max(atrData.atrPercent * CONFIG.MONITOR.STOP_LOSS.ATR_MULTIPLIER, 
+                        CONFIG.MONITOR.STOP_LOSS.MIN_STOP_PERCENT),
+                CONFIG.MONITOR.STOP_LOSS.MAX_STOP_PERCENT
+            );
+        }
+        
+        let structureStopPrice = null;
+        let structureStopPercent = null;
+        
+        if (zoneType === 'COMPRA' && structureData) {
+            if (structureData.closestSupport) {
+                structureStopPrice = structureData.closestSupport.targetPrice * (1 - CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((currentPrice - structureStopPrice) / currentPrice) * 100;
+            } else if (structureData.closestBullFVG) {
+                structureStopPrice = structureData.closestBullFVG.bottom * (1 - CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((currentPrice - structureStopPrice) / currentPrice) * 100;
+            }
+        } else if (zoneType === 'VENDA' && structureData) {
+            if (structureData.closestResistance) {
+                structureStopPrice = structureData.closestResistance.targetPrice * (1 + CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((structureStopPrice - currentPrice) / currentPrice) * 100;
+            } else if (structureData.closestBearFVG) {
+                structureStopPrice = structureData.closestBearFVG.top * (1 + CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((structureStopPrice - currentPrice) / currentPrice) * 100;
+            }
+        }
+        
+        let finalStopPercent = atrStopPercent;
+        let stopType = "ATR";
+        
+        if (structureStopPercent !== null && structureStopPercent > atrStopPercent) {
+            finalStopPercent = Math.min(structureStopPercent, CONFIG.MONITOR.STOP_LOSS.MAX_STOP_PERCENT);
+            stopType = "ESTRUTURA";
+        }
+        
+        finalStopPercent = Math.min(Math.max(finalStopPercent, 3.5), 12.0);
+        
+        let stopPrice;
+        if (zoneType === 'COMPRA') {
+            stopPrice = currentPrice * (1 - finalStopPercent / 100);
+        } else {
+            stopPrice = currentPrice * (1 + finalStopPercent / 100);
+        }
+        
+        return {
+            stopPrice: stopPrice,
+            stopPercent: finalStopPercent,
+            stopType: stopType,
+            atrUsed: atrStopPercent,
+            structureUsed: structureStopPercent
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular stop inteligente: ${error.message}`);
+        if (zoneType === 'COMPRA') {
+            return { stopPrice: currentPrice * 0.965, stopPercent: 3.5, stopType: "PADRÃO" };
+        } else {
+            return { stopPrice: currentPrice * 1.035, stopPercent: 3.5, stopType: "PADRÃO" };
+        }
+    }
+}
+
+// =====================================================================
+// === FUNÇÕES PARA DETECÇÃO DE FVG ===
 // =====================================================================
 
 function detectFVG(candles) {
@@ -317,10 +541,7 @@ function detectFVG(candles) {
                 bottom: candle3.high,
                 index: i,
                 time: candle1.time,
-                type: 'bull',
-                candle1Close: candle1.close,
-                candle2Close: candle2.close,
-                candle3Close: candle3.close
+                type: 'bull'
             });
         }
         
@@ -330,10 +551,7 @@ function detectFVG(candles) {
                 bottom: candle1.high,
                 index: i,
                 time: candle1.time,
-                type: 'bear',
-                candle1Close: candle1.close,
-                candle2Close: candle2.close,
-                candle3Close: candle3.close
+                type: 'bear'
             });
         }
     }
@@ -364,18 +582,14 @@ function checkFVGWithConfirmation(fvgs, currentPrice, currentCandles, type = nul
         const isConfirmed = isFVGConfirmed(fvg, currentCandles);
         
         let distance;
-        let isAbove = false;
-        let isBelow = false;
         let targetPrice = null;
         
         if (fvg.type === 'bull') {
             targetPrice = fvg.bottom;
             if (currentPrice < targetPrice) {
                 distance = ((targetPrice - currentPrice) / currentPrice) * 100;
-                isBelow = true;
             } else if (currentPrice > fvg.top) {
                 distance = ((currentPrice - fvg.top) / currentPrice) * 100;
-                isAbove = true;
             } else if (currentPrice >= targetPrice && currentPrice <= fvg.top) {
                 distance = 0;
             } else {
@@ -385,10 +599,8 @@ function checkFVGWithConfirmation(fvgs, currentPrice, currentCandles, type = nul
             targetPrice = fvg.top;
             if (currentPrice > targetPrice) {
                 distance = ((currentPrice - targetPrice) / currentPrice) * 100;
-                isAbove = true;
             } else if (currentPrice < fvg.bottom) {
                 distance = ((fvg.bottom - currentPrice) / currentPrice) * 100;
-                isBelow = true;
             } else if (currentPrice >= fvg.bottom && currentPrice <= targetPrice) {
                 distance = 0;
             } else {
@@ -402,9 +614,6 @@ function checkFVGWithConfirmation(fvgs, currentPrice, currentCandles, type = nul
                 ...fvg,
                 distancePercent: distance,
                 targetPrice: targetPrice,
-                isAbove,
-                isBelow,
-                isInside: distance === 0,
                 isConfirmed: true
             };
         }
@@ -529,20 +738,20 @@ async function analyzeStructure(symbol, timeframe, currentPrice) {
         let zoneType = 'NEUTRO';
         let zoneDescription = '';
         
-        if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD && closestBullFVG.isConfirmed) {
+        if (closestBullFVG && closestBullFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'COMPRA';
-            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}% (Preço alvo: ${formatPrice(closestBullFVG.targetPrice)}) ✅ CONFIRMADO`;
+            zoneDescription = `FVG Bull ${timeframe} à ${closestBullFVG.distancePercent.toFixed(2)}%`;
         } else if (closestSupport && closestSupport.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'COMPRA';
-            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}% (Preço: ${formatPrice(closestSupport.targetPrice)})`;
+            zoneDescription = `Suporte ${timeframe} à ${closestSupport.distancePercent.toFixed(2)}%`;
         }
         
-        if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD && closestBearFVG.isConfirmed) {
+        if (closestBearFVG && closestBearFVG.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'VENDA';
-            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}% (Preço alvo: ${formatPrice(closestBearFVG.targetPrice)}) ✅ CONFIRMADO`;
+            zoneDescription = `FVG Bear ${timeframe} à ${closestBearFVG.distancePercent.toFixed(2)}%`;
         } else if (closestResistance && closestResistance.distancePercent <= CONFIG.MONITOR.ZONE_PROXIMITY_THRESHOLD) {
             zoneType = 'VENDA';
-            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}% (Preço: ${formatPrice(closestResistance.targetPrice)})`;
+            zoneDescription = `Resistência ${timeframe} à ${closestResistance.distancePercent.toFixed(2)}%`;
         }
         
         return {
@@ -606,9 +815,6 @@ async function detectVolumeAnomaly(symbol, timeframe = '1h') {
     }
 }
 
-// =====================================================================
-// === FUNÇÃO: DETECTAR VOLUME ANORMAL COMPRADOR/VENDEDOR 3 MIN ===
-// =====================================================================
 async function detectVolume3mAnomaly(symbol, type = 'buyer') {
     try {
         const candles = await getCandles(symbol, '3m', 30);
@@ -651,7 +857,7 @@ async function detectVolume3mAnomaly(symbol, type = 'buyer') {
 // =====================================================================
 // === ANÁLISE DE VOLUME PARA ALERTA FVG ===
 // =====================================================================
-async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
+async function analyzeVolumeAlert(symbol, currentPrice, divergencias, convergencias) {
     try {
         const volume1h = await detectVolumeAnomaly(symbol, '1h');
         const volume4h = await detectVolumeAnomaly(symbol, '4h');
@@ -666,11 +872,11 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
         let volumeData = null;
         let structureData = null;
         
-        // ALERTA DE COMPRA FVG
         if (volume3mBuyer && volume3mBuyer.isAnomaly) {
-            const temDivergenciaAlta15m = divergencias && divergencias.hasBullish15mPlusOther;
+            const temDivergenciaAlta = divergencias && divergencias.hasBullish15mPlusOther;
+            const temConvergenciaAlta = convergencias && convergencias.hasBullishConvergence;
             
-            if (temDivergenciaAlta15m) {
+            if (temDivergenciaAlta && temConvergenciaAlta) {
                 if (structure4h && structure4h.zoneType === 'COMPRA') {
                     alertType = 'VOLUME_BULL';
                     mainTimeframe = '4h';
@@ -685,11 +891,11 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
             }
         }
         
-        // ALERTA DE VENDA FVG
         if (volume3mSeller && volume3mSeller.isAnomaly) {
-            const temDivergenciaBaixa15m = divergencias && divergencias.hasBearish15mPlusOther;
+            const temDivergenciaBaixa = divergencias && divergencias.hasBearish15mPlusOther;
+            const temConvergenciaBaixa = convergencias && convergencias.hasBearishConvergence;
             
-            if (temDivergenciaBaixa15m) {
+            if (temDivergenciaBaixa && temConvergenciaBaixa) {
                 if (structure4h && structure4h.zoneType === 'VENDA') {
                     alertType = 'VOLUME_BEAR';
                     mainTimeframe = '4h';
@@ -706,15 +912,11 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
         
         if (!alertType) return null;
         
-        let alignment = '';
         let tradeSignal = '';
-        
         if (alertType === 'VOLUME_BULL') {
-            alignment = '✅ ALINHADO ';
             tradeSignal = '🟢 CONSIDERAR COMPRA';
         } else if (alertType === 'VOLUME_BEAR') {
-            alignment = '✅ ALINHADO';
-            tradeSignal = '🔴 CONSIDERAR CORREÇÃO';
+            tradeSignal = '🔴 CONSIDERAR VENDA';
         }
         
         return {
@@ -722,7 +924,6 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
             mainTimeframe,
             volume: volumeData,
             structure: structureData,
-            alignment,
             tradeSignal,
             volume1h,
             volume4h,
@@ -739,7 +940,7 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA CALCULAR STOCHASTIC (5,3,3) ===
+// === FUNÇÕES PARA STOCHASTIC E CCI ===
 // =====================================================================
 async function calculateStochastic(symbol, timeframe) {
     try {
@@ -802,19 +1003,11 @@ async function calculateStochastic(symbol, timeframe) {
         const isOversold = currentK < 20 && currentD < 20;
         
         let status = '';
-        const kValue = currentK;
-        
-        if (kValue < 15) {
-            status = '🔵';
-        } else if (kValue >= 15 && kValue < 25) {
-            status = '🟢';
-        } else if (kValue >= 25 && kValue < 45) {
-            status = '🟡';
-        } else if (kValue >= 45 && kValue < 70) {
-            status = '🟠';
-        } else {
-            status = '🔴';
-        }
+        if (currentK < 15) status = '🔵';
+        else if (currentK >= 15 && currentK < 25) status = '🟢';
+        else if (currentK >= 25 && currentK < 45) status = '🟡';
+        else if (currentK >= 45 && currentK < 70) status = '🟠';
+        else status = '🔴';
         
         const result = {
             k: currentK.toFixed(0),
@@ -836,9 +1029,6 @@ async function calculateStochastic(symbol, timeframe) {
     }
 }
 
-// =====================================================================
-// === FUNÇÃO PARA CALCULAR CCI COM EMA 5 ===
-// =====================================================================
 async function calculateCCI(symbol, timeframe) {
     try {
         const cacheKey = `${symbol}_cci_${timeframe}`;
@@ -895,34 +1085,19 @@ async function calculateCCI(symbol, timeframe) {
         const cciDirection = currentCCI > prevCCI ? '⤴️' : (currentCCI < prevCCI ? '⤵️' : '');
         
         let crossStatus = '';
-        
-        if (currentCCI > currentEMA) {
-            crossStatus = 'ALTA';
-        } else if (currentCCI < currentEMA) {
-            crossStatus = 'BAIXA';
-        } else {
-            crossStatus = 'NEUTRO';
-        }
+        if (currentCCI > currentEMA) crossStatus = 'ALTA';
+        else if (currentCCI < currentEMA) crossStatus = 'BAIXA';
+        else crossStatus = 'NEUTRO';
         
         let valueCircle = '';
-        
-        if (currentCCI <= -200) {
-            valueCircle = '🔵';
-        } else if (currentCCI <= -100) {
-            valueCircle = '🟢';
-        } else if (currentCCI <= -50) {
-            valueCircle = '🟡';
-        } else if (currentCCI <= 0) {
-            valueCircle = '🟡';
-        } else if (currentCCI <= 50) {
-            valueCircle = '🟠';
-        } else if (currentCCI <= 100) {
-            valueCircle = '🟠';
-        } else if (currentCCI <= 200) {
-            valueCircle = '🔴';
-        } else {
-            valueCircle = '🔥';
-        }
+        if (currentCCI <= -200) valueCircle = '🔵';
+        else if (currentCCI <= -100) valueCircle = '🟢';
+        else if (currentCCI <= -50) valueCircle = '🟡';
+        else if (currentCCI <= 0) valueCircle = '🟡';
+        else if (currentCCI <= 50) valueCircle = '🟠';
+        else if (currentCCI <= 100) valueCircle = '🟠';
+        else if (currentCCI <= 200) valueCircle = '🔴';
+        else valueCircle = '🔥';
         
         const result = {
             crossStatus: crossStatus,
@@ -946,163 +1121,12 @@ async function calculateCCI(symbol, timeframe) {
 function formatStochMessage(stoch4h, stoch1d) {
     let msg = '';
     if (stoch4h) {
-        msg += `Stoch 4H: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
+        msg += `Stoch 4h: K${stoch4h.k}${stoch4h.kTrend} D${stoch4h.d}${stoch4h.dTrend} ${stoch4h.status}\n`;
     }
     if (stoch1d) {
-        msg += `Stoch 1D: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}\n`;
+        msg += `Stoch 1d: K${stoch1d.k}${stoch1d.kTrend} D${stoch1d.d}${stoch1d.dTrend} ${stoch1d.status}`;
     }
     return msg;
-}
-
-function formatCCIMessage(cci4h, cci1d) {
-    let msg = '';
-    if (cci4h) {
-        msg += `CCI 4H: ${cci4h.crossStatus} ${cci4h.direction} ${cci4h.circle}\n`;
-    }
-    if (cci1d) {
-        msg += `CCI 1D: ${cci1d.crossStatus} ${cci1d.direction} ${cci1d.circle}\n`;
-    }
-    return msg;
-}
-
-function formatStructureMessage(structure, timeframe) {
-    if (!structure) return '';
-    
-    let msg = `📐 Estrutura ${timeframe}:\n`;
-    
-    if (structure.closestBullFVG) {
-        const fvg = structure.closestBullFVG;
-        msg += `  🟢 FVG Bull: ${fvg.distancePercent.toFixed(2)}% ➜ ${formatPrice(fvg.targetPrice)} USDT ✅\n`;
-    }
-    
-    if (structure.closestBearFVG) {
-        const fvg = structure.closestBearFVG;
-        msg += `  🔴 FVG Bear: ${fvg.distancePercent.toFixed(2)}% ➜ ${formatPrice(fvg.targetPrice)} USDT ✅\n`;
-    }
-    
-    if (structure.closestSupport) {
-        msg += `  🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}% ➜ ${formatPrice(structure.closestSupport.targetPrice)} USDT\n`;
-    }
-    
-    if (structure.closestResistance) {
-        msg += `  🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}% ➜ ${formatPrice(structure.closestResistance.targetPrice)} USDT\n`;
-    }
-    
-    msg += `  🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription}\n`;
-    
-    return msg;
-}
-
-function formatVolumeMessage(volume, timeframe) {
-    if (!volume || !volume.type) return '';
-    const volumeEmoji = volume.type === 'bull' ? '🔥' : '❄️';
-    const volumeText = volume.type === 'bull' ? 'ALTO' : 'BAIXO';
-    return `${volumeEmoji} Vol ${timeframe}: ${volumeText} ${volume.volumeRatio.toFixed(2)} ${volume.intensity}\n`;
-}
-
-// =====================================================================
-// === FUNÇÃO PARA ANALISAR STOCH E GERAR ALERTA DE CONDIÇÃO ===
-// =====================================================================
-function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
-    let alertaStoch = '';
-    let condicaoFavoravel = true;
-    
-    if (zoneType === 'COMPRA') {
-        if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = ` STOCH 4H (K${stoch4h.k}) - BAIXO.`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = ` STOCH 4H (K${stoch4h.k}) - ALTO.`;
-            condicaoFavoravel = false;
-        } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = ` STOCH 4H ${stoch4h.k} - NEUTRO.`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = ` STOCH 4H ${stoch4h.k} - NEUTRO!`;
-            condicaoFavoravel = false;
-        } else {
-            alertaStoch = ` STOCH 4H ${stoch4h.k} - NEUTRO.`;
-            condicaoFavoravel = true;
-        }
-        
-        if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - FORTALECE COMPRA!`;
-        } else if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - CONTRÁRIO PARA COMPRA!`;
-            condicaoFavoravel = false;
-        }
-        
-    } else if (zoneType === 'VENDA') {
-        if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = ` STOCH 4H ALTO (K${stoch4h.k}) - FAVORÁVEL PARA VENDA!`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = ` STOCH 4H BAIXO (K${stoch4h.k}) - NÃO FAVORÁVEL PARA VENDA!`;
-            condicaoFavoravel = false;
-        } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE VENDA.`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = ` STOCH 4H ${stoch4h.k} - PRÓXIMO A ZONA DE COMPRA!`;
-            condicaoFavoravel = false;
-        } else {
-            alertaStoch = ` STOCH 4H ${stoch4h.k}.`;
-            condicaoFavoravel = true;
-        }
-        
-        if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\n STOCH 1D ALTO (K${stoch1d.k}) - FORTALECE VENDA!`;
-        } else if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\n STOCH 1D BAIXO (K${stoch1d.k}) - CONTRÁRIO PARA VENDA!`;
-            condicaoFavoravel = false;
-        }
-    }
-    
-    return { alertaStoch, condicaoFavoravel };
-}
-
-// =====================================================================
-// === FUNÇÃO PARA GERAR DICA ESTRATÉGICA ===
-// =====================================================================
-function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
-    if (!structureData) return '';
-    
-    if (zoneType === 'COMPRA') {
-        let targetPrice = '';
-        if (structureData.closestBullFVG) {
-            targetPrice = formatPrice(structureData.closestBullFVG.targetPrice);
-        } else if (structureData.closestSupport) {
-            targetPrice = formatPrice(structureData.closestSupport.targetPrice);
-        }
-        
-        const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'COMPRA');
-        
-        let dica = `💡🤖 DICA de Compra:\n`;
-        dica += `• Aguarde um PULLBACK até próximo de ${targetPrice} USDT\n`;
-        dica += `• Use STOP abaixo da Compra (${(currentPrice * 0.98).toFixed(4)} USDT)\n`;
-        dica += `• ${stochAnalysis.alertaStoch}\n`;
-        
-        return dica;
-        
-    } else if (zoneType === 'VENDA') {
-        let targetPrice = '';
-        if (structureData.closestBearFVG) {
-            targetPrice = formatPrice(structureData.closestBearFVG.targetPrice);
-        } else if (structureData.closestResistance) {
-            targetPrice = formatPrice(structureData.closestResistance.targetPrice);
-        }
-        
-        const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'VENDA');
-        
-        let dica = `💡🤖 DICA na Correção:\n`;
-        dica += `• Aguarde um PULLBACK (subida) até próximo de ${targetPrice} USDT\n`;
-        dica += `• Use STOP acima da Venda (${(currentPrice * 1.02).toFixed(4)} USDT)\n`;
-        dica += `• ${stochAnalysis.alertaStoch}\n`;
-        
-        return dica;
-    }
-    
-    return '';
 }
 
 // =====================================================================
@@ -1140,7 +1164,7 @@ function calculateRSI(prices, period = 14) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA ENCONTRAR PIVÔS ===
+// === FUNÇÕES PARA ENCONTRAR PIVÔS ===
 // =====================================================================
 function findPivots(data, lookback = 3) {
     const pivots = { highs: [], lows: [] };
@@ -1164,7 +1188,7 @@ function findPivots(data, lookback = 3) {
 // =====================================================================
 // === FUNÇÃO PARA DETECTAR DIVERGÊNCIAS ===
 // =====================================================================
-function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
+function findRSIDivergences(prices, rsiValues) {
     const divergences = { bullish: [], bearish: [] };
     
     if (prices.length < 30 || rsiValues.length < 30) return divergences;
@@ -1172,7 +1196,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
     const pricePivots = findPivots(prices, 5);
     const rsiPivots = findPivots(rsiValues, 5);
     
-    // Divergências de Alta (Bullish)
     for (let i = 0; i < pricePivots.lows.length; i++) {
         for (let j = i + 1; j < pricePivots.lows.length; j++) {
             const priceLow1 = pricePivots.lows[i];
@@ -1202,7 +1225,6 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
         }
     }
     
-    // Divergências de Baixa (Bearish)
     for (let i = 0; i < pricePivots.highs.length; i++) {
         for (let j = i + 1; j < pricePivots.highs.length; j++) {
             const priceHigh1 = pricePivots.highs[i];
@@ -1236,9 +1258,81 @@ function findRSIDivergences(prices, rsiValues, volumeProfile = null) {
 }
 
 // =====================================================================
+// === NOVA FUNÇÃO: DETECTAR CONVERGÊNCIAS ===
+// =====================================================================
+function findRSIConvergences(prices, rsiValues) {
+    const convergences = { bullish: [], bearish: [] };
+    
+    if (prices.length < 30 || rsiValues.length < 30) return convergences;
+    
+    const pricePivots = findPivots(prices, 5);
+    const rsiPivots = findPivots(rsiValues, 5);
+    
+    for (let i = 0; i < pricePivots.lows.length; i++) {
+        for (let j = i + 1; j < pricePivots.lows.length; j++) {
+            const priceLow1 = pricePivots.lows[i];
+            const priceLow2 = pricePivots.lows[j];
+            
+            const priceHigher = priceLow2.value > priceLow1.value;
+            const priceDistance = Math.abs(priceLow2.index - priceLow1.index);
+            
+            if (priceHigher && priceDistance >= 5) {
+                const rsiLow1 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow1.index) <= 3);
+                const rsiLow2 = rsiPivots.lows.find(r => Math.abs(r.index - priceLow2.index) <= 3);
+                
+                if (rsiLow1 && rsiLow2) {
+                    const rsiHigher = rsiLow2.value > rsiLow1.value;
+                    const strength = Math.abs(priceLow2.value - priceLow1.value) / priceLow1.value * 100;
+                    const rsiDiff = Math.abs(rsiLow2.value - rsiLow1.value);
+                    
+                    if (rsiHigher && strength >= CONFIG.MONITOR.RSI.MIN_CONVERGENCE_STRENGTH && rsiDiff >= 3) {
+                        convergences.bullish.push({
+                            type: 'bullish_convergence',
+                            strength: strength,
+                            rsiDiff: rsiDiff
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    for (let i = 0; i < pricePivots.highs.length; i++) {
+        for (let j = i + 1; j < pricePivots.highs.length; j++) {
+            const priceHigh1 = pricePivots.highs[i];
+            const priceHigh2 = pricePivots.highs[j];
+            
+            const priceLower = priceHigh2.value < priceHigh1.value;
+            const priceDistance = Math.abs(priceHigh2.index - priceHigh1.index);
+            
+            if (priceLower && priceDistance >= 5) {
+                const rsiHigh1 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh1.index) <= 3);
+                const rsiHigh2 = rsiPivots.highs.find(r => Math.abs(r.index - priceHigh2.index) <= 3);
+                
+                if (rsiHigh1 && rsiHigh2) {
+                    const rsiLower = rsiHigh2.value < rsiHigh1.value;
+                    const strength = Math.abs(priceHigh2.value - priceHigh1.value) / priceHigh1.value * 100;
+                    const rsiDiff = Math.abs(rsiHigh2.value - rsiHigh1.value);
+                    
+                    if (rsiLower && strength >= CONFIG.MONITOR.RSI.MIN_CONVERGENCE_STRENGTH && rsiDiff >= 3) {
+                        convergences.bearish.push({
+                            type: 'bearish_convergence',
+                            strength: strength,
+                            rsiDiff: rsiDiff
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    return convergences;
+}
+
+// =====================================================================
 // === ANALISAR DIVERGÊNCIAS ===
 // =====================================================================
-async function analyzeDivergences(symbol, cvdManager) {
+async function analyzeDivergences(symbol) {
     const cacheKey = `${symbol}_divergences`;
     const now = Date.now();
     const cached = divergenceCache.get(cacheKey);
@@ -1309,16 +1403,82 @@ async function analyzeDivergences(symbol, cvdManager) {
 }
 
 // =====================================================================
-// === BUSCAR CANDLES ===
+// === ANALISAR CONVERGÊNCIAS ===
+// =====================================================================
+async function analyzeConvergences(symbol) {
+    const cacheKey = `${symbol}_convergences`;
+    const now = Date.now();
+    const cached = convergenceCache.get(cacheKey);
+    
+    if (cached && (now - cached.timestamp) < 300000) {
+        return cached.data;
+    }
+    
+    const result = {
+        hasBullishConvergence: false,
+        hasBearishConvergence: false,
+        bullishTimeframes: [],
+        bearishTimeframes: [],
+        hasBullishOn15m: false,
+        hasBearishOn15m: false
+    };
+    
+    for (const timeframe of CONFIG.MONITOR.RSI.TIMEFRAMES) {
+        try {
+            const candles = await getCandles(symbol, timeframe, CONFIG.MONITOR.RSI.LOOKBACK_CANDLES);
+            if (!candles || candles.length < 50) continue;
+            
+            const prices = candles.map(c => c.close);
+            const rsi = calculateRSI(prices, CONFIG.MONITOR.RSI.PERIOD);
+            if (!rsi || rsi.length < 50) continue;
+            
+            const convergences = findRSIConvergences(prices, rsi);
+            
+            if (convergences.bullish.length > 0) {
+                result.hasBullishConvergence = true;
+                result.bullishTimeframes.push(timeframe);
+                if (timeframe === '15m') result.hasBullishOn15m = true;
+            }
+            
+            if (convergences.bearish.length > 0) {
+                result.hasBearishConvergence = true;
+                result.bearishTimeframes.push(timeframe);
+                if (timeframe === '15m') result.hasBearishOn15m = true;
+            }
+            
+        } catch (error) {}
+    }
+    
+    convergenceCache.set(cacheKey, {
+        data: result,
+        timestamp: now
+    });
+    
+    return result;
+}
+
+// =====================================================================
+// === BUSCAR CANDLES COM CACHE E RATE LIMIT ===
 // =====================================================================
 async function getCandles(symbol, interval, limit = 100) {
+    const cacheKey = `${symbol}_${interval}_${limit}`;
+    const now = Date.now();
+    const cached = candlesCache.get(cacheKey);
+    
+    if (cached && (now - cached.timestamp) < 30000) {
+        return cached.data;
+    }
+    
     try {
+        await rateLimiter.acquire();
+        
         const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         const response = await fetch(url);
         const data = await response.json();
+        
         if (!Array.isArray(data)) return [];
         
-        return data.map(candle => ({
+        const candles = data.map(candle => ({
             open: parseFloat(candle[1]), 
             high: parseFloat(candle[2]), 
             low: parseFloat(candle[3]),
@@ -1326,14 +1486,19 @@ async function getCandles(symbol, interval, limit = 100) {
             volume: parseFloat(candle[5]), 
             time: candle[0]
         }));
+        
+        candlesCache.set(cacheKey, {
+            data: candles,
+            timestamp: now
+        });
+        
+        return candles;
     } catch (error) {
+        console.log(`⚠️ Erro ao buscar candles ${symbol} ${interval}: ${error.message}`);
         return [];
     }
 }
 
-// =====================================================================
-// === OBTER RSI 1h ===
-// =====================================================================
 async function getRSIForSymbol(symbol) {
     try {
         const now = Date.now();
@@ -1362,9 +1527,6 @@ async function getRSIForSymbol(symbol) {
     }
 }
 
-// =====================================================================
-// === EMOJI BASEADO NO RSI ===
-// =====================================================================
 function getRSIEmoji(rsiValue) {
     if (rsiValue === null || rsiValue === undefined) return '⚪';
     if (rsiValue < 20) return '🔵';
@@ -1376,10 +1538,12 @@ function getRSIEmoji(rsiValue) {
 }
 
 // =====================================================================
-// === BUSCAR TODOS OS SÍMBOLOS ===
+// === BUSCAR DADOS DE MERCADO COM RATE LIMIT ===
 // =====================================================================
 async function getAllSymbols() {
     try {
+        await rateLimiter.acquire();
+        
         const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
         const data = await res.json();
         const filtered = data.filter(i => 
@@ -1399,11 +1563,10 @@ async function getAllSymbols() {
     }
 }
 
-// =====================================================================
-// === BUSCAR FUNDING RATES ===
-// =====================================================================
 async function getFundingRates(symbols) {
     try {
+        await rateLimiter.acquire();
+        
         const res = await fetch('https://fapi.binance.com/fapi/v1/premiumIndex');
         const data = await res.json();
         const result = {};
@@ -1419,19 +1582,18 @@ async function getFundingRates(symbols) {
     }
 }
 
-// =====================================================================
-// === BUSCAR LSR ===
-// =====================================================================
 async function getLSRData(symbols) {
     try {
         const period = CONFIG.MONITOR.LSRS_PERIOD;
         const result = {};
         
-        const batchSize = 50;
+        const batchSize = 20;
         for (let i = 0; i < symbols.length; i += batchSize) {
             const batch = symbols.slice(i, i + batchSize);
             const promises = batch.map(async s => {
                 try {
+                    await rateLimiter.acquire();
+                    
                     const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${s}&period=${period}&limit=1`;
                     const res = await fetch(url);
                     const data = await res.json();
@@ -1450,7 +1612,7 @@ async function getLSRData(symbols) {
             }
             
             if (i + batchSize < symbols.length) {
-                await delay(500);
+                await delay(1000);
             }
         }
         
@@ -1461,9 +1623,6 @@ async function getLSRData(symbols) {
     }
 }
 
-// =====================================================================
-// === FUNÇÃO PARA VERIFICAR TENDÊNCIA DO LSR ===
-// =====================================================================
 async function getLSRTrend(symbol) {
     try {
         const now = Date.now();
@@ -1473,6 +1632,9 @@ async function getLSRTrend(symbol) {
         }
         
         const period = CONFIG.MONITOR.LSR_15M_PERIOD;
+        
+        await rateLimiter.acquire();
+        
         const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${period}&limit=2`;
         
         const res = await fetch(url);
@@ -1629,11 +1791,11 @@ class CVDManager {
         const attempts = this.reconnectAttempts.get(symbol) || 0;
         
         if (attempts < this.maxReconnectAttempts) {
-            const delay = this.reconnectDelay * Math.pow(2, attempts);
+            const delayTime = this.reconnectDelay * Math.pow(2, attempts);
             setTimeout(() => {
                 this.reconnectAttempts.set(symbol, attempts + 1);
                 this.connectWebSocket(symbol);
-            }, delay);
+            }, delayTime);
         } else {
             const data = this.cvdData.get(symbol);
             if (data && data.ws) {
@@ -1661,37 +1823,6 @@ class CVDManager {
         const data = this.cvdData.get(symbol);
         if (!data) return '';
         return data.direction;
-    }
-    
-    getVolumeProfile(symbol, minutesAgo = 5) {
-        const data = this.cvdData.get(symbol);
-        if (!data || data.history.length === 0) return null;
-        
-        const now = Date.now();
-        const cutoff = now - (minutesAgo * 60 * 1000);
-        
-        let buyVolume = 0, sellVolume = 0, totalVolume = 0;
-        
-        for (const trade of data.history) {
-            if (trade.timestamp >= cutoff) {
-                if (trade.delta > 0) buyVolume += trade.volume;
-                else sellVolume += trade.volume;
-                totalVolume += trade.volume;
-            }
-        }
-        
-        if (totalVolume === 0) return null;
-        
-        const buyerRatio = (buyVolume / totalVolume) * 100;
-        const sellerRatio = (sellVolume / totalVolume) * 100;
-        
-        return {
-            buyerRatio: buyerRatio,
-            sellerRatio: sellerRatio,
-            totalVolume: totalVolume,
-            dominant: buyerRatio > sellerRatio ? 'buyers' : 'sellers',
-            dominantRatio: Math.max(buyerRatio, sellerRatio)
-        };
     }
     
     cleanup() {
@@ -1735,7 +1866,7 @@ function delay(ms) {
 // === VERIFICAR CRITÉRIOS E ENVIAR ALERTA FVG ===
 // =====================================================================
 async function checkAndAlert(symbolData, cvdManager) {
-    const { symbol: fullSymbol, price, volume24h } = symbolData;
+    const { symbol: fullSymbol, price } = symbolData;
     const symbol = fullSymbol.replace('USDT', '');
     
     try {
@@ -1748,9 +1879,10 @@ async function checkAndAlert(symbolData, cvdManager) {
         if (funding === undefined || funding === null) return;
         if (lsr === undefined || lsr === null) return;
         
-        const [rsiValue, divergences, lsrTrendData] = await Promise.all([
+        const [rsiValue, divergences, convergences, lsrTrendData] = await Promise.all([
             getRSIForSymbol(fullSymbol),
-            analyzeDivergences(fullSymbol, cvdManager),
+            analyzeDivergences(fullSymbol),
+            analyzeConvergences(fullSymbol),
             getLSRTrend(fullSymbol)
         ]);
         
@@ -1765,7 +1897,7 @@ async function checkAndAlert(symbolData, cvdManager) {
             calculateCCI(fullSymbol, '1d')
         ]);
         
-        const volumeAlert = await analyzeVolumeAlert(fullSymbol, price, divergences);
+        const volumeAlert = await analyzeVolumeAlert(fullSymbol, price, divergences, convergences);
         
         const asset = {
             symbol,
@@ -1779,6 +1911,7 @@ async function checkAndAlert(symbolData, cvdManager) {
             rsiEmoji: getRSIEmoji(rsiValue),
             cvdDirection: cvd ? cvd.direction : '',
             divergences,
+            convergences,
             stoch4h,
             stoch1d,
             cci4h,
@@ -1789,116 +1922,169 @@ async function checkAndAlert(symbolData, cvdManager) {
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BULL' && canAlert(fullSymbol, 'VOLUME_BULL')) {
             await sendFVGAlert(asset, 'BULL');
             markAlerted(fullSymbol, 'VOLUME_BULL');
-            log(`🟢 COMPRA FVG (ZONA ≤1% + VOLUME 3M COMPRADOR + DIVERGÊNCIA ALTA 15M): ${symbol}`, 'alert');
+            log(`🟢 COMPRA FVG: ${symbol}`, 'alert');
             await delay(500);
         }
         
         if (volumeAlert && volumeAlert.alertType === 'VOLUME_BEAR' && canAlert(fullSymbol, 'VOLUME_BEAR')) {
             await sendFVGAlert(asset, 'BEAR');
             markAlerted(fullSymbol, 'VOLUME_BEAR');
-            log(`🔴 VENDA FVG (ZONA ≤1% + VOLUME 3M VENDEDOR + DIVERGÊNCIA BAIXA 15M): ${symbol}`, 'alert');
+            log(`🔴 VENDA FVG: ${symbol}`, 'alert');
             await delay(500);
         }
         
     } catch (error) {
-        if (!error.message.includes('Cannot read properties of undefined')) {
-            log(`Erro ao verificar ${fullSymbol}: ${error.message}`, 'error');
-        }
+        log(`Erro ao verificar ${fullSymbol}: ${error.message}`, 'error');
     }
 }
 
 // =====================================================================
-// === ENVIAR ALERTA FVG ===
+// === ENVIAR ALERTA FVG COM STOP INTELIGENTE E ALVOS DINÂMICOS ===
 // =====================================================================
 async function sendFVGAlert(asset, type) {
     const dt = getBrazilianDateTime();
     const volumeAlert = asset.volumeAlert;
     
+    const zoneType = type === 'BULL' ? 'COMPRA' : 'VENDA';
+    const structureData = volumeAlert.structure4h || volumeAlert.structure1h;
+    
+    // ===== CORREÇÃO: VALIDAÇÃO DA ENTRADA PARA VENDA =====
+    let targetPrice;
+    
+    if (type === 'BULL') {
+        targetPrice = volumeAlert.structure4h?.closestBullFVG?.targetPrice || 
+                      volumeAlert.structure4h?.closestSupport?.targetPrice || 
+                      asset.price;
+    } else {
+        // PARA VENDA: a entrada deve ser MAIOR que o preço atual
+        const bearFVGPrice = volumeAlert.structure4h?.closestBearFVG?.targetPrice;
+        const resistancePrice = volumeAlert.structure4h?.closestResistance?.targetPrice;
+        
+        // Escolhe o maior preço entre as opções (resistência ou FVG Bear)
+        let possibleTarget = null;
+        if (bearFVGPrice && resistancePrice) {
+            possibleTarget = Math.max(bearFVGPrice, resistancePrice);
+        } else if (bearFVGPrice) {
+            possibleTarget = bearFVGPrice;
+        } else if (resistancePrice) {
+            possibleTarget = resistancePrice;
+        }
+        
+        // Se o target for menor que o preço atual, usa o preço atual + buffer
+        if (possibleTarget && possibleTarget > asset.price) {
+            targetPrice = possibleTarget;
+        } else {
+            // Fallback: entrada 0.5% acima do preço atual
+            targetPrice = asset.price * 1.005;
+            log(`⚠️ Ajuste entrada VENDA ${asset.symbol}: ${formatPrice(asset.price)} → ${formatPrice(targetPrice)}`, 'warning');
+        }
+    }
+    
+    const stopData = await calculateSmartStopLoss(asset.fullSymbol, targetPrice, zoneType, structureData);
+    
+    // ===== CORREÇÃO: VALIDAÇÃO DO STOP =====
+    let finalStopPrice = stopData.stopPrice;
+    let finalStopPercent = stopData.stopPercent;
+    
+    if (type === 'VENDA') {
+        // Stop deve ser MAIOR que a entrada na venda
+        if (finalStopPrice <= targetPrice) {
+            finalStopPrice = targetPrice * 1.035; // stop mínimo 3.5%
+            finalStopPercent = 3.5;
+            log(`⚠️ Ajuste stop VENDA ${asset.symbol}: stop muito baixo, corrigido para ${finalStopPercent}%`, 'warning');
+        }
+    } else {
+        // Stop deve ser MENOR que a entrada na compra
+        if (finalStopPrice >= targetPrice) {
+            finalStopPrice = targetPrice * 0.965;
+            finalStopPercent = 3.5;
+            log(`⚠️ Ajuste stop COMPRA ${asset.symbol}: stop muito alto, corrigido para ${finalStopPercent}%`, 'warning');
+        }
+    }
+    
+    // Calcula os alvos dinâmicos
+    const targets = calculateDynamicTakeProfits(targetPrice, finalStopPrice, zoneType);
+    
     let message = '';
     
     if (type === 'BULL') {
-        message = `<i>💹<b> COMPRA FVG 🔥!</b>\n`;
-        message += ` Ativo: <code>${asset.symbol}</code>\n`;
-        message += ` ${dt.full}hs\n`;
-        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
-        
-        if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bull') {
-            message += formatVolumeMessage(volumeAlert.volume1h, '1h');
+        message = `<i>🟢 COMPRA 🟢\n`;
+        message += ` ATIVO: ${asset.symbol}\n`;
+        message += ` ${dt.full} hs\n`;
+        message += ` Preço atual: ${formatPrice(asset.price)} USDT\n`;
+        message += `📍 Região de Compra (${volumeAlert.mainTimeframe}):\n`;
+        if (volumeAlert.structure4h && volumeAlert.structure4h.closestBullFVG) {
+            const fvg = volumeAlert.structure4h.closestBullFVG;
+            message += ` FVG Bull à ${fvg.distancePercent.toFixed(2)}%\n`;
         }
-        if (volumeAlert.volume4h && volumeAlert.volume4h.type === 'bull') {
-            message += formatVolumeMessage(volumeAlert.volume4h, '4h');
+        if (volumeAlert.structure4h && volumeAlert.structure4h.closestSupport) {
+            const support = volumeAlert.structure4h.closestSupport;
+            message += `🟢 Suporte em ${formatPrice(support.targetPrice)} USDT (${support.distancePercent.toFixed(2)}%)\n`;
         }
-        
-        if (volumeAlert.structure4h) {
-            message += formatStructureMessage(volumeAlert.structure4h, '4h');
+        message += `🔍🤖 Estratégia\n`;
+        message += `✅ COMPRA no pullback\n`;
+        message += ` 📍 Entrada: ${formatPrice(targetPrice)} USDT\n`;
+        message += ` 🛑 Stop: ${formatPrice(finalStopPrice)} USDT (${finalStopPercent.toFixed(2)}%)\n`;
+        message += `Alvos:\n`;
+        for (let i = 0; i < targets.targets.length; i++) {
+            const t = targets.targets[i];
+            const profitAbs = t.price - targetPrice;
+            const profitPercent = (profitAbs / targetPrice) * 100;
+            message += ` Alvo ${i+1} : ${formatPrice(t.price)} USDT (+${profitPercent.toFixed(2)}%) - Fechar ${t.partialClose}%\n`;
         }
-        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
-            message += formatStructureMessage(volumeAlert.structure1h, '1h');
-        }
+        message += ` Mercado:\n`;
+        message += ` LSR: ${asset.lsr.toFixed(2)} (${asset.lsrTrend === 'falling' ? 'caindo ✅' : 'subindo'})\n`;
+        message += ` Funding: ${asset.fundingPercent.toFixed(4)}% ${asset.funding < 0 ? 'negativo ✅' : 'positivo'}\n`;
+        message += ` RSI 1h: ${asset.rsi?.toFixed(1) || 'N/A'} ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection || 'neutro'}\n`;
+        message += ` STOCH:\n`;
+        message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}\n`;
         
-        message += ` 🤖✨ Decisão da IA: <b>${volumeAlert.tradeSignal}</b>\n`;
-        
-        if (volumeAlert.structure4h) {
-            message += getTradeDica('COMPRA', volumeAlert.structure4h, asset.price, asset.stoch4h, asset.stoch1d);
-        } else if (volumeAlert.structure1h) {
-            message += getTradeDica('COMPRA', volumeAlert.structure1h, asset.price, asset.stoch4h, asset.stoch1d);
-        }
-        
-        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'falling' ? '📉 Caindo' : '📈 Subindo'})\n`;
-        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding < 0 ? '🟢 Negativo' : '🔴 Positivo'}\n`;
-        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji} | CVD: ${asset.cvdDirection}\n`;
-        
-        if (asset.stoch4h) {
-            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
-        }
-        
-        if (asset.stoch1d) {
-            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
+        if (volumeAlert.structure1h && volumeAlert.structure1h.zoneType === 'VENDA') {
+            message += `⚠️ ALERTA: Timeframe 1h em zona de venda! Use stop móvel.\n`;
         }
         
-        message += ` Titanium Prime X by @J4Rviz</i>\n`;
+        message += ` Titanium Prime X by @J4Rviz</i>`;
         
     } else {
-        message = `<i>🛑<b> VENDA FVG 🔥!</b>\n`;
-        message += ` Ativo: <code>${asset.symbol}</code>\n`;
-        message += ` ${dt.full}hs\n`;
-        message += ` Preço: <code>${formatPrice(asset.price)} USDT</code>\n`;
-        
-        if (volumeAlert.volume1h && volumeAlert.volume1h.type === 'bear') {
-            message += formatVolumeMessage(volumeAlert.volume1h, '1h');
+        // ===== MENSAGEM DE VENDA CORRIGIDA =====
+        message = `<i>🔴 VENDA 🔴\n`;
+        message += ` ATIVO: ${asset.symbol}\n`;
+        message += ` ${dt.full} hs\n`;
+        message += ` Preço atual: ${formatPrice(asset.price)} USDT\n`;
+        message += `📍 Região de Venda (${volumeAlert.mainTimeframe}):\n`;
+        if (volumeAlert.structure4h && volumeAlert.structure4h.closestBearFVG) {
+            const fvg = volumeAlert.structure4h.closestBearFVG;
+            message += ` FVG Bear à ${fvg.distancePercent.toFixed(2)}%\n`;
         }
-        if (volumeAlert.volume4h && volumeAlert.volume4h.type === 'bear') {
-            message += formatVolumeMessage(volumeAlert.volume4h, '4h');
+        if (volumeAlert.structure4h && volumeAlert.structure4h.closestResistance) {
+            const resistance = volumeAlert.structure4h.closestResistance;
+            message += `🔴 Resistência em ${formatPrice(resistance.targetPrice)} USDT (${resistance.distancePercent.toFixed(2)}%)\n`;
         }
-        
-        if (volumeAlert.structure4h) {
-            message += formatStructureMessage(volumeAlert.structure4h, '4h');
+        message += `🔍🤖 Estratégia\n`;
+        message += `✅ VENDA no pullback\n`;
+        message += ` 📍 Entrada: ${formatPrice(targetPrice)} USDT\n`;
+        message += ` 🛑 Stop: ${formatPrice(finalStopPrice)} USDT (${finalStopPercent.toFixed(2)}%)\n`;
+        message += ` Alvos:\n`;
+        for (let i = 0; i < targets.targets.length; i++) {
+            const t = targets.targets[i];
+            // Para venda: preço do alvo é MENOR que a entrada
+            const profitAbs = targetPrice - t.price;
+            const profitPercent = (profitAbs / targetPrice) * 100;
+            message += ` Alvo ${i+1} : ${formatPrice(t.price)} USDT (${profitPercent.toFixed(2)}%) - Fechar ${t.partialClose}%\n`;
         }
-        if (volumeAlert.structure1h && (!volumeAlert.structure4h || volumeAlert.structure1h.zoneType !== volumeAlert.structure4h.zoneType)) {
-            message += formatStructureMessage(volumeAlert.structure1h, '1h');
+        message += ` Mercado:\n`;
+        message += ` LSR: ${asset.lsr.toFixed(2)} (${asset.lsrTrend === 'rising' ? 'subindo ✅' : 'caindo'})\n`;
+        message += ` Funding: ${asset.fundingPercent.toFixed(4)}% ${asset.funding > 0 ? 'positivo ✅' : 'negativo'}\n`;
+        message += ` RSI 1h: ${asset.rsi?.toFixed(1) || 'N/A'} ${asset.rsiEmoji}\n`;
+        message += ` CVD: ${asset.cvdDirection || 'neutro'}\n`;
+        message += ` STOCH:\n`;
+        message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}\n`;
+        
+        if (volumeAlert.structure1h && volumeAlert.structure1h.zoneType === 'COMPRA') {
+            message += `⚠️ ALERTA: Timeframe 1h em zona de compra! Use stop móvel.\n`;
         }
-        
-        message += ` 🤖✨ Decisão da IA: <b>${volumeAlert.tradeSignal}</b>\n`;
-        
-        if (volumeAlert.structure4h) {
-            message += getTradeDica('VENDA', volumeAlert.structure4h, asset.price, asset.stoch4h, asset.stoch1d);
-        } else if (volumeAlert.structure1h) {
-            message += getTradeDica('VENDA', volumeAlert.structure1h, asset.price, asset.stoch4h, asset.stoch1d);
-        }
-        
-        message += ` LSR: <code>${asset.lsr.toFixed(2)}</code> (${asset.lsrTrend === 'rising' ? '📈 Subindo' : '📉 Caindo'})\n`;
-        message += ` Funding: <code>${asset.fundingPercent.toFixed(4)}%</code> ${asset.funding > 0 ? '🔴 Positivo' : '🟢 Negativo'}\n`;
-        message += ` RSI 1h: <code>${asset.rsi?.toFixed(1) || 'N/A'}</code> ${asset.rsiEmoji} | CVD: ${asset.cvdDirection}\n`;
-        
-        if (asset.stoch4h) {
-            message += ` Stoch 4H: K${asset.stoch4h.k}${asset.stoch4h.kTrend} D${asset.stoch4h.d}${asset.stoch4h.dTrend} ${asset.stoch4h.status}\n`;
-        }
-        
-        if (asset.stoch1d) {
-            message += ` Stoch 1D: K${asset.stoch1d.k}${asset.stoch1d.kTrend} D${asset.stoch1d.d}${asset.stoch1d.dTrend} ${asset.stoch1d.status}\n`;
-        }
-        
-        message += ` Titanium Prime X by @J4Rviz</i>\n`;
+        message += ` Titanium Prime X by @J4Rviz</i>`;
     }
     
     await telegramQueue.add(message);
@@ -1908,18 +2094,16 @@ async function sendFVGAlert(asset, type) {
 // === MENSAGEM INICIAL ===
 // =====================================================================
 async function sendInitMessage() {
-    let msg = `<i><b> TITANIUM PRIME X - FVG MONITOR </b>\n\n`;
-    msg += `✅ Sistema de FVG Iniciado!\n`;
-    msg += `📊 Monitorando apenas alertas de FVG com confirmação de candle\n`;
-    msg += `⏰ Scan a cada ${CONFIG.MONITOR.SCAN_INTERVAL_SECONDS} segundos\n`;
-    msg += `🔄 Cooldown de ${CONFIG.MONITOR.ALERT_COOLDOWN_MINUTES} minutos por ativo\n`;
+    let msg = `<i>🚀 TITANIUM PRIME X\n\n`;
+    msg += `✅ Sistema iniciado!\n`;
+   
     msg += `</i>`;
     
     await telegramQueue.add(msg, true);
 }
 
 // =====================================================================
-// === MONITOR PRINCIPAL (SCAN CONTÍNUO) ===
+// === MONITOR PRINCIPAL ===
 // =====================================================================
 const cvdManager = new CVDManager();
 let isScanning = false;
@@ -1932,7 +2116,7 @@ async function scanAndAlert() {
         const symbols = await getAllSymbols();
         if (!symbols.length) return;
         
-        log(`🔍 Escaneando ${symbols.length} símbolos para FVG...`, 'info');
+        log(`🔍 Escaneando ${symbols.length} símbolos...`, 'info');
         
         for (const s of symbols) {
             if (!cvdManager.subscribedSymbols.has(s.symbol)) {
@@ -1940,17 +2124,14 @@ async function scanAndAlert() {
             }
         }
         
-        let alertCount = 0;
+        let count = 0;
         for (const symbolData of symbols) {
             await checkAndAlert(symbolData, cvdManager);
-            alertCount++;
-            
-            if (alertCount % 10 === 0) {
-                await delay(100);
-            }
+            count++;
+            if (count % 10 === 0) await delay(200);
         }
         
-        log(`✅ Scan FVG completo. ${alertCount} ativos verificados.`, 'success');
+        log(`✅ Scan completo. ${count} ativos verificados.`, 'success');
         
     } catch (error) {
         log(`Erro no scan: ${error.message}`, 'error');
@@ -1964,16 +2145,14 @@ async function scanAndAlert() {
 // =====================================================================
 async function startMonitor() {
     console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME X - FVG MONITOR');
-    console.log('📊 Sistema especializado em Fair Value Gaps');
-    console.log('✅ Critério obrigatório: Fechamento do candle');
+    console.log('🚀 TITANIUM PRIME X ');
+    
     console.log('='.repeat(70));
     
     loadAlertedSymbols();
     loadFVGMemory();
     
     await sendInitMessage();
-    
     await scanAndAlert();
     
     setInterval(async () => {
