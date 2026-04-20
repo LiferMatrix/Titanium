@@ -11,12 +11,12 @@ const ALERTED_FILE = path.join(__dirname, 'alertedSymbols.json');
 const FVG_MEMORY_FILE = path.join(__dirname, 'fvgMemory.json');
 
 // =====================================================================
-// === CONFIGURAÇÃO ===
+// === CONFIGURAÇÃO COM STOP DEFINITIVO ===
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AGg',
-        CHAT_ID: '-100259',
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979',
         MESSAGE_DELAY_MS: 18000,
         MAX_MESSAGES_PER_MINUTE: 20,
         BURST_DELAY_MS: 10000,
@@ -56,6 +56,13 @@ const CONFIG = {
         FVG: {
             REQUIRED_CANDLE_CLOSE: true,
             CONFIRMATION_CANDLES: 1
+        },
+        STOP_LOSS: {
+            ATR_PERIOD: 14,           // Período do ATR
+            ATR_MULTIPLIER: 3.0,      // DEFINITIVO: 3.0x ATR
+            MIN_STOP_PERCENT: 3.5,    // DEFINITIVO: mínimo 3.5%
+            MAX_STOP_PERCENT: 12.0,   // DEFINITIVO: máximo 12.0%
+            STRUCTURE_BUFFER: 0.003   // DEFINITIVO: 0.3% buffer
         }
     }
 };
@@ -100,6 +107,7 @@ const lsrTrendCache = new Map();
 const stochCache = new Map();
 const cciCache = new Map();
 const alertedSymbols = new Map();
+const atrCache = new Map();
 
 function loadAlertedSymbols() {
     try {
@@ -296,6 +304,128 @@ class TelegramQueue {
 }
 
 const telegramQueue = new TelegramQueue();
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR ATR (AVERAGE TRUE RANGE) ===
+// =====================================================================
+async function calculateATR(symbol, timeframe = '1h', period = 14) {
+    try {
+        const cacheKey = `${symbol}_atr_${timeframe}`;
+        const now = Date.now();
+        const cached = atrCache.get(cacheKey);
+        if (cached && (now - cached.timestamp) < 300000) {
+            return cached.data;
+        }
+        
+        const candles = await getCandles(symbol, timeframe, period + 10);
+        if (!candles || candles.length < period + 1) return null;
+        
+        const trueRanges = [];
+        
+        for (let i = 1; i < candles.length; i++) {
+            const high = candles[i].high;
+            const low = candles[i].low;
+            const prevClose = candles[i - 1].close;
+            
+            const tr1 = high - low;
+            const tr2 = Math.abs(high - prevClose);
+            const tr3 = Math.abs(low - prevClose);
+            
+            const trueRange = Math.max(tr1, tr2, tr3);
+            trueRanges.push(trueRange);
+        }
+        
+        const recentTR = trueRanges.slice(-period);
+        const atr = recentTR.reduce((a, b) => a + b, 0) / period;
+        const atrPercent = (atr / candles[candles.length - 1].close) * 100;
+        
+        const result = { atr, atrPercent };
+        
+        atrCache.set(cacheKey, { data: result, timestamp: now });
+        return result;
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular ATR para ${symbol}: ${error.message}`);
+        return null;
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO PARA CALCULAR STOP LOSS INTELIGENTE (DEFINITIVA) ===
+// =====================================================================
+async function calculateSmartStopLoss(symbol, currentPrice, zoneType, structureData) {
+    try {
+        // 1. Calcula o ATR
+        const atrData = await calculateATR(symbol, '1h', CONFIG.MONITOR.STOP_LOSS.ATR_PERIOD);
+        let atrStopPercent = CONFIG.MONITOR.STOP_LOSS.MIN_STOP_PERCENT;
+        
+        if (atrData && atrData.atrPercent) {
+            atrStopPercent = Math.min(
+                Math.max(atrData.atrPercent * CONFIG.MONITOR.STOP_LOSS.ATR_MULTIPLIER, 
+                        CONFIG.MONITOR.STOP_LOSS.MIN_STOP_PERCENT),
+                CONFIG.MONITOR.STOP_LOSS.MAX_STOP_PERCENT
+            );
+        }
+        
+        let structureStopPrice = null;
+        let structureStopPercent = null;
+        
+        // 2. Busca stop baseado na ESTRUTURA
+        if (zoneType === 'COMPRA' && structureData) {
+            if (structureData.closestSupport) {
+                structureStopPrice = structureData.closestSupport.targetPrice * (1 - CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((currentPrice - structureStopPrice) / currentPrice) * 100;
+            } else if (structureData.closestBullFVG) {
+                structureStopPrice = structureData.closestBullFVG.bottom * (1 - CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((currentPrice - structureStopPrice) / currentPrice) * 100;
+            }
+        } else if (zoneType === 'VENDA' && structureData) {
+            if (structureData.closestResistance) {
+                structureStopPrice = structureData.closestResistance.targetPrice * (1 + CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((structureStopPrice - currentPrice) / currentPrice) * 100;
+            } else if (structureData.closestBearFVG) {
+                structureStopPrice = structureData.closestBearFVG.top * (1 + CONFIG.MONITOR.STOP_LOSS.STRUCTURE_BUFFER);
+                structureStopPercent = ((structureStopPrice - currentPrice) / currentPrice) * 100;
+            }
+        }
+        
+        // 3. Escolhe o stop MAIS LARGO entre ATR e Estrutura
+        let finalStopPercent = atrStopPercent;
+        let stopType = "ATR";
+        
+        if (structureStopPercent !== null && structureStopPercent > atrStopPercent) {
+            finalStopPercent = Math.min(structureStopPercent, CONFIG.MONITOR.STOP_LOSS.MAX_STOP_PERCENT);
+            stopType = "ESTRUTURA";
+        }
+        
+        // 4. Garantia final: stop mínimo 3.5% e máximo 12%
+        finalStopPercent = Math.min(Math.max(finalStopPercent, 3.5), 12.0);
+        
+        // 5. Calcula o preço do stop
+        let stopPrice;
+        if (zoneType === 'COMPRA') {
+            stopPrice = currentPrice * (1 - finalStopPercent / 100);
+        } else {
+            stopPrice = currentPrice * (1 + finalStopPercent / 100);
+        }
+        
+        return {
+            stopPrice: stopPrice,
+            stopPercent: finalStopPercent,
+            stopType: stopType,
+            atrUsed: atrStopPercent,
+            structureUsed: structureStopPercent
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Erro ao calcular stop inteligente: ${error.message}`);
+        if (zoneType === 'COMPRA') {
+            return { stopPrice: currentPrice * 0.965, stopPercent: 3.5, stopType: "PADRÃO" };
+        } else {
+            return { stopPrice: currentPrice * 1.035, stopPercent: 3.5, stopType: "PADRÃO" };
+        }
+    }
+}
 
 // =====================================================================
 // === FUNÇÕES PARA DETECÇÃO DE FVG ===
@@ -649,7 +779,7 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias, convergenc
         let volumeData = null;
         let structureData = null;
         
-        // ALERTA DE COMPRA FVG: Divergência de Alta + Convergência de Alta
+        // ALERTA DE COMPRA FVG
         if (volume3mBuyer && volume3mBuyer.isAnomaly) {
             const temDivergenciaAlta = divergencias && divergencias.hasBullish15mPlusOther;
             const temConvergenciaAlta = convergencias && convergencias.hasBullishConvergence;
@@ -669,7 +799,7 @@ async function analyzeVolumeAlert(symbol, currentPrice, divergencias, convergenc
             }
         }
         
-        // ALERTA DE VENDA FVG: Divergência de Baixa + Convergência de Baixa
+        // ALERTA DE VENDA FVG
         if (volume3mSeller && volume3mSeller.isAnomaly) {
             const temDivergenciaBaixa = divergencias && divergencias.hasBearish15mPlusOther;
             const temConvergenciaBaixa = convergencias && convergencias.hasBearishConvergence;
@@ -908,140 +1038,6 @@ function formatStochMessage(stoch4h, stoch1d) {
     return msg;
 }
 
-function formatStructureMessage(structure, timeframe) {
-    if (!structure) return '';
-    
-    let msg = `📍 ${timeframe}:\n`;
-    
-    if (structure.closestBullFVG) {
-        msg += `🟢 FVG Bull: ${structure.closestBullFVG.distancePercent.toFixed(2)}% até ${formatPrice(structure.closestBullFVG.targetPrice)} USDT\n`;
-    }
-    if (structure.closestBearFVG) {
-        msg += `🔴 FVG Bear: ${structure.closestBearFVG.distancePercent.toFixed(2)}% até ${formatPrice(structure.closestBearFVG.targetPrice)} USDT\n`;
-    }
-    if (structure.closestSupport) {
-        msg += `🟢 Suporte: ${structure.closestSupport.distancePercent.toFixed(2)}% em ${formatPrice(structure.closestSupport.targetPrice)} USDT\n`;
-    }
-    if (structure.closestResistance) {
-        msg += `🔴 Resistência: ${structure.closestResistance.distancePercent.toFixed(2)}% em ${formatPrice(structure.closestResistance.targetPrice)} USDT\n`;
-    }
-    msg += `🎯 Zona: ${structure.zoneType} - ${structure.zoneDescription}\n`;
-    
-    return msg;
-}
-
-function formatVolumeMessage(volume, timeframe) {
-    if (!volume || !volume.type) return '';
-    const volumeEmoji = volume.type === 'bull' ? '🔥' : '❄️';
-    const volumeText = volume.type === 'bull' ? 'ALTO' : 'BAIXO';
-    return `${volumeEmoji} Volume ${timeframe}: ${volumeText} (${volume.volumeRatio.toFixed(2)}x média) ${volume.intensity}\n`;
-}
-
-// =====================================================================
-// === FUNÇÃO PARA ANALISAR STOCH ===
-// =====================================================================
-function analisarStochParaOperacao(stoch4h, stoch1d, zoneType) {
-    let alertaStoch = '';
-    let condicaoFavoravel = true;
-    
-    if (zoneType === 'COMPRA') {
-        if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = `Stoch 4h oversold (K${stoch4h.k}) → 🟢 favorável`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = `Stoch 4h overbought (K${stoch4h.k}) → 🔴 desfavorável`;
-            condicaoFavoravel = false;
-        } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro baixo`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro alto`;
-            condicaoFavoravel = false;
-        } else {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro`;
-            condicaoFavoravel = true;
-        }
-        
-        if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\nStoch 1d oversold (K${stoch1d.k}) → 🟢 sinal forte!`;
-        } else if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\nStoch 1d overbought (K${stoch1d.k}) → 🔴 atenção!`;
-            condicaoFavoravel = false;
-        }
-        
-    } else if (zoneType === 'VENDA') {
-        if (stoch4h && stoch4h.isOverbought) {
-            alertaStoch = `Stoch 4h overbought (K${stoch4h.k}) → 🔴 favorável para venda`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.isOversold) {
-            alertaStoch = `Stoch 4h oversold (K${stoch4h.k}) → 🟢 desfavorável para venda`;
-            condicaoFavoravel = false;
-        } else if (stoch4h && stoch4h.rawK > 70) {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro alto`;
-            condicaoFavoravel = true;
-        } else if (stoch4h && stoch4h.rawK < 30) {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro baixo`;
-            condicaoFavoravel = false;
-        } else {
-            alertaStoch = `Stoch 4h em ${stoch4h.k} → 🟡 neutro`;
-            condicaoFavoravel = true;
-        }
-        
-        if (stoch1d && stoch1d.isOverbought) {
-            alertaStoch += `\nStoch 1d overbought (K${stoch1d.k}) → 🔴 sinal forte!`;
-        } else if (stoch1d && stoch1d.isOversold) {
-            alertaStoch += `\nStoch 1d oversold (K${stoch1d.k}) → 🟢 atenção!`;
-            condicaoFavoravel = false;
-        }
-    }
-    
-    return { alertaStoch, condicaoFavoravel };
-}
-
-// =====================================================================
-// === FUNÇÃO PARA GERAR DICA ESTRATÉGICA ===
-// =====================================================================
-function getTradeDica(zoneType, structureData, currentPrice, stoch4h, stoch1d) {
-    if (!structureData) return '';
-    
-    if (zoneType === 'COMPRA') {
-        let targetPrice = '';
-        if (structureData.closestBullFVG) {
-            targetPrice = formatPrice(structureData.closestBullFVG.targetPrice);
-        } else if (structureData.closestSupport) {
-            targetPrice = formatPrice(structureData.closestSupport.targetPrice);
-        }
-        
-        const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'COMPRA');
-        
-        let dica = `💡 DICA de Compra:\n`;
-        dica += `• Aguarde pullback até ${targetPrice} USDT\n`;
-        dica += `• Stop loss: ${(currentPrice * 0.98).toFixed(6)} USDT\n`;
-        dica += `• ${stochAnalysis.alertaStoch}\n`;
-        
-        return dica;
-        
-    } else if (zoneType === 'VENDA') {
-        let targetPrice = '';
-        if (structureData.closestBearFVG) {
-            targetPrice = formatPrice(structureData.closestBearFVG.targetPrice);
-        } else if (structureData.closestResistance) {
-            targetPrice = formatPrice(structureData.closestResistance.targetPrice);
-        }
-        
-        const stochAnalysis = analisarStochParaOperacao(stoch4h, stoch1d, 'VENDA');
-        
-        let dica = `💡 DICA de Venda:\n`;
-        dica += `• Aguarde pullback (subida) até ${targetPrice} USDT\n`;
-        dica += `• Stop loss: ${(currentPrice * 1.02).toFixed(6)} USDT\n`;
-        dica += `• ${stochAnalysis.alertaStoch}\n`;
-        
-        return dica;
-    }
-    
-    return '';
-}
-
 // =====================================================================
 // === FUNÇÃO PARA CALCULAR RSI ===
 // =====================================================================
@@ -1183,7 +1179,7 @@ function findRSIConvergences(prices, rsiValues) {
     const pricePivots = findPivots(prices, 5);
     const rsiPivots = findPivots(rsiValues, 5);
     
-    // Convergência de Alta (Bullish) - Preço e RSI se movendo juntos para cima
+    // Convergência de Alta
     for (let i = 0; i < pricePivots.lows.length; i++) {
         for (let j = i + 1; j < pricePivots.lows.length; j++) {
             const priceLow1 = pricePivots.lows[i];
@@ -1213,7 +1209,7 @@ function findRSIConvergences(prices, rsiValues) {
         }
     }
     
-    // Convergência de Baixa (Bearish) - Preço e RSI se movendo juntos para baixo
+    // Convergência de Baixa
     for (let i = 0; i < pricePivots.highs.length; i++) {
         for (let j = i + 1; j < pricePivots.highs.length; j++) {
             const priceHigh1 = pricePivots.highs[i];
@@ -1320,7 +1316,7 @@ async function analyzeDivergences(symbol) {
 }
 
 // =====================================================================
-// === NOVA FUNÇÃO: ANALISAR CONVERGÊNCIAS ===
+// === ANALISAR CONVERGÊNCIAS ===
 // =====================================================================
 async function analyzeConvergences(symbol) {
     const cacheKey = `${symbol}_convergences`;
@@ -1830,42 +1826,47 @@ async function checkAndAlert(symbolData, cvdManager) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA FVG COM MENSAGEM CLARA E ELEGANTE ===
+// === ENVIAR ALERTA FVG COM STOP INTELIGENTE (DEFINITIVO) ===
 // =====================================================================
 async function sendFVGAlert(asset, type) {
     const dt = getBrazilianDateTime();
     const volumeAlert = asset.volumeAlert;
     
+    const zoneType = type === 'BULL' ? 'COMPRA' : 'VENDA';
+    const structureData = volumeAlert.structure4h || volumeAlert.structure1h;
+    const stopData = await calculateSmartStopLoss(asset.fullSymbol, asset.price, zoneType, structureData);
+    
     let message = '';
     
     if (type === 'BULL') {
-        message = `<i>🟢 Compra 🟢 \n`;
+        message = `<i>🟢 Compra 🟢\n`;
         message += ` ATIVO: ${asset.symbol}\n`;
-        message += ` HORÁRIO: ${dt.full}\n`;
-        message += ` PREÇO: ${formatPrice(asset.price)} USDT\n`;
-        message += `📍 ZONA DE COMPRA (4h):\n`;
+        message += ` ${dt.full} hs\n`;
+        message += ` Preço: ${formatPrice(asset.price)} USDT\n`;
+        
+        message += `📍 Região de Compra (4h):\n`;
         if (volumeAlert.structure4h && volumeAlert.structure4h.closestBullFVG) {
             const fvg = volumeAlert.structure4h.closestBullFVG;
-            message += `🟢 FVG Bull confirmado!\n`;
-            message += `📍 Alvo: ${formatPrice(fvg.targetPrice)} USDT\n`;
+            message += ` Alvo: ${formatPrice(fvg.targetPrice)} USDT\n`;
             message += ` Distância: ${fvg.distancePercent.toFixed(2)}%\n`;
         }
         if (volumeAlert.structure4h && volumeAlert.structure4h.closestSupport) {
             const support = volumeAlert.structure4h.closestSupport;
             message += `🟢 Suporte em ${formatPrice(support.targetPrice)} USDT\n`;
-            message += `📏 Distância: ${support.distancePercent.toFixed(2)}%\n`;
+            message += ` Distância: ${support.distancePercent.toFixed(2)}%\n`;
         }
         
-        message += `🎯 RECOMENDAÇÃO:\n`;
+        message += `🔍🤖 Dica\n`;
         message += `✅ COMPRA no pullback\n`;
         const targetPrice = volumeAlert.structure4h?.closestBullFVG?.targetPrice || volumeAlert.structure4h?.closestSupport?.targetPrice || asset.price;
-        message += `📍 Entrada: ${formatPrice(targetPrice)} USDT\n`;
-        message += `🛑 Stop: ${(asset.price * 0.98).toFixed(6)} USDT\n\n`;
-        message += ` MERCADO:\n`;
+        message += ` Entrada: ${formatPrice(targetPrice)} USDT\n`;
+        message += `🛑 Stop (${stopData.stopType}): ${formatPrice(stopData.stopPrice)} USDT (${stopData.stopPercent.toFixed(2)}%)\n`;
+        
+        message += ` Mercado:\n`;
         message += ` LSR: ${asset.lsr.toFixed(2)} (${asset.lsrTrend === 'falling' ? 'caindo ✅' : 'subindo'})\n`;
         message += ` Funding: ${asset.fundingPercent.toFixed(4)}% ${asset.funding < 0 ? '✅ negativo' : 'positivo'}\n`;
         message += ` RSI 1h: ${asset.rsi?.toFixed(1) || 'N/A'} ${asset.rsiEmoji}\n`;
-        message += ` CVD: ${asset.cvdDirection}\n\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
         message += ` STOCH:\n`;
         message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}\n`;
@@ -1877,37 +1878,36 @@ async function sendFVGAlert(asset, type) {
         message += `\n Titanium Prime X by @J4Rviz</i>`;
         
     } else {
-        message = `<i>🔴 Correção 🔴\n\n`;
+        message = `<i>🔴 Correção 🔴\n`;
         message += ` ATIVO: ${asset.symbol}\n`;
-        message += ` HORÁRIO: ${dt.full}\n`;
-        message += ` PREÇO: ${formatPrice(asset.price)} USDT\n\n`;
+        message += ` ${dt.full} hs\n`;
+        message += ` PREÇO: ${formatPrice(asset.price)} USDT\n`;
         
-        message += `📍 ZONA DE VENDA (4h):\n`;
+        message += `📍 Correção no (4h):\n`;
         if (volumeAlert.structure4h && volumeAlert.structure4h.closestBearFVG) {
             const fvg = volumeAlert.structure4h.closestBearFVG;
-            message += `🔴 FVG Bear confirmado!\n`;
-            message += ` Alvo: ${formatPrice(fvg.targetPrice)} USDT\n`;
+           message += ` Alvo: ${formatPrice(fvg.targetPrice)} USDT\n`;
             message += ` Distância: ${fvg.distancePercent.toFixed(2)}%\n`;
         }
         if (volumeAlert.structure4h && volumeAlert.structure4h.closestResistance) {
             const resistance = volumeAlert.structure4h.closestResistance;
             message += `🔴 Resistência em ${formatPrice(resistance.targetPrice)} USDT\n`;
-            message += `📏 Distância: ${resistance.distancePercent.toFixed(2)}%\n`;
+            message += ` Distância: ${resistance.distancePercent.toFixed(2)}%\n`;
         }
         
-        message += `🎯 RECOMENDAÇÃO:\n`;
+        message += `🔍🤖 Dica:\n`;
         message += `✅ VENDA no pullback\n`;
         const targetPrice = volumeAlert.structure4h?.closestBearFVG?.targetPrice || volumeAlert.structure4h?.closestResistance?.targetPrice || asset.price;
-        message += `📍 Entrada: ${formatPrice(targetPrice)} USDT\n`;
-        message += `🛑 Stop: ${(asset.price * 1.02).toFixed(6)} USDT\n\n`;
+        message += ` Entrada: ${formatPrice(targetPrice)} USDT\n`;
+        message += `🛑 Stop (${stopData.stopType}): ${formatPrice(stopData.stopPrice)} USDT (${stopData.stopPercent.toFixed(2)}%)\n`;
         
-        message += ` MERCADO:\n`;
+        message += ` Mercado:\n`;
         message += ` LSR: ${asset.lsr.toFixed(2)} (${asset.lsrTrend === 'rising' ? 'subindo ✅' : 'caindo'})\n`;
         message += ` Funding: ${asset.fundingPercent.toFixed(4)}% ${asset.funding > 0 ? '✅ positivo' : 'negativo'}\n`;
         message += ` RSI 1h: ${asset.rsi?.toFixed(1) || 'N/A'} ${asset.rsiEmoji}\n`;
-        message += ` CVD: ${asset.cvdDirection}\n\n`;
+        message += ` CVD: ${asset.cvdDirection}\n`;
         
-        message += ` STOCH:\n`;
+        message += ` Stoch:\n`;
         message += `${formatStochMessage(asset.stoch4h, asset.stoch1d)}\n`;
         
         if (volumeAlert.structure1h && volumeAlert.structure1h.zoneType === 'COMPRA') {
@@ -1976,7 +1976,7 @@ async function scanAndAlert() {
 async function startMonitor() {
     console.log('\n' + '='.repeat(70));
     console.log('🚀 TITANIUM PRIME X ');
-    
+   
     console.log('='.repeat(70));
     
     loadAlertedSymbols();
