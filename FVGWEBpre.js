@@ -15,8 +15,8 @@ const SETUP_80_FILE = path.join(__dirname, 'setup80.json'); // NOVO: memória de
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
-        CHAT_ID: '-1002554953979',
+        BOT_TOKEN: '7708427979:AAF7vVxg',
+        CHAT_ID: '-1002554',
         MESSAGE_DELAY_MS: 18000,
         MAX_MESSAGES_PER_MINUTE: 20,
         BURST_DELAY_MS: 10000,
