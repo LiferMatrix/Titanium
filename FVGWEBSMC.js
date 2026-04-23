@@ -1470,7 +1470,7 @@ async function sendSMCAlert(analysis) {
     const tradeText = analysis.tradeSignal === 'SELL' ? 'VENDA' : 'COMPRA';
     const dailyEMA = analysis.emaAnalysis['1d'];
     
-    let message = `<i>${tradeEmoji} ${tradeText} - ${analysis.symbol} - (${formatPrice(analysis.price)}</i>\n`;
+    let message = `<i>${tradeEmoji} ${tradeText} - ${analysis.symbol} - ${formatPrice(analysis.price)}</i>\n`;
     message += `<i>🔍🤖 Analise:  ${dt.full} hs</i>\n`;
     message += `<i>${analysis.conflictAnalysis.message}</i>\n`;
     message += `<i>📌 Setup: ${analysis.setupDescription}</i>\n`;
