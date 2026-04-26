@@ -97,7 +97,7 @@ const CONFIG = {
         RETRY_DELAY_MS: 5000
     },
     MONITOR: {
-        SCAN_INTERVAL_SECONDS: 300,
+        SCAN_INTERVAL_SECONDS: 60,
         MIN_VOLUME_USDT: 100000,
         MAX_SYMBOLS: 570,
         EXCLUDE_SYMBOLS: ['USDCUSDT', 'BUSDUSDT', 'TUSDUSDT'],
@@ -142,19 +142,6 @@ const CONFIG = {
             CCI_PERIOD: 20,
             CCI_EMA_PERIOD: 5
         }
-    },
-    WEBSOCKET: {
-        BINANCE_URL: 'wss://fstream.binance.com/ws',
-        RECONNECT_DELAY: 5000,
-        MAX_RECONNECT_ATTEMPTS: 10,
-        HEARTBEAT_INTERVAL: 30000,
-        CONNECTION_DELAY_MS: 300,
-        SYMBOLS_PER_CONNECTION: 25,
-        MAX_CONNECTIONS: 25,
-        PROCESS_DELAY_MS: 100,
-        BATCH_DELAY_MS: 500,
-        RECONNECT_JITTER: 5000,
-        HEARTBEAT_JITTER: 10000
     }
 };
 
@@ -169,13 +156,17 @@ const macdDivergenceCache = new Map();
 function calculateMACD(prices, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
     if (prices.length < slowPeriod) return null;
     
+    // Calcula EMA rápida e lenta
     const emaFast = calculateEMA(prices, fastPeriod);
     const emaSlow = calculateEMA(prices, slowPeriod);
     
     if (emaFast === null || emaSlow === null) return null;
     
+    // Linha MACD
     const macdLine = emaFast - emaSlow;
     
+    // Para calculadora do histograma, precisamos da série completa
+    // Retornamos os valores para uso na detecção de divergência
     return { macdLine, emaFast, emaSlow };
 }
 
@@ -184,6 +175,7 @@ function calculateMACDHistogram(prices, fastPeriod = 12, slowPeriod = 26, signal
     
     const macdValues = [];
     
+    // Calcula MACD para cada ponto
     for (let i = slowPeriod; i <= prices.length; i++) {
         const slice = prices.slice(0, i);
         const emaFast = calculateEMA(slice, fastPeriod);
@@ -195,7 +187,10 @@ function calculateMACDHistogram(prices, fastPeriod = 12, slowPeriod = 26, signal
     
     if (macdValues.length < signalPeriod) return null;
     
+    // Calcula a linha de sinal (EMA do MACD)
     const signalLine = calculateEMA(macdValues, signalPeriod);
+    
+    // Histograma
     const histogram = macdValues[macdValues.length - 1] - signalLine;
     
     return {
@@ -207,6 +202,9 @@ function calculateMACDHistogram(prices, fastPeriod = 12, slowPeriod = 26, signal
     };
 }
 
+// =====================================================================
+// === FUNÇÃO PARA ENCONTRAR PIVÔS NO MACD ===
+// =====================================================================
 function findMACDPivots(values, lookback = 3) {
     const pivots = { highs: [], lows: [] };
     
@@ -230,11 +228,15 @@ function findMACDPivots(values, lookback = 3) {
     return pivots;
 }
 
+// =====================================================================
+// === DETECÇÃO DE DIVERGÊNCIA NO MACD (HISTOGRAMA) ===
+// =====================================================================
 function detectMACDDivergence(prices, macdHistogram, macdValues, timeframe) {
     if (prices.length < 30 || macdHistogram.length < 30) {
         return { bullish: false, bearish: false, hasBullish: false, hasBearish: false, timeframes: [] };
     }
     
+    // Encontra pivôs no preço e no histograma do MACD
     const pricePivots = findPivots(prices, 5);
     const macdPivots = findMACDPivots(macdHistogram, 5);
     
@@ -242,6 +244,9 @@ function detectMACDDivergence(prices, macdHistogram, macdValues, timeframe) {
     let bearish = false;
     let detectedTimeframes = [];
     
+    // =========================================
+    // DIVERGÊNCIA BULLISH (PREÇO FAZ LOW MAIS BAIXO, MACD FAZ LOW MAIS ALTO)
+    // =========================================
     for (let i = 0; i < pricePivots.lows.length; i++) {
         for (let j = i + 1; j < pricePivots.lows.length; j++) {
             const priceLow1 = pricePivots.lows[i];
@@ -257,11 +262,15 @@ function detectMACDDivergence(prices, macdHistogram, macdValues, timeframe) {
                 if (macdLow1 && macdLow2 && macdLow2.value > macdLow1.value) {
                     bullish = true;
                     detectedTimeframes.push(timeframe);
+                    console.log(`   ✅ MACD Bullish detectado em ${timeframe}`);
                 }
             }
         }
     }
     
+    // =========================================
+    // DIVERGÊNCIA BEARISH (PREÇO FAZ HIGH MAIS ALTO, MACD FAZ HIGH MAIS BAIXO)
+    // =========================================
     for (let i = 0; i < pricePivots.highs.length; i++) {
         for (let j = i + 1; j < pricePivots.highs.length; j++) {
             const priceHigh1 = pricePivots.highs[i];
@@ -277,6 +286,7 @@ function detectMACDDivergence(prices, macdHistogram, macdValues, timeframe) {
                 if (macdHigh1 && macdHigh2 && macdHigh2.value < macdHigh1.value) {
                     bearish = true;
                     detectedTimeframes.push(timeframe);
+                    console.log(`   ✅ MACD Bearish detectado em ${timeframe}`);
                 }
             }
         }
@@ -292,6 +302,9 @@ function detectMACDDivergence(prices, macdHistogram, macdValues, timeframe) {
     };
 }
 
+// =====================================================================
+// === FUNÇÃO PARA VERIFICAR DIVERGÊNCIA MACD EM UM TIMEFRAME ===
+// =====================================================================
 async function checkMACDDivergenceOnTimeframe(symbol, timeframe, type) {
     try {
         const cacheKey = `${symbol}_macd_${timeframe}`;
@@ -308,6 +321,8 @@ async function checkMACDDivergenceOnTimeframe(symbol, timeframe, type) {
         if (!candles || candles.length < 50) return false;
         
         const prices = candles.map(c => c.close);
+        
+        // Calcula MACD e histograma para cada ponto
         const macdHistogram = [];
         
         for (let i = 26; i <= prices.length; i++) {
@@ -335,10 +350,16 @@ async function checkMACDDivergenceOnTimeframe(symbol, timeframe, type) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO PARA VERIFICAR DIVERGÊNCIA MACD EM 15m ===
+// =====================================================================
 async function checkMACDDivergence15m(symbol, type) {
     return await checkMACDDivergenceOnTimeframe(symbol, '15m', type);
 }
 
+// =====================================================================
+// === FUNÇÃO PARA VERIFICAR DIVERGÊNCIA MACD EM OUTROS TIMEFRAMES ===
+// =====================================================================
 async function checkMACDDivergenceOtherTF(symbol, type) {
     try {
         const timeframes = ['30m', '1h', '2h', '4h', '12h', '1d', '3d', '1w'];
@@ -346,9 +367,9 @@ async function checkMACDDivergenceOtherTF(symbol, type) {
         for (const tf of timeframes) {
             const hasDiv = await checkMACDDivergenceOnTimeframe(symbol, tf, type);
             if (hasDiv) {
+                console.log(`   ✅ MACD Divergência ${type === 'BUY' ? 'BULLISH' : 'BEARISH'} detectada em ${tf}`);
                 return true;
             }
-            await delay(50);
         }
         return false;
     } catch (error) {
@@ -356,6 +377,9 @@ async function checkMACDDivergenceOtherTF(symbol, type) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO PARA LISTAR TIMEFRAMES COM DIVERGÊNCIA MACD ===
+// =====================================================================
 async function getMACDDivergenceTimeframesList(symbol, type) {
     try {
         const timeframes = ['15m', '30m', '1h', '2h', '4h', '12h', '1d', '3d', '1w'];
@@ -366,7 +390,6 @@ async function getMACDDivergenceTimeframesList(symbol, type) {
             if (hasDiv) {
                 detected.push(tf);
             }
-            await delay(50);
         }
         
         return detected;
@@ -375,6 +398,9 @@ async function getMACDDivergenceTimeframesList(symbol, type) {
     }
 }
 
+// =====================================================================
+// === FUNÇÃO PARA ANALISAR DIVERGÊNCIA MACD COMPLETA ===
+// =====================================================================
 async function analyzeMACDDivergences(symbol, tradeSignal) {
     try {
         const cacheKey = `${symbol}_macd_divergences`;
@@ -426,8 +452,6 @@ async function analyzeMACDDivergences(symbol, tradeSignal) {
                     result.hasBearish = true;
                     result.timeframesList.push(tf);
                 }
-                
-                await delay(100);
             } catch (error) {}
         }
         
@@ -448,7 +472,7 @@ async function analyzeMACDDivergences(symbol, tradeSignal) {
 }
 
 // =====================================================================
-// === FUNÇÃO PARA CALCULAR CCI ===
+// === FUNÇÃO PARA CALCULAR CCI (Commodity Channel Index) ===
 // =====================================================================
 function calculateCCI(highs, lows, closes, period = 20) {
     if (closes.length < period) return null;
@@ -781,7 +805,7 @@ class TelegramQueue {
 const telegramQueue = new TelegramQueue();
 
 // =====================================================================
-// === BUSCAR CANDLES (FALLBACK) ===
+// === BUSCAR CANDLES ===
 // =====================================================================
 async function getCandles(symbol, interval, limit = 100) {
     const cacheKey = `${symbol}_${interval}_${limit}`;
@@ -814,25 +838,6 @@ async function getCandles(symbol, interval, limit = 100) {
     } catch (error) {
         return [];
     }
-}
-
-// =====================================================================
-// === BUSCAR TODOS OS SÍMBOLOS ===
-// =====================================================================
-async function getAllSymbolsFromAPI() {
-    try {
-        await rateLimiter.acquire();
-        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
-        const data = await res.json();
-        return data.filter(i => i.symbol.endsWith('USDT') && parseFloat(i.quoteVolume) >= CONFIG.MONITOR.MIN_VOLUME_USDT && !CONFIG.MONITOR.EXCLUDE_SYMBOLS.includes(i.symbol)).map(i => ({ symbol: i.symbol, price: parseFloat(i.lastPrice), volume24h: parseFloat(i.quoteVolume) }));
-    } catch (error) {
-        console.log(`⚠️ Erro ao buscar símbolos: ${error.message}`);
-        return [];
-    }
-}
-
-async function getAllSymbols() {
-    return await getAllSymbolsFromAPI();
 }
 
 // =====================================================================
@@ -902,7 +907,7 @@ async function getRSI(symbol, timeframe = '15m') {
 }
 
 // =====================================================================
-// === ANÁLISE DE HIGHER TIMEFRAME ===
+// === ANÁLISE DE HIGHER TIMEFRAME (1W, 1M) ===
 // =====================================================================
 async function analyzeHigherTimeframe(symbol) {
     try {
@@ -948,7 +953,7 @@ async function analyzeHigherTimeframe(symbol) {
 }
 
 // =====================================================================
-// === ANÁLISE DE VOLUME ===
+// === ANÁLISE DE VOLUME CONFIRMATION ===
 // =====================================================================
 async function analyzeVolumeConfirmation(symbol, pivotPrice, pivotIndex) {
     try {
@@ -983,7 +988,7 @@ async function analyzeVolumeConfirmation(symbol, pivotPrice, pivotIndex) {
 }
 
 // =====================================================================
-// === PREMIUM/DISCOUNT ===
+// === PREMIUM/DISCOUNT ARRAYS ===
 // =====================================================================
 function calculatePremiumDiscount(currentPrice, valueAreaLow, valueAreaHigh) {
     const range = valueAreaHigh - valueAreaLow;
@@ -1026,7 +1031,7 @@ function getValueArea(candles) {
 }
 
 // =====================================================================
-// === OTE ===
+// === OPTIMUM TRADE ENTRY (OTE) - Fibonacci Avançado ===
 // =====================================================================
 function calculateOTE(high, low, direction) {
     const range = high - low;
@@ -1079,7 +1084,7 @@ function detectBreakerBlocks(orderBlocks, currentPrice) {
 }
 
 // =====================================================================
-// === ORDER BLOCK ===
+// === ORDER BLOCK COM VALIDAÇÃO ===
 // =====================================================================
 function findOrderBlocksWithValidation(candles, lookback = 50) {
     const bullishOB = [];
@@ -1150,7 +1155,7 @@ function checkMitigationAdvanced(orderBlocks, currentPrice, tolerance = 0.002, t
 }
 
 // =====================================================================
-// === ANÁLISE DE EMAS ===
+// === ANÁLISE DE EMAS - AJUSTADA PARA 15m ===
 // =====================================================================
 async function analyzeMultiTimeframeEMAs(symbol) {
     try {
@@ -1229,7 +1234,7 @@ async function analyzeMultiTimeframeEMAs(symbol) {
 }
 
 // =====================================================================
-// === DETECÇÃO DE DIVERGÊNCIAS RSI ===
+// === DETECÇÃO DE DIVERGÊNCIAS (RSI - MULTI-TIMEFRAME COMPLETO) ===
 // =====================================================================
 function findPivots(data, lookback = 3) {
     const pivots = { highs: [], lows: [] };
@@ -1328,9 +1333,9 @@ async function checkDivergenceOtherTF(symbol, type) {
         for (const tf of timeframes) {
             const hasDiv = await checkDivergenceOnTimeframe(symbol, tf, type);
             if (hasDiv) {
+                console.log(`   ✅ Divergência RSI ${type === 'BUY' ? 'BULLISH' : 'BEARISH'} detectada em ${tf}`);
                 return true;
             }
-            await delay(100);
         }
         return false;
     } catch (error) {
@@ -1348,7 +1353,6 @@ async function getDivergenceTimeframesList(symbol, type) {
             if (hasDiv) {
                 detected.push(tf);
             }
-            await delay(100);
         }
         
         return detected;
@@ -1387,7 +1391,6 @@ async function analyzeDivergences(symbol) {
                     result.bearish.push(...divergences.bearish);
                     result.hasBearish = true;
                 }
-                await delay(100);
             } catch (error) {}
         }
         if (result.hasBullish && result.hasBearish) {
@@ -1405,7 +1408,7 @@ async function analyzeDivergences(symbol) {
 }
 
 // =====================================================================
-// === STOCHASTIC ===
+// === STOCHASTIC (PARÂMETROS 5.3.3) ===
 // =====================================================================
 async function calculateStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, slowing = 3) {
     try {
@@ -1470,7 +1473,7 @@ async function calculateStochastic(symbol, timeframe, kPeriod = 5, dPeriod = 3, 
 }
 
 // =====================================================================
-// === FVG ===
+// === FVG COM VALIDAÇÃO MULTI-TIMEFRAME ===
 // =====================================================================
 function detectFVG(candles) {
     if (!candles || candles.length < 3) return { bullish: [], bearish: [] };
@@ -1504,7 +1507,6 @@ async function validateFVGCruzado(symbol, fvgPrice, type) {
                 const hasFVG = fvgs.bearish.some(f => Math.abs(f.top - fvgPrice) / fvgPrice < 0.005);
                 confirmations.push(hasFVG);
             }
-            await delay(100);
         }
         
         const confirmedCount = confirmations.filter(c => c).length;
@@ -1702,11 +1704,23 @@ async function getLSRData(symbols) {
                     const lsr = parseFloat(data[0].longShortRatio);
                     result[symbol] = { value: lsr, emoji: lsr > 1.2 ? '📈' : (lsr < 0.8 ? '📉' : '➡️') };
                 }
-                await delay(100);
+                await delay(50);
             } catch { result[symbol] = null; }
         }
         return result;
     } catch (error) { return {}; }
+}
+
+async function getAllSymbols() {
+    try {
+        await rateLimiter.acquire();
+        const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+        const data = await res.json();
+        return data.filter(i => i.symbol.endsWith('USDT') && parseFloat(i.quoteVolume) >= CONFIG.MONITOR.MIN_VOLUME_USDT && !CONFIG.MONITOR.EXCLUDE_SYMBOLS.includes(i.symbol)).map(i => ({ symbol: i.symbol, price: parseFloat(i.lastPrice), volume24h: parseFloat(i.quoteVolume) }));
+    } catch (error) {
+        console.log(`⚠️ Erro ao buscar símbolos: ${error.message}`);
+        return [];
+    }
 }
 
 // =====================================================================
@@ -1768,7 +1782,7 @@ function isExtremeOverbought(rsi, stoch4h) {
 }
 
 // =====================================================================
-// === SCORE PONDERADO ===
+// === SCORE PONDERADO (WEIGHTED SCORE) ===
 // =====================================================================
 function calculateWeightedScore(analysis) {
     const weights = {
@@ -1838,6 +1852,7 @@ function calculateWeightedScore(analysis) {
     }
     maxPossible += weights.fundingSignal;
     
+    // NOVO: Bônus para divergência MACD
     if (analysis.hasMACDDivergence) {
         totalScore += weights.macdDivergence;
     }
@@ -1848,7 +1863,7 @@ function calculateWeightedScore(analysis) {
 }
 
 // =====================================================================
-// === ANÁLISE DE CONFLITO ===
+// === ANÁLISE DE CONFLITO - AJUSTADA PARA 15m ===
 // =====================================================================
 function analyzeTimeframeConflict(emaAnalysis) {
     if (!emaAnalysis) return { level: 'NEUTRO', message: ' Tendências neutras', score: 0 };
@@ -1874,271 +1889,7 @@ function analyzeScoreQuality(score) {
 }
 
 // =====================================================================
-// === WEBSOCKET MANAGER - VERSÃO COMPLETA CORRIGIDA ===
-// =====================================================================
-class WebSocketManager {
-    constructor() {
-        this.connections = [];
-        this.processingQueue = [];
-        this.isProcessing = false;
-        this.lastAnalysisTime = new Map();
-        this.reconnectAttempts = new Map();
-    }
-
-    async connect() {
-        try {
-            console.log('🔌 Iniciando WebSocket Manager para TODAS as moedas...');
-            
-            const symbols = await getAllSymbolsFromAPI();
-            if (!symbols.length) {
-                console.log('⚠️ Nenhum símbolo encontrado, tentando novamente em 30s...');
-                setTimeout(() => this.connect(), 30000);
-                return;
-            }
-            
-            console.log(`📊 Total de símbolos encontrados: ${symbols.length}`);
-            
-            const sortedSymbols = symbols.sort((a, b) => b.volume24h - a.volume24h);
-            const connCount = Math.ceil(sortedSymbols.length / CONFIG.WEBSOCKET.SYMBOLS_PER_CONNECTION);
-            console.log(`🔗 Serão criadas ${connCount} conexões WebSocket (${CONFIG.WEBSOCKET.SYMBOLS_PER_CONNECTION} símbolos por conexão)`);
-            
-            for (let i = 0; i < sortedSymbols.length; i += CONFIG.WEBSOCKET.SYMBOLS_PER_CONNECTION) {
-                const batchSymbols = sortedSymbols.slice(i, i + CONFIG.WEBSOCKET.SYMBOLS_PER_CONNECTION);
-                const connectionId = this.connections.length;
-                
-                console.log(`🔌 Criando conexão ${connectionId + 1}/${connCount} com ${batchSymbols.length} símbolos...`);
-                
-                await this.createConnection(batchSymbols, connectionId);
-                await delay(CONFIG.WEBSOCKET.BATCH_DELAY_MS);
-            }
-            
-            console.log(`✅ ${this.connections.length} conexões WebSocket estabelecidas com sucesso!`);
-            this.startBackgroundProcessing();
-            
-        } catch (error) {
-            console.log(`⚠️ Erro ao conectar WebSocket: ${error.message}`);
-            setTimeout(() => this.connect(), 30000);
-        }
-    }
-
-    async createConnection(symbols, connectionId) {
-        return new Promise((resolve, reject) => {
-            // 🔥 CORREÇÃO: Extrai os nomes dos símbolos corretamente
-            const symbolNames = symbols.map(s => {
-                if (typeof s === 'object' && s !== null) {
-                    return (s.symbol || String(s)).toLowerCase();
-                }
-                return String(s).toLowerCase();
-            });
-            
-            const streams = symbolNames.map(s => `${s}@kline_15m`);
-            const wsUrl = `${CONFIG.WEBSOCKET.BINANCE_URL}/stream?streams=${streams.join('/')}`;
-            
-            if (wsUrl.length > 8000) {
-                console.log(`⚠️ URL muito longa para conexão ${connectionId + 1}, pulando...`);
-                reject(new Error('URL muito longa'));
-                return;
-            }
-            
-            const ws = new WebSocket(wsUrl);
-            
-            const timeout = setTimeout(() => {
-                ws.close();
-                reject(new Error(`Timeout na conexão ${connectionId + 1}`));
-            }, 15000);
-            
-            ws.on('open', () => {
-                clearTimeout(timeout);
-                console.log(`  ✅ Conexão ${connectionId + 1} estabelecida (${symbolNames.length} símbolos)`);
-                
-                this.connections[connectionId] = {
-                    id: connectionId,
-                    ws: ws,
-                    symbols: symbolNames.map(s => s.toUpperCase()),
-                    lastHeartbeat: Date.now(),
-                    heartbeat: setInterval(() => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                            ws.ping();
-                            if (this.connections[connectionId]) {
-                                this.connections[connectionId].lastHeartbeat = Date.now();
-                            }
-                        }
-                    }, CONFIG.WEBSOCKET.HEARTBEAT_INTERVAL + (Math.random() * CONFIG.WEBSOCKET.HEARTBEAT_JITTER))
-                };
-                resolve();
-            });
-            
-            ws.on('message', (data) => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.data && parsed.data.k && parsed.data.k.x) {
-                        const kline = parsed.data.k;
-                        const symbol = parsed.data.s;
-                        this.queueAnalysis(symbol, '15m', kline);
-                    }
-                } catch(e) {}
-            });
-            
-            ws.on('error', (error) => {
-                console.log(`  ⚠️ Erro na conexão ${connectionId + 1}: ${error.message}`);
-            });
-            
-            ws.on('close', () => {
-                console.log(`  🔌 Conexão ${connectionId + 1} fechada`);
-                this.reconnectConnection(connectionId, symbols);
-            });
-        });
-    }
-
-    async reconnectConnection(connectionId, symbols) {
-        const oldConn = this.connections[connectionId];
-        if (oldConn && oldConn.heartbeat) {
-            clearInterval(oldConn.heartbeat);
-        }
-        
-        const attempts = (this.reconnectAttempts.get(connectionId) || 0) + 1;
-        this.reconnectAttempts.set(connectionId, attempts);
-        
-        if (attempts > CONFIG.WEBSOCKET.MAX_RECONNECT_ATTEMPTS) {
-            console.log(`❌ Conexão ${connectionId + 1} atingiu máximo de tentativas`);
-            return;
-        }
-        
-        const jitter = Math.random() * CONFIG.WEBSOCKET.RECONNECT_JITTER;
-        const delayTime = CONFIG.WEBSOCKET.RECONNECT_DELAY * Math.min(attempts, 5) + jitter;
-        
-        console.log(`🔄 Reconectando conexão ${connectionId + 1} em ${(delayTime/1000).toFixed(1)}s... (tentativa ${attempts})`);
-        
-        await delay(delayTime);
-        
-        // 🔥 CORREÇÃO: Extrai os nomes dos símbolos corretamente para reconexão
-        const symbolNames = symbols.map(s => {
-            if (typeof s === 'object' && s !== null) {
-                return (s.symbol || String(s)).toLowerCase();
-            }
-            return String(s).toLowerCase();
-        });
-        
-        const streams = symbolNames.map(s => `${s}@kline_15m`);
-        const wsUrl = `${CONFIG.WEBSOCKET.BINANCE_URL}/stream?streams=${streams.join('/')}`;
-        
-        if (wsUrl.length > 8000) {
-            console.log(`⚠️ URL muito longa para reconexão ${connectionId + 1}`);
-            return;
-        }
-        
-        const ws = new WebSocket(wsUrl);
-        
-        const timeout = setTimeout(() => {
-            ws.close();
-            this.reconnectConnection(connectionId, symbols);
-        }, 15000);
-        
-        ws.on('open', () => {
-            clearTimeout(timeout);
-            console.log(`  ✅ Conexão ${connectionId + 1} reconectada`);
-            this.reconnectAttempts.delete(connectionId);
-            
-            this.connections[connectionId] = {
-                id: connectionId,
-                ws: ws,
-                symbols: symbolNames.map(s => s.toUpperCase()),
-                lastHeartbeat: Date.now(),
-                heartbeat: setInterval(() => {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.ping();
-                        if (this.connections[connectionId]) {
-                            this.connections[connectionId].lastHeartbeat = Date.now();
-                        }
-                    }
-                }, CONFIG.WEBSOCKET.HEARTBEAT_INTERVAL)
-            };
-        });
-        
-        ws.on('message', (data) => {
-            try {
-                const parsed = JSON.parse(data);
-                if (parsed.data && parsed.data.k && parsed.data.k.x) {
-                    this.queueAnalysis(parsed.data.s, '15m', parsed.data.k);
-                }
-            } catch(e) {}
-        });
-        
-        ws.on('error', (error) => {
-            console.log(`  ⚠️ Erro na reconexão ${connectionId + 1}: ${error.message}`);
-        });
-        
-        ws.on('close', () => {
-            this.reconnectConnection(connectionId, symbols);
-        });
-    }
-
-    queueAnalysis(symbol, interval, kline) {
-        const lastTime = this.lastAnalysisTime.get(symbol);
-        const now = Date.now();
-        
-        if (lastTime && now - lastTime < 10000) return;
-        this.lastAnalysisTime.set(symbol, now);
-        
-        if (this.processingQueue.length > 200) {
-            this.processingQueue = this.processingQueue.slice(-100);
-        }
-        
-        this.processingQueue.push({ symbol, interval, kline, timestamp: now });
-    }
-
-    async startBackgroundProcessing() {
-        setInterval(async () => {
-            if (this.isProcessing || this.processingQueue.length === 0) return;
-            
-            this.isProcessing = true;
-            
-            try {
-                const batch = this.processingQueue.splice(0, 10);
-                
-                for (const item of batch) {
-                    try {
-                        await delay(CONFIG.WEBSOCKET.PROCESS_DELAY_MS);
-                        
-                        const price = parseFloat(item.kline.c);
-                        const analysis = await analyzeSMC({ symbol: item.symbol, price });
-                        
-                        if (analysis && analysis.score >= CONFIG.MONITOR.MIN_SCORE_ACCEPT) {
-                            const canSend = canAlert(item.symbol, analysis.tradeSignal, parseInt(analysis.score));
-                            
-                            if (canSend) {
-                                await sendSMCAlert(analysis);
-                                markAlerted(item.symbol, analysis.tradeSignal, parseInt(analysis.score));
-                                console.log(`🚀 [WS] Alerta ${analysis.tradeSignal} para ${analysis.symbol} (Score: ${analysis.score})`);
-                                await delay(5000);
-                            }
-                        }
-                    } catch (error) {
-                        console.log(`⚠️ Erro ao processar ${item.symbol}: ${error.message}`);
-                    }
-                }
-            } catch (error) {
-                console.log(`⚠️ Erro no processamento: ${error.message}`);
-            } finally {
-                this.isProcessing = false;
-            }
-        }, 500);
-    }
-
-    disconnect() {
-        console.log('🔌 Desconectando todas as conexões WebSocket...');
-        for (const conn of this.connections) {
-            if (conn && conn.heartbeat) clearInterval(conn.heartbeat);
-            if (conn && conn.ws) try { conn.ws.close(); } catch(e) {}
-        }
-        this.connections = [];
-        this.lastAnalysisTime.clear();
-        this.reconnectAttempts.clear();
-    }
-}
-
-// =====================================================================
-// === ANÁLISE SMC COMPLETA ===
+// === ANÁLISE SMC COMPLETA - TIMEFRAME 15 MINUTOS ===
 // =====================================================================
 async function analyzeSMC(symbolData) {
     const { symbol: fullSymbol, price } = symbolData;
@@ -2216,17 +1967,23 @@ async function analyzeSMC(symbolData) {
         const funding = fundingRates[fullSymbol];
         const lsr = lsrData[fullSymbol];
         
+        // STOCHASTIC - AGORA 4h E DIÁRIO
         const [stoch4h, stochDaily] = await Promise.all([
             calculateStochastic(fullSymbol, '4h', 5, 3, 3),
             calculateStochastic(fullSymbol, '1d', 5, 3, 3)
         ]);
         
         const cciAnalysis = await analyzeCCI(fullSymbol, '4h');
+        
         const divergences = await analyzeDivergences(fullSymbol);
+        
+        // NOVO: Análise de divergência MACD
         const macdDivergenceAnalysis = await analyzeMACDDivergences(fullSymbol, null);
+        
         const conflictAnalysis = analyzeTimeframeConflict(emaAnalysis);
         
         let tradeSignal = null, entryPrice = null, structureData = null, setupDescription = '';
+        let currentScore = 0;
         let volumeConfirmed = false;
         let hasValidFVG = false;
         let hasLiquiditySweep = false;
@@ -2237,14 +1994,15 @@ async function analyzeSMC(symbolData) {
         let hasCCICrossover = false;
         let lsrConfirmed = false;
         let fundingConfirmed = false;
-        let hasMACDDivergence = false;
-        let macdDivergenceSummary = '';
+        let hasMACDDivergence = false;      // NOVO
+        let macdDivergenceSummary = '';      // NOVO
         
         const hasDiv15mBuy = await checkDivergence15m(fullSymbol, 'BUY');
         const hasDiv15mSell = await checkDivergence15m(fullSymbol, 'SELL');
         const hasDivOtherBuy = await checkDivergenceOtherTF(fullSymbol, 'BUY');
         const hasDivOtherSell = await checkDivergenceOtherTF(fullSymbol, 'SELL');
         
+        // NOVO: Verifica divergência MACD
         const hasMACDBuy = await checkMACDDivergence15m(fullSymbol, 'BUY') || await checkMACDDivergenceOtherTF(fullSymbol, 'BUY');
         const hasMACDSell = await checkMACDDivergence15m(fullSymbol, 'SELL') || await checkMACDDivergenceOtherTF(fullSymbol, 'SELL');
         
@@ -2255,7 +2013,7 @@ async function analyzeSMC(symbolData) {
         const sellDivTimeframes = (hasDiv15mSell || hasDivOtherSell) ? await getDivergenceTimeframesList(fullSymbol, 'SELL') : [];
         
         // =============================================================
-        // COMPRA (BUY)
+        // COMPRA (BUY) - TIMEFRAME 15 MINUTOS
         // =============================================================
         const isBuyTrendValid = (primaryTrend.trend === 'ALTA' && primaryTrend.isAboveEMA13) ||
                                 (CONFIG.MONITOR.ALLOW_NEUTRAL_TREND && primaryTrend.trend === 'NEUTRA' && secondaryTrend?.trend === 'ALTA');
@@ -2264,13 +2022,26 @@ async function analyzeSMC(symbolData) {
             const isOverbought = isExtremeOverbought(rsi, stoch4h);
             const hasRequiredDivergence = hasDiv15mBuy && hasDivOtherBuy;
             
-            if (cciAnalysis && cciAnalysis.crossoverUp) hasCCICrossover = true;
-            if (lsr && lsr.value < 2.5) lsrConfirmed = true;
-            if (funding && funding < 0) fundingConfirmed = true;
+            if (cciAnalysis && cciAnalysis.crossoverUp) {
+                hasCCICrossover = true;
+                console.log(`   ✅ CCI Bullish Crossover detectado (4h): CCI cruzou acima da EMA`);
+            }
             
+            if (lsr && lsr.value < 2.5) {
+                lsrConfirmed = true;
+                console.log(`   ✅ LSR favorável para COMPRA: ${lsr.value.toFixed(2)} < 2.5`);
+            }
+            
+            if (funding && funding < 0) {
+                fundingConfirmed = true;
+                console.log(`   ✅ Funding favorável para COMPRA: ${(funding * 100).toFixed(3)}% (negativo)`);
+            }
+            
+            // NOVO: Verifica divergência MACD Bullish
             if (hasMACDBuy) {
                 hasMACDDivergence = true;
                 macdDivergenceSummary = `🟢 MACD Bullish em: ${macdBuyTimeframes.join(', ')}`;
+                console.log(`   ✅ MACD Bullish detectado para COMPRA`);
             }
             
             if (!isOverbought && hasRequiredDivergence) {
@@ -2324,6 +2095,7 @@ async function analyzeSMC(symbolData) {
                     reasons.push(`💰 Funding negativo: ${(funding * 100).toFixed(3)}%`);
                 }
                 
+                // NOVO: Bônus para divergência MACD Bullish
                 if (hasMACDDivergence) {
                     score += 5;
                     reasons.push(`📊 MACD Bullish confirmado`);
@@ -2332,6 +2104,8 @@ async function analyzeSMC(symbolData) {
                 timeframesAligned = conflictAnalysis.level === 'ALINHADO';
                 if (timeframesAligned) score += 10;
                 
+                currentScore = score;
+                
                 if (score >= CONFIG.MONITOR.MIN_SCORE_ACCEPT && bullishFVG && isFVGValid) {
                     tradeSignal = 'BUY';
                     if (liquiditySweep) { entryPrice = price * 1.001; structureData = { sweepPrice: price }; }
@@ -2339,12 +2113,16 @@ async function analyzeSMC(symbolData) {
                     else if (bullishFVG) { entryPrice = bullishFVG.targetPrice * 1.001; }
                     else { entryPrice = price * 1.002; }
                     setupDescription = `${reasons.join(' + ')} (Score: ${score})`;
+                } else if (score < CONFIG.MONITOR.MIN_SCORE_ACCEPT) {
+                    console.log(`⛔ ${fullSymbol} BUY: Score ${score} < ${CONFIG.MONITOR.MIN_SCORE_ACCEPT} - BLOQUEADO`);
                 }
+            } else if (!hasRequiredDivergence) {
+                console.log(`⛔ ${fullSymbol} BUY: Divergência Bullish obrigatória NÃO detectada (15m: ${hasDiv15mBuy}, Outro TF: ${hasDivOtherBuy})`);
             }
         }
         
         // =============================================================
-        // VENDA (SELL)
+        // VENDA (SELL) - TIMEFRAME 15 MINUTOS
         // =============================================================
         const isSellTrendValid = (primaryTrend.trend === 'BAIXA' && !primaryTrend.isAboveEMA13) ||
                                   (CONFIG.MONITOR.ALLOW_NEUTRAL_TREND && primaryTrend.trend === 'NEUTRA' && secondaryTrend?.trend === 'BAIXA');
@@ -2353,13 +2131,26 @@ async function analyzeSMC(symbolData) {
             const isOversold = isExtremeOversold(rsi, stoch4h);
             const hasRequiredDivergence = hasDiv15mSell && hasDivOtherSell;
             
-            if (cciAnalysis && cciAnalysis.crossoverDown) hasCCICrossover = true;
-            if (lsr && lsr.value > 2.5) lsrConfirmed = true;
-            if (funding && funding > 0) fundingConfirmed = true;
+            if (cciAnalysis && cciAnalysis.crossoverDown) {
+                hasCCICrossover = true;
+                console.log(`   ✅ CCI Bearish Crossover detectado (4h): CCI cruzou abaixo da EMA`);
+            }
             
+            if (lsr && lsr.value > 2.5) {
+                lsrConfirmed = true;
+                console.log(`   ✅ LSR favorável para VENDA: ${lsr.value.toFixed(2)} > 2.5`);
+            }
+            
+            if (funding && funding > 0) {
+                fundingConfirmed = true;
+                console.log(`   ✅ Funding favorável para VENDA: ${(funding * 100).toFixed(3)}% (positivo)`);
+            }
+            
+            // NOVO: Verifica divergência MACD Bearish
             if (hasMACDSell) {
                 hasMACDDivergence = true;
                 macdDivergenceSummary = `🔴 MACD Bearish em: ${macdSellTimeframes.join(', ')}`;
+                console.log(`   ✅ MACD Bearish detectado para VENDA`);
             }
             
             if (!isOversold && hasRequiredDivergence) {
@@ -2413,6 +2204,7 @@ async function analyzeSMC(symbolData) {
                     reasons.push(`💰 Funding positivo: ${(funding * 100).toFixed(3)}%`);
                 }
                 
+                // NOVO: Bônus para divergência MACD Bearish
                 if (hasMACDDivergence) {
                     score += 5;
                     reasons.push(`📊 MACD Bearish confirmado`);
@@ -2421,6 +2213,8 @@ async function analyzeSMC(symbolData) {
                 timeframesAligned = conflictAnalysis.level === 'ALINHADO';
                 if (timeframesAligned) score += 10;
                 
+                currentScore = score;
+                
                 if (score >= CONFIG.MONITOR.MIN_SCORE_ACCEPT && bearishFVG && isFVGValid) {
                     tradeSignal = 'SELL';
                     if (liquiditySweep) { entryPrice = price * 0.999; structureData = { sweepPrice: price }; }
@@ -2428,7 +2222,11 @@ async function analyzeSMC(symbolData) {
                     else if (bearishFVG) { entryPrice = bearishFVG.targetPrice * 0.999; }
                     else { entryPrice = price * 0.998; }
                     setupDescription = `${reasons.join(' + ')} (Score: ${score})`;
+                } else if (score < CONFIG.MONITOR.MIN_SCORE_ACCEPT) {
+                    console.log(`⛔ ${fullSymbol} SELL: Score ${score} < ${CONFIG.MONITOR.MIN_SCORE_ACCEPT} - BLOQUEADO`);
                 }
+            } else if (!hasRequiredDivergence) {
+                console.log(`⛔ ${fullSymbol} SELL: Divergência Bearish obrigatória NÃO detectada (15m: ${hasDiv15mSell}, Outro TF: ${hasDivOtherSell})`);
             }
         }
         
@@ -2485,7 +2283,7 @@ async function analyzeSMC(symbolData) {
             hasCCICrossover,
             lsrConfirmed,
             fundingConfirmed,
-            hasMACDDivergence
+            hasMACDDivergence   // NOVO
         });
         
         const scoreQuality = analyzeScoreQuality(weightedScore);
@@ -2495,6 +2293,7 @@ async function analyzeSMC(symbolData) {
             `🟢 Divergência RSI Bullish detectada em: ${divTimeframesList.join(', ')}` : 
             `🔴 Divergência RSI Bearish detectada em: ${divTimeframesList.join(', ')}`;
         
+        // NOVO: Informação da divergência MACD para o alerta
         const macdDivInfo = hasMACDDivergence ? macdDivergenceSummary : '';
         
         return {
@@ -2516,8 +2315,8 @@ async function analyzeSMC(symbolData) {
             minScoreRequired: CONFIG.MONITOR.MIN_SCORE_ACCEPT,
             cciText,
             lsrFundText,
-            macdDivergenceInfo: macdDivInfo,
-            hasMACDDivergence
+            macdDivergenceInfo: macdDivInfo,  // NOVO
+            hasMACDDivergence                  // NOVO
         };
        
     } catch (error) {
@@ -2527,23 +2326,26 @@ async function analyzeSMC(symbolData) {
 }
 
 // =====================================================================
-// === ENVIAR ALERTA ===
+// === ENVIAR ALERTA COM ANÁLISE COMPLETA (FORMATO SIMPLIFICADO) ===
 // =====================================================================
 async function sendSMCAlert(analysis) {
     const dt = getBrazilianDateTime();
     const tradeEmoji = analysis.tradeSignal === 'SELL' ? '🔴' : '🟢';
     const tradeText = analysis.tradeSignal === 'SELL' ? 'Correção' : 'Compra';
     
+    // 🔗 CONSTRÓI O LINK DO TRADINGVIEW (TIMEFRAME 1h)
     const symbol = analysis.fullSymbol || `${analysis.symbol}USDT`;
     const tvLink = `https://www.tradingview.com/chart/?symbol=BINANCE%3A${symbol}`;
     const tvLinkText = `<a href="${tvLink}"> 🔍Ver_Gráfico</a>`;
     
+    // Extrai os timeframes da divergência RSI
     let divTimeframes = '';
     if (analysis.divergenceInfo) {
         const match = analysis.divergenceInfo.match(/detectada em: (.+)/);
         if (match) divTimeframes = match[1];
     }
     
+    // Pega o FVG relevante (Bullish para COMPRA, Bearish para VENDA)
     let fvgText = '';
     let fvgDistance = '';
     let volumeText = '';
@@ -2583,6 +2385,7 @@ async function sendSMCAlert(analysis) {
         }
     }
     
+    // Volume
     if (analysis.volumeConfirmed) {
         const volMatch = analysis.setupDescription.match(/Volume ([\w\s]+?) \(([\d.]+)x/);
         if (volMatch) {
@@ -2592,13 +2395,18 @@ async function sendSMCAlert(analysis) {
         }
     }
     
+    // CCI
     if (analysis.cciText) {
         if (analysis.cciText.includes('Bullish')) cciText = 'bullish ⤴️';
         else if (analysis.cciText.includes('Bearish')) cciText = 'bearish ⤵️';
         else cciText = 'neutro';
     }
     
+    // LSR e Funding
     const lsrValue = analysis.lsr?.value?.toFixed(2) || 'N/A';
+    const lsrStatus = analysis.tradeSignal === 'SELL' ? 
+        (lsrValue > 2.5 ? 'sobrecomprado' : 'normal') : 
+        (lsrValue < 2.5 ? 'sobrevendido' : 'normal');
     const lsrCheck = (analysis.tradeSignal === 'SELL' && lsrValue > 2.5) || (analysis.tradeSignal === 'BUY' && lsrValue < 2.5) ? '✅' : '';
     
     const fundingValue = analysis.funding?.toFixed(3) || 'N/A';
@@ -2607,17 +2415,20 @@ async function sendSMCAlert(analysis) {
         (analysis.funding < 0 ? 'negativo' : 'positivo');
     const fundingCheck = (analysis.tradeSignal === 'SELL' && analysis.funding > 0) || (analysis.tradeSignal === 'BUY' && analysis.funding < 0) ? '✅' : '';
     
+    // Score quality
     let scoreMedal = '';
     if (analysis.score >= 80) scoreMedal = '🏆 TOP';
     else if (analysis.score >= 65) scoreMedal = '🔥 MUITO BOM';
     else if (analysis.score >= 50) scoreMedal = '✅ VÁLIDO';
     else scoreMedal = '⚠️ FRACO';
     
+    // Alvos formatados
     const targetsSimple = analysis.targetsText
         .replace(/\n   Alvo /g, ' | ')
         .replace(/ \(/g, ' (')
         .replace(/\) - /g, ') ');
     
+    // RSI status
     let rsiStatus = '';
     if (analysis.rsi) {
         if (analysis.rsi.value < 35) rsiStatus = 'sobrevendido';
@@ -2625,24 +2436,30 @@ async function sendSMCAlert(analysis) {
         else rsiStatus = 'neutro';
     }
     
+    // Stoch formatação
     let stoch4hText = '';
     let stochDailyText = '';
     if (analysis.stoch4h) stoch4hText = `K${analysis.stoch4h.k}${analysis.stoch4h.kTrend} D${analysis.stoch4h.d}`;
     if (analysis.stochDaily) stochDailyText = `K${analysis.stochDaily.k}${analysis.stochDaily.kTrend} D${analysis.stochDaily.d}`;
     
+    // Suporte e resistência (apenas o primeiro de cada)
     let supportText = analysis.supportsText.split(' | ')[0] || 'N/A';
     let resistanceText = analysis.resistancesText.split(' | ')[0] || 'N/A';
     
+    // Extrai apenas o preço do suporte/resistência
     supportText = supportText.split(' ')[0];
     resistanceText = resistanceText.split(' ')[0];
     
     let message = ``;
     message += `<b>${tradeEmoji} ${tradeText} ${analysis.symbol}</b> <i>-  ${formatPrice(analysis.price)}</i>\n`;
+    
     message += `<i> ${dt.date.slice(0,5)} ${dt.time.slice(0,5)}hs</i> ${tvLinkText}\n`;
+    
     message += `<b>🔍🤖 Análise:</b>\n`;
     message += `<b> #SCORE: ${analysis.score}</b> <i>${scoreMedal}</i>\n`;
     message += `<i>• Divergência RSI de ${analysis.tradeSignal === 'SELL' ? 'BAIXA' : 'ALTA'} (${divTimeframes})</i>\n`;
     
+    // NOVO: Exibe divergência MACD no alerta
     if (analysis.hasMACDDivergence && analysis.macdDivergenceInfo) {
         message += `<i>• ${analysis.macdDivergenceInfo}</i>\n`;
     }
@@ -2672,6 +2489,7 @@ async function sendSMCAlert(analysis) {
         message += `<b>🔻 SUPORTE:</b> <i>${supportText}</i>\n`;
     }
     
+    //message += `<i>💡 ${analysis.scoreQuality.recommendation}</i>\n`;
     message += `<i>✨ Titanium by @J4Rviz</i>`;
    
     await telegramQueue.add(message);
@@ -2680,42 +2498,173 @@ async function sendSMCAlert(analysis) {
 // =====================================================================
 // === MONITOR PRINCIPAL ===
 // =====================================================================
-let wsManager = null;
+let isScanning = false;
 
-async function startMonitor() {
-    console.log('\n' + '='.repeat(70));
-    console.log(' TITANIUM - WEBSOCKET COMPLETO (570 MOEDAS) ');
-    console.log('='.repeat(70));
-    console.log(`⚠️ TIMEFRAME: 15 MINUTOS`);
-    console.log(`✅ Divergência MACD ativa (+5 pontos)`);
-    console.log(`🔌 WebSocket: TODAS as moedas (${CONFIG.WEBSOCKET.SYMBOLS_PER_CONNECTION} por conexão)`);
-    console.log(`⏱️  Delay entre análises: ${CONFIG.WEBSOCKET.PROCESS_DELAY_MS}ms`);
-    console.log('='.repeat(70));
-    
-    loadAlertedSymbols();
-    
-    const initMsg = `<i>⚡ TITANIUM ACTIVADO ⚡</i>\n\n` +
-                    `<i>✅ WebSocket conectado a TODAS as moedas</i>\n` +
-                    `<i>✅ Divergências RSI + MACD ativas</i>\n` +
-                    `<i>✅ Análise em tempo real</i>\n` +
-                    `<i>✅ Score mínimo: ${CONFIG.MONITOR.MIN_SCORE_ACCEPT}</i>`;
-    await telegramQueue.add(initMsg, true);
-    
-    wsManager = new WebSocketManager();
-    await wsManager.connect();
-    
-    process.on('SIGINT', () => {
-        console.log('\n🛑 Desligando Titanium...');
-        if (wsManager) wsManager.disconnect();
-        process.exit(0);
-    });
-    
-    process.on('uncaughtException', (error) => {
-        console.log(`❌ Erro não tratado: ${error.message}`);
-    });
+async function scanAndAlert() {
+    if (isScanning) return;
+    isScanning = true;
+   
+    try {
+        const symbols = await getAllSymbols();
+        if (!symbols.length) return;
+       
+        console.log(`🔍 Escaneando ${symbols.length} símbolos...`);
+        console.log(`📊 TIMEFRAME PRINCIPAL: 15 MINUTOS`);
+        console.log(`📊 SCORE MÍNIMO OBRIGATÓRIO: ${CONFIG.MONITOR.MIN_SCORE_ACCEPT}`);
+        console.log(`📊 DIVERGÊNCIAS RSI VERIFICADAS EM: 15m (obrigatório) + 30m,1h,2h,4h,12h,1d,3d,1w`);
+        console.log(`📊 DIVERGÊNCIAS MACD VERIFICADAS EM: 15m,30m,1h,2h,4h,12h,1d,3d,1w (Bônus +5 pontos)`);
+        console.log(`📊 CCI 4h (20,5) | LSR (2.5) | Funding (±)`);
+        let alertsSent = 0;
+       
+        for (const symbolData of symbols) {
+            try {
+                const analysis = await analyzeSMC(symbolData);
+                if (!analysis) continue;
+                
+                const canSendAlert = canAlert(analysis.fullSymbol, analysis.tradeSignal, parseInt(analysis.score));
+                console.log(`📊 ${analysis.symbol}: Score=${analysis.score}, Trade=${analysis.tradeSignal}, MACD=${analysis.hasMACDDivergence ? '✅' : '❌'}, CanAlert=${canSendAlert}`);
+                
+                if (analysis && canSendAlert) {
+                    await sendSMCAlert(analysis);
+                    markAlerted(analysis.fullSymbol, analysis.tradeSignal, parseInt(analysis.score));
+                    alertsSent++;
+                    console.log(`✅ [${alertsSent}] Alerta ${analysis.tradeSignal} para ${analysis.symbol} (Score: ${analysis.score} | MACD: ${analysis.hasMACDDivergence ? 'SIM' : 'NÃO'})`);
+                    await delay(5000);
+                } else {
+                    console.log(`⏸️ ${analysis.symbol}: Alerta bloqueado por cooldown dinâmico ou outro motivo`);
+                }
+            } catch (error) {
+                console.log(`⚠️ Erro ao processar ${symbolData.symbol}: ${error.message}`);
+            }
+        }
+       
+        console.log(`✅ Scan completo. ${alertsSent} alertas enviados.`);
+       
+    } catch (error) {
+        console.log(`❌ Erro no scan: ${error.message}`);
+    } finally {
+        isScanning = false;
+    }
 }
+
+async function sendInitMessage() {
+    const msg = `<i>⚡ Titanium ⚡</i>\n\n` +
+               
+                `<i> Monitorando </i>`;
+    await telegramQueue.add(msg, true);
+}
+
+// =====================================================================
+// === VERIFICAÇÃO DE CONEXÃO ===
+// =====================================================================
+async function checkInternetConnection() {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        await fetch('https://api.binance.com/api/v3/ping', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        return true;
+    } catch (error) {
+        console.log(`⚠️ Sem conexão: ${error.message}`);
+        return false;
+    }
+}
+
+// =====================================================================
+// === MONITOR COM RECONEXÃO ===
+// =====================================================================
+async function startMonitorWithReconnect() {
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+    const BASE_DELAY = 5000;
+    let scanInterval = null;
+    
+    console.log('\n' + '='.repeat(70));
+    console.log(' Titanium ');
+    console.log('='.repeat(70));
+    
+    console.log('='.repeat(70));
+    console.log(`⚠️ MODO AGRESSIVO - OPERANDO EM 15 MINUTOS`);
+    console.log(`✅ Divergência MACD ativa (+5 pontos no score)`);
+    console.log('='.repeat(70));
+    
+    while (true) {
+        const hasInternet = await checkInternetConnection();
+        
+        if (!hasInternet) {
+            reconnectAttempts++;
+            const delayTime = Math.min(BASE_DELAY * Math.pow(2, reconnectAttempts - 1), 60000);
+            console.log(`🌐 Sem internet. Tentativa ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}. Reconectando em ${delayTime/1000}s...`);
+            await delay(delayTime);
+            continue;
+        }
+        
+        reconnectAttempts = 0;
+        
+        try {
+            console.log('✅ Conexão estabelecida. Iniciando monitor em 15 MINUTOS...');
+            
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+            }
+            
+            loadAlertedSymbols();
+            await sendInitMessage();
+            await scanAndAlert();
+            
+            scanInterval = setInterval(async () => {
+                if (await checkInternetConnection()) {
+                    await scanAndAlert();
+                } else {
+                    console.log('⚠️ Internet perdida, interrompendo scans...');
+                    if (scanInterval) {
+                        clearInterval(scanInterval);
+                        scanInterval = null;
+                    }
+                }
+            }, CONFIG.MONITOR.SCAN_INTERVAL_SECONDS * 1000);
+            
+            while (await checkInternetConnection()) {
+                await delay(10000);
+            }
+            
+            console.log('🔌 Conexão perdida! Tentando reconectar...');
+            
+        } catch (error) {
+            console.log(`❌ Monitor falhou: ${error.message}`);
+            
+            if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                console.log('🔴 Número máximo de tentativas. Encerrando...');
+                process.exit(1);
+            }
+            
+            const delayTime = Math.min(BASE_DELAY * Math.pow(2, reconnectAttempts), 60000);
+            console.log(`🔄 Reconectando em ${delayTime/1000}s... (Tentativa ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+            await delay(delayTime);
+        }
+    }
+}
+
+// =====================================================================
+// === TRATAMENTO DE ENCERRAMENTO ===
+// =====================================================================
+process.on('SIGINT', () => {
+    console.log('🛑 Desligando Titanium PRO Monitor (15m)...');
+    process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+    console.log(`❌ Erro não tratado: ${error.message}`);
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+        console.log('🔄 Erro de rede detectado, o monitor tentará reconectar...');
+    } else {
+        console.log('⚠️ Reinicie o monitor se necessário');
+    }
+});
 
 // =====================================================================
 // === INICIALIZAÇÃO ===
 // =====================================================================
-startMonitor().catch(console.error);
+
+startMonitorWithReconnect().catch(console.error);
