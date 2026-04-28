@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================================
 // === TOKEN E CONFIGURAÇÕES FIXAS DO TELEGRAM ===
 // =====================================================================
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHao4N0A';
-const TELEGRAM_CHAT_ID = '-100197';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
+const TELEGRAM_CHAT_ID = '-1001990889297';
 
 // =====================================================================
 // === LIMITE DE TAMANHO PARA CACHES ===
@@ -1454,13 +1454,14 @@ async function detectEMAPullbackMultiTF(symbol, tradeSignal, currentPrice) {
             const isPriceFalling = currentPriceNum < previousPrice;  // Preço está caindo
             const isPriceRising = currentPriceNum > previousPrice;   // Preço está subindo
             
-            let tolerance = 0.5;
-            if (tf === '1h') tolerance = 0.4;
-            else if (tf === '4h') tolerance = 0.35;
-            else if (tf === '6h') tolerance = 0.3;
-            else if (tf === '8h') tolerance = 0.3;
-            else if (tf === '12h') tolerance = 0.25;
-            else if (tf === '1d') tolerance = 0.2;
+            let tolerance = 1.2;      // padrão mais generoso (para 15m e outros)
+            if (tf === '15m') tolerance = 1.0;
+            else if (tf === '1h') tolerance = 0.8;
+            else if (tf === '4h') tolerance = 0.7;
+            else if (tf === '6h') tolerance = 0.7;
+            else if (tf === '8h') tolerance = 0.6;
+            else if (tf === '12h') tolerance = 0.5;
+            else if (tf === '1d') tolerance = 0.4;
             
             const isNearEMA = distance <= tolerance;
             
@@ -2437,17 +2438,17 @@ function calculateTargets(entryPrice, stopPrice, tradeType) {
 // =====================================================================
 function calculateWeightedScore(analysis) {
     const weights = {
-        timeframeAlignment: 5,
-        fvgValidity: 12,
+        timeframeAlignment: 8,
+        fvgValidity: 18,
         liquiditySweep: 18,
         orderBlockMitigation: 5,
         volumeConfirmation: 18,
-        divergenceConvergence: 13,
+        divergenceConvergence: 15,
         higherTimeframe: 5,
         cciSignal: 8,
-        lsrSignal: 8,
-        fundingSignal: 5,
-        macdDivergence: 10,
+        lsrSignal: 10,
+        fundingSignal: 8,
+        macdDivergence: 15,
         atrVolatility: 8,
         ema55Pullback15m: 6,
         ema55Pullback1h: 6,
@@ -2455,8 +2456,9 @@ function calculateWeightedScore(analysis) {
         ema55Pullback6h: 6,
         ema55Pullback8h: 6,
         ema55Pullback12h: 3,
-        ema55PullbackDaily: 4,
-        ema55MultiTFBonus: 5
+        ema55PullbackDaily: 5,
+        ema55MultiTFBonus: 5,
+        cci1hExtreme: 10
     };
     
     let totalScore = 0;
@@ -2521,6 +2523,9 @@ function calculateWeightedScore(analysis) {
     
     if (analysis.ema55MultiTFBonus) totalScore += weights.ema55MultiTFBonus;
     maxPossible += weights.ema55MultiTFBonus;
+    
+    if (analysis.cci1hExtreme) totalScore += weights.cci1hExtreme;
+    maxPossible += weights.cci1hExtreme;
     
     const finalScore = maxPossible > 0 ? (totalScore / maxPossible) * 100 : 0;
     return finalScore;
@@ -2637,6 +2642,7 @@ async function analyzeSMC(symbolData) {
         ]);
         
         const cciAnalysis = await analyzeCCI(fullSymbol, '4h');
+        const cci1hAnalysis = await analyzeCCI(fullSymbol, '1h');
         const cciDailyAnalysis = await analyzeCCIDaily(fullSymbol);
         const divergences = await analyzeDivergences(fullSymbol);
         const macdDivergenceAnalysis = await analyzeMACDDivergences(fullSymbol, null);
@@ -2742,6 +2748,13 @@ async function analyzeSMC(symbolData) {
                     reasons.push(`⚠️ ATR ${atrData ? atrData.atrPercent.toFixed(1) : 'N/A'}% < mínimo ${CONFIG.MONITOR.MIN_ATR_PERCENT}%`);
                 }
                 
+                // CCI 1h EXTREMO para COMPRA (CCI > 120)
+                const cci1hValue = cci1hAnalysis ? parseFloat(cci1hAnalysis.currentCCI) : 0;
+                if (cci1hValue > 110) {
+                score += 10;
+                reasons.push(`🔥 CCI 1h  (${cci1hValue.toFixed(0)} > 110) 🔥`);
+                }
+                
                 // EMA 55 Pullback com validação de direção
                 const ema55Pullback = await detectEMAPullbackMultiTF(fullSymbol, 'BUY', price);
                 if (ema55Pullback.confirmed && ema55Pullback.pullbackType === 'BULLISH_PULLBACK') {
@@ -2836,6 +2849,13 @@ async function analyzeSMC(symbolData) {
                     reasons.push(`📊 ATR ${atrData.atrPercent.toFixed(1)}% (volátil)`);
                 } else {
                     reasons.push(`⚠️ ATR ${atrData ? atrData.atrPercent.toFixed(1) : 'N/A'}% < mínimo ${CONFIG.MONITOR.MIN_ATR_PERCENT}%`);
+                }
+                
+                // CCI 1h EXTREMO para VENDA (CCI < -80)
+                const cci1hValue = cci1hAnalysis ? parseFloat(cci1hAnalysis.currentCCI) : 0;
+                if (cci1hValue < -80) {
+                score += 10;
+                reasons.push(`❄️ CCI 1h  (${cci1hValue.toFixed(0)} < -80) ❄️`);
                 }
                 
                 // EMA 55 Pullback com validação de direção
@@ -2935,7 +2955,8 @@ async function analyzeSMC(symbolData) {
             ema55Pullback8h: ema55PullbackFinal['8h'],
             ema55Pullback12h: ema55PullbackFinal['12h'],
             ema55PullbackDaily: ema55PullbackFinal['1d'],
-            ema55MultiTFBonus: ema55PullbackFinal.count >= 3
+            ema55MultiTFBonus: ema55PullbackFinal.count >= 3,
+            cci1hExtreme: (tradeSignal === 'BUY' && cci1hAnalysis && parseFloat(cci1hAnalysis.currentCCI) > 110) || (tradeSignal === 'SELL' && cci1hAnalysis && parseFloat(cci1hAnalysis.currentCCI) < -80)
         });
         
         if (weightedScore < CONFIG.MONITOR.MIN_SCORE_ACCEPT) {
@@ -2974,6 +2995,7 @@ async function analyzeSMC(symbolData) {
         const divTimeframesList = tradeSignal === 'BUY' ? buyDivTimeframes : sellDivTimeframes;
         
         const cci4hDisplay = cciAnalysis ? cciAnalysis.display : '➡️ Neutro';
+        const cci1hDisplay = cci1hAnalysis ? cci1hAnalysis.display : '➡️ Neutro';
         const cciDailyDisplay = cciDailyAnalysis ? cciDailyAnalysis.display : '➡️ Neutro';
         
         const stopComponentsShort = stopData.stopComponents.replace(/ \| /g, ' | ').substring(0, 60);
@@ -3026,6 +3048,7 @@ async function analyzeSMC(symbolData) {
             resistanceShort: resistanceShort,
             supportShort: supportShort,
             cci4hDisplay: cci4hDisplay,
+            cci1hDisplay: cci1hDisplay,
             cciDailyDisplay: cciDailyDisplay,
             rejectionMessage: finalRejectionMessage,
             rejectionLevel: rejectionResult.level,
@@ -3109,6 +3132,7 @@ async function sendSMCAlert(analysis) {
         message += `<i>${chochText}</i>`;
     }
     
+    message += `<i>• CCI 1h: ${analysis.cci1hDisplay}</i>\n`;
     message += `<i>• CCI 4h: ${analysis.cci4hDisplay}</i>\n`;
     message += `<i>• CCI 1D: ${analysis.cciDailyDisplay}</i>\n`;
     message += `<b> #Entrada:</b> <i>${formatPrice(analysis.entryPrice)}</i>\n`;
@@ -3149,6 +3173,7 @@ async function scanAndAlert() {
         console.log(`📊 ATR MÍNIMO 15m: ${CONFIG.MONITOR.MIN_ATR_PERCENT}%`);
         console.log(`🕯️ REJEIÇÃO NÍVEL 5 (RETESTE FVG + VOLUME + WICK) - OBRIGATÓRIA`);
         console.log(`📈 EMA55 PULLBACK COM VALIDAÇÃO DE DIREÇÃO (ALTA para BUY / BAIXA para SELL)`);
+        console.log(`🔥 CCI 1h EXTREMO: COMPRA > 110 | VENDA < -80 (+10 pontos no score)`);
         let alertsSent = 0;
        
         for (const symbolData of symbols) {
@@ -3180,7 +3205,7 @@ async function scanAndAlert() {
 }
 
 async function sendInitMessage() {
-    const msg = `<i>⚡ Titanium ⚡</i>\n\n<i> Monitorando com REJEIÇÃO NÍVEL 5 (RETESTE FVG + VOLUME + WICK)</i>\n<i> ATR Mínimo 15m: ${CONFIG.MONITOR.MIN_ATR_PERCENT}%</i>\n<i> EMA55 Pullback com validação de DIREÇÃO (15m/1h/4h/6h/8h/12h/1D)</i>`;
+    const msg = `<i>⚡ Titanium ⚡</i><i> Monitorando ...</i>`;
     await telegramQueue.add(msg, true);
 }
 
@@ -3218,6 +3243,7 @@ async function startMonitorWithReconnect() {
     console.log(`✅ EMA55 Pullback com validação de DIREÇÃO: 15m/1h/4h/6h/8h/12h/1D`);
     console.log(`   • Para COMPRA: pullback de ALTA (preço > EMA55 e caindo em direção à EMA)`);
     console.log(`   • Para VENDA: pullback de BAIXA (preço < EMA55 e subindo em direção à EMA)`);
+    console.log(`🔥 CCI 1h EXTREMO: COMPRA > 110 (+10 pontos) | VENDA < -80 (+10 pontos)`);
     console.log(`🕯️ REJEIÇÃO NÍVEL 5 (RETESTE FVG + VOLUME + WICK)`);
     console.log(`   Nível 5: Reteste FVG Completo (Volume + Wick + Confirmação) 🔥`);
     console.log(`   Nível 4: Reteste FVG Simples ⚡`);
