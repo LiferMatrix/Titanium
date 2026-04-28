@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================================
 // === TOKEN E CONFIGURAÇÕES FIXAS DO TELEGRAM ===
 // =====================================================================
-const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A';
-const TELEGRAM_CHAT_ID = '-1001990889297';
+const TELEGRAM_BOT_TOKEN = '7633398974:AAHaVFs_';
+const TELEGRAM_CHAT_ID = '-100197';
 
 // =====================================================================
 // === LIMITE DE TAMANHO PARA CACHES ===
