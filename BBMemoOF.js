@@ -10,15 +10,15 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_D_oZA',
-        CHAT_ID: '-1001997'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
-        BATCH_SIZE: 6,
+        BATCH_SIZE: 8,
         SYMBOL_DELAY_MS: 4000,
-        REQUEST_TIMEOUT: 10000,
+        REQUEST_TIMEOUT: 13000,
         COOLDOWN_AFTER_BATCH_MS: 2000,
-        MAX_REQUESTS_PER_MINUTE: 800,
+        MAX_REQUESTS_PER_MINUTE: 1000,
         CACHE_DURATION_SECONDS: 30,
         TOP_SYMBOLS_LIMIT: 300
     },
@@ -50,19 +50,19 @@ const CONFIG = {
             OTHER: 75,
             LOW_VOLUME: 50
         },
-        MIN_VOLUME_USDT: 50000,
+        MIN_VOLUME_USDT: 100000,
         MIN_VOLUME_RATIO: 1.7,
-        MIN_24H_VOLUME_USDT: 100000,
+        MIN_24H_VOLUME_USDT: 300000,
         VOLUME_DIRECTION: {
-            BUY_MIN_PERCENTAGE: 52,
-            SELL_MAX_PERCENTAGE: 45,
+            BUY_MIN_PERCENTAGE: 45,
+            SELL_MAX_PERCENTAGE: 55,
             STRICT_MODE: true,
             REQUIRE_VOLUME_DIRECTION: true
         },
         MIN_TREND_STRENGTH: 3,
         PRICE_DEVIATION: 1.0,
         RSI: {
-            BUY_MAX: 64,
+            BUY_MAX: 62,
             SELL_MIN: 66
         },
         PRIORITY_LEVELS: {
@@ -147,14 +147,28 @@ const CONFIG = {
                 '1w': 6.0
             }
         },
-        // CONFIGURAÇÕES DA MEMÓRIA DE ESTUDO
         MEMORY: {
             ENABLED: true,
-            EXPIRY_HOURS: 48,           // Mantém o estudo na memória por 48 horas
-            CHECK_TIMEFRAME: '3m',      // Timeframe para confirmação da reversão
-            EMA_FAST: 13,               // EMA rápida para cruzamento
-            EMA_SLOW: 34,               // EMA lenta para cruzamento
-            EMA_TREND: 55               // EMA de tendência para fechamento
+            EXPIRY_HOURS: 48,
+            CHECK_TIMEFRAME: '3m',
+            EMA_FAST: 13,
+            EMA_SLOW: 34,
+            EMA_TREND: 55
+        },
+        PIVOT_DIVERGENCE: {
+            ENABLED: true,
+            SCORE_BONUS: 2.5,
+            CVD_ALIGNMENT_BONUS: 1.5,
+            CVD_MISALIGN_PENALTY: -2.0,
+            MIN_PIVOT_STRENGTH: 3,
+            CHECK_TIMEFRAMES: ['1h', '4h', '1d', '3d', '1w']
+        },
+        WICK_REJECTION: {
+            ENABLED: true,
+            BONUS_POINTS: 2.0,
+            MIN_WICK_TO_BODY_RATIO: 2.0,
+            MIN_WICK_PERCENT: 0.3,
+            LOOKBACK_CANDLES: 5
         }
     },
     VOLUME: { EMA_PERIOD: 9 },
@@ -170,10 +184,10 @@ const CONFIG = {
         LOOKBACK_PERIODS: 30,
         MIN_PIVOT_STRENGTH: 0.5,
         SCORE_MULTIPLIER: {
-            '15m': 0.5,
-            '30m': 0.7,
-            '1h': 1.0,
-            '2h': 1.2,
+            '15m': 1.5,
+            '30m': 1.5,
+            '1h': 1.5,
+            '2h': 1.5,
             '4h': 2.0,
             '12h': 2.5,
             '1d': 3.0,
@@ -203,23 +217,29 @@ const CONFIG = {
     LSR_PENALTY: {
         BUY_MAX_RATIO: 3.0,
         SELL_MIN_RATIO: 1.3,
-        PENALTY_POINTS: -4
+        PENALTY_POINTS: -5
     },
     FUNDING_PENALTY: {
         ENABLED: true,
         LEVELS: {
             POSITIVE: {
-                VERY_LOW: { THRESHOLD: 0.001, POINTS: -1 },
-                LOW: { THRESHOLD: 0.002, POINTS: -2 },
-                MEDIUM: { THRESHOLD: 0.004, POINTS: -3 },
-                HIGH: { THRESHOLD: 0.008, POINTS: -4 }
+                VERY_LOW: { THRESHOLD: 0.01, POINTS: -2 },
+                LOW: { THRESHOLD: 0.02, POINTS: -3 },
+                MEDIUM: { THRESHOLD: 0.03, POINTS: -5 },
+                HIGH: { THRESHOLD: 0.1, POINTS: -7 }
             },
             NEGATIVE: {
-                VERY_LOW: { THRESHOLD: -0.001, POINTS: -1 },
-                LOW: { THRESHOLD: -0.002, POINTS: -2 },
-                MEDIUM: { THRESHOLD: -0.004, POINTS: -3 },
-                HIGH: { THRESHOLD: -0.008, POINTS: -4 }
+                VERY_LOW: { THRESHOLD: -0.01, POINTS: -2 },
+                LOW: { THRESHOLD: -0.02, POINTS: -3 },
+                MEDIUM: { THRESHOLD: -0.03, POINTS: -5 },
+                HIGH: { THRESHOLD: -0.1, POINTS: -7 }
             }
+        },
+        FAVORABLE_BONUS: {
+            ENABLED: true,
+            BUY_NEGATIVE_BONUS: 3,
+            SELL_POSITIVE_BONUS: 3,
+            MIN_THRESHOLD: 0.002
         },
         BUY_PENALTY_FOR_POSITIVE: true,
         SELL_PENALTY_FOR_NEGATIVE: true,
@@ -232,10 +252,10 @@ const CONFIG = {
             '1h': 3.8,
             '2h': 4.0,
             '4h': 4.2,
-            '12h': 4.5,
-            '1d': 5.0,
-            '3d': 5.5,
-            '1w': 6.0
+            '12h': 4.2,
+            '1d': 4.2,
+            '3d': 4.2,
+            '1w': 4.2
         },
         STRUCTURE_MULTIPLIER: 0.15,
         USE_CLUSTER_ZONE: true,
@@ -300,7 +320,7 @@ if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 // =====================================================================
 class StudyMemory {
     constructor() {
-        this.memory = new Map(); // symbol -> { direction, timestamp, price, bbLower, bbUpper, divergenceScore, studyData }
+        this.memory = new Map();
         this.loadFromFile();
     }
 
@@ -354,7 +374,6 @@ class StudyMemory {
         
         if (!study) return null;
         
-        // Verifica se expirou
         if (Date.now() > study.expiryTime) {
             this.memory.delete(key);
             this.saveToFile();
@@ -398,8 +417,145 @@ class StudyMemory {
     }
 }
 
-// Instância global da memória
 const studyMemory = new StudyMemory();
+
+// =====================================================================
+// === FUNÇÃO PARA DETECTAR REJEIÇÃO DE WICK ===
+// =====================================================================
+function detectWickRejection(candles, isGreenAlert) {
+    if (!CONFIG.ALERTS.WICK_REJECTION.ENABLED) {
+        return { hasRejection: false, bonus: 0, message: '', details: null };
+    }
+    
+    if (!candles || candles.length < CONFIG.ALERTS.WICK_REJECTION.LOOKBACK_CANDLES) {
+        return { hasRejection: false, bonus: 0, message: '', details: null };
+    }
+    
+    const lookback = Math.min(CONFIG.ALERTS.WICK_REJECTION.LOOKBACK_CANDLES, candles.length - 1);
+    const recentCandles = candles.slice(-lookback);
+    const lastCandle = candles[candles.length - 1];
+    const secondLastCandle = candles.length >= 2 ? candles[candles.length - 2] : null;
+    
+    const minWickPercent = CONFIG.ALERTS.WICK_REJECTION.MIN_WICK_PERCENT;
+    const minRatio = CONFIG.ALERTS.WICK_REJECTION.MIN_WICK_TO_BODY_RATIO;
+    const bonus = CONFIG.ALERTS.WICK_REJECTION.BONUS_POINTS;
+    
+    let hasRejection = false;
+    let rejectionType = null;
+    let wickInfo = null;
+    
+    if (isGreenAlert) {
+        // Para COMPRA: procura candle com WICK INFERIOR (cauda de baixa) - rejeição de preço mais baixo
+        const lowerWick = lastCandle.low;
+        const bodyLow = Math.min(lastCandle.open, lastCandle.close);
+        const bodyHigh = Math.max(lastCandle.open, lastCandle.close);
+        const bodySize = bodyHigh - bodyLow;
+        const lowerWickSize = bodyLow - lowerWick;
+        const candleRange = lastCandle.high - lastCandle.low;
+        const lowerWickPercent = (lowerWickSize / candleRange) * 100;
+        
+        if (lowerWickSize > 0 && bodySize > 0) {
+            const wickToBodyRatio = lowerWickSize / bodySize;
+            
+            if (wickToBodyRatio >= minRatio && lowerWickPercent >= minWickPercent) {
+                hasRejection = true;
+                rejectionType = 'LOWER_WICK';
+                wickInfo = {
+                    type: '🟢 REJEIÇÃO DE BAIXA (Wick inferior)',
+                    ratio: wickToBodyRatio.toFixed(2),
+                    percent: lowerWickPercent.toFixed(1),
+                    price: formatPrice(lowerWick),
+                    bodyLow: formatPrice(bodyLow)
+                };
+            }
+        }
+        
+        // Também verifica candle anterior se o atual não tem
+        if (!hasRejection && secondLastCandle) {
+            const prevLowerWick = secondLastCandle.low;
+            const prevBodyLow = Math.min(secondLastCandle.open, secondLastCandle.close);
+            const prevBodyHigh = Math.max(secondLastCandle.open, secondLastCandle.close);
+            const prevBodySize = prevBodyHigh - prevBodyLow;
+            const prevLowerWickSize = prevBodyLow - prevLowerWick;
+            const prevCandleRange = secondLastCandle.high - secondLastCandle.low;
+            const prevLowerWickPercent = (prevLowerWickSize / prevCandleRange) * 100;
+            
+            if (prevLowerWickSize > 0 && prevBodySize > 0) {
+                const prevWickToBodyRatio = prevLowerWickSize / prevBodySize;
+                
+                if (prevWickToBodyRatio >= minRatio && prevLowerWickPercent >= minWickPercent) {
+                    hasRejection = true;
+                    rejectionType = 'LOWER_WICK_PREV';
+                    wickInfo = {
+                        type: '🟢 REJEIÇÃO DE BAIXA (Wick inferior - candle anterior)',
+                        ratio: prevWickToBodyRatio.toFixed(2),
+                        percent: prevLowerWickPercent.toFixed(1),
+                        price: formatPrice(prevLowerWick),
+                        bodyLow: formatPrice(prevBodyLow)
+                    };
+                }
+            }
+        }
+    } else {
+        // Para VENDA: procura candle com WICK SUPERIOR (cauda de alta) - rejeição de preço mais alto
+        const upperWick = lastCandle.high;
+        const bodyLow = Math.min(lastCandle.open, lastCandle.close);
+        const bodyHigh = Math.max(lastCandle.open, lastCandle.close);
+        const bodySize = bodyHigh - bodyLow;
+        const upperWickSize = upperWick - bodyHigh;
+        const candleRange = lastCandle.high - lastCandle.low;
+        const upperWickPercent = (upperWickSize / candleRange) * 100;
+        
+        if (upperWickSize > 0 && bodySize > 0) {
+            const wickToBodyRatio = upperWickSize / bodySize;
+            
+            if (wickToBodyRatio >= minRatio && upperWickPercent >= minWickPercent) {
+                hasRejection = true;
+                rejectionType = 'UPPER_WICK';
+                wickInfo = {
+                    type: '🔴 REJEIÇÃO DE ALTA (Wick superior)',
+                    ratio: wickToBodyRatio.toFixed(2),
+                    percent: upperWickPercent.toFixed(1),
+                    price: formatPrice(upperWick),
+                    bodyHigh: formatPrice(bodyHigh)
+                };
+            }
+        }
+        
+        if (!hasRejection && secondLastCandle) {
+            const prevUpperWick = secondLastCandle.high;
+            const prevBodyLow = Math.min(secondLastCandle.open, secondLastCandle.close);
+            const prevBodyHigh = Math.max(secondLastCandle.open, secondLastCandle.close);
+            const prevBodySize = prevBodyHigh - prevBodyLow;
+            const prevUpperWickSize = prevUpperWick - prevBodyHigh;
+            const prevCandleRange = secondLastCandle.high - secondLastCandle.low;
+            const prevUpperWickPercent = (prevUpperWickSize / prevCandleRange) * 100;
+            
+            if (prevUpperWickSize > 0 && prevBodySize > 0) {
+                const prevWickToBodyRatio = prevUpperWickSize / prevBodySize;
+                
+                if (prevWickToBodyRatio >= minRatio && prevUpperWickPercent >= minWickPercent) {
+                    hasRejection = true;
+                    rejectionType = 'UPPER_WICK_PREV';
+                    wickInfo = {
+                        type: '🔴 REJEIÇÃO DE ALTA (Wick superior - candle anterior)',
+                        ratio: prevWickToBodyRatio.toFixed(2),
+                        percent: prevUpperWickPercent.toFixed(1),
+                        price: formatPrice(prevUpperWick),
+                        bodyHigh: formatPrice(prevBodyHigh)
+                    };
+                }
+            }
+        }
+    }
+    
+    if (hasRejection) {
+        const message = `${wickInfo.type} | Cauda ${wickInfo.percent}% do candle | Corpo x${wickInfo.ratio}`;
+        return { hasRejection: true, bonus: bonus, message: message, details: wickInfo };
+    }
+    
+    return { hasRejection: false, bonus: 0, message: '', details: null };
+}
 
 // =====================================================================
 // === FUNÇÕES DE EMA PARA CONFIRMAÇÃO NO GRÁFICO 3 MINUTOS ===
@@ -432,7 +588,6 @@ async function checkEMAConfirmation(symbol, direction) {
         
         const closes = candles.map(c => c.close);
         
-        // Calcula EMAs
         const ema13Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_FAST);
         const ema34Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_SLOW);
         const ema55Series = calculateEMASeries(closes, CONFIG.ALERTS.MEMORY.EMA_TREND);
@@ -445,13 +600,11 @@ async function checkEMAConfirmation(symbol, direction) {
         
         const currentEMA55 = ema55Series[ema55Series.length - 1];
         const currentPrice = closes[closes.length - 1];
-        const currentCandle = candles[candles.length - 1];
         
         let confirmed = false;
         let message = '';
         
         if (direction === 'COMPRA') {
-            // CRITÉRIO DE COMPRA: EMA13 cruza para cima da EMA34 E preço fecha acima da EMA55
             const ema13CrossedUp = previousEMA13 <= previousEMA34 && currentEMA13 > currentEMA34;
             const priceAboveEMA55 = currentPrice > currentEMA55;
             
@@ -467,7 +620,6 @@ async function checkEMAConfirmation(symbol, direction) {
                 message = `⏳ Aguardando confirmação: EMA13:${currentEMA13.toFixed(2)} | EMA34:${currentEMA34.toFixed(2)} | Preço/EMA55:${formatPrice(currentPrice)}/${currentEMA55.toFixed(2)}`;
             }
         } else {
-            // CRITÉRIO DE VENDA: EMA13 cruza para baixo da EMA34 E preço fecha abaixo da EMA55
             const ema13CrossedDown = previousEMA13 >= previousEMA34 && currentEMA13 < currentEMA34;
             const priceBelowEMA55 = currentPrice < currentEMA55;
             
@@ -616,12 +768,10 @@ function log(message, type = 'info') {
     fs.appendFileSync(logFile, logMessage + '\n', { flag: 'a' });
 }
 
-// Caches
 const alertCache = new Map();
 const dailyCounter = new Map();
 let currentTopSymbols = [];
 
-// Filas
 const priorityQueue = { critical: [], high: [], medium: [], low: [] };
 let isSendingTelegram = false;
 let alertsSentThisScan = 0;
@@ -817,6 +967,23 @@ class RealCVDManager {
         }
         
         return { cvdConfirmed: false, cvdScore: 0, cvdSignal: null, isReal: true };
+    }
+
+    getCVDDirection(symbol, currentPrice) {
+        const snapshot = this.snapshots.get(symbol);
+        if (!snapshot || !snapshot.deltas || snapshot.deltas.length < 10) {
+            return { direction: 'neutro', strength: 0 };
+        }
+        
+        const recentDeltas = snapshot.deltas.slice(-20);
+        const cvdValues = recentDeltas.map(d => d.cumulative);
+        const cvdStart = cvdValues[0] || 0;
+        const cvdEnd = cvdValues[cvdValues.length - 1] || 0;
+        const cvdTrend = cvdEnd - cvdStart;
+        
+        if (cvdTrend > 0) return { direction: 'comprador', strength: Math.abs(cvdTrend) };
+        if (cvdTrend < 0) return { direction: 'vendedor', strength: Math.abs(cvdTrend) };
+        return { direction: 'neutro', strength: 0 };
     }
 
     getStats() {
@@ -1021,143 +1188,424 @@ async function analyzeCVDSimulated(symbol, currentPrice, isGreenAlert) {
 }
 
 // =====================================================================
-// === RATE LIMITER INTELIGENTE ===
+// === FUNÇÃO PARA OBTER DIREÇÃO DO CVD (NOVO) ===
 // =====================================================================
-class IntelligentRateLimiter {
-    constructor() {
-        this.lastRequestTime = 0;
-        this.consecutiveErrors = 0;
-        this.errorBackoff = 1000;
-        this.maxBackoff = 60000;
-        this.requestCount = 0;
-        this.minuteStart = Date.now();
+async function getCVDDirection(symbol, currentPrice) {
+    if (CONFIG.CVD.WEBSOCKET.ENABLED && realCVD.isInitialized) {
+        return realCVD.getCVDDirection(symbol, currentPrice);
+    }
+    
+    try {
+        const cvdData = await getCVDDataSimulated(symbol);
+        if (!cvdData || !cvdData.deltas || cvdData.deltas.length < 10) {
+            return { direction: 'neutro', strength: 0 };
+        }
+        
+        const recentDeltas = cvdData.deltas.slice(-20);
+        const cvdValues = recentDeltas.map(d => d.cumulative);
+        const cvdStart = cvdValues[0] || 0;
+        const cvdEnd = cvdValues[cvdValues.length - 1] || 0;
+        const cvdTrend = cvdEnd - cvdStart;
+        
+        if (cvdTrend > 0) return { direction: 'comprador', strength: Math.abs(cvdTrend) };
+        if (cvdTrend < 0) return { direction: 'vendedor', strength: Math.abs(cvdTrend) };
+        return { direction: 'neutro', strength: 0 };
+    } catch (error) {
+        return { direction: 'neutro', strength: 0 };
+    }
+}
+
+// =====================================================================
+// === FUNÇÃO CORRIGIDA: FUNDING PENALTY COM BÔNUS PARA FUNDING FAVORÁVEL ===
+// =====================================================================
+function checkFundingPenalty(funding, isGreenAlert) {
+    if (!CONFIG.FUNDING_PENALTY.ENABLED || funding === null || funding === undefined) {
+        return { hasPenalty: false, points: 0, message: '' };
+    }
+    
+    const fundingPercent = funding * 100;
+    let totalPoints = 0;
+    let penaltyMessage = '';
+    let bonusMessage = '';
+    
+    // =============================================================
+    // PENALIDADES (apenas para funding DESFAVORÁVEL)
+    // =============================================================
+    
+    // COMPRA com funding POSITIVO = DESFAVORÁVEL (muita gente comprada)
+    if (isGreenAlert && funding > 0 && CONFIG.FUNDING_PENALTY.BUY_PENALTY_FOR_POSITIVE) {
+        const absFunding = funding;
+        if (absFunding >= 0.01) {
+            totalPoints += -4;
+            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}% (muito positivo)`;
+        } else if (absFunding >= 0.005) {
+            totalPoints += -3;
+            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}% (positivo)`;
+        } else if (absFunding >= 0.002) {
+            totalPoints += -2;
+            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
+        } else if (absFunding >= 0.001) {
+            totalPoints += -1;
+            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
+        }
+    }
+    
+    // VENDA com funding NEGATIVO = DESFAVORÁVEL (muita gente vendida)
+    if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
+        const absFunding = Math.abs(funding);
+        if (absFunding >= 0.01) {
+            totalPoints += -4;
+            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}% (muito negativo)`;
+        } else if (absFunding >= 0.005) {
+            totalPoints += -3;
+            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}% (negativo)`;
+        } else if (absFunding >= 0.002) {
+            totalPoints += -2;
+            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
+        } else if (absFunding >= 0.001) {
+            totalPoints += -1;
+            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
+        }
+    }
+    
+    // =============================================================
+    // BÔNUS para funding FAVORÁVEL
+    // =============================================================
+    if (CONFIG.FUNDING_PENALTY.FAVORABLE_BONUS.ENABLED) {
+        const minBonusThreshold = CONFIG.FUNDING_PENALTY.FAVORABLE_BONUS.MIN_THRESHOLD;
+        
+        // COMPRA com funding NEGATIVO = FAVORÁVEL (gente vendendo barato)
+        if (isGreenAlert && funding < 0 && Math.abs(funding) >= minBonusThreshold) {
+            const bonusPoints = CONFIG.FUNDING_PENALTY.FAVORABLE_BONUS.BUY_NEGATIVE_BONUS;
+            totalPoints += bonusPoints;
+            bonusMessage = `🎯 Fund ${fundingPercent.toFixed(2)}% (negativo = BÔNUS COMPRA +${bonusPoints})`;
+        }
+        
+        // VENDA com funding POSITIVO = FAVORÁVEL (gente comprando caro)
+        if (!isGreenAlert && funding > 0 && funding >= minBonusThreshold) {
+            const bonusPoints = CONFIG.FUNDING_PENALTY.FAVORABLE_BONUS.SELL_POSITIVE_BONUS;
+            totalPoints += bonusPoints;
+            bonusMessage = `🎯 Fund +${fundingPercent.toFixed(2)}% (positivo = BÔNUS VENDA +${bonusPoints})`;
+        }
+    }
+    
+    // Aplica limite máximo de penalidade (não limita bônus positivo)
+    if (totalPoints < CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY) {
+        totalPoints = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY;
+    }
+    
+    const finalMessage = penaltyMessage || bonusMessage;
+    const hasAnyEffect = totalPoints !== 0;
+    
+    return {
+        hasPenalty: totalPoints < 0,  // true se for negativo (penalidade)
+        points: totalPoints,
+        message: finalMessage,
+        isBonus: totalPoints > 0
+    };
+}
+
+async function check15MinVolatility(symbol) {
+    if (!CONFIG.ALERTS.MIN_15M_VOLATILITY.ENABLED) return { passed: true, message: '', metrics: {} };
+    try {
+        const candles15m = await getCandles(symbol, '15m', 30);
+        if (!candles15m || candles15m.length < 20) {
+            return { passed: false, message: 'Dados insuficientes 15m', metrics: {} };
+        }
+        const trValues = [];
+        for (let i = 1; i < candles15m.length; i++) {
+            const high = candles15m[i].high;
+            const low = candles15m[i].low;
+            const prevClose = candles15m[i-1].close;
+            trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+        }
+        const recentTR = trValues.slice(-14);
+        const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
+        const currentPrice = candles15m[candles15m.length - 1].close;
+        const atrPercent = (atr / currentPrice) * 100;
+        const minATR = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_ATR_PERCENT;
+        const atrPassed = atrPercent >= minATR;
+        
+        const bb = calculateBollingerBands(candles15m, 20, 2);
+        let bbWidth = 0;
+        if (bb.middle && bb.middle > 0) {
+            bbWidth = ((bb.upper - bb.lower) / bb.middle) * 100;
+        }
+        const minBBWidth = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_BB_WIDTH_PERCENT;
+        const bbPassed = bbWidth >= minBBWidth;
+        
+        const passed = atrPassed && bbPassed;
+        let message = '';
+        if (!passed) {
+            message = `⚠️ Baixa volatilidade 15m: ATR=${atrPercent.toFixed(2)}% (min ${minATR}%), BB Width=${bbWidth.toFixed(2)}% (min ${minBBWidth}%)`;
+        }
+        return { passed, message, metrics: { atrPercent, atrPassed, bbWidth, bbPassed } };
+    } catch (error) {
+        log(`Erro ao verificar volatilidade 15m para ${symbol}: ${error.message}`, 'error');
+        return { passed: false, message: 'Erro na verificação 15m', metrics: {} };
+    }
+}
+
+function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
+    const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 3.0;
+    const minStopPercent = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 2.0;
+    const maxStopPercent = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 7.0;
+    
+    if (!candles || candles.length < 20) {
+        const defaultAtr = currentPrice * 0.02;
+        const stop = isGreenAlert ? currentPrice - defaultAtr * atrMultiplier : currentPrice + defaultAtr * atrMultiplier;
+        const atr = defaultAtr;
+        let tp1, tp2, tp3;
+        if (isGreenAlert) {
+            tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+        } else {
+            tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+            tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+            tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+        }
+        
+        let stopDistance = Math.abs(currentPrice - stop) / currentPrice * 100;
+        let finalStop = stop;
+        if (stopDistance < minStopPercent) {
+            finalStop = isGreenAlert ? currentPrice * (1 - minStopPercent / 100) : currentPrice * (1 + minStopPercent / 100);
+        } else if (stopDistance > maxStopPercent) {
+            finalStop = isGreenAlert ? currentPrice * (1 - maxStopPercent / 100) : currentPrice * (1 + maxStopPercent / 100);
+        }
+        
+        return { stop: finalStop, tp1, tp2, tp3 };
     }
 
-    async wait() {
-        const now = Date.now();
-        if (now - this.minuteStart > 60000) {
-            this.requestCount = 0;
-            this.minuteStart = now;
+    const trValues = [];
+    for (let i = 1; i < candles.length; i++) {
+        const high = candles[i].high;
+        const low = candles[i].low;
+        const prevClose = candles[i-1].close;
+        trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+    }
+    const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
+
+    let stopPrice = isGreenAlert ? currentPrice - (atr * atrMultiplier)
+                                 : currentPrice + (atr * atrMultiplier);
+
+    const lookback = timeframe === '1w' ? 12 : (timeframe === '3d' ? 15 : (timeframe === '1d' ? 20 : (timeframe === '4h' ? 30 : 40)));
+    const relevantCandles = candles.slice(-lookback);
+    let structureLow = Math.min(...relevantCandles.map(c => c.low));
+    let structureHigh = Math.max(...relevantCandles.map(c => c.high));
+    const touchCount = {};
+    relevantCandles.forEach(c => {
+        const lowKey = Math.round(c.low * 1000) / 1000;
+        const highKey = Math.round(c.high * 1000) / 1000;
+        touchCount[lowKey] = (touchCount[lowKey] || 0) + 1;
+        touchCount[highKey] = (touchCount[highKey] || 0) + 1;
+    });
+    let clusterZone = isGreenAlert ? structureLow : structureHigh;
+    let maxTouches = 0;
+    Object.entries(touchCount).forEach(([price, touches]) => {
+        const priceNum = parseFloat(price);
+        if (isGreenAlert && priceNum < currentPrice && priceNum > structureLow * 0.95) {
+            if (touches > maxTouches) { maxTouches = touches; clusterZone = priceNum; }
+        } else if (!isGreenAlert && priceNum > currentPrice && priceNum < structureHigh * 1.05) {
+            if (touches > maxTouches) { maxTouches = touches; clusterZone = priceNum; }
         }
-        if (this.requestCount >= CONFIG.SCAN.MAX_REQUESTS_PER_MINUTE) {
-            const waitTime = 60000 - (now - this.minuteStart);
-            log(`Rate limit por minuto atingido, aguardando ${Math.ceil(waitTime / 1000)}s...`, 'warning');
-            await new Promise(r => setTimeout(r, waitTime));
-            this.requestCount = 0;
-            this.minuteStart = Date.now();
-        }
-        const timeSinceLast = now - this.lastRequestTime;
-        const baseDelay = CONFIG.SCAN.SYMBOL_DELAY_MS;
-        const adaptiveDelay = baseDelay + (this.consecutiveErrors * 100);
-        if (timeSinceLast < adaptiveDelay) {
-            await new Promise(r => setTimeout(r, adaptiveDelay - timeSinceLast));
-        }
-        this.lastRequestTime = Date.now();
-        this.requestCount++;
+    });
+
+    if (isGreenAlert) {
+        const clusterAdjustedStop = Math.min(stopPrice, clusterZone - (clusterZone * 0.002));
+        if (clusterZone < currentPrice) stopPrice = Math.min(stopPrice, clusterAdjustedStop);
+        let stopDistance = (currentPrice - stopPrice) / currentPrice * 100;
+        if (stopDistance < minStopPercent) stopPrice = currentPrice * (1 - minStopPercent / 100);
+        else if (stopDistance > maxStopPercent) stopPrice = currentPrice * (1 - maxStopPercent / 100);
+    } else {
+        const clusterAdjustedStop = Math.max(stopPrice, clusterZone + (clusterZone * 0.002));
+        if (clusterZone > currentPrice) stopPrice = Math.max(stopPrice, clusterAdjustedStop);
+        let stopDistance = (stopPrice - currentPrice) / currentPrice * 100;
+        if (stopDistance < minStopPercent) stopPrice = currentPrice * (1 + minStopPercent / 100);
+        else if (stopDistance > maxStopPercent) stopPrice = currentPrice * (1 + maxStopPercent / 100);
     }
 
-    async makeRequest(url, cacheKey = null) {
-        if (cacheKey) {
-            const cached = cache.get(cacheKey);
-            if (cached) return cached;
+    let tp1, tp2, tp3;
+    if (isGreenAlert) {
+        tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+    } else {
+        tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
+    }
+
+    return { stop: stopPrice, tp1, tp2, tp3 };
+}
+
+// =====================================================================
+// === BOLLINGER BANDS (15m) COM MEMÓRIA ===
+// =====================================================================
+function calculateBollingerBands(candles, period, stdDev) {
+    if (!candles || candles.length < period) {
+        return { upper: null, middle: null, lower: null };
+    }
+    const closes = candles.map(c => c.close);
+    const sma = closes.slice(-period).reduce((a, b) => a + b, 0) / period;
+    const variance = closes.slice(-period).reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) / period;
+    const sd = Math.sqrt(variance);
+    const upper = sma + (stdDev * sd);
+    const lower = sma - (stdDev * sd);
+    return { upper, middle: sma, lower };
+}
+
+async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, studyData) {
+    if (!CONFIG.ALERTS.BOLLINGER.ENABLED) return { passed: true, message: '', candleConfirmed: true, shouldStudy: false };
+    
+    try {
+        const candles = await getCandles(symbol, CONFIG.ALERTS.BOLLINGER.TIMEFRAME, CONFIG.ALERTS.BOLLINGER.PERIOD + 5);
+        if (!candles || candles.length < CONFIG.ALERTS.BOLLINGER.PERIOD) {
+            return { passed: false, message: 'Dados insuficientes para Bollinger Bands', candleConfirmed: false, shouldStudy: false };
         }
-        if (!cache.canMakeRequest()) {
-            const waitTime = cache.getWaitTime();
-            log(`Aguardando ${Math.ceil(waitTime / 1000)}s para respeitar rate limit...`, 'warning');
-            await new Promise(r => setTimeout(r, waitTime));
+        
+        const bb = calculateBollingerBands(candles, CONFIG.ALERTS.BOLLINGER.PERIOD, CONFIG.ALERTS.BOLLINGER.STD_DEV);
+        if (bb.upper === null || bb.lower === null) {
+            return { passed: false, message: 'Falha no cálculo das Bollinger Bands', candleConfirmed: false, shouldStudy: false };
         }
-        let attempts = 0;
-        const maxAttempts = 3;
-        while (attempts < maxAttempts) {
-            try {
-                await this.wait();
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.SCAN.REQUEST_TIMEOUT);
-                cache.addRequest();
-                const response = await fetch(url, { signal: controller.signal });
-                clearTimeout(timeoutId);
-                if (response.status === 429) {
-                    this.consecutiveErrors++;
-                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
-                    log(`Rate limit 429, aguardando ${backoffTime / 1000}s...`, 'warning');
-                    await new Promise(r => setTimeout(r, backoffTime));
-                    attempts++;
-                    continue;
-                }
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const data = await response.json();
-                this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
-                if (cacheKey) cache.set(cacheKey, data);
-                return data;
-            } catch (error) {
-                if (error.name === 'AbortError') log(`Timeout na requisição`, 'warning');
-                else log(`Erro na requisição: ${error.message}`, 'error');
-                this.consecutiveErrors++;
-                attempts++;
-                if (attempts < maxAttempts) {
-                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
-                    await new Promise(r => setTimeout(r, backoffTime));
-                }
+        
+        const currentCandle = candles[candles.length - 1];
+        const currentPrice = currentCandle.close;
+        
+        let passed = false;
+        let message = '';
+        let shouldStudy = false;
+        
+        const direction = isGreenAlert ? 'COMPRA' : 'VENDA';
+        
+        if (isGreenAlert) {
+            const touchedLowerBand = currentPrice <= bb.lower;
+            
+            if (touchedLowerBand) {
+                passed = false;
+                shouldStudy = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda inferior (${formatPrice(currentPrice)} ≤ ${formatPrice(bb.lower)}) com divergência de COMPRA. Aguardando confirmação EMA 3m...`;
+                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
+            } else {
+                message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)})`;
+            }
+        } else {
+            const touchedUpperBand = currentPrice >= bb.upper;
+            
+            if (touchedUpperBand) {
+                passed = false;
+                shouldStudy = true;
+                message = `📚 ESTUDO: ${symbol} tocou banda superior (${formatPrice(currentPrice)} ≥ ${formatPrice(bb.upper)}) com divergência de VENDA. Aguardando confirmação EMA 3m...`;
+                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
+            } else {
+                message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)})`;
             }
         }
-        throw new Error(`Falha após ${maxAttempts} tentativas`);
+        
+        return { passed, message, bands: bb, candleConfirmed: true, shouldStudy, touchedBollinger: (isGreenAlert ? currentPrice <= bb.lower : currentPrice >= bb.upper), bbLower: bb.lower, bbUpper: bb.upper };
+        
+    } catch (error) {
+        log(`Erro ao verificar Bollinger para ${symbol}: ${error.message}`, 'error');
+        return { passed: false, message: 'Erro na verificação Bollinger', candleConfirmed: false, shouldStudy: false };
     }
 }
 
-const rateLimiter = new IntelligentRateLimiter();
-
 // =====================================================================
-// === FUNÇÕES DE CLASSIFICAÇÃO DE SÍMBOLOS ===
+// === BUSCAR CANDLES COM CACHE ===
 // =====================================================================
-async function getTopSymbols() {
+async function getCandles(symbol, interval, limit = 100) {
     try {
-        log('Buscando top símbolos por volume...');
-        const data = await rateLimiter.makeRequest('https://fapi.binance.com/fapi/v1/ticker/24hr', 'top_symbols_24h');
-        const topSymbols = data
-            .filter(s => s.symbol.endsWith('USDT') && parseFloat(s.volume) > 0)
-            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-            .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
-            .map(s => s.symbol);
-        log(`Encontrados ${topSymbols.length} símbolos top por volume`);
-        return topSymbols;
-    } catch (e) {
-        log('Falha ao buscar top symbols, usando lista estática expandida', 'warning');
-        return [
-            'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
-            'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
-            'LTCUSDT','BCHUSDT','ARBUSDT','OPUSDT','INJUSDT','IMXUSDT','STXUSDT','HBARUSDT','VETUSDT','RUNEUSDT',
-            'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT',
-            'AAVEUSDT','MKRUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','BALUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
-        ];
+        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const data = await rateLimiter.makeRequest(url, cacheKey);
+        return data.map(candle => ({
+            open: parseFloat(candle[1]),
+            high: parseFloat(candle[2]),
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]),
+            volume: parseFloat(candle[5]),
+            time: candle[0]
+        }));
+    } catch (error) {
+        return [];
     }
-}
-
-function getSymbolCategory(symbol, topSymbols = []) {
-    const top10 = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
-                   'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'TONUSDT'];
-    if (top10.includes(symbol)) return 'TOP_10';
-    if (topSymbols.length > 0) {
-        const rank = topSymbols.indexOf(symbol);
-        if (rank !== -1 && rank < 50) return 'TOP_50';
-        if (rank !== -1 && rank < 150) return 'TOP_150';
-    }
-    return 'OTHER';
-}
-
-function getDailyLimit(symbol) {
-    const category = getSymbolCategory(symbol, currentTopSymbols);
-    return CONFIG.ALERTS.DAILY_LIMITS[category] || CONFIG.ALERTS.DAILY_LIMITS.OTHER;
-}
-
-function getPriorityLevel(score) {
-    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.CRITICAL) return 'critical';
-    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.HIGH) return 'high';
-    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.MEDIUM) return 'medium';
-    return 'low';
 }
 
 // =====================================================================
-// === FUNÇÕES DE ANÁLISE TÉCNICA ===
+// === DADOS ADICIONAIS ===
+// =====================================================================
+async function getAdditionalData(symbol, currentPrice, candles1h, candles3m, candlesDaily, candles4h, candles15m) {
+    try {
+        const volume1h = analyzeVolumeWithEMA(candles1h);
+        const volume3m = analyzeVolumeWithEMA(candles3m);
+        const rsi = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
+        const stochDaily = calculateStochastic(candlesDaily, CONFIG.STOCHASTIC.DAILY.K_PERIOD,
+                                               CONFIG.STOCHASTIC.DAILY.K_SMOOTH, CONFIG.STOCHASTIC.DAILY.D_PERIOD);
+        const stoch4h = calculateStochastic(candles4h, CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD,
+                                            CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH, CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD);
+        const stoch1h = calculateStochastic(candles1h, CONFIG.STOCHASTIC.ONE_HOUR.K_PERIOD,
+                                            CONFIG.STOCHASTIC.ONE_HOUR.K_SMOOTH, CONFIG.STOCHASTIC.ONE_HOUR.D_PERIOD);
+        const stoch1dFormatted = formatStochastic(stochDaily);
+        const stoch4hFormatted = formatStochastic(stoch4h);
+        const stoch1hFormatted = formatStochastic(stoch1h);
+        
+        const cci4h = calculateCCIWithEMA(candles4h, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
+        const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
+        
+        const volumes1h = candles1h.map(c => c.volume);
+        const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
+        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
+        const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
+        const volumeUSDT1h = currentVolume1h * currentPrice;
+        const volumes3m = candles3m.map(c => c.volume);
+        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const currentVolume3m = volumes3m[volumes3m.length - 1] || 0;
+        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
+        const volume24hUSDT = volumes1h.slice(-24).reduce((sum, vol) => sum + (vol * currentPrice), 0);
+        let lsr = null;
+        try {
+            const lsrData = await rateLimiter.makeRequest(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`, `lsr_${symbol}`);
+            lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
+        } catch {}
+        let funding = null;
+        try {
+            const fundingData = await rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, `funding_${symbol}`);
+            funding = parseFloat(fundingData.lastFundingRate) || null;
+        } catch {}
+        const volumeChangePct = ((volumeRatio1h - 1) * 100);
+        const volume24hPct = volumeChangePct > 0 ? `+${volumeChangePct.toFixed(0)}%` : `${volumeChangePct.toFixed(0)}%`;
+        const trendStrength = checkTrendStrength(candles1h);
+        return {
+            rsi, stoch1d: stoch1dFormatted, stoch4h: stoch4hFormatted, stoch1h: stoch1hFormatted,
+            stochDailyValues: stochDaily, stoch4hValues: stoch4h, stoch1hValues: stoch1h,
+            cci4h, cciDaily,
+            volume1h: { ratio: volumeRatio1h, percentage: volume1h.percentage, text: volume1h.text,
+                        direction: volume1h.direction, emoji: volume1h.emoji, ratioFormatted: volumeRatio1h.toFixed(2),
+                        usdt: volumeUSDT1h },
+            volume3m: { ratio: volumeRatio3m, percentage: volume3m.percentage, text: volume3m.text,
+                        direction: volume3m.direction, emoji: volume3m.emoji, ratioFormatted: volumeRatio3m.toFixed(2) },
+            volume24h: { pct: volume24hPct, text: volume1h.text, usdt: volume24hUSDT },
+            trendStrength, lsr, funding,
+            candles1h, candles4h, candlesDaily, candles15m
+        };
+    } catch (error) {
+        log(`Erro em getAdditionalData para ${symbol}: ${error.message}`, 'error');
+        return {
+            rsi: 50, stoch1d: 'K50⤵️D55 🟡', stoch4h: 'K50⤵️D55 🟡', stoch1h: 'K50⤵️D55 🟡',
+            stochDailyValues: { k: 50, d: 55 }, stoch4hValues: { k: 50, d: 55 }, stoch1hValues: { k: 50, d: 55 },
+            cci4h: { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' },
+            cciDaily: { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' },
+            volume1h: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00', usdt: 0 },
+            volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00' },
+            volume24h: { pct: '0%', text: '⚪Neutro', usdt: 0 },
+            trendStrength: 0, lsr: null, funding: null,
+            candles1h: [], candles4h: [], candlesDaily: [], candles15m: []
+        };
+    }
+}
+
+// =====================================================================
+// === FUNÇÕES DE ANÁLISE TÉCNICA (CONTINUAÇÃO) ===
 // =====================================================================
 function calculateSMA(values, period) {
     if (!values || values.length < period) return 0;
@@ -1387,7 +1835,6 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
     const rsiPivots = findSignificantPivots(rsiValues, CONFIG.RSI_DIVERGENCE.MIN_PIVOT_STRENGTH * 2);
     const multiplier = CONFIG.RSI_DIVERGENCE.SCORE_MULTIPLIER[timeframe] || 1;
 
-    // Divergências Regulares - Bullish
     if (pricePivots.lows.length >= 2 && rsiPivots.lows.length >= 2) {
         const lastPriceLow = pricePivots.lows[pricePivots.lows.length - 1];
         const prevPriceLow = pricePivots.lows[pricePivots.lows.length - 2];
@@ -1409,7 +1856,6 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
         }
     }
     
-    // Divergências Regulares - Bearish
     if (pricePivots.highs.length >= 2 && rsiPivots.highs.length >= 2) {
         const lastPriceHigh = pricePivots.highs[pricePivots.highs.length - 1];
         const prevPriceHigh = pricePivots.highs[pricePivots.highs.length - 2];
@@ -1431,7 +1877,6 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
         }
     }
 
-    // Divergências Ocultas - Bullish
     if (pricePivots.lows.length >= 2 && rsiPivots.lows.length >= 2) {
         const lastPriceLow = pricePivots.lows[pricePivots.lows.length - 1];
         const prevPriceLow = pricePivots.lows[pricePivots.lows.length - 2];
@@ -1456,7 +1901,6 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
         }
     }
     
-    // Divergências Ocultas - Bearish
     if (pricePivots.highs.length >= 2 && rsiPivots.highs.length >= 2) {
         const lastPriceHigh = pricePivots.highs[pricePivots.highs.length - 1];
         const prevPriceHigh = pricePivots.highs[pricePivots.highs.length - 2];
@@ -1484,7 +1928,7 @@ function detectAdvancedDivergences(prices, rsiValues, timeframe) {
 }
 
 // =====================================================================
-// === FUNÇÕES ADICIONAIS (LSR, Funding, Stop Loss, etc.) ===
+// === FUNÇÕES ADICIONAIS (LSR, Stop Loss, etc.) ===
 // =====================================================================
 function checkLSRPenalty(lsr, isGreenAlert) {
     if (!lsr) return { hasPenalty: false, points: 0, message: '' };
@@ -1497,366 +1941,6 @@ function checkLSRPenalty(lsr, isGreenAlert) {
                  message: `LSR ${lsr.toFixed(2)}` };
     }
     return { hasPenalty: false, points: 0, message: '' };
-}
-
-function checkFundingPenalty(funding, isGreenAlert) {
-    if (!CONFIG.FUNDING_PENALTY.ENABLED || funding === null || funding === undefined) {
-        return { hasPenalty: false, points: 0, message: '' };
-    }
-    const fundingPercent = funding * 100;
-    let penaltyPoints = 0;
-    let penaltyMessage = '';
-    
-    if (isGreenAlert && funding > 0 && CONFIG.FUNDING_PENALTY.BUY_PENALTY_FOR_POSITIVE) {
-        const absFunding = funding;
-        if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.HIGH.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.HIGH.POINTS;
-            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.MEDIUM.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.MEDIUM.POINTS;
-            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.LOW.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.LOW.POINTS;
-            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.VERY_LOW.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.POSITIVE.VERY_LOW.POINTS;
-            penaltyMessage = `Fund +${fundingPercent.toFixed(2)}%`;
-        }
-    }
-    
-    if (!isGreenAlert && funding < 0 && CONFIG.FUNDING_PENALTY.SELL_PENALTY_FOR_NEGATIVE) {
-        const absFunding = Math.abs(funding);
-        if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.HIGH.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.HIGH.POINTS;
-            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.MEDIUM.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.MEDIUM.POINTS;
-            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.LOW.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.LOW.POINTS;
-            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
-        } else if (absFunding >= CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.VERY_LOW.THRESHOLD) {
-            penaltyPoints = CONFIG.FUNDING_PENALTY.LEVELS.NEGATIVE.VERY_LOW.POINTS;
-            penaltyMessage = `Fund ${fundingPercent.toFixed(2)}%`;
-        }
-    }
-    
-    if (penaltyPoints !== 0) {
-        return { hasPenalty: true, points: penaltyPoints, message: penaltyMessage };
-    }
-    
-    return { hasPenalty: false, points: 0, message: '' };
-}
-
-async function check15MinVolatility(symbol) {
-    if (!CONFIG.ALERTS.MIN_15M_VOLATILITY.ENABLED) return { passed: true, message: '', metrics: {} };
-    try {
-        const candles15m = await getCandles(symbol, '15m', 30);
-        if (!candles15m || candles15m.length < 20) {
-            return { passed: false, message: 'Dados insuficientes 15m', metrics: {} };
-        }
-        const trValues = [];
-        for (let i = 1; i < candles15m.length; i++) {
-            const high = candles15m[i].high;
-            const low = candles15m[i].low;
-            const prevClose = candles15m[i-1].close;
-            trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
-        }
-        const recentTR = trValues.slice(-14);
-        const atr = recentTR.reduce((a, b) => a + b, 0) / recentTR.length;
-        const currentPrice = candles15m[candles15m.length - 1].close;
-        const atrPercent = (atr / currentPrice) * 100;
-        const minATR = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_ATR_PERCENT;
-        const atrPassed = atrPercent >= minATR;
-        
-        const bb = calculateBollingerBands(candles15m, 20, 2);
-        let bbWidth = 0;
-        if (bb.middle && bb.middle > 0) {
-            bbWidth = ((bb.upper - bb.lower) / bb.middle) * 100;
-        }
-        const minBBWidth = CONFIG.ALERTS.MIN_15M_VOLATILITY.MIN_BB_WIDTH_PERCENT;
-        const bbPassed = bbWidth >= minBBWidth;
-        
-        const passed = atrPassed && bbPassed;
-        let message = '';
-        if (!passed) {
-            message = `⚠️ Baixa volatilidade 15m: ATR=${atrPercent.toFixed(2)}% (min ${minATR}%), BB Width=${bbWidth.toFixed(2)}% (min ${minBBWidth}%)`;
-        }
-        return { passed, message, metrics: { atrPercent, atrPassed, bbWidth, bbPassed } };
-    } catch (error) {
-        log(`Erro ao verificar volatilidade 15m para ${symbol}: ${error.message}`, 'error');
-        return { passed: false, message: 'Erro na verificação 15m', metrics: {} };
-    }
-}
-
-function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
-    const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 3.0;
-    const minStopPercent = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 2.0;
-    const maxStopPercent = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 7.0;
-    
-    if (!candles || candles.length < 20) {
-        const defaultAtr = currentPrice * 0.02;
-        const stop = isGreenAlert ? currentPrice - defaultAtr * atrMultiplier : currentPrice + defaultAtr * atrMultiplier;
-        const atr = defaultAtr;
-        let tp1, tp2, tp3;
-        if (isGreenAlert) {
-            tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
-            tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
-            tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
-        } else {
-            tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
-            tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
-            tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
-        }
-        
-        let stopDistance = Math.abs(currentPrice - stop) / currentPrice * 100;
-        let finalStop = stop;
-        if (stopDistance < minStopPercent) {
-            finalStop = isGreenAlert ? currentPrice * (1 - minStopPercent / 100) : currentPrice * (1 + minStopPercent / 100);
-        } else if (stopDistance > maxStopPercent) {
-            finalStop = isGreenAlert ? currentPrice * (1 - maxStopPercent / 100) : currentPrice * (1 + maxStopPercent / 100);
-        }
-        
-        return { stop: finalStop, tp1, tp2, tp3 };
-    }
-
-    const trValues = [];
-    for (let i = 1; i < candles.length; i++) {
-        const high = candles[i].high;
-        const low = candles[i].low;
-        const prevClose = candles[i-1].close;
-        trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
-    }
-    const atr = trValues.slice(-14).reduce((a, b) => a + b, 0) / 14;
-
-    let stopPrice = isGreenAlert ? currentPrice - (atr * atrMultiplier)
-                                 : currentPrice + (atr * atrMultiplier);
-
-    const lookback = timeframe === '1w' ? 12 : (timeframe === '3d' ? 15 : (timeframe === '1d' ? 20 : (timeframe === '4h' ? 30 : 40)));
-    const relevantCandles = candles.slice(-lookback);
-    let structureLow = Math.min(...relevantCandles.map(c => c.low));
-    let structureHigh = Math.max(...relevantCandles.map(c => c.high));
-    const touchCount = {};
-    relevantCandles.forEach(c => {
-        const lowKey = Math.round(c.low * 1000) / 1000;
-        const highKey = Math.round(c.high * 1000) / 1000;
-        touchCount[lowKey] = (touchCount[lowKey] || 0) + 1;
-        touchCount[highKey] = (touchCount[highKey] || 0) + 1;
-    });
-    let clusterZone = isGreenAlert ? structureLow : structureHigh;
-    let maxTouches = 0;
-    Object.entries(touchCount).forEach(([price, touches]) => {
-        const priceNum = parseFloat(price);
-        if (isGreenAlert && priceNum < currentPrice && priceNum > structureLow * 0.95) {
-            if (touches > maxTouches) { maxTouches = touches; clusterZone = priceNum; }
-        } else if (!isGreenAlert && priceNum > currentPrice && priceNum < structureHigh * 1.05) {
-            if (touches > maxTouches) { maxTouches = touches; clusterZone = priceNum; }
-        }
-    });
-
-    if (isGreenAlert) {
-        const clusterAdjustedStop = Math.min(stopPrice, clusterZone - (clusterZone * 0.002));
-        if (clusterZone < currentPrice) stopPrice = Math.min(stopPrice, clusterAdjustedStop);
-        let stopDistance = (currentPrice - stopPrice) / currentPrice * 100;
-        if (stopDistance < minStopPercent) stopPrice = currentPrice * (1 - minStopPercent / 100);
-        else if (stopDistance > maxStopPercent) stopPrice = currentPrice * (1 - maxStopPercent / 100);
-    } else {
-        const clusterAdjustedStop = Math.max(stopPrice, clusterZone + (clusterZone * 0.002));
-        if (clusterZone > currentPrice) stopPrice = Math.max(stopPrice, clusterAdjustedStop);
-        let stopDistance = (stopPrice - currentPrice) / currentPrice * 100;
-        if (stopDistance < minStopPercent) stopPrice = currentPrice * (1 + minStopPercent / 100);
-        else if (stopDistance > maxStopPercent) stopPrice = currentPrice * (1 + maxStopPercent / 100);
-    }
-
-    let tp1, tp2, tp3;
-    if (isGreenAlert) {
-        tp1 = currentPrice + atr * CONFIG.TARGETS.TP1_MULTIPLIER;
-        tp2 = currentPrice + atr * CONFIG.TARGETS.TP2_MULTIPLIER;
-        tp3 = currentPrice + atr * CONFIG.TARGETS.TP3_MULTIPLIER;
-    } else {
-        tp1 = currentPrice - atr * CONFIG.TARGETS.TP1_MULTIPLIER;
-        tp2 = currentPrice - atr * CONFIG.TARGETS.TP2_MULTIPLIER;
-        tp3 = currentPrice - atr * CONFIG.TARGETS.TP3_MULTIPLIER;
-    }
-
-    return { stop: stopPrice, tp1, tp2, tp3 };
-}
-
-// =====================================================================
-// === BOLLINGER BANDS (15m) COM CONFIRMAÇÃO DE CANDLE E MEMÓRIA ===
-// =====================================================================
-function calculateBollingerBands(candles, period, stdDev) {
-    if (!candles || candles.length < period) {
-        return { upper: null, middle: null, lower: null };
-    }
-    const closes = candles.map(c => c.close);
-    const sma = closes.slice(-period).reduce((a, b) => a + b, 0) / period;
-    const variance = closes.slice(-period).reduce((sum, price) => sum + Math.pow(price - sma, 2), 0) / period;
-    const sd = Math.sqrt(variance);
-    const upper = sma + (stdDev * sd);
-    const lower = sma - (stdDev * sd);
-    return { upper, middle: sma, lower };
-}
-
-async function checkBollingerWithMemory(symbol, isGreenAlert, divergenceScore, studyData) {
-    if (!CONFIG.ALERTS.BOLLINGER.ENABLED) return { passed: true, message: '', candleConfirmed: true, shouldStudy: false };
-    
-    try {
-        const candles = await getCandles(symbol, CONFIG.ALERTS.BOLLINGER.TIMEFRAME, CONFIG.ALERTS.BOLLINGER.PERIOD + 5);
-        if (!candles || candles.length < CONFIG.ALERTS.BOLLINGER.PERIOD) {
-            return { passed: false, message: 'Dados insuficientes para Bollinger Bands', candleConfirmed: false, shouldStudy: false };
-        }
-        
-        const bb = calculateBollingerBands(candles, CONFIG.ALERTS.BOLLINGER.PERIOD, CONFIG.ALERTS.BOLLINGER.STD_DEV);
-        if (bb.upper === null || bb.lower === null) {
-            return { passed: false, message: 'Falha no cálculo das Bollinger Bands', candleConfirmed: false, shouldStudy: false };
-        }
-        
-        const currentCandle = candles[candles.length - 1];
-        const previousCandle = candles[candles.length - 2];
-        const currentPrice = currentCandle.close;
-        
-        let passed = false;
-        let message = '';
-        let candleConfirmed = false;
-        let shouldStudy = false;
-        
-        const direction = isGreenAlert ? 'COMPRA' : 'VENDA';
-        
-        if (isGreenAlert) {
-            const touchedLowerBand = currentPrice <= bb.lower;
-            
-            if (touchedLowerBand && currentCandle.close > previousCandle.low) {
-                // TOCOU NA BANDA INFERIOR COM CANDLE DE ALTA - ESTUDAR
-                passed = false; // Não alerta ainda, só estuda
-                shouldStudy = true;
-                candleConfirmed = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda inferior (${formatPrice(currentPrice)} ≤ ${formatPrice(bb.lower)}) com divergência de COMPRA. Aguardando confirmação EMA 3m...`;
-                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
-            } else if (touchedLowerBand) {
-                shouldStudy = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda inferior mas candle não confirmado. Aguardando...`;
-            } else {
-                message = `❌ Preço ($${formatPrice(currentPrice)}) acima da banda inferior ($${formatPrice(bb.lower)})`;
-            }
-        } else {
-            const touchedUpperBand = currentPrice >= bb.upper;
-            
-            if (touchedUpperBand && currentCandle.close < previousCandle.high) {
-                // TOCOU NA BANDA SUPERIOR COM CANDLE DE BAIXA - ESTUDAR
-                passed = false; // Não alerta ainda, só estuda
-                shouldStudy = true;
-                candleConfirmed = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda superior (${formatPrice(currentPrice)} ≥ ${formatPrice(bb.upper)}) com divergência de VENDA. Aguardando confirmação EMA 3m...`;
-                log(`📝 ${symbol} - Registrando estudo para ${direction}`, 'info');
-            } else if (touchedUpperBand) {
-                shouldStudy = true;
-                message = `📚 ESTUDO: ${symbol} tocou banda superior mas candle não confirmado. Aguardando...`;
-            } else {
-                message = `❌ Preço ($${formatPrice(currentPrice)}) abaixo da banda superior ($${formatPrice(bb.upper)})`;
-            }
-        }
-        
-        return { passed, message, bands: bb, candleConfirmed, shouldStudy, touchedBollinger: (isGreenAlert ? currentPrice <= bb.lower : currentPrice >= bb.upper), bbLower: bb.lower, bbUpper: bb.upper };
-        
-    } catch (error) {
-        log(`Erro ao verificar Bollinger para ${symbol}: ${error.message}`, 'error');
-        return { passed: false, message: 'Erro na verificação Bollinger', candleConfirmed: false, shouldStudy: false };
-    }
-}
-
-// =====================================================================
-// === BUSCAR CANDLES COM CACHE ===
-// =====================================================================
-async function getCandles(symbol, interval, limit = 100) {
-    try {
-        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
-        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-        const data = await rateLimiter.makeRequest(url, cacheKey);
-        return data.map(candle => ({
-            open: parseFloat(candle[1]),
-            high: parseFloat(candle[2]),
-            low: parseFloat(candle[3]),
-            close: parseFloat(candle[4]),
-            volume: parseFloat(candle[5]),
-            time: candle[0]
-        }));
-    } catch (error) {
-        return [];
-    }
-}
-
-// =====================================================================
-// === DADOS ADICIONAIS ===
-// =====================================================================
-async function getAdditionalData(symbol, currentPrice, candles1h, candles3m, candlesDaily, candles4h, candles15m) {
-    try {
-        const volume1h = analyzeVolumeWithEMA(candles1h);
-        const volume3m = analyzeVolumeWithEMA(candles3m);
-        const rsi = calculateRSI(candles1h, CONFIG.RSI.PERIOD);
-        const stochDaily = calculateStochastic(candlesDaily, CONFIG.STOCHASTIC.DAILY.K_PERIOD,
-                                               CONFIG.STOCHASTIC.DAILY.K_SMOOTH, CONFIG.STOCHASTIC.DAILY.D_PERIOD);
-        const stoch4h = calculateStochastic(candles4h, CONFIG.STOCHASTIC.FOUR_HOUR.K_PERIOD,
-                                            CONFIG.STOCHASTIC.FOUR_HOUR.K_SMOOTH, CONFIG.STOCHASTIC.FOUR_HOUR.D_PERIOD);
-        const stoch1h = calculateStochastic(candles1h, CONFIG.STOCHASTIC.ONE_HOUR.K_PERIOD,
-                                            CONFIG.STOCHASTIC.ONE_HOUR.K_SMOOTH, CONFIG.STOCHASTIC.ONE_HOUR.D_PERIOD);
-        const stoch1dFormatted = formatStochastic(stochDaily);
-        const stoch4hFormatted = formatStochastic(stoch4h);
-        const stoch1hFormatted = formatStochastic(stoch1h);
-        
-        const cci4h = calculateCCIWithEMA(candles4h, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
-        const cciDaily = calculateCCIWithEMA(candlesDaily, CONFIG.CCI.PERIOD, CONFIG.CCI.EMA_PERIOD);
-        
-        const volumes1h = candles1h.map(c => c.volume);
-        const avgVolume1h = volumes1h.slice(-24).reduce((a, b) => a + b, 0) / 24;
-        const currentVolume1h = volumes1h[volumes1h.length - 1] || 0;
-        const volumeRatio1h = avgVolume1h > 0 ? currentVolume1h / avgVolume1h : 1;
-        const volumeUSDT1h = currentVolume1h * currentPrice;
-        const volumes3m = candles3m.map(c => c.volume);
-        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const currentVolume3m = volumes3m[volumes3m.length - 1] || 0;
-        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
-        const volume24hUSDT = volumes1h.slice(-24).reduce((sum, vol) => sum + (vol * currentPrice), 0);
-        let lsr = null;
-        try {
-            const lsrData = await rateLimiter.makeRequest(`https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=5m&limit=1`, `lsr_${symbol}`);
-            lsr = lsrData.length > 0 ? parseFloat(lsrData[0].longShortRatio) : null;
-        } catch {}
-        let funding = null;
-        try {
-            const fundingData = await rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, `funding_${symbol}`);
-            funding = parseFloat(fundingData.lastFundingRate) || null;
-        } catch {}
-        const volumeChangePct = ((volumeRatio1h - 1) * 100);
-        const volume24hPct = volumeChangePct > 0 ? `+${volumeChangePct.toFixed(0)}%` : `${volumeChangePct.toFixed(0)}%`;
-        const trendStrength = checkTrendStrength(candles1h);
-        return {
-            rsi, stoch1d: stoch1dFormatted, stoch4h: stoch4hFormatted, stoch1h: stoch1hFormatted,
-            stochDailyValues: stochDaily, stoch4hValues: stoch4h, stoch1hValues: stoch1h,
-            cci4h, cciDaily,
-            volume1h: { ratio: volumeRatio1h, percentage: volume1h.percentage, text: volume1h.text,
-                        direction: volume1h.direction, emoji: volume1h.emoji, ratioFormatted: volumeRatio1h.toFixed(2),
-                        usdt: volumeUSDT1h },
-            volume3m: { ratio: volumeRatio3m, percentage: volume3m.percentage, text: volume3m.text,
-                        direction: volume3m.direction, emoji: volume3m.emoji, ratioFormatted: volumeRatio3m.toFixed(2) },
-            volume24h: { pct: volume24hPct, text: volume1h.text, usdt: volume24hUSDT },
-            trendStrength, lsr, funding,
-            candles1h, candles4h, candlesDaily, candles15m
-        };
-    } catch (error) {
-        log(`Erro em getAdditionalData para ${symbol}: ${error.message}`, 'error');
-        return {
-            rsi: 50, stoch1d: 'K50⤵️D55 🟡', stoch4h: 'K50⤵️D55 🟡', stoch1h: 'K50⤵️D55 🟡',
-            stochDailyValues: { k: 50, d: 55 }, stoch4hValues: { k: 50, d: 55 }, stoch1hValues: { k: 50, d: 55 },
-            cci4h: { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' },
-            cciDaily: { cci: 0, ema: 0, trend: 'Neutro', emoji: '⚪', text: 'CCI N/A' },
-            volume1h: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00', usdt: 0 },
-            volume3m: { ratio: 1, percentage: 50, text: '⚪Neutro', direction: 'Neutro', emoji: '⚪', ratioFormatted: '1.00' },
-            volume24h: { pct: '0%', text: '⚪Neutro', usdt: 0 },
-            trendStrength: 0, lsr: null, funding: null,
-            candles1h: [], candles4h: [], candlesDaily: [], candles15m: []
-        };
-    }
 }
 
 // =====================================================================
@@ -2015,7 +2099,9 @@ async function sendSingleAlert(alert) {
             alert.displayDailyCount = newCount;
             const penaltyIcon = alert.totalPenalty < 0 ? '⚠️' : '✅';
             const cvdType = alert.cvdIsReal ? 'REAL' : 'SIM';
-            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | CVD: ${alert.cvdConfirmed ? '✅' : '❌'} (${cvdType}) | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
+            const pivotBonus = alert.pivotDivergenceBonus || 0;
+            const wickBonus = alert.wickRejectionBonus || 0;
+            log(`${penaltyIcon} ALERTA ENVIADO: ${alert.direction} ${alert.symbol} [${alert.timeframe}] - Score: ${alert.confirmationScore} | Pivô: +${pivotBonus} | Wick: +${wickBonus} | CVD: ${alert.cvdConfirmed ? '✅' : '❌'} (${cvdType}) | Volume: ${alert.volume1h.direction} (${alert.volume1h.percentage.toFixed(1)}%) | Penalidades: ${alert.totalPenalty}`, 'success');
         }
         return true;
     } catch (error) {
@@ -2033,7 +2119,9 @@ async function sendGroupedAlerts(alerts, priority) {
         message += `🟢 **COMPRA** (${buyAlerts.length})\n`;
         buyAlerts.slice(0, 5).forEach(a => {
             const cvdType = a.cvdIsReal ? '🔴' : '🟡';
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%) | Penal: ${a.totalPenalty}\n`;
+            const pivotIcon = a.pivotDivergenceDetected ? '🎯' : '';
+            const wickIcon = a.wickRejectionDetected ? '🕯️' : '';
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} ${pivotIcon} ${wickIcon} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${a.volume1h.direction} (${a.volume1h.percentage.toFixed(1)}%) | Penal: ${a.totalPenalty}\n`;
         });
         if (buyAlerts.length > 5) message += `... e mais ${buyAlerts.length - 5}\n`;
         message += '\n';
@@ -2041,8 +2129,10 @@ async function sendGroupedAlerts(alerts, priority) {
     if (sellAlerts.length > 0) {
         message += `🔴 **VENDA** (${sellAlerts.length})\n`;
         sellAlerts.slice(0, 5).forEach(a => {
-            const cvdType = a.cvdIsReal ? '🔴' : '🟡';
-            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${(100 - a.volume1h.percentage).toFixed(1)}% vendedor | Penal: ${a.totalPenalty}\n`;
+            const cvdType = a.cvdIsReal ? '🐋Top🔥VOL' : 'Vol Normal';
+            const pivotIcon = a.pivotDivergenceDetected ? '🎯' : '';
+            const wickIcon = a.wickRejectionDetected ? '🕯️' : '';
+            message += `• ${a.symbol.replace('USDT', '')} [${a.timeframe}] Score: ${a.confirmationScore} ${pivotIcon} ${wickIcon} | CVD: ${a.cvdConfirmed ? '✅' : '❌'} ${cvdType} | Vol: ${(100 - a.volume1h.percentage).toFixed(1)}% vendedor | Penal: ${a.totalPenalty}\n`;
         });
         if (sellAlerts.length > 5) message += `... e mais ${sellAlerts.length - 5}\n`;
     }
@@ -2119,7 +2209,7 @@ function findClusterLevels(candles, currentPrice, tolerancePercent = 0.5, maxClu
 }
 
 // =====================================================================
-// === ANALISAR TIMEFRAME ===
+// === ANALISAR TIMEFRAME (VERSÃO ATUALIZADA COM PIVÔ/CVD) ===
 // =====================================================================
 async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles) {
     try {
@@ -2171,7 +2261,11 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
             confirmationScore += fundingPenalty.points;
             totalPenalty += fundingPenalty.points;
             penaltyMessages.push(fundingPenalty.message);
+        } else if (fundingPenalty.points > 0) {
+            confirmationScore += fundingPenalty.points;
+            if (fundingPenalty.message) penaltyMessages.push(fundingPenalty.message);
         }
+        
         if (totalPenalty < CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY) {
             const excess = CONFIG.FUNDING_PENALTY.MAX_TOTAL_PENALTY - totalPenalty;
             confirmationScore -= excess;
@@ -2190,6 +2284,18 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
 
         confirmationScore += cciScoreAdjustment;
         totalPenalty += cciScoreAdjustment;
+
+        let pivotDivergenceResult = null;
+        let pivotScoreBonus = 0;
+        
+        if (CONFIG.ALERTS.PIVOT_DIVERGENCE.ENABLED) {
+            pivotDivergenceResult = await analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreenAlert, currentPrice);
+            if (pivotDivergenceResult.hasPivotDivergence) {
+                pivotScoreBonus = pivotDivergenceResult.scoreBonus;
+                confirmationScore += pivotScoreBonus;
+                log(`🎯 ${symbol} [${timeframe}] - ${pivotDivergenceResult.message}`, 'success');
+            }
+        }
 
         return {
             symbol,
@@ -2226,12 +2332,311 @@ async function analyzeDivergenceTimeframe(symbol, candles, timeframe, allCandles
             volume24h: additional.volume24h,
             trendStrength: additional.trendStrength,
             candles1h, candles4h, candlesDaily, candles15m,
-            originalCandles: candles
+            originalCandles: candles,
+            pivotDivergenceDetected: pivotDivergenceResult ? pivotDivergenceResult.hasPivotDivergence : false,
+            pivotDivergenceBonus: pivotScoreBonus,
+            pivotInfo: pivotDivergenceResult ? pivotDivergenceResult.pivotInfo : null,
+            pivotCVDAligned: pivotDivergenceResult ? pivotDivergenceResult.cvdAligned : false
         };
     } catch (error) {
         log(`Erro em analyzeDivergenceTimeframe ${symbol} [${timeframe}]: ${error.message}`, 'error');
         return null;
     }
+}
+
+// =====================================================================
+// === NOVA FUNÇÃO: ANÁLISE DE DIVERGÊNCIA COM PIVÔ E CVD ===
+// =====================================================================
+async function analyzePivotDivergenceWithCVD(symbol, timeframe, candles, isGreenAlert, currentPrice) {
+    if (!CONFIG.ALERTS.PIVOT_DIVERGENCE.ENABLED) {
+        return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
+    }
+    
+    if (!CONFIG.ALERTS.PIVOT_DIVERGENCE.CHECK_TIMEFRAMES.includes(timeframe)) {
+        return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
+    }
+    
+    try {
+        if (!candles || candles.length < 50) return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: '' };
+        
+        const closes = candles.map(c => c.close);
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        
+        const pivotHighs = [];
+        const pivotLows = [];
+        const minStrength = CONFIG.ALERTS.PIVOT_DIVERGENCE.MIN_PIVOT_STRENGTH;
+        
+        for (let i = 3; i < candles.length - 3; i++) {
+            let isPivotHigh = true;
+            for (let j = -3; j <= 3; j++) {
+                if (j === 0) continue;
+                if (highs[i] <= highs[i + j]) {
+                    isPivotHigh = false;
+                    break;
+                }
+            }
+            if (isPivotHigh) {
+                let touches = 1;
+                const pivotPrice = highs[i];
+                for (let k = 0; k < candles.length; k++) {
+                    if (Math.abs(k - i) > 5 && Math.abs(highs[k] - pivotPrice) / pivotPrice < 0.005) {
+                        touches++;
+                    }
+                }
+                if (touches >= minStrength) {
+                    pivotHighs.push({ price: pivotPrice, index: i, touches, type: 'resistance' });
+                }
+            }
+            
+            let isPivotLow = true;
+            for (let j = -3; j <= 3; j++) {
+                if (j === 0) continue;
+                if (lows[i] >= lows[i + j]) {
+                    isPivotLow = false;
+                    break;
+                }
+            }
+            if (isPivotLow) {
+                let touches = 1;
+                const pivotPrice = lows[i];
+                for (let k = 0; k < candles.length; k++) {
+                    if (Math.abs(k - i) > 5 && Math.abs(lows[k] - pivotPrice) / pivotPrice < 0.005) {
+                        touches++;
+                    }
+                }
+                if (touches >= minStrength) {
+                    pivotLows.push({ price: pivotPrice, index: i, touches, type: 'support' });
+                }
+            }
+        }
+        
+        const currentIndex = candles.length - 1;
+        let relevantPivot = null;
+        
+        if (isGreenAlert) {
+            const supportsBelow = pivotLows.filter(p => p.price < currentPrice);
+            if (supportsBelow.length > 0) {
+                supportsBelow.sort((a, b) => b.touches - a.touches);
+                relevantPivot = supportsBelow[0];
+            }
+        } else {
+            const resistancesAbove = pivotHighs.filter(p => p.price > currentPrice);
+            if (resistancesAbove.length > 0) {
+                resistancesAbove.sort((a, b) => b.touches - a.touches);
+                relevantPivot = resistancesAbove[0];
+            }
+        }
+        
+        if (!relevantPivot) {
+            return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: 'Nenhum pivô significativo encontrado' };
+        }
+        
+        const rsiValues = [];
+        for (let i = CONFIG.RSI.PERIOD; i < candles.length; i++) {
+            rsiValues.push(calculateRSI(candles.slice(0, i + 1), CONFIG.RSI.PERIOD));
+        }
+        
+        let hasDivergence = false;
+        let divergenceType = null;
+        
+        if (rsiValues.length > relevantPivot.index) {
+            const rsiAtPivot = rsiValues[relevantPivot.index - CONFIG.RSI.PERIOD] || 50;
+            const currentRSI = rsiValues[rsiValues.length - 1] || 50;
+            const priceAtPivot = relevantPivot.price;
+            
+            if (isGreenAlert) {
+                if (priceAtPivot < currentPrice && rsiAtPivot < currentRSI) {
+                    hasDivergence = true;
+                    divergenceType = 'bullish_pivot';
+                } else if (priceAtPivot < currentPrice && rsiAtPivot > currentRSI) {
+                    hasDivergence = true;
+                    divergenceType = 'hidden_bullish_pivot';
+                }
+            } else {
+                if (priceAtPivot > currentPrice && rsiAtPivot > currentRSI) {
+                    hasDivergence = true;
+                    divergenceType = 'bearish_pivot';
+                } else if (priceAtPivot > currentPrice && rsiAtPivot < currentRSI) {
+                    hasDivergence = true;
+                    divergenceType = 'hidden_bearish_pivot';
+                }
+            }
+        }
+        
+        if (!hasDivergence) {
+            return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: relevantPivot, cvdAligned: false, message: `Pivô ${relevantPivot.type} em ${formatPrice(relevantPivot.price)} (${relevantPivot.touches}x) sem divergência` };
+        }
+        
+        const cvdDirectionData = await getCVDDirection(symbol, currentPrice);
+        const isCVDAligned = (isGreenAlert && cvdDirectionData.direction === 'comprador') ||
+                             (!isGreenAlert && cvdDirectionData.direction === 'vendedor');
+        
+        let scoreBonus = CONFIG.ALERTS.PIVOT_DIVERGENCE.SCORE_BONUS;
+        
+        if (isCVDAligned) {
+            scoreBonus += CONFIG.ALERTS.PIVOT_DIVERGENCE.CVD_ALIGNMENT_BONUS;
+            log(`🎯 ${symbol} [${timeframe}] - Divergência com PIVÔ + CVD ALINHADO! Bônus total: +${scoreBonus}`, 'success');
+        } else {
+            scoreBonus += CONFIG.ALERTS.PIVOT_DIVERGENCE.CVD_MISALIGN_PENALTY;
+            log(`⚠️ ${symbol} [${timeframe}] - Divergência com PIVÔ mas CVD desalinhado (${cvdDirectionData.direction}). Bônus ajustado: ${scoreBonus > 0 ? '+' : ''}${scoreBonus}`, 'warning');
+        }
+        
+        const pivotStrengthText = relevantPivot.touches >= 5 ? '🔥 FORTE' : (relevantPivot.touches >= 3 ? '⚡ MÉDIO' : '⚠️ FRACO');
+        
+        return {
+            hasPivotDivergence: true,
+            scoreBonus: scoreBonus,
+            pivotInfo: {
+                ...relevantPivot,
+                strengthText: pivotStrengthText,
+                divergenceType: divergenceType
+            },
+            cvdAligned: isCVDAligned,
+            cvdDirection: cvdDirectionData.direction,
+            message: `🎯 Pivô ${relevantPivot.type} em ${formatPrice(relevantPivot.price)} (${relevantPivot.touches}x ${pivotStrengthText}) com divergência ${divergenceType} | CVD: ${cvdDirectionData.direction} ${isCVDAligned ? '✅' : '❌'} | Bônus: ${scoreBonus > 0 ? '+' : ''}${scoreBonus}`
+        };
+        
+    } catch (error) {
+        log(`Erro em analyzePivotDivergenceWithCVD ${symbol}: ${error.message}`, 'error');
+        return { hasPivotDivergence: false, scoreBonus: 0, pivotInfo: null, cvdAligned: false, message: `Erro: ${error.message}` };
+    }
+}
+
+// =====================================================================
+// === RATE LIMITER INTELIGENTE ===
+// =====================================================================
+class IntelligentRateLimiter {
+    constructor() {
+        this.lastRequestTime = 0;
+        this.consecutiveErrors = 0;
+        this.errorBackoff = 1000;
+        this.maxBackoff = 60000;
+        this.requestCount = 0;
+        this.minuteStart = Date.now();
+    }
+
+    async wait() {
+        const now = Date.now();
+        if (now - this.minuteStart > 60000) {
+            this.requestCount = 0;
+            this.minuteStart = now;
+        }
+        if (this.requestCount >= CONFIG.SCAN.MAX_REQUESTS_PER_MINUTE) {
+            const waitTime = 60000 - (now - this.minuteStart);
+            log(`Rate limit por minuto atingido, aguardando ${Math.ceil(waitTime / 1000)}s...`, 'warning');
+            await new Promise(r => setTimeout(r, waitTime));
+            this.requestCount = 0;
+            this.minuteStart = Date.now();
+        }
+        const timeSinceLast = now - this.lastRequestTime;
+        const baseDelay = CONFIG.SCAN.SYMBOL_DELAY_MS;
+        const adaptiveDelay = baseDelay + (this.consecutiveErrors * 100);
+        if (timeSinceLast < adaptiveDelay) {
+            await new Promise(r => setTimeout(r, adaptiveDelay - timeSinceLast));
+        }
+        this.lastRequestTime = Date.now();
+        this.requestCount++;
+    }
+
+    async makeRequest(url, cacheKey = null) {
+        if (cacheKey) {
+            const cached = cache.get(cacheKey);
+            if (cached) return cached;
+        }
+        if (!cache.canMakeRequest()) {
+            const waitTime = cache.getWaitTime();
+            log(`Aguardando ${Math.ceil(waitTime / 1000)}s para respeitar rate limit...`, 'warning');
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (attempts < maxAttempts) {
+            try {
+                await this.wait();
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), CONFIG.SCAN.REQUEST_TIMEOUT);
+                cache.addRequest();
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (response.status === 429) {
+                    this.consecutiveErrors++;
+                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
+                    log(`Rate limit 429, aguardando ${backoffTime / 1000}s...`, 'warning');
+                    await new Promise(r => setTimeout(r, backoffTime));
+                    attempts++;
+                    continue;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
+                if (cacheKey) cache.set(cacheKey, data);
+                return data;
+            } catch (error) {
+                if (error.name === 'AbortError') log(`Timeout na requisição`, 'warning');
+                else log(`Erro na requisição: ${error.message}`, 'error');
+                this.consecutiveErrors++;
+                attempts++;
+                if (attempts < maxAttempts) {
+                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
+                    await new Promise(r => setTimeout(r, backoffTime));
+                }
+            }
+        }
+        throw new Error(`Falha após ${maxAttempts} tentativas`);
+    }
+}
+
+const rateLimiter = new IntelligentRateLimiter();
+
+// =====================================================================
+// === FUNÇÕES DE CLASSIFICAÇÃO DE SÍMBOLOS ===
+// =====================================================================
+async function getTopSymbols() {
+    try {
+        log('Buscando top símbolos por volume...');
+        const data = await rateLimiter.makeRequest('https://fapi.binance.com/fapi/v1/ticker/24hr', 'top_symbols_24h');
+        const topSymbols = data
+            .filter(s => s.symbol.endsWith('USDT') && parseFloat(s.volume) > 0)
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+            .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
+            .map(s => s.symbol);
+        log(`Encontrados ${topSymbols.length} símbolos top por volume`);
+        return topSymbols;
+    } catch (e) {
+        log('Falha ao buscar top symbols, usando lista estática expandida', 'warning');
+        return [
+            'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
+            'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT',
+            'LTCUSDT','BCHUSDT','ARBUSDT','OPUSDT','INJUSDT','IMXUSDT','STXUSDT','HBARUSDT','VETUSDT','RUNEUSDT',
+            'ALGOUSDT','EGLDUSDT','MANAUSDT','SANDUSDT','AXSUSDT','APEUSDT','CHZUSDT','GALAUSDT','FLOWUSDT','THETAUSDT',
+            'AAVEUSDT','SUSHIUSDT','COMPUSDT','SNXUSDT','YFIUSDT','CRVUSDT','BALUSDT','1INCHUSDT','ENJUSDT','ZILUSDT'
+        ];
+    }
+}
+
+function getSymbolCategory(symbol, topSymbols = []) {
+    const top10 = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+                   'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'TONUSDT'];
+    if (top10.includes(symbol)) return 'TOP_10';
+    if (topSymbols.length > 0) {
+        const rank = topSymbols.indexOf(symbol);
+        if (rank !== -1 && rank < 50) return 'TOP_50';
+        if (rank !== -1 && rank < 150) return 'TOP_150';
+    }
+    return 'OTHER';
+}
+
+function getDailyLimit(symbol) {
+    const category = getSymbolCategory(symbol, currentTopSymbols);
+    return CONFIG.ALERTS.DAILY_LIMITS[category] || CONFIG.ALERTS.DAILY_LIMITS.OTHER;
+}
+
+function getPriorityLevel(score) {
+    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.CRITICAL) return 'critical';
+    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.HIGH) return 'high';
+    if (score >= CONFIG.ALERTS.PRIORITY_LEVELS.MEDIUM) return 'medium';
+    return 'low';
 }
 
 // =====================================================================
@@ -2247,7 +2652,9 @@ async function fetchAllCandles(symbol) {
 }
 
 // =====================================================================
-// === ANALISAR SÍMBOLO COM SISTEMA DE MEMÓRIA ===
+// === ANALISAR SÍMBOLO COM SISTEMA DE MEMÓRIA E PIVÔ ===
+// === ALTERADO: Obrigatoriedade de divergência em 15m, 30m ou 1h ===
+// === REMOVIDA: Verificação de confirmação de candle ===
 // =====================================================================
 async function analyzeSymbol(symbol) {
     try {
@@ -2264,6 +2671,17 @@ async function analyzeSymbol(symbol) {
             }
         }
         if (divergences.length === 0) return [];
+
+        // =============================================================
+        // NOVA REGRA: PELO MENOS UMA DIVERGÊNCIA EM 15m, 30m OU 1h
+        // =============================================================
+        const requiredTimeframes = ['15m', '30m', '1h'];
+        const hasRequiredDivergence = divergences.some(d => requiredTimeframes.includes(d.timeframe));
+        
+        if (!hasRequiredDivergence) {
+            log(`❌ ${symbol} - Nenhuma divergência em ${requiredTimeframes.join(', ')}. Alerta bloqueado.`, 'warning');
+            return [];
+        }
 
         const bestDivergence = divergences.reduce((a, b) => a.confirmationScore > b.confirmationScore ? a : b);
         let maxScore = bestDivergence.confirmationScore;
@@ -2308,17 +2726,27 @@ async function analyzeSymbol(symbol) {
             return [];
         }
         
-        // ANÁLISE DO CVD (HÍBRIDO: REAL + SIMULADO)
         const cvdAnalysis = await analyzeCVDHybrid(symbol, currentPrice, isGreenAlert);
         
-        // VERIFICAÇÃO DE DIREÇÃO DO VOLUME
         const volumeDirectionCheck = checkVolumeDirection(bestDivergence.volume1h, isGreenAlert);
         if (!volumeDirectionCheck.passed) {
             log(`❌ ${symbol} - ${finalDirection} bloqueado: ${volumeDirectionCheck.message}`, 'warning');
             return [];
         }
         
-        // PONTUAÇÃO DOS CLUSTERS
+        // =============================================================
+        // NOVO: DETECÇÃO DE REJEIÇÃO DE WICK
+        // =============================================================
+        const candlesForWick = allCandles['15m'] || allCandles['1h'];
+        const wickRejection = detectWickRejection(candlesForWick, isGreenAlert);
+        
+        let wickScoreBonus = 0;
+        if (wickRejection.hasRejection) {
+            wickScoreBonus = wickRejection.bonus;
+            maxScore += wickScoreBonus;
+            log(`🕯️ ${symbol} - ${wickRejection.message} | Bônus: +${wickScoreBonus}`, 'success');
+        }
+        
         let clusterScoreBonus = 0;
         let clusterInfo = '';
         const maxClusterBonus = CONFIG.ALERTS.CLUSTER_BONUS_LIMITS.MAX_TOTAL_BONUS;
@@ -2347,54 +2775,45 @@ async function analyzeSymbol(symbol) {
         clusterScoreBonus = Math.min(maxClusterBonus * 2, clusterScoreBonus);
         maxScore += clusterScoreBonus;
         
-        // ADICIONA O SCORE DO CVD
+        const pivotBonus = bestDivergence.pivotDivergenceBonus || 0;
+        if (pivotBonus > 0) {
+            log(`🎯 ${symbol} - Bônus Pivô: +${pivotBonus} | Score total: ${maxScore.toFixed(1)}`, 'success');
+        }
+        
         if (cvdAnalysis.cvdConfirmed) {
             maxScore += cvdAnalysis.cvdScore;
             const cvdType = cvdAnalysis.isReal ? 'REAL' : 'SIM';
             log(`✅ ${symbol} - CVD ${cvdType} confirmado! Bônus +${cvdAnalysis.cvdScore} | Score total: ${maxScore.toFixed(1)}`, 'success');
         }
         
-        // VERIFICAÇÃO DE SCORE MÍNIMO
         if (!isMinimumScoreReached(maxScore)) {
             log(`❌ ${symbol} - Score ${maxScore.toFixed(1)} < ${CONFIG.ALERTS.MIN_SCORE_TO_ALERT} - Alerta bloqueado`, 'warning');
             return [];
         }
         
-        // =====================================================================
-        // === SISTEMA DE MEMÓRIA E CONFIRMAÇÃO EMA ===
-        // =====================================================================
-        
         const directionStr = finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA';
         
-        // Primeiro, verifica se já existe um estudo ativo na memória para este símbolo/direção
         const existingStudy = studyMemory.getStudy(symbol, directionStr);
         
         if (existingStudy) {
-            // Já temos um estudo ativo - verifica confirmação das EMAs
             log(`📚 ${symbol} - Estudo ativo encontrado para ${directionStr} (desde ${new Date(existingStudy.timestamp).toLocaleString()})`, 'info');
             
-            // Verifica confirmação no gráfico 3m
             const emaConfirmation = await checkEMAConfirmation(symbol, directionStr);
             
             if (emaConfirmation.confirmed) {
-                // CONFIRMAÇÃO OBTIDA! Envia o alerta com os dados do estudo
                 log(`✅ ${symbol} - CONFIRMAÇÃO OBTIDA! Enviando alerta...`, 'success');
                 
-                // Prepara o estudoData com a confirmação
                 const studyData = {
                     ...existingStudy.studyData,
                     emaConfirmation: emaConfirmation,
                     confirmedAt: Date.now()
                 };
                 
-                // Verifica Bollinger novamente para pegar dados atualizados
                 const bollingerCheck = await checkBollingerWithMemory(symbol, isGreenAlert, maxScore, studyData);
                 
-                // Verifica cooldown
                 if (isCooldownActive(symbol, directionStr, 'MULTI')) return [];
                 if (isDailyLimitReached(symbol)) return [];
                 
-                // Timeframe para stop
                 let timeframeForTargets = '1h';
                 let candlesForTargets = allCandles['1h'];
                 if (bestDivergence.usedTimeframe && allCandles[bestDivergence.usedTimeframe] && allCandles[bestDivergence.usedTimeframe].length >= 20) {
@@ -2404,13 +2823,19 @@ async function analyzeSymbol(symbol) {
                 
                 const { stop, tp1, tp2, tp3 } = computeStopAndTargets(currentPrice, isGreenAlert, timeframeForTargets, candlesForTargets);
                 
-                // Pega as bandas do estudo existente
                 const bbInfo = existingStudy.bbLower ? 
                     `📊 BB 15m: ${formatPrice(existingStudy.bbLower)} / ${formatPrice((existingStudy.bbLower + existingStudy.bbUpper) / 2)} / ${formatPrice(existingStudy.bbUpper)}` : '';
                 
                 const allPenaltyMessages = [];
                 if (bestDivergence.penaltyMessages) {
                     allPenaltyMessages.push(...bestDivergence.penaltyMessages);
+                }
+                
+                let pivotInfoText = '';
+                if (bestDivergence.pivotDivergenceDetected && bestDivergence.pivotInfo) {
+                    const pivot = bestDivergence.pivotInfo;
+                    const cvdAlignIcon = bestDivergence.pivotCVDAligned ? '✅' : '⚠️';
+                    pivotInfoText = `🎯 Pivô ${pivot.type} em ${formatPrice(pivot.price)} (${pivot.touches}x ${pivot.strengthText}) | CVD: ${pivot.cvdDirection || 'N/A'} ${cvdAlignIcon} | Bônus: +${bestDivergence.pivotDivergenceBonus}`;
                 }
                 
                 const consolidated = {
@@ -2422,6 +2847,14 @@ async function analyzeSymbol(symbol) {
                     confirmationScore: maxScore,
                     clusterBonus: clusterScoreBonus,
                     clusterInfo: clusterInfo,
+                    pivotDivergenceDetected: bestDivergence.pivotDivergenceDetected,
+                    pivotDivergenceBonus: bestDivergence.pivotDivergenceBonus,
+                    pivotInfo: bestDivergence.pivotInfo,
+                    pivotCVDAligned: bestDivergence.pivotCVDAligned,
+                    pivotInfoText: pivotInfoText,
+                    wickRejectionDetected: wickRejection.hasRejection,
+                    wickRejectionBonus: wickScoreBonus,
+                    wickRejectionMessage: wickRejection.message,
                     divergencesList: divergences.map(d => ({
                         timeframe: d.timeframe,
                         type: d.direction,
@@ -2430,7 +2863,8 @@ async function analyzeSymbol(symbol) {
                         rsiValue: d.rsiValue,
                         priceAtDivergence: d.priceAtDivergence,
                         emoji: d.divergenceEmoji,
-                        isRecent: d.isDivergenceRecent
+                        isRecent: d.isDivergenceRecent,
+                        pivotBonus: d.pivotDivergenceBonus || 0
                     })),
                     bullishCount,
                     bearishCount,
@@ -2473,26 +2907,19 @@ async function analyzeSymbol(symbol) {
                     }
                 };
                 
-                // Remove o estudo da memória após o alerta
                 studyMemory.removeStudy(symbol, directionStr);
                 queueAlert(consolidated);
                 return [consolidated];
                 
             } else {
-                // Ainda aguardando confirmação
                 log(`⏳ ${symbol} - Aguardando confirmação EMA para ${directionStr}: ${emaConfirmation.message}`, 'info');
                 return [];
             }
         }
         
-        // =====================================================================
-        // === NÃO TEM ESTUDO ATIVO - VERIFICA BOLLINGER PARA CRIAR NOVO ESTUDO ===
-        // =====================================================================
-        
         const bollingerCheck = await checkBollingerWithMemory(symbol, isGreenAlert, maxScore, null);
         
         if (bollingerCheck.shouldStudy && CONFIG.ALERTS.MEMORY.ENABLED) {
-            // Criar novo estudo na memória
             const studyData = {
                 symbol,
                 direction: directionStr,
@@ -2500,7 +2927,7 @@ async function analyzeSymbol(symbol) {
                 bbLower: bollingerCheck.bbLower,
                 bbUpper: bollingerCheck.bbUpper,
                 divergenceScore: maxScore,
-                divergences: divergences.map(d => ({ timeframe: d.timeframe, type: d.direction, subtype: d.divergenceType, score: d.confirmationScore })),
+                divergences: divergences.map(d => ({ timeframe: d.timeframe, type: d.direction, subtype: d.divergenceType, score: d.confirmationScore, pivotBonus: d.pivotDivergenceBonus || 0 })),
                 bullishCount,
                 bearishCount,
                 isNearSupport,
@@ -2508,7 +2935,10 @@ async function analyzeSymbol(symbol) {
                 supports,
                 resistances,
                 volume1h: bestDivergence.volume1h,
-                rsi: bestDivergence.rsi
+                rsi: bestDivergence.rsi,
+                pivotDivergenceDetected: bestDivergence.pivotDivergenceDetected,
+                pivotDivergenceBonus: bestDivergence.pivotDivergenceBonus,
+                pivotInfo: bestDivergence.pivotInfo
             };
             
             studyMemory.addStudy(symbol, directionStr, currentPrice, bollingerCheck.bbLower, bollingerCheck.bbUpper, maxScore, studyData);
@@ -2516,8 +2946,6 @@ async function analyzeSymbol(symbol) {
             return [];
         }
         
-        // Se chegou aqui, não tem estudo e não tocou Bollinger - alerta normal? Não, pois queremos só com estudo
-        // Então retorna vazio
         return [];
         
     } catch (error) {
@@ -2536,7 +2964,7 @@ function getPivotStrength(touches) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM COM INFORMAÇÕES DO ESTUDO ===
+// === FORMATAR MENSAGEM COM INFORMAÇÕES DO ESTUDO, PIVÔ E REJEIÇÃO DE WICK ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -2552,26 +2980,26 @@ function formatAlert(data) {
     const volume3mLine = `#Vol 3m: ${data.volume3m.ratioFormatted}x (${data.volume3m.percentage.toFixed(0)}%) ${data.volume3m.text}`;
     
     let cvdLine = '';
-    const cvdTypeIcon = data.cvdIsReal ? '🔴' : '🟡';
+    const cvdTypeIcon = data.cvdIsReal ? '🐋Top🔥VOL' : 'Vol Normal';
     
     if (data.cvdConfirmed) {
         const cvdEmoji = data.cvdSignal?.type === 'bullish' ? '💹' : '🔻';
         cvdLine = `#CVD ${cvdTypeIcon}: ${cvdEmoji} ${data.cvdSignal?.type === 'bullish' ? '#BULL' : '#BEAR'} +${data.cvdScore} ${data.cvdIsReal ? '' : ''}`;
     } else if (data.cvdSignal && !data.cvdConfirmed) {
-        cvdLine = `#CVD🐋 ${cvdTypeIcon}: ⚠️ ${data.cvdSignal.type === 'bullish' ? '#BULL' : '#BEAR'} (não alinhado)`;
+        cvdLine = `#CVD ${cvdTypeIcon}: ⚠️ ${data.cvdSignal.type === 'bullish' ? '#BULL' : '#BEAR'} (não alinhado)`;
     } else {
-        cvdLine = `#CVD🐋 ${cvdTypeIcon}: ❌ Indefinido`;
+        cvdLine = `#CVD ${cvdTypeIcon}: ❌ Indefinido`;
     }
     
     let divergencesText = '';
     if (data.divergencesList && data.divergencesList.length > 0) {
-        const tfList = data.divergencesList.map(d => `${d.timeframe}${d.isRecent ? '✅' : '⚠️'}`).join(',');
+        const tfList = data.divergencesList.map(d => `${d.timeframe}${d.isRecent ? '✅' : '⚠️'}${d.pivotBonus > 0 ? '🎯' : ''}`).join(',');
         divergencesText = `${data.bullishCount + data.bearishCount} divergências (${tfList})`;
     } else {
         divergencesText = `${data.divergenceType}`;
     }
     
-    const targets = `🎯 TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}`;
+    const targets = ` TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}`;
     const stop = `⛔ Stop: ${formatPrice(data.stopLoss)} (${((Math.abs(data.stopLoss - data.price) / data.price) * 100).toFixed(1)}%)`;
     
     function getTimeframeIcon(tf) {
@@ -2587,6 +3015,11 @@ function formatAlert(data) {
             'MULTI': ''
         };
         return icons[tf] || '';
+    }
+    
+    let wickLine = '';
+    if (data.wickRejectionDetected && data.wickRejectionMessage) {
+        wickLine = `🕯️ ${data.wickRejectionMessage} | Bônus: +${data.wickRejectionBonus}`;
     }
     
     let supportLine = '';
@@ -2654,13 +3087,21 @@ function formatAlert(data) {
         penaltiesLine = ` ⚠️ Penal: ${data.totalPenalty}`;
     }
     
-    // Adiciona informações do estudo se disponível
+    let pivotDivergenceLine = '';
+    if (data.pivotDivergenceDetected && data.pivotInfo) {
+        const pivot = data.pivotInfo;
+        const cvdAlignIcon = data.pivotCVDAligned ? '✅' : '⚠️';
+        const divergenceIcon = pivot.divergenceType === 'bullish_pivot' ? '📈' : 
+                               (pivot.divergenceType === 'bearish_pivot' ? '📉' : '🔮');
+        pivotDivergenceLine = `🎯 Pivô ${pivot.type} em ${formatPrice(pivot.price)} (${pivot.touches}x ${pivot.strengthText}) ${divergenceIcon}\n   CVD: ${pivot.cvdDirection || 'N/A'} ${cvdAlignIcon} | Bônus: +${data.pivotDivergenceBonus}`;
+    }
+    
     let studyInfo = '';
     if (data.studyInfo) {
         const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
         const confirmTime = new Date(data.studyInfo.confirmedAt).toLocaleTimeString();
         const waitMinutes = Math.round((data.studyInfo.confirmedAt - data.studyInfo.studiedAt) / 60000);
-        studyInfo = `\nOperação encontrada às ${studyTime} | Confirmado após ${waitMinutes}min }`;
+        studyInfo = `Operação: ${studyTime} → Confirmada a ${waitMinutes}mins`;
     }
     
     const timeframeIcon = getTimeframeIcon(data.usedTimeframe);
@@ -2673,10 +3114,11 @@ function formatAlert(data) {
 ${scoreEmoji} #SCORE: ${finalScore.toFixed(1)} (Pivôs +${totalPivotBonus.toFixed(1)}) | Data: ${formattedDateTime}
 🔍 ${divergencesText}
 ${cvdLine}
+${wickLine}
 ${targets}
 ${stop}
 ▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
-#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 TV</a>
+#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}"> Ver_Gráfico</a>
 ${volume3mLine}
 ${volume1hLine}
 #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -2687,6 +3129,7 @@ CCI 1D:${cciDailyText}
 📌 Pivôs (${timeframeText}):
 ${supportLine ? supportLine : ''}
 ${resistanceLine ? resistanceLine : ''}
+${pivotDivergenceLine}
 ${penaltiesLine}
 ${studyInfo}
  🤖...Alerta Educativo, não é recomendação de investimento.
@@ -2700,14 +3143,12 @@ async function startScanner() {
     console.log('\n' + '='.repeat(70));
     console.log('🚀 TITANIUM PRIME X');
     console.log('='.repeat(70));
-    console.log('📚 Sistema de Memória: Registra toques nas Bollinger + divergências');
-    console.log('✅ Confirmação: EMA13/34 (cruzamento) + fechamento acima/abaixo EMA55 (3m)');
+   
     console.log('='.repeat(70));
     
     currentTopSymbols = await getTopSymbols();
     log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
     
-    // Inicializa CVD Real
     if (CONFIG.CVD.WEBSOCKET.ENABLED) {
         log('Inicializando CVD Real via WebSocket...', 'info');
         await realCVD.initialize(currentTopSymbols);
@@ -2721,15 +3162,23 @@ async function startScanner() {
     log(`CVD (Cumulative Volume Delta) - TIMEFRAME: ${CONFIG.CVD.TIMEFRAME}`, 'success');
     log(`📚 Memória de estudo: ATIVADA | Expira em ${CONFIG.ALERTS.MEMORY.EXPIRY_HOURS}h`, 'success');
     log(`✅ Confirmação EMA: ${CONFIG.ALERTS.MEMORY.EMA_FAST}/${CONFIG.ALERTS.MEMORY.EMA_SLOW} cruzamento | Fechamento EMA${CONFIG.ALERTS.MEMORY.EMA_TREND} (${CONFIG.ALERTS.MEMORY.CHECK_TIMEFRAME})`, 'success');
+    log(`🎯 Pivô Divergence: ATIVADO | Bônus: ${CONFIG.ALERTS.PIVOT_DIVERGENCE.SCORE_BONUS} | CVD Alinhado: +${CONFIG.ALERTS.PIVOT_DIVERGENCE.CVD_ALIGNMENT_BONUS}`, 'success');
+    log(`🕯️ Rejeição de Wick: ATIVADO | Bônus: +${CONFIG.ALERTS.WICK_REJECTION.BONUS_POINTS} | Mínimo: ${CONFIG.ALERTS.WICK_REJECTION.MIN_WICK_TO_BODY_RATIO}x corpo`, 'success');
+    log(`📋 NOVA REGRA: Divergência obrigatória em 15m, 30m ou 1h`, 'success');
+    log(`🔧 OTIMIZAÇÃO: Removida verificação de confirmação de candle (apenas EMAs 3m)`, 'success');
+    log(`💰 FUNDING: Penaliza apenas funding DESFAVORÁVEL | Bônus para funding FAVORÁVEL (+2)`, 'success');
     
     try {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
         const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? 'CVD REAL via WebSocket' : 'CVD Simulado';
-        const initMessage = `🚀 Titanium Prime X v4.0 Ativado (COM MEMÓRIA DE ESTUDO)\n` +
+        const initMessage = `🚀 Titanium Prime X v4.3 Ativado (COM PIVÔ + CVD DIRECIONAL + WICK REJECTION)\n` +
             `Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `${cvdStatus}\n` +
             `📚 Estudo: Toque na Bollinger + Divergência → Aguarda confirmação EMA13/34/55 (3m)\n` +
+            `🕯️ Wick Rejection: Cauda ≥ 0.3% do candle e ≥ 2x corpo = Bônus +${CONFIG.ALERTS.WICK_REJECTION.BONUS_POINTS}\n` +
+            `🎯 NOVO: Divergência obrigatória em 15m/30m/1h\n` +
+            `💰 FUNDING: Negativo = Bônus COMPRA | Positivo = Bônus VENDA\n` +
             `✅ Alerta só após reversão confirmada\n` +
             `${getBrazilianDateTime().full}`;
         const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -2750,7 +3199,6 @@ async function startScanner() {
             saveDailyCounters();
             log('Contadores diários resetados', 'info');
         }
-        // Limpeza de memória expirada a cada hora
         studyMemory.cleanupExpired();
         const stats = studyMemory.getStats();
         log(`📚 Memória: ${stats.total} estudos ativos (COMPRA: ${stats.byDirection.COMPRA}, VENDA: ${stats.byDirection.VENDA})`, 'info');
@@ -2793,7 +3241,6 @@ async function startScanner() {
     }
 }
 
-// Tratamento de desligamento gracioso
 process.on('SIGINT', () => {
     log('Desligando...', 'warning');
     const stats = studyMemory.getStats();
