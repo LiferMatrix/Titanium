@@ -9,11 +9,11 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 /// =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vavdg',
-        CHAT_ID: '-10025549'
+        BOT_TOKEN: '7708427979:AAF7vVx6AG8pSyzQU8Xbao87VLhKcbJavdg',
+        CHAT_ID: '-1002554953979'
     },
     SCAN: {
-        BATCH_SIZE: 8,
+        BATCH_SIZE: 4,
         SYMBOL_DELAY_MS: 5000,
         REQUEST_TIMEOUT: 18000,
         COOLDOWN_AFTER_BATCH_MS: 1500,
