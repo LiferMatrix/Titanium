@@ -10,11 +10,11 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFsA',
-        CHAT_ID: '-10019'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
-        BATCH_SIZE: 8,
+        BATCH_SIZE: 5,
         SYMBOL_DELAY_MS: 4000,
         REQUEST_TIMEOUT: 13000,
         COOLDOWN_AFTER_BATCH_MS: 2000,
@@ -2950,7 +2950,7 @@ ${cvdLine}
 ${targets}
 ${stop}
 ▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
-#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 Gráfico</a>
+#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 Ver_Gráfico</a>
 ${volume3mLine}
 ${volume1hLine}
 #LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
@@ -2964,7 +2964,7 @@ ${resistanceLine ? resistanceLine : ''}
 ${pivotDivergenceLine}
 ${penaltiesLine}
 ${studyInfo}
- 🤖...Alerta Educativo, não é recomendação de investimento.
+ 🤖...Não é recomendação de investimento.
 Titanium Prime X by @J4Rviz</i>`;
 }
 
@@ -3003,7 +3003,7 @@ async function startScanner() {
         const token = CONFIG.TELEGRAM.BOT_TOKEN;
         const chatId = CONFIG.TELEGRAM.CHAT_ID;
         const cvdStatus = CONFIG.CVD.WEBSOCKET.ENABLED ? 'CVD REAL via WebSocket' : 'CVD Simulado';
-        const initMessage = `🚀 Titanium Prime X v4.2 Ativado (COM PIVÔ + CVD DIRECIONAL + FUNDING CORRIGIDO)\n` +
+        const initMessage = ` Titanium Prime X\n` +
             `Monitorando: ${currentTopSymbols.length} símbolos\n` +
             `${cvdStatus}\n` +
             `📚 Estudo: Toque na Bollinger + Divergência → Aguarda confirmação EMA13/34/55 (3m)\n` +
