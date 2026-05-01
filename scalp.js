@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 /// =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx',
-        CHAT_ID: '-10029'
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 4,
@@ -19,18 +19,18 @@ const CONFIG = {
         COOLDOWN_AFTER_BATCH_MS: 1500,
         MAX_REQUESTS_PER_MINUTE: 1000,
         CACHE_DURATION_SECONDS: 45,
-        TOP_SYMBOLS_LIMIT: 450,
+        TOP_SYMBOLS_LIMIT: 570,
         SCAN_INTERVAL_SECONDS: 30
     },
     ALERTS: {
         COOLDOWN_MINUTES: 15,
         COOLDOWN_BY_TIMEFRAME: {
-            '15m': 10, '30m': 10, '1h': 10, '2h': 10, '4h': 15,
+            '15m': 5, '30m': 5, '1h': 5, '2h': 5, '4h': 15,
             '12h': 15, '1d': 15, '3d': 15, '1w': 15
         },
         VOLUME_DIRECTION: {
-            BUY_MIN_PERCENTAGE: 45,
-            SELL_MAX_PERCENTAGE: 55,
+            BUY_MIN_PERCENTAGE: 40,
+            SELL_MAX_PERCENTAGE: 60,
             REQUIRE_VOLUME_DIRECTION: true
         },
         MAX_ALERTS_PER_SCAN: 30,
@@ -113,7 +113,7 @@ const CONFIG = {
         ENABLED: true,
         TIMEFRAME: '3m',
         LOOKBACK_CANDLES: 20,
-        ABNORMAL_MULTIPLIER: 2.0,
+        ABNORMAL_MULTIPLIER: 1.5,
         MIN_CONFIDENCE: 60
     }
 };
