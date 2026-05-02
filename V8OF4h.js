@@ -1,783 +1,129 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
-const z = require('zod');
-const https = require('https');
-const { Agent } = require('http');
 require('dotenv').config();
 if (!globalThis.fetch) globalThis.fetch = fetch;
 
-// =====================================================================
-// === CONFIGURAÇÕES CENTRALIZADAS - VERSÃO MAIS RÁPIDA ===
-// =====================================================================
+/// =====================================================================
+/// === CONFIGURAÇÕES CENTRALIZADAS ===
+/// =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7708427979:AAF7vVx6AG8pS
-        CHAT_ID: '-100255
+        BOT_TOKEN: '7633398974:AAHaVFs_D_oZfswILgUd0i2wHgF88fo4N0A',
+        CHAT_ID: '-1001990889297'
     },
-    PERFORMANCE: {
-        SYMBOL_DELAY_MS: 250,
-        SCAN_INTERVAL_SECONDS: 120,
-        CANDLE_CACHE_TTL: 300000,
-        BATCH_SIZE: 15,
-        REQUEST_TIMEOUT: 20000,
+    SCAN: {
+        BATCH_SIZE: 5,
+        SYMBOL_DELAY_MS: 5000,
+        REQUEST_TIMEOUT: 18000,
+        COOLDOWN_AFTER_BATCH_MS: 1500,
+        MAX_REQUESTS_PER_MINUTE: 1000,
+        CACHE_DURATION_SECONDS: 45,
+        TOP_SYMBOLS_LIMIT: 570,
+        SCAN_INTERVAL_SECONDS: 30
+    },
+    ALERTS: {
         COOLDOWN_MINUTES: 15,
-        PRICE_DEVIATION_THRESHOLD: 0.5,
-        TELEGRAM_RETRY_ATTEMPTS: 3,
-        TELEGRAM_RETRY_DELAY: 2000
+        COOLDOWN_BY_TIMEFRAME: {
+            '15m': 5, '30m': 5, '1h': 5, '2h': 5, '4h': 15,
+            '12h': 15, '1d': 15, '3d': 15, '1w': 15
+        },
+        VOLUME_DIRECTION: {
+            BUY_MIN_PERCENTAGE: 40,
+            SELL_MAX_PERCENTAGE: 60,
+            REQUIRE_VOLUME_DIRECTION: true
+        },
+        MAX_ALERTS_PER_SCAN: 30,
+        TELEGRAM_DELAY_MS: 5000
     },
-    VOLUME: {
-        TIMEFRAME: '1h',
-        EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.7,
-        BUYER_THRESHOLD: 52,
-        SELLER_THRESHOLD: 48,
-        CONFIRMATION_CANDLES: 2
+    RSI: {
+        PERIOD: 14,
+        OVERSOLD: 30,
+        OVERBOUGHT: 70,
+        EXTREME_OVERSOLD: 25,
+        EXTREME_OVERBOUGHT: 75
     },
+    RSI_DIVERGENCE: {
+        TIMEFRAMES: ['15m', '30m', '1h', '2h', '4h', '12h', '1d', '3d', '1w'],
+        LOOKBACK_PERIODS: 30,
+        MIN_PIVOT_STRENGTH: 0.5,
+        LOOKBACK_BY_TIMEFRAME: {
+            '15m': 60, '30m': 70, '1h': 80, '2h': 90, '4h': 100,
+            '12h': 120, '1d': 150, '3d': 180, '1w': 200
+        },
+        SCORE_MULTIPLIER: {
+            '15m': 1.5, '30m': 1.5, '1h': 1.5, '2h': 1.5, '4h': 2.0,
+            '12h': 2.5, '1d': 3.0, '3d': 4.0, '1w': 5.0
+        },
+        REQUIRE_EXTREME_FOR_HIDDEN: true,
+        HIDDEN_DIVERGENCE_MULTIPLIER: 1.5,
+        REGULAR_DIVERGENCE_MULTIPLIER: 1.0,
+        MIN_RSI_EXTREME_FOR_HIDDEN: { bullish: 30, bearish: 70 },
+        REQUIRE_PIVOT_FOR_DIVERGENCE: true
+    },
+    BOLLINGER: {
+        PERIOD: 20,
+        STD_DEVIATION: 2.2,
+        PROXIMITY_PERCENT: 0.8,
+        REQUIRED_TIMEFRAMES: ['15m'],
+        CHECK_BOTH_TIMEFRAMES: false
+    },
+    WICK_REJECTION: {
+        ENABLED: true,
+        TIMEFRAME: '15m',
+        MIN_WICK_TO_BODY_RATIO: 1.5,
+        MIN_WICK_PERCENT: 0.25,
+        LOOKBACK_CANDLES: 3,
+        ATR_MULTIPLIER: 1.5,
+        MAX_WICK_PERCENT: 2.0,
+        REQUIRE_CONSECUTIVE: false,
+        CHECK_CLOSE_CONFIRMATION: true
+    },
+    STOCHASTIC: {
+        DAILY: { K_PERIOD: 5, K_SMOOTH: 3, D_PERIOD: 3 },
+        FOUR_HOUR: { K_PERIOD: 14, K_SMOOTH: 3, D_PERIOD: 3 },
+        ONE_HOUR: { K_PERIOD: 14, K_SMOOTH: 3, D_PERIOD: 3 }
+    },
+    CCI: { PERIOD: 20, EMA_PERIOD: 5 },
+    FUNDING: {
+        ENABLED: true,
+        FAVORABLE_BONUS: {
+            ENABLED: true,
+            BUY_NEGATIVE_BONUS: 3,
+            SELL_POSITIVE_BONUS: 3,
+            MIN_THRESHOLD: 0.002
+        }
+    },
+    STOP_LOSS: {
+        ATR_MULTIPLIER: {
+            '15m': 3.0, '30m': 3.3, '1h': 3.8, '2h': 4.0, '4h': 4.2,
+            '12h': 4.2, '1d': 4.2, '3d': 4.2, '1w': 4.2
+        },
+        MIN_STOP_DISTANCE_PERCENT: {
+            '15m': 2.0, '30m': 2.2, '1h': 2.5, '2h': 3.0, '4h': 3.5,
+            '12h': 4.0, '1d': 5.0, '3d': 6.0, '1w': 7.0
+        },
+        MAX_STOP_DISTANCE_PERCENT: {
+            '15m': 5.0, '30m': 5.5, '1h': 7.0, '2h': 8.0, '4h': 10.0,
+            '12h': 12.0, '1d': 14.0, '3d': 16.0, '1w': 20.0
+        }
+    },
+    TARGETS: { TP1_MULTIPLIER: 1.0, TP2_MULTIPLIER: 1.5, TP3_MULTIPLIER: 2.0 },
     VOLUME_3M: {
         ENABLED: true,
         TIMEFRAME: '3m',
-        EMA_PERIOD: 9,
-        MIN_VOLUME_RATIO: 1.5,
-        BUYER_THRESHOLD: 52,
-        SELLER_THRESHOLD: 48
-    },
-    RATE_LIMITER: {
-        INITIAL_DELAY: 300,
-        MAX_DELAY: 8000,
-        BACKOFF_FACTOR: 2,
-        MAX_RETRIES: 5,
-        RESET_THRESHOLD: 3,
-        MAX_CONCURRENT_REQUESTS: 8,
-        REQUESTS_PER_MINUTE: 900
-    },
-    TRADE: {
-        RISK_REWARD_RATIO: 1.8,
-        STOP_PERCENTAGE: 2,
-        TAKE_PROFIT_LEVELS: [2, 3, 4],
-        PARTIAL_CLOSE: [30, 30, 40]
-    },
-    ALERTS: {
-        MIN_SCORE: 85,
-        MIN_VOLUME_RATIO: 1.7,
-        ENABLE_SOUND: true,
-        MAX_ALERTS_PER_SCAN: 5,
-        MAX_DAILY_ALERTS_PER_SYMBOL: 10,
-        PRIORITY_LEVELS: {
-            ALTA: 85,
-            MEDIA: 75,
-            BAIXA: 70
-        }
-    },
-    RSI: {
-        BUY_MAX: 64,
-        SELL_MIN: 66,
-        PERIOD: 14
-    },
-    DEBUG: {
-        VERBOSE: false
-    },
-    CLEANUP: {
-        ENABLED: true,
-        MAX_LOG_AGE_HOURS: 24,
-        MAX_CACHE_AGE_HOURS: 12,
-        MAX_ALERT_FILES_AGE_HOURS: 48,
-        CLEANUP_INTERVAL_MINUTES: 60,
-        MAX_FOLDER_SIZE_MB: 500,
-        COMPRESS_OLD_LOGS: true,
-        MIN_FREE_SPACE_MB: 100
-    },
-    CCI: {
-        ENABLED: true,
-        PERIOD: 20,
-        EMA_PERIOD: 5,
-        MIN_ALTA_SCORE: 30,
-        MIN_BAIXA_SCORE: 30,
-        REQUIRED_FOR_BUY: 'ALTA',      // Critério obrigatório para COMPRA
-        REQUIRED_FOR_SELL: 'BAIXA'     // Critério obrigatório para VENDA
-    },
-    STOCH: {
-        PERIOD_1D: 5,
-        SLOW_1D: 3,
-        SMOOTH_1D: 3,
-        PERIOD_4H: 14,
-        SLOW_4H: 3,
-        SMOOTH_4H: 3,
-        COLORS: {
-            EXTREME_OVERSOLD: 10,
-            OVERSOLD: 30,
-            NEUTRAL: 65,
-            OVERBOUGHT: 80
-        }
-    },
-    LIQUIDATION: {
-        ENABLED: true,
-        LOOKBACK_CANDLES: 100,
-        CLUSTER_THRESHOLD: 0.02,
-        MAX_ZONES: 3,
-        VOLUME_WEIGHT: 0.6,
-        PRICE_WEIGHT: 0.4
-    },
-    CONNECTION: {
-        KEEP_ALIVE: true,
-        KEEP_ALIVE_MSECS: 20000,
-        MAX_SOCKETS: 35,
-        MAX_FREE_SOCKETS: 10,
-        SOCKET_TIMEOUT: 20000,
-        FREE_SOCKET_TIMEOUT: 10000,
-        REJECT_UNAUTHORIZED: false
+        LOOKBACK_CANDLES: 20,
+        ABNORMAL_MULTIPLIER: 1.6,
+        MIN_CONFIDENCE: 60
     }
 };
-
-// =====================================================================
-// === SCHEMAS DE VALIDAÇÃO ZOD ===
-// =====================================================================
-const CandleSchema = z.object({
-    open: z.number().positive(),
-    high: z.number().positive(),
-    low: z.number().positive(),
-    close: z.number().positive(),
-    volume: z.number().positive(),
-    time: z.number().int()
-});
-
-const KlineResponseSchema = z.array(
-    z.tuple([
-        z.number(), z.string(), z.string(), z.string(), z.string(),
-        z.string(), z.number(), z.string(), z.number(), z.string(),
-        z.string(), z.string()
-    ])
-);
-
-const LSRResponseSchema = z.array(
-    z.object({
-        longShortRatio: z.string(),
-        longAccount: z.string(),
-        shortAccount: z.string()
-    })
-);
-
-const FundingRateSchema = z.array(
-    z.object({
-        symbol: z.string(),
-        fundingRate: z.string(),
-        fundingTime: z.number()
-    })
-);
-
-const ExchangeInfoSchema = z.object({
-    symbols: z.array(
-        z.object({
-            symbol: z.string(),
-            status: z.string()
-        })
-    )
-});
-
-const TradeAlertSchema = z.object({
-    symbol: z.string(),
-    direction: z.enum(['COMPRA', 'VENDA']),
-    entryPrice: z.number(),
-    stopLoss: z.number(),
-    takeProfit1: z.number(),
-    takeProfit2: z.number(),
-    takeProfit3: z.number(),
-    riskReward: z.number(),
-    confidence: z.number(),
-    score: z.number(),
-    volumeRatio: z.number(),
-    buyerPercentage: z.number(),
-    sellerPercentage: z.number(),
-    volume24hVsEma9: z.string(),
-    volume24hEmoji: z.string(),
-    volumeRatio3m: z.number().optional().nullable(),
-    buyerPercentage3m: z.number().optional().nullable(),
-    sellerPercentage3m: z.number().optional().nullable(),
-    lsr: z.number().optional().nullable(),
-    funding: z.number().optional().nullable(),
-    rsi: z.number().optional().nullable(),
-    cci4h: z.string().optional().nullable(),           // CCI 4H para critério obrigatório
-    cciDaily: z.string().optional().nullable(),        // CCI Diário para informação
-    cciValue4h: z.number().optional().nullable(),
-    cciEma4h: z.number().optional().nullable(),
-    cciValueDaily: z.number().optional().nullable(),
-    cciEmaDaily: z.number().optional().nullable(),
-    stochDaily: z.string().optional().nullable(),
-    stoch4h: z.string().optional().nullable(),
-    longLiquidationZones: z.array(z.number()).optional().nullable(),
-    shortLiquidationZones: z.array(z.number()).optional().nullable(),
-    nearestLongLiq: z.number().optional().nullable(),
-    nearestShortLiq: z.number().optional().nullable(),
-    support: z.number(),
-    resistance: z.number(),
-    emoji: z.string(),
-    timestamp: z.number()
-});
 
 // =====================================================================
 // === DIRETÓRIOS ===
 // =====================================================================
 const LOG_DIR = './logs';
-const CACHE_DIR = './cache';
-const ALERTS_DIR = './alerts';
-
+const COOLDOWN_FILE = './cooldowns.json';
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
-if (!fs.existsSync(ALERTS_DIR)) fs.mkdirSync(ALERTS_DIR, { recursive: true });
-
-// =====================================================================
-// === RATE LIMITER E GERENCIADOR DE CONEXÃO ROBUSTO V2 ===
-// =====================================================================
-class RateLimiter {
-    constructor() {
-        this.currentDelay = CONFIG.RATE_LIMITER.INITIAL_DELAY;
-        this.consecutiveErrors = 0;
-        this.lastRequestTime = 0;
-        this.requestCount = 0;
-        this.minuteRequests = 0;
-        this.lastMinuteReset = Date.now();
-        this.errorLog = new Map();
-        this.resetCount = 0;
-        this.consecutiveResetErrors = 0;
-        this.activeRequests = 0;
-        this.maxConcurrentRequests = CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS;
-        this.requestQueue = [];
-        this.processingQueue = false;
-        this.recreateAgent();
-    }
-
-    recreateAgent() {
-        if (this.currentAgent && this.currentAgent.destroy) {
-            try {
-                this.currentAgent.destroy();
-            } catch (e) {}
-        }
-        
-        this.currentAgent = new https.Agent({
-            keepAlive: CONFIG.CONNECTION.KEEP_ALIVE,
-            keepAliveMsecs: CONFIG.CONNECTION.KEEP_ALIVE_MSECS,
-            maxSockets: CONFIG.CONNECTION.MAX_SOCKETS,
-            maxFreeSockets: CONFIG.CONNECTION.MAX_FREE_SOCKETS,
-            timeout: CONFIG.CONNECTION.SOCKET_TIMEOUT,
-            freeSocketTimeout: CONFIG.CONNECTION.FREE_SOCKET_TIMEOUT,
-            rejectUnauthorized: CONFIG.CONNECTION.REJECT_UNAUTHORIZED,
-            scheduling: 'fifo'
-        });
-        
-        return this.currentAgent;
-    }
-
-    checkRateLimit() {
-        const now = Date.now();
-        
-        if (now - this.lastMinuteReset > 60000) {
-            console.log(`📊 Requisições no último minuto: ${this.minuteRequests}`);
-            this.minuteRequests = 0;
-            this.lastMinuteReset = now;
-        }
-        
-        if (this.minuteRequests >= CONFIG.RATE_LIMITER.REQUESTS_PER_MINUTE) {
-            const waitTime = 60000 - (now - this.lastMinuteReset);
-            if (waitTime > 0) {
-                console.log(`⏳ Rate limit atingido (${this.minuteRequests}/min), aguardando ${Math.ceil(waitTime/1000)}s`);
-                return waitTime;
-            }
-        }
-        
-        if (this.activeRequests >= this.maxConcurrentRequests) {
-            return 100;
-        }
-        
-        return 0;
-    }
-
-    resetConnection() {
-        this.resetCount++;
-        this.consecutiveResetErrors++;
-        
-        console.log(`🔄 Resetando conexão (tentativa #${this.resetCount}, consecutivas: ${this.consecutiveResetErrors})...`);
-        
-        if (this.consecutiveResetErrors > 3) {
-            const waitTime = Math.min(30000, this.currentDelay * 4);
-            console.log(`⏳ Muitos erros consecutivos, aguardando ${waitTime/1000}s...`);
-            return waitTime;
-        }
-        
-        this.recreateAgent();
-        return 0;
-    }
-
-    async processQueue() {
-        if (this.processingQueue) return;
-        this.processingQueue = true;
-
-        while (this.requestQueue.length > 0) {
-            if (this.activeRequests >= this.maxConcurrentRequests) {
-                await new Promise(r => setTimeout(r, 100));
-                continue;
-            }
-
-            const { url, options, type, resolve, reject, retryCount } = this.requestQueue.shift();
-            
-            this.activeRequests++;
-            
-            this.executeRequest(url, options, type, retryCount)
-                .then(resolve)
-                .catch(reject)
-                .finally(() => {
-                    this.activeRequests--;
-                });
-
-            await new Promise(r => setTimeout(r, 50));
-        }
-
-        this.processingQueue = false;
-    }
-
-    async executeRequest(url, options = {}, type = 'klines', retryCount = 1) {
-        const maxRetries = CONFIG.RATE_LIMITER.MAX_RETRIES;
-        let agent = this.currentAgent;
-        let lastError;
-
-        for (let attempt = retryCount; attempt <= maxRetries; attempt++) {
-            try {
-                const rateLimitWait = this.checkRateLimit();
-                if (rateLimitWait > 0) {
-                    await new Promise(r => setTimeout(r, rateLimitWait));
-                }
-
-                const now = Date.now();
-                const timeSinceLastRequest = now - this.lastRequestTime;
-                if (timeSinceLastRequest < this.currentDelay) {
-                    await new Promise(r => setTimeout(r, this.currentDelay - timeSinceLastRequest));
-                }
-
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
-
-                const fetchOptions = {
-                    ...options,
-                    signal: controller.signal,
-                    agent: agent,
-                    headers: {
-                        ...options.headers,
-                        'Connection': 'keep-alive',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'Accept': '*/*',
-                        'User-Agent': 'Mozilla/5.0 (compatible; TitaniumBot/1.0)'
-                    }
-                };
-
-                const response = await fetch(url, fetchOptions);
-                clearTimeout(timeoutId);
-                
-                this.lastRequestTime = Date.now();
-                this.minuteRequests++;
-                this.requestCount++;
-
-                if (!response.ok) {
-                    const errorText = await response.text().catch(() => '');
-                    
-                    if (response.status === 429) {
-                        const retryAfter = response.headers.get('retry-after') || 60;
-                        console.log(`⏳ Rate limit 429, aguardando ${retryAfter}s`);
-                        
-                        this.currentDelay = Math.min(
-                            CONFIG.RATE_LIMITER.MAX_DELAY,
-                            this.currentDelay * 2
-                        );
-                        
-                        await new Promise(r => setTimeout(r, retryAfter * 1000));
-                        continue;
-                    }
-                    
-                    if (response.status >= 500) {
-                        console.log(`⚠️ Erro ${response.status} no servidor, tentativa ${attempt}/${maxRetries}`);
-                        await new Promise(r => setTimeout(r, this.currentDelay * attempt));
-                        continue;
-                    }
-                    
-                    throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
-                }
-
-                let data;
-                try {
-                    const text = await response.text();
-                    if (!text || text.trim().length === 0) {
-                        throw new Error('Resposta vazia');
-                    }
-                    data = JSON.parse(text);
-                } catch (parseError) {
-                    console.log(`⚠️ Erro ao parsear resposta: ${parseError.message}`);
-                    throw new Error('Resposta inválida do servidor');
-                }
-
-                this.consecutiveErrors = 0;
-                this.consecutiveResetErrors = 0;
-                
-                this.currentDelay = Math.max(
-                    CONFIG.RATE_LIMITER.INITIAL_DELAY,
-                    this.currentDelay * 0.8
-                );
-                
-                return data;
-
-            } catch (error) {
-                lastError = error;
-                this.consecutiveErrors++;
-                
-                const errorType = error.code || error.name;
-                const isConnectionError = errorType === 'ECONNRESET' || 
-                                         errorType === 'EPIPE' || 
-                                         errorType === 'ECONNREFUSED' ||
-                                         errorType === 'ENOTFOUND' ||
-                                         errorType === 'ETIMEDOUT' ||
-                                         error.name === 'AbortError' ||
-                                         error.message.includes('Premature') ||
-                                         error.message.includes('socket') ||
-                                         error.message.includes('closed') ||
-                                         error.message.includes('Invalid response body');
-                
-                if (isConnectionError) {
-                    console.log(`🔌 Erro de conexão (${errorType}) em ${type} (tentativa ${attempt}/${maxRetries})`);
-                    
-                    if (attempt < maxRetries) {
-                        const waitTime = this.resetConnection();
-                        if (waitTime > 0) {
-                            await new Promise(r => setTimeout(r, waitTime));
-                        }
-                        
-                        agent = this.currentAgent;
-                    }
-                } else {
-                    console.log(`⚠️ Erro na requisição ${type} (tentativa ${attempt}/${maxRetries}): ${error.message}`);
-                }
-                
-                if (attempt < maxRetries) {
-                    const baseWait = this.currentDelay * Math.pow(2, attempt - 1);
-                    const jitter = Math.random() * 1000;
-                    const waitTime = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, baseWait + jitter);
-                    
-                    console.log(`⏳ Aguardando ${Math.ceil(waitTime/1000)}s antes de tentar novamente...`);
-                    await new Promise(r => setTimeout(r, waitTime));
-                }
-            }
-        }
-
-        this.currentDelay = Math.min(CONFIG.RATE_LIMITER.MAX_DELAY, this.currentDelay * 2);
-        
-        this.errorLog.set(url.split('?')[0], {
-            timestamp: Date.now(),
-            error: lastError?.message,
-            attempts: maxRetries
-        });
-        
-        throw lastError;
-    }
-
-    async makeRequest(url, options = {}, type = 'klines') {
-        return new Promise((resolve, reject) => {
-            this.requestQueue.push({
-                url,
-                options,
-                type,
-                resolve,
-                reject,
-                retryCount: 1
-            });
-            
-            this.processQueue();
-        });
-    }
-
-    getStats() {
-        return {
-            currentDelay: this.currentDelay,
-            consecutiveErrors: this.consecutiveErrors,
-            requestCount: this.requestCount,
-            minuteRequests: this.minuteRequests,
-            resetCount: this.resetCount,
-            consecutiveResetErrors: this.consecutiveResetErrors,
-            activeRequests: this.activeRequests,
-            queueLength: this.requestQueue.length,
-            errorLogSize: this.errorLog.size
-        };
-    }
-}
-
-const rateLimiter = new RateLimiter();
-
-// =====================================================================
-// === SISTEMA DE LIMPEZA AUTOMÁTICA ===
-// =====================================================================
-class CleanupManager {
-    constructor() {
-        this.cleanupInterval = null;
-        this.totalCleaned = 0;
-        this.lastCleanupTime = null;
-    }
-
-    start() {
-        if (!CONFIG.CLEANUP.ENABLED) {
-            console.log('🧹 Sistema de limpeza automática DESATIVADO');
-            return;
-        }
-
-        console.log('🧹 Iniciando sistema de limpeza automática...');
-        console.log(`   - Logs: manter últimos ${CONFIG.CLEANUP.MAX_LOG_AGE_HOURS}h`);
-        console.log(`   - Cache: manter últimos ${CONFIG.CLEANUP.MAX_CACHE_AGE_HOURS}h`);
-        console.log(`   - Alertas: manter últimos ${CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS}h`);
-        console.log(`   - Limpeza a cada: ${CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES}min`);
-        
-        setTimeout(() => this.cleanup(), 5000);
-        
-        this.cleanupInterval = setInterval(
-            () => this.cleanup(), 
-            CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000
-        );
-    }
-
-    async cleanup() {
-        const startTime = Date.now();
-        this.lastCleanupTime = new Date();
-        
-        console.log(`\n🧹 Iniciando limpeza automática - ${getBrazilianDateTime().full}`);
-        
-        let cleanedCount = 0;
-        let cleanedSize = 0;
-        let errors = [];
-
-        try {
-            const logResult = this.cleanupDirectory(LOG_DIR, CONFIG.CLEANUP.MAX_LOG_AGE_HOURS);
-            cleanedCount += logResult.count;
-            cleanedSize += logResult.size;
-
-            const cacheResult = this.cleanupDirectory(CACHE_DIR, CONFIG.CLEANUP.MAX_CACHE_AGE_HOURS);
-            cleanedCount += cacheResult.count;
-            cleanedSize += cacheResult.size;
-
-            const alertResult = this.cleanupDirectory(ALERTS_DIR, CONFIG.CLEANUP.MAX_ALERT_FILES_AGE_HOURS);
-            cleanedCount += alertResult.count;
-            cleanedSize += alertResult.size;
-
-            const tempResult = this.cleanupTempFiles();
-            cleanedCount += tempResult.count;
-            cleanedSize += tempResult.size;
-
-            const sizeCheckResult = await this.checkFolderSize();
-            if (sizeCheckResult.cleaned > 0) {
-                cleanedCount += sizeCheckResult.count;
-                cleanedSize += sizeCheckResult.size;
-            }
-
-            this.totalCleaned += cleanedCount;
-
-            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-            
-            if (cleanedCount > 0) {
-                console.log(`✅ Limpeza concluída em ${duration}s`);
-                console.log(`   - Arquivos removidos: ${cleanedCount}`);
-                console.log(`   - Espaço liberado: ${(cleanedSize / (1024 * 1024)).toFixed(2)} MB`);
-                console.log(`   - Total já limpo: ${this.totalCleaned} arquivos`);
-            } else {
-                console.log(`✅ Limpeza concluída em ${duration}s - Nenhum arquivo antigo encontrado`);
-            }
-
-            this.logCleanup(cleanedCount, cleanedSize, duration, errors);
-
-        } catch (error) {
-            console.error('❌ Erro durante limpeza:', error.message);
-            errors.push(error.message);
-        }
-    }
-
-    cleanupDirectory(dirPath, maxAgeHours) {
-        const result = { count: 0, size: 0 };
-        
-        if (!fs.existsSync(dirPath)) return result;
-
-        try {
-            const files = fs.readdirSync(dirPath);
-            const now = Date.now();
-            const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
-
-            files.forEach(file => {
-                const filePath = path.join(dirPath, file);
-                
-                try {
-                    const stats = fs.statSync(filePath);
-                    
-                    if (stats.isFile()) {
-                        const fileAge = now - stats.mtimeMs;
-                        
-                        if (fileAge > maxAgeMs) {
-                            const fileSize = stats.size;
-                            fs.unlinkSync(filePath);
-                            result.count++;
-                            result.size += fileSize;
-                            
-                            if (CONFIG.DEBUG.VERBOSE) {
-                                console.log(`   🗑️ Removido: ${file} (${(fileSize / 1024).toFixed(1)} KB)`);
-                            }
-                        }
-                    }
-                } catch (err) {}
-            });
-        } catch (err) {
-            console.error(`   ⚠️ Erro ao ler diretório ${dirPath}:`, err.message);
-        }
-
-        return result;
-    }
-
-    cleanupTempFiles() {
-        const result = { count: 0, size: 0 };
-        
-        try {
-            const files = fs.readdirSync('.');
-            
-            files.forEach(file => {
-                if (file.includes('tmp') || file.includes('temp') || 
-                    (file.includes('.log.') && file !== 'system.log')) {
-                    try {
-                        const stats = fs.statSync(file);
-                        if (stats.isFile()) {
-                            if (Date.now() - stats.mtimeMs > 3600000) {
-                                const fileSize = stats.size;
-                                fs.unlinkSync(file);
-                                result.count++;
-                                result.size += fileSize;
-                            }
-                        }
-                    } catch (err) {}
-                }
-            });
-        } catch (err) {}
-
-        return result;
-    }
-
-    async checkFolderSize() {
-        const result = { count: 0, size: 0, cleaned: 0 };
-        const maxSizeBytes = CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB * 1024 * 1024;
-
-        try {
-            let totalSize = 0;
-            const allFiles = [];
-
-            [LOG_DIR, CACHE_DIR, ALERTS_DIR].forEach(dir => {
-                if (fs.existsSync(dir)) {
-                    const files = fs.readdirSync(dir);
-                    files.forEach(file => {
-                        const filePath = path.join(dir, file);
-                        try {
-                            const stats = fs.statSync(filePath);
-                            if (stats.isFile()) {
-                                totalSize += stats.size;
-                                allFiles.push({
-                                    path: filePath,
-                                    size: stats.size,
-                                    mtime: stats.mtimeMs
-                                });
-                            }
-                        } catch (err) {}
-                    });
-                }
-            });
-
-            if (totalSize > maxSizeBytes) {
-                console.log(`   ⚠️ Espaço total (${(totalSize / (1024*1024)).toFixed(2)} MB) excede limite de ${CONFIG.CLEANUP.MAX_FOLDER_SIZE_MB} MB`);
-                
-                allFiles.sort((a, b) => a.mtime - b.mtime);
-                
-                for (const file of allFiles) {
-                    if (totalSize <= maxSizeBytes) break;
-                    
-                    try {
-                        fs.unlinkSync(file.path);
-                        totalSize -= file.size;
-                        result.count++;
-                        result.size += file.size;
-                        result.cleaned++;
-                    } catch (err) {}
-                }
-                
-                console.log(`   🗑️ Removidos ${result.count} arquivos antigos para liberar espaço`);
-            }
-        } catch (err) {
-            console.error('   ⚠️ Erro ao verificar tamanho da pasta:', err.message);
-        }
-
-        return result;
-    }
-
-    logCleanup(count, size, duration, errors) {
-        try {
-            const logEntry = {
-                timestamp: Date.now(),
-                datetime: getBrazilianDateTime().full,
-                filesRemoved: count,
-                spaceFreedMB: (size / (1024 * 1024)).toFixed(2),
-                durationSeconds: duration,
-                errors: errors.length ? errors : undefined,
-                totalCleaned: this.totalCleaned
-            };
-
-            const logFile = path.join(LOG_DIR, 'cleanup.log');
-            fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
-        } catch (err) {}
-    }
-
-    stop() {
-        if (this.cleanupInterval) {
-            clearInterval(this.cleanupInterval);
-            this.cleanupInterval = null;
-            console.log('🧹 Sistema de limpeza automática interrompido');
-        }
-    }
-}
-
-const cleanupManager = new CleanupManager();
-
-// =====================================================================
-// === CACHE E CONTROLE DE ALERTAS ===
-// =====================================================================
-const candleCache = new Map();
-const alertCooldown = new Map();
-const lastAlertPrices = new Map();
-const fundingRateCache = new Map();
-const dailyMessageCounter = new Map();
-let dailyResetPerformed = false;
-
-class CacheManager {
-    static get(symbol, timeframe, limit) {
-        const key = `${symbol}_${timeframe}_${limit}`;
-        const cached = candleCache.get(key);
-        if (cached && Date.now() - cached.timestamp < CONFIG.PERFORMANCE.CANDLE_CACHE_TTL) {
-            return cached.data;
-        }
-        return null;
-    }
-
-    static set(symbol, timeframe, limit, data) {
-        const key = `${symbol}_${timeframe}_${limit}`;
-        candleCache.set(key, { data, timestamp: Date.now() });
-    }
-    
-    static cleanup() {
-        const now = Date.now();
-        let cleaned = 0;
-        for (const [key, value] of candleCache.entries()) {
-            if (now - value.timestamp > CONFIG.PERFORMANCE.CANDLE_CACHE_TTL) {
-                candleCache.delete(key);
-                cleaned++;
-            }
-        }
-        if (cleaned > 0 && CONFIG.DEBUG.VERBOSE) {
-            console.log(`🧹 Cache limpo: ${cleaned} entradas removidas`);
-        }
-    }
-}
 
 // =====================================================================
 // === FUNÇÕES AUXILIARES ===
@@ -788,19 +134,11 @@ function getBrazilianDateTime() {
     const brazilTime = new Date(now.getTime() + offset * 60 * 60 * 1000);
     const date = brazilTime.toISOString().split('T')[0].split('-').reverse().join('/');
     const time = brazilTime.toISOString().split('T')[1].split('.')[0].substring(0, 5);
-    const fullTime = brazilTime.toISOString().split('T')[1].split('.')[0];
-    return { date, time, full: `${date} ${time}`, fullTime };
-}
-
-function formatNumber(num, decimals = 2) {
-    if (num === undefined || num === null) return 'N/A';
-    if (Math.abs(num) > 1000) return num.toFixed(decimals);
-    if (Math.abs(num) > 1) return num.toFixed(decimals);
-    return num.toFixed(decimals);
+    return { date, time, full: `${date} ${time}` };
 }
 
 function formatPrice(price) {
-    if (!price) return '-';
+    if (!price || isNaN(price)) return '-';
     if (price > 1000) return price.toFixed(2);
     if (price > 1) return price.toFixed(3);
     if (price > 0.1) return price.toFixed(4);
@@ -809,1315 +147,1238 @@ function formatPrice(price) {
     return price.toFixed(8);
 }
 
-function getConfidenceEmoji(score) {
-    if (score >= 90) return '🔥🔥';
-    if (score >= 85) return '🔥';
-    if (score >= 80) return '⚡';
-    if (score >= 75) return '✅';
-    if (score >= 70) return '⚠️';
-    return '📊';
+function log(message, type = 'info') {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}`;
+    if (type === 'error') console.error(`❌ ${message}`);
+    else if (type === 'success') console.log(`✅ ${message}`);
+    else if (type === 'warning') console.log(`⚠️ ${message}`);
+    else console.log(`ℹ️ ${message}`);
+    const logFile = path.join(LOG_DIR, `${new Date().toISOString().split('T')[0]}.log`);
+    fs.appendFileSync(logFile, logMessage + '\n', { flag: 'a' });
 }
 
-function getDirectionEmoji(direction) {
-    return direction === 'COMPRA' ? '🟢' : '🔴';
+let alertCache = new Map();
+let currentTopSymbols = [];
+let alertsSentThisScan = 0;
+
+function loadCooldowns() {
+    try {
+        if (fs.existsSync(COOLDOWN_FILE)) {
+            const data = JSON.parse(fs.readFileSync(COOLDOWN_FILE, 'utf8'));
+            alertCache = new Map(Object.entries(data));
+            log(`Carregados ${alertCache.size} cooldowns do arquivo`, 'success');
+        }
+    } catch (e) {
+        log(`Erro ao carregar cooldowns: ${e.message}`, 'warning');
+    }
 }
 
-function getStochEmoji(value) {
-    if (value < CONFIG.STOCH.COLORS.EXTREME_OVERSOLD) return '🔵';
-    if (value <= CONFIG.STOCH.COLORS.OVERSOLD) return '🟢';
-    if (value <= CONFIG.STOCH.COLORS.NEUTRAL) return '🟡';
-    if (value <= CONFIG.STOCH.COLORS.OVERBOUGHT) return '🟠';
-    return '🔴';
+function saveCooldowns() {
+    try {
+        const data = Object.fromEntries(alertCache);
+        fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(data, null, 2));
+    } catch (e) {
+        log(`Erro ao salvar cooldowns: ${e.message}`, 'warning');
+    }
 }
+
+setInterval(saveCooldowns, 5 * 60 * 1000);
 
 // =====================================================================
-// === FUNÇÃO PARA DETECTAR ZONAS DE LIQUIDAÇÃO ===
+// === CACHE INTELIGENTE ===
 // =====================================================================
-function detectLiquidationZones(candles, currentPrice) {
-    if (!CONFIG.LIQUIDATION.ENABLED || candles.length < 50) {
-        return { longZones: [], shortZones: [], nearestLong: null, nearestShort: null };
+class SmartCache {
+    constructor() {
+        this.cache = new Map();
+        this.requestTimestamps = [];
     }
 
-    const lookback = Math.min(CONFIG.LIQUIDATION.LOOKBACK_CANDLES, candles.length);
-    const recentCandles = candles.slice(-lookback);
-    
-    const priceVolumeClusters = [];
-    
-    for (let i = 0; i < recentCandles.length; i++) {
-        const candle = recentCandles[i];
-        const volumeWeight = candle.volume / Math.max(...recentCandles.map(c => c.volume));
-        
-        if (candle.high > candle.close && candle.high > candle.open) {
-            priceVolumeClusters.push({
-                price: candle.high,
-                volumeWeight,
-                type: 'short',
-                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
-                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
-            });
+    get(key) {
+        const item = this.cache.get(key);
+        if (!item) return null;
+        if (Date.now() - item.timestamp > CONFIG.SCAN.CACHE_DURATION_SECONDS * 1000) {
+            this.cache.delete(key);
+            return null;
         }
-        
-        if (candle.low < candle.close && candle.low < candle.open) {
-            priceVolumeClusters.push({
-                price: candle.low,
-                volumeWeight,
-                type: 'long',
-                strength: volumeWeight * CONFIG.LIQUIDATION.VOLUME_WEIGHT + 
-                         (candle.high - candle.low) / candle.low * CONFIG.LIQUIDATION.PRICE_WEIGHT
-            });
-        }
+        return item.data;
     }
-    
-    const clusterThreshold = currentPrice * CONFIG.LIQUIDATION.CLUSTER_THRESHOLD;
-    
-    const clusterPoints = (points) => {
-        const clusters = [];
-        const used = new Set();
-        
-        for (let i = 0; i < points.length; i++) {
-            if (used.has(i)) continue;
-            
-            const cluster = {
-                prices: [points[i].price],
-                strengths: [points[i].strength],
-                totalStrength: points[i].strength,
-                avgPrice: points[i].price
-            };
-            used.add(i);
-            
-            for (let j = i + 1; j < points.length; j++) {
-                if (used.has(j)) continue;
-                
-                if (Math.abs(points[i].price - points[j].price) <= clusterThreshold) {
-                    cluster.prices.push(points[j].price);
-                    cluster.strengths.push(points[j].strength);
-                    cluster.totalStrength += points[j].strength;
-                    used.add(j);
+
+    set(key, data) {
+        this.cache.set(key, { data, timestamp: Date.now() });
+    }
+
+    canMakeRequest() {
+        const now = Date.now();
+        const oneMinuteAgo = now - 60000;
+        this.requestTimestamps = this.requestTimestamps.filter(ts => ts > oneMinuteAgo);
+        return this.requestTimestamps.length < CONFIG.SCAN.MAX_REQUESTS_PER_MINUTE;
+    }
+
+    addRequest() {
+        this.requestTimestamps.push(Date.now());
+    }
+
+    getWaitTime() {
+        if (this.requestTimestamps.length === 0) return 0;
+        const now = Date.now();
+        const oldestRequest = this.requestTimestamps[0];
+        const requestsLastMinute = this.requestTimestamps.length;
+        if (requestsLastMinute < CONFIG.SCAN.MAX_REQUESTS_PER_MINUTE) return 0;
+        const timeUntilExpiry = 60000 - (now - oldestRequest);
+        return Math.max(0, timeUntilExpiry);
+    }
+}
+
+const cache = new SmartCache();
+
+// =====================================================================
+// === RATE LIMITER INTELIGENTE ===
+// =====================================================================
+class IntelligentRateLimiter {
+    constructor() {
+        this.lastRequestTime = 0;
+        this.consecutiveErrors = 0;
+        this.errorBackoff = 1000;
+        this.maxBackoff = 60000;
+        this.requestCount = 0;
+        this.minuteStart = Date.now();
+    }
+
+    async wait() {
+        const now = Date.now();
+        if (now - this.minuteStart > 60000) {
+            this.requestCount = 0;
+            this.minuteStart = now;
+        }
+        if (this.requestCount >= CONFIG.SCAN.MAX_REQUESTS_PER_MINUTE) {
+            const waitTime = 60000 - (now - this.minuteStart);
+            log(`Rate limit por minuto atingido, aguardando ${Math.ceil(waitTime / 1000)}s...`, 'warning');
+            await new Promise(r => setTimeout(r, waitTime));
+            this.requestCount = 0;
+            this.minuteStart = Date.now();
+        }
+        const timeSinceLast = now - this.lastRequestTime;
+        const baseDelay = CONFIG.SCAN.SYMBOL_DELAY_MS;
+        const adaptiveDelay = baseDelay + (this.consecutiveErrors * 100);
+        if (timeSinceLast < adaptiveDelay) {
+            await new Promise(r => setTimeout(r, adaptiveDelay - timeSinceLast));
+        }
+        this.lastRequestTime = Date.now();
+        this.requestCount++;
+    }
+
+    async makeRequest(url, cacheKey = null) {
+        if (cacheKey) {
+            const cached = cache.get(cacheKey);
+            if (cached) return cached;
+        }
+        if (!cache.canMakeRequest()) {
+            const waitTime = cache.getWaitTime();
+            log(`Aguardando ${Math.ceil(waitTime / 1000)}s para respeitar rate limit...`, 'warning');
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (attempts < maxAttempts) {
+            try {
+                await this.wait();
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), CONFIG.SCAN.REQUEST_TIMEOUT);
+                cache.addRequest();
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (response.status === 429) {
+                    this.consecutiveErrors++;
+                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
+                    log(`Rate limit 429, aguardando ${backoffTime / 1000}s...`, 'warning');
+                    await new Promise(r => setTimeout(r, backoffTime));
+                    attempts++;
+                    continue;
+                }
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                this.consecutiveErrors = Math.max(0, this.consecutiveErrors - 1);
+                if (cacheKey) cache.set(cacheKey, data);
+                return data;
+            } catch (error) {
+                if (error.name === 'AbortError') log(`Timeout na requisição`, 'warning');
+                else log(`Erro na requisição: ${error.message}`, 'error');
+                this.consecutiveErrors++;
+                attempts++;
+                if (attempts < maxAttempts) {
+                    const backoffTime = Math.min(this.errorBackoff * Math.pow(2, attempts), this.maxBackoff);
+                    await new Promise(r => setTimeout(r, backoffTime));
                 }
             }
-            
-            let weightedSum = 0;
-            for (let k = 0; k < cluster.prices.length; k++) {
-                weightedSum += cluster.prices[k] * cluster.strengths[k];
-            }
-            cluster.avgPrice = weightedSum / cluster.strengths.reduce((a, b) => a + b, 0);
-            
-            clusters.push(cluster);
         }
-        
-        return clusters
-            .sort((a, b) => b.totalStrength - a.totalStrength)
-            .slice(0, CONFIG.LIQUIDATION.MAX_ZONES)
-            .map(c => c.avgPrice);
-    };
-    
-    const longPoints = priceVolumeClusters
-        .filter(p => p.type === 'long' && p.price < currentPrice)
-        .sort((a, b) => b.strength - a.strength);
-    
-    const shortPoints = priceVolumeClusters
-        .filter(p => p.type === 'short' && p.price > currentPrice)
-        .sort((a, b) => b.strength - a.strength);
-    
-    const longZones = clusterPoints(longPoints);
-    const shortZones = clusterPoints(shortPoints);
-    
-    const nearestLong = longZones.length > 0 
-        ? longZones.reduce((nearest, zone) => 
-            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
-        ) : null;
-    
-    const nearestShort = shortZones.length > 0 
-        ? shortZones.reduce((nearest, zone) => 
-            Math.abs(zone - currentPrice) < Math.abs(nearest - currentPrice) ? zone : nearest
-        ) : null;
-    
-    return {
-        longZones,
-        shortZones,
-        nearestLong,
-        nearestShort
-    };
-}
-
-// =====================================================================
-// === RESET CONTADOR DIÁRIO ÀS 21H ===
-// =====================================================================
-function resetDailyCounterIfNeeded() {
-    const now = getBrazilianDateTime();
-    const currentHour = parseInt(now.fullTime.split(':')[0]);
-    
-    if (currentHour === 21 && !dailyResetPerformed) {
-        const totalReset = dailyMessageCounter.size;
-        dailyMessageCounter.clear();
-        dailyResetPerformed = true;
-        console.log(`🔄 Contadores diários resetados às 21:00 - ${totalReset} moedas com alertas hoje`);
-        
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log('📊 Status do reset diário:', {
-                hora: currentHour,
-                resetPerformed: dailyResetPerformed,
-                contadoresResetados: totalReset
-            });
-        }
-    }
-    
-    if (currentHour !== 21) {
-        dailyResetPerformed = false;
+        throw new Error(`Falha após ${maxAttempts} tentativas`);
     }
 }
 
+const rateLimiter = new IntelligentRateLimiter();
+
 // =====================================================================
-// === VERIFICAR LIMITE DIÁRIO POR MOEDA ===
+// === FUNÇÕES DE MERCADO ===
 // =====================================================================
-function canSendDailyAlert(symbol) {
-    resetDailyCounterIfNeeded();
-    
-    const currentCount = dailyMessageCounter.get(symbol) || 0;
-    const maxDaily = CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL;
-    
-    if (currentCount >= maxDaily) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⏸️ ${symbol} já recebeu ${currentCount}/${maxDaily} alertas hoje - limite diário atingido`);
-        }
-        return false;
+async function getCandles(symbol, interval, limit = 100) {
+    try {
+        const cacheKey = `candles_${symbol}_${interval}_${limit}`;
+        const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        const data = await rateLimiter.makeRequest(url, cacheKey);
+        return data.map(candle => ({
+            open: parseFloat(candle[1]),
+            high: parseFloat(candle[2]),
+            low: parseFloat(candle[3]),
+            close: parseFloat(candle[4]),
+            volume: parseFloat(candle[5]),
+            time: candle[0]
+        }));
+    } catch (error) {
+        return [];
     }
-    
+}
+
+async function getTopSymbols() {
+    try {
+        log('Buscando top símbolos por volume...');
+        const data = await rateLimiter.makeRequest('https://fapi.binance.com/fapi/v1/ticker/24hr', 'top_symbols_24h');
+        const topSymbols = data
+            .filter(s => s.symbol.endsWith('USDT') && parseFloat(s.volume) > 0)
+            .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+            .slice(0, CONFIG.SCAN.TOP_SYMBOLS_LIMIT)
+            .map(s => s.symbol);
+        log(`Encontrados ${topSymbols.length} símbolos top por volume`);
+        return topSymbols;
+    } catch (e) {
+        log('Falha ao buscar top symbols, usando lista estática', 'warning');
+        return [
+            'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','TONUSDT',
+            'MATICUSDT','DOTUSDT','TRXUSDT','UNIUSDT','ATOMUSDT','ETCUSDT','ICPUSDT','FILUSDT','NEARUSDT','APTUSDT'
+        ];
+    }
+}
+
+async function getLSR(symbol, period = '15m') {
+    try {
+        const periodMap = { '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '12h': '12h', '1d': '1d' };
+        const mappedPeriod = periodMap[period] || '15m';
+        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=${mappedPeriod}&limit=1`;
+        const data = await rateLimiter.makeRequest(url, `lsr_${symbol}_${mappedPeriod}`);
+        if (data && data.length > 0) {
+            const longRatio = parseFloat(data[0].longShortRatio);
+            const longAccount = parseFloat(data[0].longAccount);
+            const shortAccount = parseFloat(data[0].shortAccount);
+            return {
+                ratio: longRatio,
+                longPercent: (longAccount * 100).toFixed(1),
+                shortPercent: (shortAccount * 100).toFixed(1),
+                text: `${(longAccount * 100).toFixed(1)}%/${(shortAccount * 100).toFixed(1)}%`,
+                emoji: longAccount > shortAccount ? '📈' : '📉'
+            };
+        }
+        return null;
+    } catch (error) {
+        log(`Erro ao buscar LSR para ${symbol}: ${error.message}`, 'warning');
+        return null;
+    }
+}
+
+// NOVA FUNÇÃO: Busca LSR de Posições (Open Interest)
+async function getLSRPosit(symbol, period = '5m') {
+    try {
+        const url = `https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=${symbol}&period=${period}&limit=1`;
+        const data = await rateLimiter.makeRequest(url, `lsr_posit_${symbol}`);
+        if (data && data.length > 0) {
+            const longRatio = parseFloat(data[0].longShortRatio);
+            const longAccount = parseFloat(data[0].longAccount);
+            const shortAccount = parseFloat(data[0].shortAccount);
+            return {
+                ratio: longRatio,
+                longPercent: (longAccount * 100).toFixed(1),
+                shortPercent: (shortAccount * 100).toFixed(1),
+                text: `${(longAccount * 100).toFixed(1)}%/${(shortAccount * 100).toFixed(1)}%`
+            };
+        }
+        return null;
+    } catch (error) {
+        log(`Erro ao buscar LSR Posit para ${symbol}: ${error.message}`, 'warning');
+        return null;
+    }
+}
+
+function isCooldownActive(symbol, direction, timeframe) {
+    const now = Date.now();
+    const specificKey = `${symbol}_${direction}_${timeframe}`;
+    const lastSpecific = alertCache.get(specificKey);
+    if (lastSpecific) {
+        const minutesDiff = (now - lastSpecific.timestamp) / (1000 * 60);
+        const required = CONFIG.ALERTS.COOLDOWN_BY_TIMEFRAME[timeframe] || 15;
+        if (minutesDiff < required) return true;
+    }
+    return false;
+}
+
+function registerAlert(symbol, direction, price, timeframe) {
+    const now = Date.now();
+    alertCache.set(`${symbol}_${direction}_${timeframe}`, { timestamp: now, timeframe, direction });
+    alertsSentThisScan++;
+    for (const [k, v] of alertCache) {
+        if (now - v.timestamp > 48 * 60 * 60 * 1000) alertCache.delete(k);
+    }
+    log(`Registrado alerta ${symbol} ${direction} [${timeframe}]`, 'success');
+    saveCooldowns();
     return true;
 }
 
 // =====================================================================
-// === CÁLCULOS TÉCNICOS ===
+// === FUNÇÕES DE INDICADORES ===
 // =====================================================================
-function calculateEMA(values, period) {
-    if (values.length < period) {
-        return values.reduce((a, b) => a + b, 0) / values.length;
+function calculateRSI(candles, period = 14) {
+    if (!candles || candles.length <= period) return 50;
+    const changes = [];
+    for (let i = 1; i < candles.length; i++) changes.push(candles[i].close - candles[i-1].close);
+    let gains = 0, losses = 0;
+    for (let i = 0; i < period; i++) {
+        if (changes[i] > 0) gains += changes[i];
+        else losses -= changes[i];
     }
-    const multiplier = 2 / (period + 1);
-    let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < values.length; i++) {
-        ema = (values[i] - ema) * multiplier + ema;
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    for (let i = period; i < changes.length; i++) {
+        if (changes[i] > 0) avgGain = (avgGain * (period - 1) + changes[i]) / period;
+        else avgGain = (avgGain * (period - 1)) / period;
+        if (changes[i] < 0) avgLoss = (avgLoss * (period - 1) - changes[i]) / period;
+        else avgLoss = (avgLoss * (period - 1)) / period;
     }
-    return ema;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return Math.min(100, Math.max(0, 100 - (100 / (1 + rs))));
+}
+
+function calculateStochastic(candles, kPeriod, kSmooth, dPeriod) {
+    if (!candles || candles.length < kPeriod + kSmooth + dPeriod) return { k: 50, d: 50 };
+    const kRaw = [];
+    for (let i = kPeriod - 1; i < candles.length; i++) {
+        const periodCandles = candles.slice(i - kPeriod + 1, i + 1);
+        const highestHigh = Math.max(...periodCandles.map(c => c.high));
+        const lowestLow = Math.min(...periodCandles.map(c => c.low));
+        const currentClose = candles[i].close;
+        if (highestHigh - lowestLow === 0) kRaw.push(50);
+        else kRaw.push(((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100);
+    }
+    const kSmoothValues = [];
+    for (let i = kSmooth - 1; i < kRaw.length; i++) {
+        const sum = kRaw.slice(i - kSmooth + 1, i + 1).reduce((a, b) => a + b, 0);
+        kSmoothValues.push(sum / kSmooth);
+    }
+    const dValues = [];
+    for (let i = dPeriod - 1; i < kSmoothValues.length; i++) {
+        const sum = kSmoothValues.slice(i - dPeriod + 1, i + 1).reduce((a, b) => a + b, 0);
+        dValues.push(sum / dPeriod);
+    }
+    return { k: kSmoothValues[kSmoothValues.length - 1] || 50, d: dValues[dValues.length - 1] || 50 };
+}
+
+function formatStochastic(stoch) {
+    const k = stoch.k, d = stoch.d;
+    let emoji = '🟡';
+    if (k < 20 && d < 25) emoji = '🟢';
+    if (k > 80 && d > 75) emoji = '🔴';
+    return `K${Math.round(k)}${k > d ? '⤴️' : '⤵️'}D${Math.round(d)} ${emoji}`;
+}
+
+function getCCITrend(candles, period = 20, emaPeriod = 5) {
+    if (!candles || candles.length < period + emaPeriod) return { trend: 'Neutro', emoji: '', text: 'CCI N/A' };
+    const cciValues = [];
+    for (let i = period; i <= candles.length; i++) {
+        const slice = candles.slice(i - period, i);
+        const tp = slice.map(c => (c.high + c.low + c.close) / 3);
+        const sma = tp.reduce((a, b) => a + b, 0) / period;
+        let md = 0;
+        for (let j = 0; j < tp.length; j++) md += Math.abs(tp[j] - sma);
+        md /= period;
+        if (md === 0) cciValues.push(0);
+        else cciValues.push((tp[tp.length - 1] - sma) / (0.015 * md));
+    }
+    if (cciValues.length < emaPeriod) return { trend: 'Neutro', emoji: '', text: 'CCI N/A' };
+    let ema = cciValues.slice(0, emaPeriod).reduce((a, b) => a + b, 0) / emaPeriod;
+    const multiplier = 2 / (emaPeriod + 1);
+    for (let i = emaPeriod; i < cciValues.length; i++) ema = (cciValues[i] - ema) * multiplier + ema;
+    const currentCCI = cciValues[cciValues.length - 1];
+    if (currentCCI > ema) return { trend: 'ALTA', emoji: '💹', text: `CCI ALTA ${currentCCI.toFixed(0)}` };
+    if (currentCCI < ema) return { trend: 'BAIXA', emoji: '🔴', text: `CCI BAIXA ${currentCCI.toFixed(0)}` };
+    return { trend: 'Neutro', emoji: '', text: `CCI ${currentCCI.toFixed(0)}` };
+}
+
+function calculateVolumeDirection(candles) {
+    if (!candles || candles.length < 20) return { percentage: 50, direction: 'Neutro', emoji: '⚪', buyer: 50, seller: 50, confidence: 'Baixa' };
+    
+    const closes = candles.map(c => c.close);
+    let ema9 = closes[0];
+    const multiplier = 2 / 10;
+    for (let i = 1; i < closes.length; i++) {
+        ema9 = (closes[i] - ema9) * multiplier + ema9;
+    }
+    
+    let bullishVolume = 0;
+    let totalVolume = 0;
+    
+    for (let i = 0; i < candles.length; i++) {
+        totalVolume += candles[i].volume;
+        if (candles[i].close > ema9) {
+            bullishVolume += candles[i].volume;
+        } else if (candles[i].close < ema9) {
+            bullishVolume += candles[i].volume * 0.4;
+        } else {
+            bullishVolume += candles[i].volume * 0.5;
+        }
+    }
+    
+    const buyerPercentage = totalVolume > 0 ? (bullishVolume / totalVolume) * 100 : 50;
+    const sellerPercentage = 100 - buyerPercentage;
+    
+    let direction = 'Neutro', emoji = '⚪', confidence = 'Baixa';
+    if (buyerPercentage >= 56) { direction = 'Comprador Forte'; emoji = '🟢🟢'; confidence = 'Alta'; }
+    else if (buyerPercentage >= 52) { direction = 'Comprador'; emoji = '🟢'; confidence = 'Média'; }
+    else if (sellerPercentage >= 56) { direction = 'Vendedor Forte'; emoji = '🔴🔴'; confidence = 'Alta'; }
+    else if (sellerPercentage >= 52) { direction = 'Vendedor'; emoji = '🔴'; confidence = 'Média'; }
+    
+    return { percentage: buyerPercentage, sellerPercentage, direction, emoji, buyer: buyerPercentage, seller: sellerPercentage, confidence };
+}
+
+function calculateVolume3mAnomaly(candles, isBullishAlert) {
+    if (!CONFIG.VOLUME_3M.ENABLED) {
+        return { passed: true, message: '⏭️ Volume 3m: desabilitado', isAbnormal: false, confidence: 0 };
+    }
+    
+    if (!candles || candles.length < CONFIG.VOLUME_3M.LOOKBACK_CANDLES) {
+        return { passed: false, message: '⚠️ Volume 3m: dados insuficientes', isAbnormal: false, confidence: 0 };
+    }
+    
+    const lastCandle = candles[candles.length - 1];
+    const previousCandles = candles.slice(0, -1);
+    
+    const avgVolume = previousCandles.slice(-CONFIG.VOLUME_3M.LOOKBACK_CANDLES).reduce((sum, c) => sum + c.volume, 0) / CONFIG.VOLUME_3M.LOOKBACK_CANDLES;
+    const currentVolume = lastCandle.volume;
+    const volumeRatio = currentVolume / avgVolume;
+    const isAbnormalVolume = volumeRatio >= CONFIG.VOLUME_3M.ABNORMAL_MULTIPLIER;
+    
+    const bodyDirection = lastCandle.close > lastCandle.open ? 'bullish' : 'bearish';
+    const volumeDirection = bodyDirection;
+    
+    let isDirectionalCorrect = false;
+    if (isBullishAlert) {
+        isDirectionalCorrect = volumeDirection === 'bullish';
+    } else {
+        isDirectionalCorrect = volumeDirection === 'bearish';
+    }
+    
+    let confidence = 0;
+    if (isAbnormalVolume) {
+        confidence = Math.min(100, (volumeRatio / CONFIG.VOLUME_3M.ABNORMAL_MULTIPLIER) * 100);
+    }
+    
+    const passed = isAbnormalVolume && isDirectionalCorrect && confidence >= CONFIG.VOLUME_3M.MIN_CONFIDENCE;
+    
+    let message = '';
+    if (passed) {
+        message = `✅ Volume 3m: ${volumeRatio.toFixed(1)}x média (${volumeDirection.toUpperCase()}) 🎯`;
+    } else if (!isAbnormalVolume) {
+        message = `❌ Volume 3m: normal (${volumeRatio.toFixed(1)}x média)`;
+    } else if (!isDirectionalCorrect) {
+        message = `❌ Volume 3m: direção errada (${volumeDirection}) para ${isBullishAlert ? 'COMPRA' : 'VENDA'}`;
+    } else {
+        message = `❌ Volume 3m: confiança ${confidence.toFixed(0)}% < ${CONFIG.VOLUME_3M.MIN_CONFIDENCE}%`;
+    }
+    
+    return { 
+        passed, 
+        message, 
+        isAbnormal: isAbnormalVolume, 
+        confidence, 
+        volumeRatio, 
+        avgVolume, 
+        currentVolume,
+        volumeDirection,
+        isDirectionalCorrect
+    };
 }
 
 function calculateATR(candles, period = 14) {
-    if (candles.length < period + 1) return null;
-    
-    const tr = [];
+    if (!candles || candles.length < period + 1) return 0;
+    const trValues = [];
     for (let i = 1; i < candles.length; i++) {
         const high = candles[i].high;
         const low = candles[i].low;
         const prevClose = candles[i-1].close;
-        
-        const tr1 = high - low;
-        const tr2 = Math.abs(high - prevClose);
-        const tr3 = Math.abs(low - prevClose);
-        
-        tr.push(Math.max(tr1, tr2, tr3));
+        trValues.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
     }
-    
-    const atr = tr.slice(-period).reduce((a, b) => a + b, 0) / period;
+    if (trValues.length === 0) return 0;
+    let atr = trValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trValues.length; i++) atr = (atr * (period - 1) + trValues[i]) / period;
     return atr;
 }
 
-function calculateRSI(candles, period = 14) {
-    if (candles.length < period + 1) return null;
-    
-    const closes = candles.map(c => c.close);
-    let gains = 0, losses = 0;
-    
-    for (let i = closes.length - period; i < closes.length; i++) {
-        const diff = closes[i] - closes[i - 1];
-        if (diff > 0) gains += diff;
-        else losses += Math.abs(diff);
-    }
-    
-    const avgGain = gains / period;
-    const avgLoss = losses / period || 0.001;
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-}
-
-function calculateCCI(candles, period = 20) {
-    if (candles.length < period) return null;
-    
-    const typ = [];
-    for (let i = 0; i < candles.length; i++) {
-        typ.push((candles[i].high + candles[i].low + candles[i].close) / 3);
-    }
-    
-    const recentTyp = typ.slice(-period);
-    const sma = recentTyp.reduce((a, b) => a + b, 0) / period;
-    
-    let meanDeviation = 0;
-    for (let i = 0; i < recentTyp.length; i++) {
-        meanDeviation += Math.abs(recentTyp[i] - sma);
-    }
-    meanDeviation = meanDeviation / period;
-    
-    if (meanDeviation === 0) return 0;
-    
-    const cci = (recentTyp[recentTyp.length - 1] - sma) / (0.015 * meanDeviation);
-    return cci;
-}
-
-function calculateCCITrend(candles) {
-    const cciValues = [];
-    for (let i = candles.length - 26; i < candles.length; i++) {
-        const slice = candles.slice(0, i + 1);
-        cciValues.push(calculateCCI(slice, CONFIG.CCI.PERIOD) || 0);
-    }
-    
-    const cciCurrent = cciValues.length > 0 ? cciValues[cciValues.length - 1] : null;
-    const cciEma = cciValues.length >= CONFIG.CCI.EMA_PERIOD ? 
-        calculateEMA(cciValues, CONFIG.CCI.EMA_PERIOD) : null;
-    
-    let trend = "NEUTRO";
-    if (cciCurrent !== null && cciEma !== null) {
-        if (cciCurrent > cciEma) {
-            trend = "ALTA";
-        } else if (cciCurrent < cciEma) {
-            trend = "BAIXA";
-        }
-    }
-    
-    return {
-        trend,
-        value: cciCurrent,
-        ema: cciEma
-    };
-}
-
-function calculateStochastic(candles, kPeriod = 14, dPeriod = 3, smooth = 3) {
-    if (candles.length < kPeriod + dPeriod + smooth) return { k: null, d: null };
-    
-    const kValues = [];
-    
-    for (let i = kPeriod; i < candles.length; i++) {
-        const periodCandles = candles.slice(i - kPeriod + 1, i + 1);
-        const high = Math.max(...periodCandles.map(c => c.high));
-        const low = Math.min(...periodCandles.map(c => c.low));
-        const close = candles[i].close;
-        
-        const k = ((close - low) / (high - low)) * 100;
-        kValues.push(k);
-    }
-    
-    const kLine = [];
-    for (let i = smooth - 1; i < kValues.length; i++) {
-        const sum = kValues.slice(i - smooth + 1, i + 1).reduce((a, b) => a + b, 0);
-        kLine.push(sum / smooth);
-    }
-    
-    const dLine = [];
-    for (let i = dPeriod - 1; i < kLine.length; i++) {
-        const sum = kLine.slice(i - dPeriod + 1, i + 1).reduce((a, b) => a + b, 0);
-        dLine.push(sum / dPeriod);
-    }
-    
-    const currentK = kLine.length > 0 ? kLine[kLine.length - 1] : null;
-    const currentD = dLine.length > 0 ? dLine[dLine.length - 1] : null;
-    
-    return { k: currentK, d: currentD };
-}
-
-function formatStochastic(k, d, emoji) {
-    if (k === null || d === null) return 'N/D';
-    
-    const arrow = k > d ? '⤴️' : '⤵️';
-    return `K${Math.round(k)}${arrow}D${Math.round(d)} ${emoji}`;
-}
-
-function calculateSupportResistance(candles) {
-    if (candles.length < 50) return { support: null, resistance: null };
-    
-    const highs = candles.map(c => c.high);
-    const lows = candles.map(c => c.low);
-    
-    const pivotHighs = [];
-    const pivotLows = [];
-    
-    for (let i = 2; i < highs.length - 2; i++) {
-        if (highs[i] > highs[i-1] && highs[i] > highs[i-2] && 
-            highs[i] > highs[i+1] && highs[i] > highs[i+2]) {
-            pivotHighs.push(highs[i]);
-        }
-        if (lows[i] < lows[i-1] && lows[i] < lows[i-2] && 
-            lows[i] < lows[i+1] && lows[i] < lows[i+2]) {
-            pivotLows.push(lows[i]);
-        }
-    }
-    
-    const resistance = pivotHighs.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, pivotHighs.length);
-    const support = pivotLows.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, pivotLows.length);
-    
-    return { 
-        support: support || lows[lows.length - 1] * 0.98, 
-        resistance: resistance || highs[highs.length - 1] * 1.02 
-    };
-}
-
 // =====================================================================
-// === ANÁLISE VOLUME 24H VS EMA 9 ===
+// === WICK REJECTION - DINÂMICO BASEADO NO ATR ===
 // =====================================================================
-function calculateVolume24hVsEma9(candles) {
-    if (!candles || candles.length < 24) {
-        return { percentage: 0, status: 'NEUTRO', emoji: '⚪' };
+function calculateDynamicWickThreshold(candles, atr, currentPrice) {
+    const avgRange = candles.slice(-10).reduce((sum, c) => sum + (c.high - c.low), 0) / 10;
+    const atrPercent = (atr / currentPrice) * 100;
+    const rangePercent = (avgRange / currentPrice) * 100;
+    
+    let dynamicMinWickPercent = Math.max(CONFIG.WICK_REJECTION.MIN_WICK_PERCENT, atrPercent * 0.5);
+    if (rangePercent > 2) dynamicMinWickPercent = Math.min(dynamicMinWickPercent * 1.3, CONFIG.WICK_REJECTION.MAX_WICK_PERCENT);
+    else if (rangePercent < 0.5) dynamicMinWickPercent = Math.max(dynamicMinWickPercent * 0.7, 0.2);
+    
+    let dynamicRatio = CONFIG.WICK_REJECTION.MIN_WICK_TO_BODY_RATIO;
+    if (atrPercent > 1.5) dynamicRatio = Math.max(dynamicRatio * 0.7, 1.2);
+    else if (atrPercent < 0.5) dynamicRatio = Math.min(dynamicRatio * 1.5, 4.0);
+    
+    return { minWickPercent: Math.min(dynamicMinWickPercent, CONFIG.WICK_REJECTION.MAX_WICK_PERCENT), minRatio: dynamicRatio, atrPercent, rangePercent };
+}
+
+function checkWickRejection(candles, isBullish, atr) {
+    if (!CONFIG.WICK_REJECTION.ENABLED) {
+        return { passed: true, message: '⏭️ Wick Rejection: desabilitado', hasRejection: false };
+    }
+    if (!candles || candles.length < 2) {
+        return { passed: false, message: '⚠️ Wick Rejection: dados insuficientes', hasRejection: false };
     }
     
-    const last24Candles = candles.slice(-24);
+    const currentPrice = candles[candles.length - 1].close;
+    const dynamicThresholds = calculateDynamicWickThreshold(candles, atr, currentPrice);
+    const lookback = Math.min(CONFIG.WICK_REJECTION.LOOKBACK_CANDLES, candles.length);
+    let rejectionCandles = [];
     
-    const closes = last24Candles.map(c => c.close);
-    const ema9 = calculateEMA(closes, 9);
-    
-    let volumeAboveEma = 0;
-    let volumeBelowEma = 0;
-    let totalVolume = 0;
-    
-    last24Candles.forEach(candle => {
-        const vol = candle.volume;
-        totalVolume += vol;
+    for (let i = candles.length - lookback; i < candles.length; i++) {
+        const candle = candles[i];
+        const bodySize = Math.abs(candle.close - candle.open);
+        const totalRange = candle.high - candle.low;
+        if (totalRange === 0 || bodySize === 0) continue;
         
-        if (candle.close > ema9) {
-            volumeAboveEma += vol;
-        } else if (candle.close < ema9) {
-            volumeBelowEma += vol;
+        let wickSize = 0, isValidRejection = false;
+        
+        if (isBullish) {
+            wickSize = Math.min(candle.open, candle.close) - candle.low;
+            const wickPercent = (wickSize / candle.close) * 100;
+            const wickToBodyRatio = wickSize / bodySize;
+            let closeConfirmed = true;
+            if (CONFIG.WICK_REJECTION.CHECK_CLOSE_CONFIRMATION) {
+                const higherBody = Math.max(candle.open, candle.close);
+                closeConfirmed = (higherBody - candle.low) > wickSize * 0.5;
+            }
+            isValidRejection = wickSize > 0 && wickToBodyRatio >= dynamicThresholds.minRatio && wickPercent >= dynamicThresholds.minWickPercent && closeConfirmed;
+            if (isValidRejection) {
+                rejectionCandles.push({ index: i, type: 'bullish_rejection', wickSize, wickPercent, ratio: wickToBodyRatio, bodySize, isCurrent: (i === candles.length - 1) });
+            }
         } else {
-            volumeAboveEma += vol / 2;
-            volumeBelowEma += vol / 2;
-        }
-    });
-    
-    const percentageAbove = (volumeAboveEma / totalVolume) * 100;
-    const percentageBelow = (volumeBelowEma / totalVolume) * 100;
-    
-    let status = 'NEUTRO';
-    let emoji = '⚪';
-    
-    if (percentageAbove > 55) {
-        status = 'COMPRADOR';
-        emoji = '🟢';
-    } else if (percentageBelow > 55) {
-        status = 'VENDEDOR';
-        emoji = '🔴';
-    }
-    
-    const dominantPercentage = percentageAbove > percentageBelow ? percentageAbove : percentageBelow;
-    const sign = percentageAbove > percentageBelow ? '+' : '-';
-    const statusText = percentageAbove > percentageBelow ? 'Comprador' : 'Vendedor';
-    
-    const formattedString = `${sign}${dominantPercentage.toFixed(0)}% ${emoji} ${statusText}`;
-    
-    return {
-        percentage: dominantPercentage,
-        status: statusText,
-        emoji: emoji,
-        formatted: formattedString
-    };
-}
-
-// =====================================================================
-// === COOLDOWN CHECK ===
-// =====================================================================
-function canSendAlert(symbol, currentPrice, direction) {
-    const now = Date.now();
-    const cooldownKey = `${symbol}_${direction}`;
-    const priceKey = `${symbol}_price`;
-    
-    const lastAlert = alertCooldown.get(cooldownKey);
-    if (lastAlert) {
-        const timeDiff = (now - lastAlert) / (1000 * 60);
-        if (timeDiff < CONFIG.PERFORMANCE.COOLDOWN_MINUTES) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} em cooldown por mais ${(CONFIG.PERFORMANCE.COOLDOWN_MINUTES - timeDiff).toFixed(1)}min`);
+            wickSize = candle.high - Math.max(candle.open, candle.close);
+            const wickPercent = (wickSize / candle.close) * 100;
+            const wickToBodyRatio = wickSize / bodySize;
+            let closeConfirmed = true;
+            if (CONFIG.WICK_REJECTION.CHECK_CLOSE_CONFIRMATION) {
+                const lowerBody = Math.min(candle.open, candle.close);
+                closeConfirmed = (candle.high - lowerBody) > wickSize * 0.5;
             }
-            return false;
-        }
-    }
-    
-    const lastPrice = lastAlertPrices.get(priceKey);
-    if (lastPrice) {
-        const priceDiff = Math.abs((currentPrice - lastPrice) / lastPrice * 100);
-        if (priceDiff < CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⏸️ ${symbol} preço variou apenas ${priceDiff.toFixed(2)}% (mínimo ${CONFIG.PERFORMANCE.PRICE_DEVIATION_THRESHOLD}%)`);
-            }
-            return false;
-        }
-    }
-    
-    if (!canSendDailyAlert(symbol)) {
-        return false;
-    }
-    
-    return true;
-}
-
-function registerAlert(symbol, price, direction) {
-    const now = Date.now();
-    const cooldownKey = `${symbol}_${direction}`;
-    const priceKey = `${symbol}_price`;
-    
-    alertCooldown.set(cooldownKey, now);
-    lastAlertPrices.set(priceKey, price);
-    
-    const currentCount = dailyMessageCounter.get(symbol) || 0;
-    const newCount = currentCount + 1;
-    dailyMessageCounter.set(symbol, newCount);
-    
-    console.log(`📊 ${symbol}: ${newCount}/${CONFIG.ALERTS.MAX_DAILY_ALERTS_PER_SYMBOL} alerta(s) hoje`);
-    
-    for (const [key, timestamp] of alertCooldown) {
-        if (now - timestamp > 2 * 60 * 60 * 1000) {
-            alertCooldown.delete(key);
-        }
-    }
-}
-
-// =====================================================================
-// === FUNÇÃO getCandles MELHORADA ===
-// =====================================================================
-async function getCandles(symbol, timeframe, limit = 100) {
-    const cached = CacheManager.get(symbol, timeframe, limit);
-    if (cached) return cached;
-
-    const intervalMap = {
-        '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
-        '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '12h': '12h', '1d': '1d'
-    };
-    
-    const interval = intervalMap[timeframe] || '1h';
-    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    
-    const maxAttempts = 3;
-    let lastError;
-    
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const data = await rateLimiter.makeRequest(url, {}, 'klines');
-            
-            if (!data || !Array.isArray(data) || data.length === 0) {
-                throw new Error('Dados inválidos ou vazios');
-            }
-            
-            const candles = data.map(candle => ({
-                open: parseFloat(candle[1]),
-                high: parseFloat(candle[2]),
-                low: parseFloat(candle[3]),
-                close: parseFloat(candle[4]),
-                volume: parseFloat(candle[5]),
-                time: candle[0]
-            }));
-            
-            CacheManager.set(symbol, timeframe, limit, candles);
-            return candles;
-            
-        } catch (error) {
-            lastError = error;
-            
-            if (attempt < maxAttempts) {
-                const waitTime = 1000 * Math.pow(2, attempt);
-                console.log(`⏳ Tentativa ${attempt}/${maxAttempts} para ${symbol} ${timeframe} falhou, aguardando ${waitTime/1000}s...`);
-                await new Promise(r => setTimeout(r, waitTime));
+            isValidRejection = wickSize > 0 && wickToBodyRatio >= dynamicThresholds.minRatio && wickPercent >= dynamicThresholds.minWickPercent && closeConfirmed;
+            if (isValidRejection) {
+                rejectionCandles.push({ index: i, type: 'bearish_rejection', wickSize, wickPercent, ratio: wickToBodyRatio, bodySize, isCurrent: (i === candles.length - 1) });
             }
         }
     }
     
-    if (CONFIG.DEBUG.VERBOSE) {
-        console.log(`⚠️ Falha ao buscar candles ${symbol} ${timeframe} após ${maxAttempts} tentativas: ${lastError?.message}`);
+    let hasValidRejection = rejectionCandles.length > 0;
+    if (CONFIG.WICK_REJECTION.REQUIRE_CONSECUTIVE && rejectionCandles.length >= 2) {
+        const indices = rejectionCandles.map(c => c.index);
+        let consecutive = true;
+        for (let i = 1; i < indices.length; i++) if (indices[i] !== indices[i-1] + 1) consecutive = false;
+        hasValidRejection = consecutive;
     }
-    return [];
+    
+    const hasCurrentRejection = rejectionCandles.some(c => c.isCurrent);
+    const bestRejection = hasCurrentRejection ? rejectionCandles.find(c => c.isCurrent) : rejectionCandles[rejectionCandles.length - 1];
+    
+    if (hasValidRejection && bestRejection) {
+        return { passed: true, hasRejection: true, message: `✅ Wick Rejection: ${isBullish ? 'wick inferior' : 'wick superior'} de ${bestRejection.wickPercent.toFixed(2)}% (${bestRejection.ratio.toFixed(1)}x corpo)`, details: rejectionCandles, thresholds: dynamicThresholds };
+    } else {
+        return { passed: false, hasRejection: false, message: `⏭️ Wick Rejection: Nenhum candle válido`, details: [], thresholds: dynamicThresholds };
+    }
 }
 
 // =====================================================================
-// === ANÁLISE DE VOLUME E GERAÇÃO DE ALERTAS ===
+// === BOLLINGER BANDS ===
 // =====================================================================
-async function getLSR(symbol) {
-    try {
-        const url = `https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=15m&limit=1`;
-        const data = await rateLimiter.makeRequest(url, {}, 'lsr');
-        return data.length > 0 ? parseFloat(data[0].longShortRatio) : null;
-    } catch {
-        return null;
+function calculateBollingerBands(candles, period = 20, stdDev = 2) {
+    if (!candles || candles.length < period) return null;
+    const closes = candles.slice(-period).map(c => c.close);
+    const sma = closes.reduce((a, b) => a + b, 0) / period;
+    const squaredDiffs = closes.map(close => Math.pow(close - sma, 2));
+    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / period;
+    const std = Math.sqrt(variance);
+    return { upper: sma + (stdDev * std), lower: sma - (stdDev * std), sma, currentPrice: candles[candles.length - 1].close, period, stdDev };
+}
+
+function checkBollingerProximity(candles, isBullish, timeframe) {
+    if (!CONFIG.BOLLINGER.REQUIRED_TIMEFRAMES.includes(timeframe)) return { passed: true, message: `⏭️ Bollinger ${timeframe}: não requerido`, isTouching: false };
+    const bb = calculateBollingerBands(candles, CONFIG.BOLLINGER.PERIOD, CONFIG.BOLLINGER.STD_DEVIATION);
+    if (!bb) return { passed: false, message: `⚠️ Bollinger ${timeframe}: sem dados suficientes`, isTouching: false };
+    const maxDistance = CONFIG.BOLLINGER.PROXIMITY_PERCENT;
+    const price = bb.currentPrice;
+    let distanceToBand = 0, bandPrice = 0, isTouching = false;
+    
+    if (isBullish) {
+        distanceToBand = ((price - bb.lower) / bb.lower) * 100;
+        bandPrice = bb.lower;
+        if (price <= bb.lower) { isTouching = true; }
+        else if (distanceToBand <= maxDistance) { isTouching = true; }
+        if (isTouching) return { passed: true, message: `✅ Bollinger: ${price <= bb.lower ? 'ABAIXO' : 'PRÓXIMO'} da banda INFERIOR`, isTouching: true, band: 'lower', distance: Math.abs(distanceToBand), bandPrice: bb.lower, sma: bb.sma };
+        else return { passed: false, message: `❌ Bollinger: distante ${distanceToBand.toFixed(2)}% da banda inferior`, isTouching: false, band: 'lower', distance: distanceToBand, bandPrice: bb.lower };
+    } else {
+        distanceToBand = ((bb.upper - price) / bb.upper) * 100;
+        bandPrice = bb.upper;
+        if (price >= bb.upper) { isTouching = true; }
+        else if (distanceToBand <= maxDistance) { isTouching = true; }
+        if (isTouching) return { passed: true, message: `✅ Bollinger: ${price >= bb.upper ? 'ACIMA' : 'PRÓXIMO'} da banda SUPERIOR`, isTouching: true, band: 'upper', distance: Math.abs(distanceToBand), bandPrice: bb.upper, sma: bb.sma };
+        else return { passed: false, message: `❌ Bollinger: distante ${distanceToBand.toFixed(2)}% da banda superior`, isTouching: false, band: 'upper', distance: distanceToBand, bandPrice: bb.upper };
     }
 }
 
+function checkBollingerTimeframes(symbol, isBullish, candles15m) {
+    const bb15m = checkBollingerProximity(candles15m, isBullish, '15m');
+    if (!bb15m.passed) log(`❌ ${symbol} - Bollinger: ${bb15m.message}`, 'warning');
+    else log(`✅ ${symbol} - ${bb15m.message}`, 'success');
+    return { passed: bb15m.passed, results: [bb15m] };
+}
+
+// =====================================================================
+// === DETECÇÃO DE DIVERGÊNCIA RSI COM PIVÔ OBRIGATÓRIO ===
+// =====================================================================
+function findSignificantPivots(values, minStrength = 0.5) {
+    const pivots = { highs: [], lows: [] };
+    if (values.length < 5) return pivots;
+    for (let i = 2; i < values.length - 2; i++) {
+        const curr = values[i];
+        const p2 = values[i-2], p1 = values[i-1];
+        const n1 = values[i+1], n2 = values[i+2];
+        if (curr > p1 && curr > p2 && curr > n1 && curr > n2) {
+            const avg = (p2 + p1 + n1 + n2) / 4;
+            const strength = ((curr - avg) / avg) * 100;
+            if (strength >= minStrength) pivots.highs.push({ index: i, value: curr, strength });
+        }
+        if (curr < p1 && curr < p2 && curr < n1 && curr < n2) {
+            const avg = (p2 + p1 + n1 + n2) / 4;
+            const strength = ((avg - curr) / avg) * 100;
+            if (strength >= minStrength) pivots.lows.push({ index: i, value: curr, strength });
+        }
+    }
+    return pivots;
+}
+
+function getLookbackForTimeframe(timeframe) {
+    return CONFIG.RSI_DIVERGENCE.LOOKBACK_BY_TIMEFRAME[timeframe] || 80;
+}
+
+function findAllPivotLevels(candles, currentPrice, timeframe) {
+    const highs = [], lows = [];
+    const lookback = Math.min(100, candles.length);
+    
+    for (let i = 5; i < lookback - 5; i++) {
+        let isHigh = true, isLow = true;
+        for (let j = -5; j <= 5; j++) {
+            if (j === 0) continue;
+            if (i + j < 0 || i + j >= candles.length) continue;
+            if (candles[i].high <= candles[i + j].high) isHigh = false;
+            if (candles[i].low >= candles[i + j].low) isLow = false;
+        }
+        if (isHigh) {
+            let touches = 1;
+            for (let k = 0; k < candles.length; k++) {
+                if (Math.abs(k - i) > 3 && Math.abs(candles[k].high - candles[i].high) / candles[i].high < 0.003) {
+                    touches++;
+                }
+            }
+            highs.push({ price: candles[i].high, touches, index: i });
+        }
+        if (isLow) {
+            let touches = 1;
+            for (let k = 0; k < candles.length; k++) {
+                if (Math.abs(k - i) > 3 && Math.abs(candles[k].low - candles[i].low) / candles[i].low < 0.003) {
+                    touches++;
+                }
+            }
+            lows.push({ price: candles[i].low, touches, index: i });
+        }
+    }
+    
+    highs.sort((a, b) => b.touches - a.touches);
+    lows.sort((a, b) => b.touches - a.touches);
+    
+    const support = lows.length > 0 && lows[0].price < currentPrice ? lows[0] : null;
+    const resistance = highs.length > 0 && highs[0].price > currentPrice ? highs[0] : null;
+    
+    return { support, resistance };
+}
+
+function getPivotStrength(touches) {
+    if (touches >= 6) return { text: '🔥 FORTE', emoji: '🔥' };
+    if (touches >= 4) return { text: '🔥 FORTE', emoji: '🔥' };
+    if (touches >= 3) return { text: '⚡ FORTE', emoji: '⚡' };
+    if (touches >= 2) return { text: '⭐ MÉDIO', emoji: '⭐' };
+    return { text: '⚠️ FRACO', emoji: '⚠️' };
+}
+
+function detectRSIDivergence(prices, rsiValues, timeframe, candles) {
+    const lookback = getLookbackForTimeframe(timeframe);
+    const limitedPrices = prices.slice(-lookback);
+    const limitedRsi = rsiValues.slice(-lookback);
+    if (limitedPrices.length < 20 || limitedRsi.length < 20) return null;
+    
+    const pricePivots = findSignificantPivots(limitedPrices, CONFIG.RSI_DIVERGENCE.MIN_PIVOT_STRENGTH);
+    const rsiPivots = findSignificantPivots(limitedRsi, CONFIG.RSI_DIVERGENCE.MIN_PIVOT_STRENGTH * 2);
+    let bestDivergence = null;
+
+    // Divergência Regular Bullish
+    if (pricePivots.lows.length >= 2 && rsiPivots.lows.length >= 2) {
+        const lastPriceLow = pricePivots.lows[pricePivots.lows.length - 1];
+        const prevPriceLow = pricePivots.lows[pricePivots.lows.length - 2];
+        const lastRSILow = rsiPivots.lows[rsiPivots.lows.length - 1];
+        const prevRSILow = rsiPivots.lows[rsiPivots.lows.length - 2];
+        if (lastPriceLow.value < prevPriceLow.value && lastRSILow.value > prevRSILow.value) {
+            const pivotLevels = findAllPivotLevels(candles, limitedPrices[limitedPrices.length - 1], timeframe);
+            if (CONFIG.RSI_DIVERGENCE.REQUIRE_PIVOT_FOR_DIVERGENCE) {
+                if (pivotLevels.support && pivotLevels.support.price <= limitedPrices[limitedPrices.length - 1] * 1.02) {
+                    bestDivergence = { 
+                        type: 'bullish', 
+                        subtype: 'regular', 
+                        emoji: '📈', 
+                        rsiValue: lastRSILow.value, 
+                        priceValue: lastPriceLow.value,
+                        pivot: pivotLevels.support,
+                        pivotType: 'suporte'
+                    };
+                }
+            } else {
+                bestDivergence = { type: 'bullish', subtype: 'regular', emoji: '📈', rsiValue: lastRSILow.value, priceValue: lastPriceLow.value };
+            }
+        }
+    }
+    
+    // Divergência Regular Bearish
+    if (!bestDivergence && pricePivots.highs.length >= 2 && rsiPivots.highs.length >= 2) {
+        const lastPriceHigh = pricePivots.highs[pricePivots.highs.length - 1];
+        const prevPriceHigh = pricePivots.highs[pricePivots.highs.length - 2];
+        const lastRSIHigh = rsiPivots.highs[rsiPivots.highs.length - 1];
+        const prevRSIHigh = rsiPivots.highs[rsiPivots.highs.length - 2];
+        if (lastPriceHigh.value > prevPriceHigh.value && lastRSIHigh.value < prevRSIHigh.value) {
+            const pivotLevels = findAllPivotLevels(candles, limitedPrices[limitedPrices.length - 1], timeframe);
+            if (CONFIG.RSI_DIVERGENCE.REQUIRE_PIVOT_FOR_DIVERGENCE) {
+                if (pivotLevels.resistance && pivotLevels.resistance.price >= limitedPrices[limitedPrices.length - 1] * 0.98) {
+                    bestDivergence = { 
+                        type: 'bearish', 
+                        subtype: 'regular', 
+                        emoji: '📉', 
+                        rsiValue: lastRSIHigh.value, 
+                        priceValue: lastPriceHigh.value,
+                        pivot: pivotLevels.resistance,
+                        pivotType: 'resistência'
+                    };
+                }
+            } else {
+                bestDivergence = { type: 'bearish', subtype: 'regular', emoji: '📉', rsiValue: lastRSIHigh.value, priceValue: lastPriceHigh.value };
+            }
+        }
+    }
+    
+    // Hidden Divergence Bullish
+    if (!bestDivergence && pricePivots.lows.length >= 2 && rsiPivots.lows.length >= 2) {
+        const lastPriceLow = pricePivots.lows[pricePivots.lows.length - 1];
+        const prevPriceLow = pricePivots.lows[pricePivots.lows.length - 2];
+        const lastRSILow = rsiPivots.lows[rsiPivots.lows.length - 1];
+        const prevRSILow = rsiPivots.lows[rsiPivots.lows.length - 2];
+        if (lastPriceLow.value > prevPriceLow.value && lastRSILow.value < prevRSILow.value) {
+            const rsiExtreme = lastRSILow.value <= CONFIG.RSI.EXTREME_OVERSOLD;
+            if (!CONFIG.RSI_DIVERGENCE.REQUIRE_EXTREME_FOR_HIDDEN || rsiExtreme) {
+                const pivotLevels = findAllPivotLevels(candles, limitedPrices[limitedPrices.length - 1], timeframe);
+                if (CONFIG.RSI_DIVERGENCE.REQUIRE_PIVOT_FOR_DIVERGENCE) {
+                    if (pivotLevels.support && pivotLevels.support.price <= limitedPrices[limitedPrices.length - 1] * 1.02) {
+                        bestDivergence = { 
+                            type: 'bullish', 
+                            subtype: 'hidden', 
+                            emoji: '🔮', 
+                            rsiValue: lastRSILow.value, 
+                            priceValue: lastPriceLow.value,
+                            pivot: pivotLevels.support,
+                            pivotType: 'suporte'
+                        };
+                    }
+                } else {
+                    bestDivergence = { type: 'bullish', subtype: 'hidden', emoji: '🔮', rsiValue: lastRSILow.value, priceValue: lastPriceLow.value };
+                }
+            }
+        }
+    }
+    
+    // Hidden Divergence Bearish
+    if (!bestDivergence && pricePivots.highs.length >= 2 && rsiPivots.highs.length >= 2) {
+        const lastPriceHigh = pricePivots.highs[pricePivots.highs.length - 1];
+        const prevPriceHigh = pricePivots.highs[pricePivots.highs.length - 2];
+        const lastRSIHigh = rsiPivots.highs[rsiPivots.highs.length - 1];
+        const prevRSIHigh = rsiPivots.highs[rsiPivots.highs.length - 2];
+        if (lastPriceHigh.value < prevPriceHigh.value && lastRSIHigh.value > prevRSIHigh.value) {
+            const rsiExtreme = lastRSIHigh.value >= CONFIG.RSI.EXTREME_OVERBOUGHT;
+            if (!CONFIG.RSI_DIVERGENCE.REQUIRE_EXTREME_FOR_HIDDEN || rsiExtreme) {
+                const pivotLevels = findAllPivotLevels(candles, limitedPrices[limitedPrices.length - 1], timeframe);
+                if (CONFIG.RSI_DIVERGENCE.REQUIRE_PIVOT_FOR_DIVERGENCE) {
+                    if (pivotLevels.resistance && pivotLevels.resistance.price >= limitedPrices[limitedPrices.length - 1] * 0.98) {
+                        bestDivergence = { 
+                            type: 'bearish', 
+                            subtype: 'hidden', 
+                            emoji: '🔮', 
+                            rsiValue: lastRSIHigh.value, 
+                            priceValue: lastPriceHigh.value,
+                            pivot: pivotLevels.resistance,
+                            pivotType: 'resistência'
+                        };
+                    }
+                } else {
+                    bestDivergence = { type: 'bearish', subtype: 'hidden', emoji: '🔮', rsiValue: lastRSIHigh.value, priceValue: lastPriceHigh.value };
+                }
+            }
+        }
+    }
+    
+    return bestDivergence;
+}
+
+// =====================================================================
+// === FUNÇÕES DE FUNDING ===
+// =====================================================================
 async function getFundingRate(symbol) {
     try {
-        const cached = fundingRateCache.get(symbol);
-        if (cached && Date.now() - cached.timestamp < 3600000) {
-            return cached.rate;
-        }
-
-        const url = `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`;
-        const data = await rateLimiter.makeRequest(url, {}, 'funding');
-        
-        let fundingRate = parseFloat(data.lastFundingRate) || null;
-        
-        if (CONFIG.DEBUG.VERBOSE && fundingRate !== null) {
-            console.log(`💰 Funding ${symbol}: ${(fundingRate * 100).toFixed(4)}%`);
-        }
-        
-        if (fundingRate !== null) {
-            fundingRateCache.set(symbol, {
-                rate: fundingRate,
-                timestamp: Date.now()
-            });
-        }
-        
-        return fundingRate;
-        
-    } catch (error) {
-        try {
-            const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1`;
-            const data = await rateLimiter.makeRequest(url, {}, 'funding_alt');
-            const fundingRate = data.length > 0 ? parseFloat(data[0].fundingRate) : null;
-            
-            if (fundingRate !== null) {
-                fundingRateCache.set(symbol, {
-                    rate: fundingRate,
-                    timestamp: Date.now()
-                });
-            }
-            
-            return fundingRate;
-        } catch {
-            return null;
-        }
-    }
+        const data = await rateLimiter.makeRequest(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, `funding_${symbol}`);
+        return parseFloat(data.lastFundingRate) || null;
+    } catch { return null; }
 }
 
-function calculateTradeLevels(price, atr, direction, support, resistance) {
-    let stopLoss, takeProfit1, takeProfit2, takeProfit3;
-    
-    if (direction === 'COMPRA') {
-        stopLoss = Math.min(
-            support * 0.995,
-            price - (atr * 1.5)
-        );
-        
-        const risk = price - stopLoss;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.min(price + reward1, resistance * 0.99);
-        takeProfit2 = Math.min(price + reward2, resistance * 1.02);
-        takeProfit3 = price + reward3;
-        
+function checkFundingBonus(funding, isGreenAlert) {
+    if (!CONFIG.FUNDING.ENABLED || funding === null) return { hasBonus: false, message: '' };
+    const fundingPercent = funding * 100;
+    if (CONFIG.FUNDING.FAVORABLE_BONUS.ENABLED) {
+        const minBonus = CONFIG.FUNDING.FAVORABLE_BONUS.MIN_THRESHOLD;
+        if (isGreenAlert && funding < 0 && Math.abs(funding) >= minBonus) {
+            return { hasBonus: true, message: `🎯 Fund ${fundingPercent.toFixed(4)}% (negativo)` };
+        }
+        if (!isGreenAlert && funding > 0 && funding >= minBonus) {
+            return { hasBonus: true, message: `🎯 Fund +${fundingPercent.toFixed(4)}%` };
+        }
+    }
+    return { hasBonus: false, message: `Fund ${funding > 0 ? '+' : ''}${fundingPercent.toFixed(4)}%` };
+}
+
+// =====================================================================
+// === CÁLCULO DE STOP E TARGETS ===
+// =====================================================================
+function computeStopAndTargets(currentPrice, isGreenAlert, timeframe, candles) {
+    const atr = calculateATR(candles, 14);
+    const atrMultiplier = CONFIG.STOP_LOSS.ATR_MULTIPLIER[timeframe] || 3.0;
+    const minStopPercent = CONFIG.STOP_LOSS.MIN_STOP_DISTANCE_PERCENT[timeframe] || 2.0;
+    const maxStopPercent = CONFIG.STOP_LOSS.MAX_STOP_DISTANCE_PERCENT[timeframe] || 7.0;
+    const atrValue = atr > 0 ? atr : currentPrice * 0.02;
+    let stop = isGreenAlert ? currentPrice - atrValue * atrMultiplier : currentPrice + atrValue * atrMultiplier;
+    let stopDistance = Math.abs(currentPrice - stop) / currentPrice * 100;
+    if (stopDistance < minStopPercent) stop = isGreenAlert ? currentPrice * (1 - minStopPercent / 100) : currentPrice * (1 + minStopPercent / 100);
+    else if (stopDistance > maxStopPercent) stop = isGreenAlert ? currentPrice * (1 - maxStopPercent / 100) : currentPrice * (1 + maxStopPercent / 100);
+    let tp1, tp2, tp3;
+    if (isGreenAlert) {
+        tp1 = currentPrice + atrValue * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice + atrValue * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice + atrValue * CONFIG.TARGETS.TP3_MULTIPLIER;
     } else {
-        stopLoss = Math.max(
-            resistance * 1.005,
-            price + (atr * 1.5)
-        );
-        
-        const risk = stopLoss - price;
-        const reward1 = risk * CONFIG.TRADE.RISK_REWARD_RATIO;
-        const reward2 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 1.5);
-        const reward3 = risk * (CONFIG.TRADE.RISK_REWARD_RATIO * 2);
-        
-        takeProfit1 = Math.max(price - reward1, support * 1.01);
-        takeProfit2 = Math.max(price - reward2, support * 0.98);
-        takeProfit3 = price - reward3;
+        tp1 = currentPrice - atrValue * CONFIG.TARGETS.TP1_MULTIPLIER;
+        tp2 = currentPrice - atrValue * CONFIG.TARGETS.TP2_MULTIPLIER;
+        tp3 = currentPrice - atrValue * CONFIG.TARGETS.TP3_MULTIPLIER;
     }
-    
-    return { stopLoss, takeProfit1, takeProfit2, takeProfit3 };
+    return { stop, tp1, tp2, tp3 };
 }
 
-async function analyzeForAlerts(symbol) {
+// =====================================================================
+// === ANÁLISE PRINCIPAL DO SÍMBOLO ===
+// =====================================================================
+async function analyzeSymbol(symbol) {
     try {
-        // Buscar candles necessários - CCI 4H como critério obrigatório, CCI Diário para informação
-        const [candles1h, candles15m, candles4h, candlesDaily, candles3m] = await Promise.all([
-            getCandles(symbol, '1h', 100),
-            getCandles(symbol, '15m', 50),
-            getCandles(symbol, '4h', 100),      // CCI 4H para critério obrigatório
-            getCandles(symbol, '1d', 100),       // CCI Diário para informação no alerta
-            getCandles(symbol, '3m', 50)
-        ]);
+        const divergences = [];
+        const allCandles = {};
         
-        if (candles1h.length < 30 || candles15m.length < 20 || candles4h.length < 50 || 
-            candlesDaily.length < 50 || candles3m.length < 30) return null;
+        // Buscar candles 3m para análise de volume
+        const candles3m = await getCandles(symbol, '3m', 30);
+        if (!candles3m || candles3m.length < 20) {
+            log(`⚠️ ${symbol} - Dados 3m insuficientes para análise de volume`, 'warning');
+            return [];
+        }
+        
+        for (const tf of CONFIG.RSI_DIVERGENCE.TIMEFRAMES) {
+            const lookback = getLookbackForTimeframe(tf);
+            const candles = await getCandles(symbol, tf, lookback);
+            if (candles && candles.length >= Math.min(lookback, 40)) {
+                allCandles[tf] = candles;
+                const rsiValues = [];
+                const prices = [];
+                for (let i = CONFIG.RSI.PERIOD; i < candles.length; i++) {
+                    rsiValues.push(calculateRSI(candles.slice(0, i + 1), CONFIG.RSI.PERIOD));
+                    prices.push(candles[i].close);
+                }
+                const divergence = detectRSIDivergence(prices, rsiValues, tf, candles);
+                if (divergence) {
+                    divergences.push({ 
+                        timeframe: tf, 
+                        type: divergence.type, 
+                        subtype: divergence.subtype, 
+                        emoji: divergence.emoji, 
+                        rsiValue: divergence.rsiValue,
+                        pivot: divergence.pivot,
+                        pivotType: divergence.pivotType,
+                        lookbackUsed: lookback 
+                    });
+                }
+            }
+        }
+        
+        if (divergences.length === 0) return [];
+        
+        const bullishDivs = divergences.filter(d => d.type === 'bullish');
+        const bearishDivs = divergences.filter(d => d.type === 'bearish');
+        let finalDirection = '', isGreenAlert = false, bestDivergence = null;
+        
+        if (bullishDivs.length > 0) { finalDirection = '🟢 COMPRA'; isGreenAlert = true; bestDivergence = bullishDivs[0]; }
+        else if (bearishDivs.length > 0) { finalDirection = '🔴 VENDA'; isGreenAlert = false; bestDivergence = bearishDivs[0]; }
+        else return [];
+        
+        // Verificar volume anormal e direcional em 3 minutos
+        const volume3mCheck = calculateVolume3mAnomaly(candles3m, isGreenAlert);
+        if (!volume3mCheck.passed) {
+            log(`❌ ${symbol} - REPROVADO: ${volume3mCheck.message}`, 'warning');
+            return [];
+        }
+        log(`✅ ${symbol} - ${volume3mCheck.message}`, 'success');
+        
+        const candles15m = await getCandles(symbol, '15m', 80);
+        const candles1h = await getCandles(symbol, '1h', 100);
+        const candles4h = allCandles['4h'] || await getCandles(symbol, '4h', 150);
+        const candles1d = allCandles['1d'] || await getCandles(symbol, '1d', 200);
+        
+        if (!candles15m || candles15m.length < 30) {
+            log(`⚠️ ${symbol} - Dados insuficientes para análise`, 'warning');
+            return [];
+        }
+        
+        if (!candles1h || candles1h.length === 0) {
+            log(`⚠️ ${symbol} - Sem dados 1h`, 'warning');
+            return [];
+        }
         
         const currentPrice = candles1h[candles1h.length - 1].close;
-        const currentCandle15m = candles15m[candles15m.length - 1];
+        const atr = calculateATR(candles15m, 14);
         
-        // =================================================================
-        // === ANÁLISE VOLUME 1H ===
-        // =================================================================
-        const volumes = candles1h.map(c => c.volume);
-        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const currentVolume = volumes[volumes.length - 1];
-        const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+        const wickRejectionCheck = checkWickRejection(candles15m, isGreenAlert, atr);
+        if (!wickRejectionCheck.passed) {
+            log(`❌ ${symbol} - REPROVADO: ${wickRejectionCheck.message}`, 'warning');
+            return [];
+        }
+        log(`✅ ${symbol} - ${wickRejectionCheck.message}`, 'success');
         
-        const closes = candles1h.map(c => c.close);
-        const ema9 = calculateEMA(closes.slice(-20), 9);
+        const bollingerCheck = checkBollingerTimeframes(symbol, isGreenAlert, candles15m);
+        if (!bollingerCheck.passed) {
+            log(`❌ ${symbol} - REPROVADO: Bollinger 15m não confirmou`, 'warning');
+            return [];
+        }
+        log(`✅ ${symbol} - Bollinger 15m confirmado!`, 'success');
         
-        let buyerVolume = 0, sellerVolume = 0, totalVolume = 0;
-        const recentCandles = candles1h.slice(-24);
+        const volume1h = calculateVolumeDirection(candles1h);
+        const volumeDirectionCheck = (() => {
+            if (isGreenAlert) return volume1h.buyer >= CONFIG.ALERTS.VOLUME_DIRECTION.BUY_MIN_PERCENTAGE;
+            else return volume1h.seller >= 45;
+        })();
         
-        recentCandles.forEach(candle => {
-            const vol = candle.volume;
-            totalVolume += vol;
-            
-            if (candle.close > ema9) {
-                buyerVolume += vol;
-            } else if (candle.close < ema9) {
-                sellerVolume += vol;
-            } else {
-                buyerVolume += vol / 2;
-                sellerVolume += vol / 2;
-            }
-        });
+        if (!volumeDirectionCheck) {
+            log(`❌ ${symbol} - REPROVADO: Volume 1h direcional insuficiente`, 'warning');
+            return [];
+        }
+        log(`✅ ${symbol} - Volume 1h direcional OK`, 'success');
         
-        const buyerPercentage = totalVolume > 0 ? (buyerVolume / totalVolume) * 100 : 50;
-        const sellerPercentage = 100 - buyerPercentage;
-        
-        // =================================================================
-        // === ANÁLISE VOLUME 3 MINUTOS ===
-        // =================================================================
-        const volumes3m = candles3m.map(c => c.volume);
-        const avgVolume3m = volumes3m.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const currentVolume3m = volumes3m[volumes3m.length - 1];
-        const volumeRatio3m = avgVolume3m > 0 ? currentVolume3m / avgVolume3m : 1;
-        
-        const closes3m = candles3m.map(c => c.close);
-        const ema9_3m = calculateEMA(closes3m.slice(-20), 9);
-        
-        let buyerVolume3m = 0, sellerVolume3m = 0, totalVolume3m = 0;
-        const recentCandles3m = candles3m.slice(-30);
-        
-        recentCandles3m.forEach(candle => {
-            const vol = candle.volume;
-            totalVolume3m += vol;
-            
-            if (candle.close > ema9_3m) {
-                buyerVolume3m += vol;
-            } else if (candle.close < ema9_3m) {
-                sellerVolume3m += vol;
-            } else {
-                buyerVolume3m += vol / 2;
-                sellerVolume3m += vol / 2;
-            }
-        });
-        
-        const buyerPercentage3m = totalVolume3m > 0 ? (buyerVolume3m / totalVolume3m) * 100 : 50;
-        const sellerPercentage3m = 100 - buyerPercentage3m;
-        
-        const volume24hVsEma9 = calculateVolume24hVsEma9(candles1h);
-        
-        // =================================================================
-        // === CÁLCULO CCI 4H (CRITÉRIO OBRIGATÓRIO) E CCI DIÁRIO (INFORMAÇÃO) ===
-        // =================================================================
-        const cci4h = calculateCCITrend(candles4h);           // Critério obrigatório
-        const cciDaily = calculateCCITrend(candlesDaily);     // Apenas informação
-        
-        const stochDaily = calculateStochastic(
-            candlesDaily, 
-            CONFIG.STOCH.PERIOD_1D, 
-            CONFIG.STOCH.SLOW_1D, 
-            CONFIG.STOCH.SMOOTH_1D
-        );
-        
-        const stoch4h = calculateStochastic(
-            candles4h, 
-            CONFIG.STOCH.PERIOD_4H, 
-            CONFIG.STOCH.SLOW_4H, 
-            CONFIG.STOCH.SMOOTH_4H
-        );
-        
-        let stochDailyDisplay = "N/D";
-        if (stochDaily.k !== null && stochDaily.d !== null) {
-            const emoji = getStochEmoji(stochDaily.k);
-            stochDailyDisplay = formatStochastic(stochDaily.k, stochDaily.d, emoji);
+        if (isCooldownActive(symbol, finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA', bestDivergence.timeframe)) {
+            log(`⏭️ ${symbol} - Cooldown ativo`, 'warning');
+            return [];
         }
         
-        let stoch4hDisplay = "N/D";
-        if (stoch4h.k !== null && stoch4h.d !== null) {
-            const emoji = getStochEmoji(stoch4h.k);
-            stoch4hDisplay = formatStochastic(stoch4h.k, stoch4h.d, emoji);
-        }
+        const cci4h = getCCITrend(candles4h, 20, 5);
+        const cci1d = getCCITrend(candles1d, 20, 5);
+        const stoch4h = calculateStochastic(candles4h, 14, 3, 3);
+        const stoch1d = calculateStochastic(candles1d, 5, 3, 3);
+        const funding = await getFundingRate(symbol);
+        const fundingBonus = checkFundingBonus(funding, isGreenAlert);
+        const { stop, tp1, tp2, tp3 } = computeStopAndTargets(currentPrice, isGreenAlert, bestDivergence.timeframe, candles4h);
         
-        const liquidationZones = detectLiquidationZones(candles1h, currentPrice);
+        const pivotLevels4h = findAllPivotLevels(candles4h, currentPrice, '4h');
+        const lsr = await getLSR(symbol, '15m');
+        const lsrPosit = await getLSRPosit(symbol, '5m');
         
-        const [lsr, funding, rsi1h, sr, atr] = await Promise.all([
-            getLSR(symbol),
-            getFundingRate(symbol),
-            Promise.resolve(calculateRSI(candles1h, CONFIG.RSI.PERIOD)),
-            Promise.resolve(calculateSupportResistance(candles1h)),
-            Promise.resolve(calculateATR(candles1h, 14))
-        ]);
-        
-        if (!sr.support || !sr.resistance || !atr || rsi1h === null) return null;
-        
-        let direction = null;
-        let score = 0;
-        let confidence = 0;
-        
-        // =================================================================
-        // === CONDIÇÃO DE COMPRA - CCI 4H COMO CRITÉRIO OBRIGATÓRIO ===
-        // =================================================================
-        if (buyerPercentage > CONFIG.VOLUME.BUYER_THRESHOLD && 
-            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h < CONFIG.RSI.BUY_MAX &&
-            
-            CONFIG.VOLUME_3M.ENABLED && 
-            buyerPercentage3m > CONFIG.VOLUME_3M.BUYER_THRESHOLD &&
-            volumeRatio3m > CONFIG.VOLUME_3M.MIN_VOLUME_RATIO) {
-            
-            // CRITÉRIO OBRIGATÓRIO: CCI 4H em ALTA
-            if (cci4h.trend === CONFIG.CCI.REQUIRED_FOR_BUY) {
-                direction = 'COMPRA';
-                score = 45;
-                
-                if (buyerPercentage > 60) score += 15;
-                else if (buyerPercentage > 55) score += 12;
-                else if (buyerPercentage > 52) score += 8;
-                
-                if (volumeRatio > 2.5) score += 15;
-                else if (volumeRatio > 2.0) score += 12;
-                else if (volumeRatio > 1.8) score += 10;
-                else if (volumeRatio > 1.6) score += 8;
-                
-                if (volumeRatio3m > 2.5) score += 10;
-                else if (volumeRatio3m > 2.0) score += 8;
-                else if (volumeRatio3m > 1.8) score += 6;
-                else if (volumeRatio3m > 1.5) score += 4;
-                
-                if (buyerPercentage3m > 65) score += 8;
-                else if (buyerPercentage3m > 60) score += 6;
-                else if (buyerPercentage3m > 55) score += 4;
-                else if (buyerPercentage3m > 52) score += 2;
-                
-                if (lsr) {
-                    if (lsr < 1.5) score += 15;
-                    else if (lsr < 2.0) score += 12;
-                    else if (lsr < 2.3) score += 10;
-                    else if (lsr < 2.6) score += 8;
-                    else if (lsr > 3.0) score -= 18;
-                    else if (lsr > 2.8) score -= 12;
-                }
-                
-                if (funding) {
-                    if (funding < -0.001) score += 15;
-                    else if (funding < -0.0005) score += 8;
-                    else if (funding < -0.0001) score += 3;
-                }
-                
-                if (rsi1h) {
-                    if (rsi1h < 35) score += 14;
-                    else if (rsi1h < 40) score += 13;
-                    else if (rsi1h < 45) score += 12;
-                    else if (rsi1h < 50) score += 10;
-                }
-                
-                if (currentPrice < sr.resistance) {
-                    const distanceToResistance = (sr.resistance - currentPrice) / sr.resistance * 100;
-                    if (distanceToResistance > 5) score += 10;
-                    else if (distanceToResistance > 2) score += 8;
-                }
-                
-                // PONTUAÇÃO EXTRA BASEADA NO CCI DIÁRIO (INFORMAÇÃO)
-                if (cciDaily.trend === "ALTA") {
-                    score += 12;
-                } else if (cciDaily.trend === "BAIXA") {
-                    score -= 5;
-                }
-            }
-        }
-        
-        // =================================================================
-        // === CONDIÇÃO DE VENDA - CCI 4H COMO CRITÉRIO OBRIGATÓRIO ===
-        // =================================================================
-        if (sellerPercentage > (100 - CONFIG.VOLUME.SELLER_THRESHOLD) && 
-            volumeRatio > CONFIG.ALERTS.MIN_VOLUME_RATIO &&
-            rsi1h > CONFIG.RSI.SELL_MIN &&
-            
-            CONFIG.VOLUME_3M.ENABLED && 
-            sellerPercentage3m > (100 - CONFIG.VOLUME_3M.SELLER_THRESHOLD) &&
-            volumeRatio3m > CONFIG.VOLUME_3M.MIN_VOLUME_RATIO) {
-            
-            // CRITÉRIO OBRIGATÓRIO: CCI 4H em BAIXA
-            if (cci4h.trend === CONFIG.CCI.REQUIRED_FOR_SELL) {
-                direction = 'VENDA';
-                score = 45;
-                
-                if (sellerPercentage > 60) score += 15;
-                else if (sellerPercentage > 55) score += 12;
-                else if (sellerPercentage > 52) score += 8;
-                
-                if (volumeRatio > 2.5) score += 15;
-                else if (volumeRatio > 2.0) score += 12;
-                else if (volumeRatio > 1.8) score += 10;
-                else if (volumeRatio > 1.6) score += 8;
-                
-                if (volumeRatio3m > 2.5) score += 10;
-                else if (volumeRatio3m > 2.0) score += 8;
-                else if (volumeRatio3m > 1.8) score += 6;
-                else if (volumeRatio3m > 1.5) score += 4;
-                
-                if (sellerPercentage3m > 65) score += 8;
-                else if (sellerPercentage3m > 60) score += 6;
-                else if (sellerPercentage3m > 55) score += 4;
-                else if (sellerPercentage3m > 52) score += 2;
-                
-                if (lsr) {
-                    if (lsr > 4.0) score += 15;
-                    else if (lsr > 3.5) score += 12;
-                    else if (lsr > 3.0) score += 10;
-                    else if (lsr > 2.7) score += 8;
-                    else if (lsr < 1.0) score -= 18;
-                    else if (lsr < 1.2) score -= 12;
-                }
-                
-                if (funding) {
-                    if (funding > 0.001) score += 15;
-                    else if (funding > 0.0005) score += 8;
-                    else if (funding > 0.0001) score += 3;
-                }
-                
-                if (rsi1h) {
-                    if (rsi1h > 75) score += 16;
-                    else if (rsi1h > 70) score += 14;
-                    else if (rsi1h > 65) score += 8;
-                    else if (rsi1h > 60) score += 5;
-                }
-                
-                if (currentPrice > sr.support) {
-                    const distanceToSupport = (currentPrice - sr.support) / currentPrice * 100;
-                    if (distanceToSupport > 5) score += 10;
-                    else if (distanceToSupport > 2) score += 8;
-                }
-                
-                // PONTUAÇÃO EXTRA BASEADA NO CCI DIÁRIO (INFORMAÇÃO)
-                if (cciDaily.trend === "BAIXA") {
-                    score += 12;
-                } else if (cciDaily.trend === "ALTA") {
-                    score -= 5;
-                }
-            }
-        }
-        
-        confidence = Math.min(100, Math.max(0, score));
-        
-        if (!direction || confidence < CONFIG.ALERTS.MIN_SCORE) return null;
-        
-        if (!canSendAlert(symbol, currentPrice, direction)) return null;
-        
-        const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = 
-            calculateTradeLevels(currentPrice, atr, direction, sr.support, sr.resistance);
-        
-        const riskReward = Math.abs((takeProfit1 - currentPrice) / (currentPrice - stopLoss));
-        
-        const emoji = getConfidenceEmoji(confidence);
-        
-        let cci4hDisplay = "NEUTRO";
-        if (cci4h.trend === "ALTA") cci4hDisplay = "CCI 4H 💹ALTA";
-        else if (cci4h.trend === "BAIXA") cci4hDisplay = "CCI 4H 🔴BAIXA";
-        
-        let cciDailyDisplay = "NEUTRO";
-        if (cciDaily.trend === "ALTA") cciDailyDisplay = "CCI Diário 💹ALTA";
-        else if (cciDaily.trend === "BAIXA") cciDailyDisplay = "CCI Diário 🔴BAIXA";
-        
-        const alert = {
-            symbol,
-            direction,
-            entryPrice: currentPrice,
-            stopLoss,
-            takeProfit1,
-            takeProfit2,
-            takeProfit3,
-            riskReward: parseFloat(riskReward.toFixed(2)),
-            confidence,
-            score: confidence,
-            volumeRatio,
-            buyerPercentage,
-            sellerPercentage,
-            volume24hVsEma9: volume24hVsEma9.formatted,
-            volume24hEmoji: volume24hVsEma9.emoji,
-            volumeRatio3m,
-            buyerPercentage3m,
-            sellerPercentage3m,
-            lsr,
-            funding,
-            rsi: rsi1h,
-            cci4h: cci4hDisplay,           // CCI 4H - Critério obrigatório
-            cciDaily: cciDailyDisplay,      // CCI Diário - Informação
-            cciValue4h: cci4h.value,
-            cciEma4h: cci4h.ema,
-            cciValueDaily: cciDaily.value,
-            cciEmaDaily: cciDaily.ema,
-            stochDaily: stochDailyDisplay,
-            stoch4h: stoch4hDisplay,
-            longLiquidationZones: liquidationZones.longZones,
-            shortLiquidationZones: liquidationZones.shortZones,
-            nearestLongLiq: liquidationZones.nearestLong,
-            nearestShortLiq: liquidationZones.nearestShort,
-            support: sr.support,
-            resistance: sr.resistance,
-            emoji,
-            timestamp: Date.now()
+        const alertData = {
+            symbol, finalDirection, currentPrice, bestDivergence,
+            cci4h, cci1d, stoch4h, stoch1d, volume1h,
+            funding, fundingBonus,
+            stop, tp1, tp2, tp3,
+            bollingerResults: bollingerCheck.results,
+            wickRejection: wickRejectionCheck,
+            volume3mCheck,
+            pivotLevels4h,
+            lsr: lsr,
+            lsrPosit: lsrPosit
         };
         
-        try {
-            TradeAlertSchema.parse(alert);
-            return alert;
-        } catch (error) {
-            if (CONFIG.DEBUG.VERBOSE) {
-                console.log(`⚠️ Alerta inválido para ${symbol}:`, error.errors);
-            }
-            return null;
-        }
+        queueAlert(alertData);
+        return [alertData];
         
     } catch (error) {
-        if (CONFIG.DEBUG.VERBOSE) {
-            console.log(`⚠️ Erro ao analisar ${symbol}: ${error.message}`);
-        }
-        return null;
+        log(`Erro em analyzeSymbol ${symbol}: ${error.message}`, 'error');
+        return [];
     }
 }
 
 // =====================================================================
-// === TELEGRAM MELHORADO COM RETRY ===
+// === FILA E ENVIO DE ALERTAS ===
 // =====================================================================
-async function sendTelegramAlert(message, parseMode = 'HTML') {
-    let attempts = 0;
-    const maxAttempts = CONFIG.PERFORMANCE.TELEGRAM_RETRY_ATTEMPTS;
-    
-    if (!CONFIG.TELEGRAM.BOT_TOKEN) {
-        console.log('⚠️ Token do Telegram não configurado');
-        return false;
-    }
+let isSendingTelegram = false;
+const alertQueue = [];
 
-    const chatIdVariations = [
-        CONFIG.TELEGRAM.CHAT_ID,
-        CONFIG.TELEGRAM.CHAT_ID.replace('-100', ''),
-        `-100${CONFIG.TELEGRAM.CHAT_ID}`,
-        CONFIG.TELEGRAM.CHAT_ID.toString().trim()
-    ];
-    
-    const uniqueChatIds = [...new Set(chatIdVariations)];
-    
-    while (attempts < maxAttempts) {
-        attempts++;
-        
-        for (const chatId of uniqueChatIds) {
-            try {
-                const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), CONFIG.PERFORMANCE.REQUEST_TIMEOUT);
-                
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: chatId,
-                        text: message,
-                        parse_mode: parseMode,
-                        disable_web_page_preview: true
-                    }),
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (response.ok) {
-                    return true;
-                }
-                
-            } catch (error) {}
-        }
-        
-        if (attempts < maxAttempts) {
-            await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.TELEGRAM_RETRY_DELAY));
-        }
-    }
-    
-    return false;
+function queueAlert(alert) {
+    alertQueue.push(alert);
+    log(`Alerta ${alert.symbol} adicionado à fila`, 'info');
 }
 
-// =====================================================================
-// === FUNÇÃO PRINCIPAL DE FORMATAÇÃO DO ALERTA ===
-// =====================================================================
-function formatTradeAlert(alert) {
-    const time = getBrazilianDateTime();
-    const symbolName = alert.symbol.replace('USDT', '');
-    const dirEmoji = getDirectionEmoji(alert.direction);
-    const direction = alert.direction === 'COMPRA' ? 'Compra' : 'Correção';
-    
-    const volPct = alert.direction === 'COMPRA' ? 
-        alert.buyerPercentage.toFixed(0) : alert.sellerPercentage.toFixed(0);
-    
-    const volPct3m = alert.direction === 'COMPRA' ? 
-        alert.buyerPercentage3m?.toFixed(0) : alert.sellerPercentage3m?.toFixed(0);
-    
-    const fundingPct = alert.funding ? (alert.funding * 100).toFixed(4) : '0.0000';
-    const fundingSign = alert.funding && alert.funding > 0 ? '+' : '';
-    
-    const entry = formatPrice(alert.entryPrice);
-    const stop = formatPrice(alert.stopLoss);
-    const tp1 = formatPrice(alert.takeProfit1);
-    const tp2 = formatPrice(alert.takeProfit2);
-    const tp3 = formatPrice(alert.takeProfit3);
-    
-    const dailyCount = dailyMessageCounter.get(alert.symbol) || 1;
-    
-    const rsiStatus = alert.direction === 'COMPRA' ? 
-        (alert.rsi < 45 ? '🚀' : alert.rsi < 55 ? '📈' : '⚖️') :
-        (alert.rsi > 70 ? '💥' : alert.rsi > 60 ? '📉' : '⚖️');
-    
-    const iaDica = alert.direction === 'COMPRA' 
-        ? '<i>🤖 IA Dica...</i> Observar Zonas de 🔹Suporte de Compra' 
-        : '<i>🤖 IA Dica...</i> Realizar Lucro ou Parcial perto da 🔻Resistência.';
-    
-    const stochDaily = alert.stochDaily || 'N/D';
-    const stoch4h = alert.stoch4h || 'N/D';
-    
-    let longLiqText = '';
-    let shortLiqText = '';
-    
-    if (CONFIG.LIQUIDATION.ENABLED) {
-        const longZones = alert.longLiquidationZones || [];
-        const shortZones = alert.shortLiquidationZones || [];
-        
-        if (longZones.length > 0) {
-            const zonesFormatted = longZones.slice(0, 2).map(z => formatPrice(z)).join(' | ');
-            longLiqText = `🔹Supt: ${zonesFormatted}`;
-        }
-        
-        if (shortZones.length > 0) {
-            const zonesFormatted = shortZones.slice(0, 2).map(z => formatPrice(z)).join(' | ');
-            shortLiqText = `🔻Resist: ${zonesFormatted}`;
-        }
+async function processQueue() {
+    if (isSendingTelegram) return;
+    isSendingTelegram = true;
+    const alerts = [...alertQueue];
+    alertQueue.length = 0;
+    for (const alert of alerts) {
+        await sendAlert(alert);
+        await new Promise(r => setTimeout(r, CONFIG.ALERTS.TELEGRAM_DELAY_MS));
     }
-    
-    return `<i>${alert.emoji} <i>${dirEmoji} Analisar ${direction} - ${symbolName}</i> ${alert.emoji}
- <i>🐋Volume! | ✨#SCORE: ${alert.confidence}%</i>
- <i>Alerta:${dailyCount} | ${time.full}hs
- <i>💲Preço: $${entry}</i>
- <i>▫️Vol 24hs: ${alert.volume24hVsEma9}</i> 
- <i>#RSI 1h: ${formatNumber(alert.rsi, 0)} ${rsiStatus} | #Vol 1h: ${alert.volumeRatio.toFixed(2)}x (${volPct}%)</i>
- <i>#Vol 3m: ${alert.volumeRatio3m?.toFixed(2)}x (${volPct3m}%)</i>
- <i>#LSR: ${formatNumber(alert.lsr, 2)} | #Fund: ${fundingSign}${fundingPct}%</i>
- <i>📊 ${alert.cci4h || 'NEUTRO'}</i>
- <i>📊 ${alert.cciDaily || 'NEUTRO'}</i>
- <i>Stoch 1D: ${stochDaily}</i>
- <i>Stoch 4H: ${stoch4h}</i>
- <i>${shortLiqText}</i>
- <i>${longLiqText}</i> 
- <i>Alvos: TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}... 🛑 Stop: ${stop}</i>
-❅──────✧❅🔹❅✧──────❅
-<i> ${iaDica}</i>
-<i>Alerta Educativo, não é recomendação de investimento.</i>
- <i>Titanium Prime by @J4Rviz</i>`;
+    isSendingTelegram = false;
 }
 
-// =====================================================================
-// === FETCH SYMBOLS ===
-// =====================================================================
-async function fetchAllFuturesSymbols() {
+async function sendAlert(alert) {
+    const message = formatAlertMessage(alert);
     try {
-        const data = await rateLimiter.makeRequest(
-            'https://fapi.binance.com/fapi/v1/exchangeInfo',
-            {},
-            'exchangeInfo'
-        );
-        
-        const symbols = data.symbols
-            .filter(s => s.symbol.endsWith('USDT') && s.status === 'TRADING')
-            .map(s => s.symbol);
-            
-        console.log(`📊 Encontrados ${symbols.length} símbolos USDT`);
-        return symbols;
+        const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: CONFIG.TELEGRAM.CHAT_ID, text: message, parse_mode: 'HTML', disable_web_page_preview: true })
+        });
+        if (response.ok) {
+            const direction = alert.finalDirection.includes('COMPRA') ? 'COMPRA' : 'VENDA';
+            registerAlert(alert.symbol, direction, alert.currentPrice, alert.bestDivergence.timeframe);
+            log(`✅ ALERTA ENVIADO: ${alert.finalDirection} ${alert.symbol}`, 'success');
+        } else {
+            const errorText = await response.text();
+            log(`Erro Telegram: ${response.status} - ${errorText}`, 'error');
+        }
     } catch (error) {
-        console.log('❌ Erro ao buscar símbolos, usando lista básica');
-        return ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT', 'AVAXUSDT'];
+        log(`Erro ao enviar Telegram: ${error.message}`, 'error');
     }
 }
 
-// =====================================================================
-// === SCANNER EM TEMPO REAL ===
-// =====================================================================
-async function realTimeScanner() {
-    console.log('\n🔍 Iniciando scanner em tempo real...');
+function formatAlertMessage(data) {
+    const time = getBrazilianDateTime();
+    const symbolName = data.symbol.replace('USDT', '');
+    const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
     
-    const symbols = await fetchAllFuturesSymbols();
-    console.log(`📊 Monitorando ${symbols.length} símbolos continuamente`);
-    console.log(`   - Critério OBRIGATÓRIO: CCI 4H em ${CONFIG.CCI.REQUIRED_FOR_BUY} para COMPRA / ${CONFIG.CCI.REQUIRED_FOR_SELL} para VENDA`);
-    console.log(`   - CCI Diário: apenas para informação e pontuação extra`);
-    console.log(`   - Max requisições concorrentes: ${CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS}`);
-    console.log(`   - Delay entre símbolos: ${CONFIG.PERFORMANCE.SYMBOL_DELAY_MS}ms`);
-    console.log(`   - Batch size: ${CONFIG.PERFORMANCE.BATCH_SIZE}`);
-    if (CONFIG.LIQUIDATION.ENABLED) {
-        console.log(`   - Zonas de liquidação: ATIVADO`);
+    const titleEmoji = data.finalDirection.includes('COMPRA') ? '🟢' : '🔴';
+    const directionText = data.finalDirection.includes('COMPRA') ? 'Compra' : 'Correção';
+    const arrowEmoji = data.finalDirection.includes('COMPRA') ? '⤴️' : '⤵️';
+    
+    // Divergência
+    const divergenceEmoji = data.bestDivergence.emoji;
+    const divergenceTimeframe = data.bestDivergence.timeframe;
+    
+    // Pivô da divergência
+    let pivotText = '';
+    if (data.bestDivergence.pivot && data.bestDivergence.pivotType) {
+        const strength = getPivotStrength(data.bestDivergence.pivot.touches);
+        pivotText = `✔️ Pivôt ${data.bestDivergence.pivotType === 'suporte' ? 'SUPORTE' : 'RESISTÊNCIA'} confirmado (${data.bestDivergence.pivot.touches}x ${strength.text})`;
     }
-    if (CONFIG.VOLUME_3M.ENABLED) {
-        console.log(`   - Volume 3m: ATIVADO (mínimo ${CONFIG.VOLUME_3M.MIN_VOLUME_RATIO}x)`);
+    
+    // Volume 3m
+    let volume3mText = '';
+    if (data.volume3mCheck && data.volume3mCheck.passed) {
+        volume3mText = `✔️ Vol: ${data.volume3mCheck.volumeRatio.toFixed(1)}x média (${data.volume3mCheck.volumeDirection.toUpperCase()})`;
     }
+    
+    // LSR Divergence Analysis
+    let lsrDivergenceText = '';
+    if (data.lsr && data.lsrPosit) {
+        const ratioLongs = parseFloat(data.lsr.longPercent);
+        const positLongs = parseFloat(data.lsrPosit.longPercent);
+        const excess = ratioLongs - 50;
+        
+        if (ratioLongs >= 70 && positLongs >= 45 && positLongs <= 55) {
+            lsrDivergenceText = ` #LSR: 🔴BEARISH 
+   ├─ 🐟Sardinhas: ${ratioLongs.toFixed(1)}% COMPRANDO (excesso de ${excess.toFixed(0)}%)
+   ├─ 🐋Baleias: ${positLongs.toFixed(1)}% Divergência de Liquidez 
+   └─ 🔻Ação: Reduzir Posição | Stop alto +20%`;
+        } else if (ratioLongs <= 30 && positLongs >= 45 && positLongs <= 55) {
+            const excess = 50 - ratioLongs;
+            lsrDivergenceText = `#LSR: 🟢BULLISH 
+   ├─ 🐟Sardinhas: ${(100-ratioLongs).toFixed(1)}% VENDENDO (pânico de ${excess.toFixed(0)}%)
+   ├─ 🐋Baleias: ${positLongs.toFixed(1)}% Divergência de Liquidez 
+   └─ 🔺Ação: Operação Favorável | Entrada Normal`;
+        } else {
+            lsrDivergenceText = ` #LSR: 🟡Neutro
+   ├─ 🐟Sardinhas: ${ratioLongs.toFixed(1)}% / 🐋Baleias: ${positLongs.toFixed(1)}%
+   └─  ✔︎Liquidez Balanceada `;
+        }
+    } else if (data.lsr) {
+        lsrDivergenceText = ` LSR: ${data.lsr.text} (Ratio: ${data.lsr.ratio.toFixed(2)})`;
+    }
+    
+    // CCI Trend
+    const cciTrendText = data.finalDirection.includes('COMPRA') ? 'de alta💹' : 'de baixa🔻';
+    
+    // Suporte e Resistência
+    let supportText = '';
+    let resistanceText = '';
+    
+    if (data.pivotLevels4h && data.pivotLevels4h.support) {
+        const strength = getPivotStrength(data.pivotLevels4h.support.touches);
+        supportText = `#Suporte: ${formatPrice(data.pivotLevels4h.support.price)} (${data.pivotLevels4h.support.touches}x ${strength.text})`;
+    }
+    
+    if (data.pivotLevels4h && data.pivotLevels4h.resistance) {
+        const strength = getPivotStrength(data.pivotLevels4h.resistance.touches);
+        resistanceText = `#Resistência: ${formatPrice(data.pivotLevels4h.resistance.price)} (${data.pivotLevels4h.resistance.touches}x ${strength.text})`;
+    }
+    
+    // LSR e OI
+    let lsrOiText = '';
+    if (data.lsr && data.lsrPosit) {
+        const ratio = data.lsr.ratio ? data.lsr.ratio.toFixed(2) : 'N/A';
+        const oiRatio = data.lsrPosit.ratio ? data.lsrPosit.ratio.toFixed(2) : 'N/A';
+        lsrOiText = `LSR: ${ratio} | OI: ${oiRatio}x`;
+    } else if (data.lsr) {
+        lsrOiText = `LSR: ${data.lsr.ratio.toFixed(2)}x`;
+    }
+    
+    // Stop distance
+    const stopDistance = ((Math.abs(data.stop - data.currentPrice) / data.currentPrice) * 100).toFixed(1);
+    
+    // Bollinger
+    let bollingerText = '';
+    if (data.bollingerResults && data.bollingerResults[0] && data.bollingerResults[0].passed && data.bollingerResults[0].isTouching) {
+        const distance = data.bollingerResults[0].distance;
+        bollingerText = `✔️ Bollinger aprox... (${distance.toFixed(2)}%)`;
+    } else if (data.bollingerResults && data.bollingerResults[0] && data.bollingerResults[0].passed) {
+        bollingerText = `✔️ Bollinger OK`;
+    }
+    
+    // Wick Rejection
+    let wickText = '';
+    if (data.wickRejection && data.wickRejection.hasRejection && data.wickRejection.details && data.wickRejection.details.length > 0) {
+        const wick = data.wickRejection.details[data.wickRejection.details.length - 1];
+        wickText = `✔️ Candle (${wick.ratio.toFixed(1)}x corpo)`;
+    } else if (data.wickRejection && data.wickRejection.passed) {
+        wickText = `✔️ Wick Rejection OK`;
+    }
+    
+    // Funding
+    const fundingText = data.fundingBonus ? data.fundingBonus.message : (data.funding ? `Fund ${data.funding > 0 ? '+' : ''}${(data.funding * 100).toFixed(4)}%` : '');
+    
+    // Montagem final
+    let message = `${titleEmoji} ${directionText} - ${symbolName} | $${formatPrice(data.currentPrice)}\n`;
+    message += `${time.date} ${time.time}hs\n`;
+    message += `🔍 Divergência RSI (${divergenceTimeframe}${divergenceEmoji}) \n`;
+    message += `${pivotText}\n`;
+    message += `${volume3mText}\n`;
+    if (lsrDivergenceText) message += `${lsrDivergenceText}\n`;
+    message += `✔️ Divergência CCI 4h ${cciTrendText}\n`;
+    if (supportText) message += `${supportText}\n`;
+    if (resistanceText) message += `${resistanceText}\n`;
+    if (lsrOiText) message += `${lsrOiText}\n`;
+    message += `🎯Alvos: TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}\n`;
+    message += `⛔️ Stop: ${formatPrice(data.stop)} (${stopDistance}%)\n`;
+    message += `#RSI 1h: ${data.bestDivergence?.rsiValue?.toFixed(0) || '50'} | 🔗 Ver_Gráfico\n`;
+    if (fundingText) message += `${fundingText}\n`;
+    message += `Stoch 1D: ${formatStochastic(data.stoch1d)}\n`;
+    message += `Stoch 4H: ${formatStochastic(data.stoch4h)}\n`;
+    message += `CCI 4H: ${data.cci4h.text}\n`;
+    message += `CCI 1D: ${data.cci1d.text}\n`;
+    if (bollingerText) message += `${bollingerText}\n`;
+    if (wickText) message += `${wickText}\n`;
+    message += `🤖...Não é recomendação de investimento.\n`;
+    message += `Titanium Cronos Scalper by @J4Rviz`;
+    
+    return message;
+}
+
+// =====================================================================
+// === SCANNER PRINCIPAL ===
+// =====================================================================
+async function startScanner() {
+    console.log('\n' + '='.repeat(70));
+    console.log('🚀 Titanium Cronus Scalper ');
+    console.log('='.repeat(70));
+    
+    loadCooldowns();
+    currentTopSymbols = await getTopSymbols();
+    log(`Monitorando ${currentTopSymbols.length} símbolos`, 'success');
+    
+    log(` Critério: Divergência RSI + Pivô OBRIGATÓRIO no MESMO timeframe`, 'success');
+    log(` Volume 3m: ANORMAL + DIRECIONAL obrigatório`, 'success');
+    log(` Wick Rejection: DINÂMICO baseado no ATR`, 'success');
+    log(` Cooldowns com persistência`, 'success');
+    log(` LSR Posit (OI): ATIVADO - Divergência entre 🐟Sardinhas e 🐋Baleias`, 'success');
+    
+    try {
+        const initMessage = `🚀 Titanium Cronus Scalper ativado...`;
+        await fetch(`https://api.telegram.org/bot${CONFIG.TELEGRAM.BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: CONFIG.TELEGRAM.CHAT_ID, text: initMessage, parse_mode: 'HTML' })
+        });
+    } catch (e) {}
+    
+    setInterval(() => processQueue(), 30000);
     
     let scanCount = 0;
-    let alertsSent = 0;
-    let consecutiveEmptyScans = 0;
-    let lastErrorCheck = Date.now();
-    
     while (true) {
-        const startTime = Date.now();
-        scanCount++;
-        
-        resetDailyCounterIfNeeded();
-        
-        if (scanCount % 5 === 0) {
-            CacheManager.cleanup();
-        }
-        
-        if (Date.now() - lastErrorCheck > 300000) {
-            const stats = rateLimiter.getStats();
-            if (stats.consecutiveErrors > 20) {
-                console.log('⚠️ Muitos erros consecutivos, recriando agente...');
-                rateLimiter.recreateAgent();
-            }
-            lastErrorCheck = Date.now();
-        }
-        
-        console.log(`\n📡 Scan #${scanCount} - ${getBrazilianDateTime().full}`);
-        console.log(`📊 Stats da conexão:`, rateLimiter.getStats());
-        
-        const batchSize = CONFIG.PERFORMANCE.BATCH_SIZE;
-        const alerts = [];
-        
-        for (let i = 0; i < symbols.length; i += batchSize) {
-            const batch = symbols.slice(i, i + batchSize);
-            const batchPromises = batch.map(symbol => analyzeForAlerts(symbol));
+        try {
+            scanCount++;
+            alertsSentThisScan = 0;
+            log(`Scan #${scanCount} - ${getBrazilianDateTime().full}`, 'info');
             
-            const batchResults = await Promise.allSettled(batchPromises);
-            
-            batchResults.forEach(result => {
-                if (result.status === 'fulfilled' && result.value) {
-                    alerts.push(result.value);
+            for (let i = 0; i < currentTopSymbols.length; i += CONFIG.SCAN.BATCH_SIZE) {
+                const batch = currentTopSymbols.slice(i, i + CONFIG.SCAN.BATCH_SIZE);
+                await Promise.allSettled(batch.map(symbol => analyzeSymbol(symbol)));
+                if (i + CONFIG.SCAN.BATCH_SIZE < currentTopSymbols.length) {
+                    await new Promise(r => setTimeout(r, CONFIG.SCAN.COOLDOWN_AFTER_BATCH_MS));
                 }
-            });
-            
-            if (i + batchSize < symbols.length) {
-                await new Promise(r => setTimeout(r, CONFIG.PERFORMANCE.SYMBOL_DELAY_MS));
-            }
-        }
-        
-        alerts.sort((a, b) => b.confidence - a.confidence);
-        
-        const topAlerts = alerts.slice(0, CONFIG.ALERTS.MAX_ALERTS_PER_SCAN);
-        let successfulAlerts = 0;
-        
-        for (const alert of topAlerts) {
-            const message = formatTradeAlert(alert);
-            const sent = await sendTelegramAlert(message);
-            
-            if (sent) {
-                registerAlert(alert.symbol, alert.entryPrice, alert.direction);
-                alertsSent++;
-                successfulAlerts++;
-                console.log(`✅ Alerta enviado: ${alert.symbol} ${alert.direction} (${alert.confidence}%)`);
-            } else {
-                console.log(`❌ Falha ao enviar alerta: ${alert.symbol}`);
             }
             
-            await new Promise(r => setTimeout(r, 1500));
-        }
-        
-        if (topAlerts.length === 0) {
-            console.log('📭 Nenhum alerta no momento');
-            consecutiveEmptyScans++;
-        } else {
-            console.log(`📨 Alertas enviados com sucesso: ${successfulAlerts}/${topAlerts.length}`);
-            consecutiveEmptyScans = 0;
-        }
-        
-        const scanTime = Date.now() - startTime;
-        console.log(`⏱️ Scan concluído em ${(scanTime/1000).toFixed(1)}s`);
-        console.log(`📊 Total alertas enviados: ${alertsSent}`);
-        
-        let nextScanInterval = CONFIG.PERFORMANCE.SCAN_INTERVAL_SECONDS * 1000;
-        if (consecutiveEmptyScans > 5) {
-            nextScanInterval = Math.min(nextScanInterval * 1.5, 300000);
-        }
-        
-        const waitTime = nextScanInterval - scanTime;
-        if (waitTime > 0) {
-            console.log(`⏳ Próximo scan em ${(waitTime/1000).toFixed(0)}s`);
-            await new Promise(r => setTimeout(r, waitTime));
+            log(`Scan #${scanCount} concluído. Alertas: ${alertsSentThisScan}`, 'success');
+            await new Promise(r => setTimeout(r, CONFIG.SCAN.SCAN_INTERVAL_SECONDS * 1000));
+        } catch (error) {
+            log(`Erro no scan: ${error.message}`, 'error');
+            await new Promise(r => setTimeout(r, CONFIG.SCAN.SCAN_INTERVAL_SECONDS * 1000));
         }
     }
 }
 
-// =====================================================================
-// === INICIALIZAÇÃO ===
-// =====================================================================
-async function startBot() {
-    console.log('\n' + '='.repeat(70));
-    console.log('🚀 TITANIUM PRIME - CCI 4H como Critério Obrigatório');
-    console.log('='.repeat(70) + '\n');
-    
-    console.log('📅 Inicializando...');
-    console.log(`📱 Telegram Token: ${CONFIG.TELEGRAM.BOT_TOKEN ? '✅' : '❌'}`);
-    console.log(`📊 Risco/Retorno alvo: 1:${CONFIG.TRADE.RISK_REWARD_RATIO}`);
-    console.log(`📊 Volume 3m: ${CONFIG.VOLUME_3M.ENABLED ? '✅ ATIVADO' : '❌ DESATIVADO'} (mínimo ${CONFIG.VOLUME_3M.MIN_VOLUME_RATIO}x)`);
-    console.log(`🔌 Keep-Alive: ATIVADO (sockets: ${CONFIG.CONNECTION.MAX_SOCKETS})`);
-    console.log(`🔄 Max Retries: ${CONFIG.RATE_LIMITER.MAX_RETRIES}`);
-    console.log(`🔄 Max Requisições Concorrentes: ${CONFIG.RATE_LIMITER.MAX_CONCURRENT_REQUESTS}`);
-    console.log(`📊 CCI 4H: CRITÉRIO OBRIGATÓRIO (${CONFIG.CCI.REQUIRED_FOR_BUY} para COMPRA / ${CONFIG.CCI.REQUIRED_FOR_SELL} para VENDA)`);
-    console.log(`📊 CCI Diário: INFORMAÇÃO na mensagem e pontuação extra`);
-    if (CONFIG.LIQUIDATION.ENABLED) {
-        console.log(`💰 Zonas de Liquidação: ATIVADO`);
-    }
-    console.log('');
-    
-    cleanupManager.start();
-    
-    const initMessage = `🤖 Titanium Prime Ativado!\n📊 Critério: CCI 4H (${CONFIG.CCI.REQUIRED_FOR_BUY}/${CONFIG.CCI.REQUIRED_FOR_SELL})\n📊 Info extra: CCI Diário na mensagem`;
-    
-    const sent = await sendTelegramAlert(initMessage);
-    if (sent) {
-        console.log('✅ Bot inicializado! Mensagem de confirmação enviada.');
-    } else {
-        console.log('⚠️ Bot inicializado mas falha ao enviar mensagem de confirmação.');
-    }
-    
-    console.log('\n🔍 Iniciando scanner em tempo real...\n');
-    
-    await realTimeScanner();
-}
-
-// =====================================================================
-// === HANDLERS DE ERRO ===
-// =====================================================================
-process.on('uncaughtException', async (err) => {
-    console.error('\n❌ UNCAUGHT EXCEPTION:', err.message);
-    console.error(err.stack);
-    
-    const errorMessage = `❌ ERRO NO BOT - Reiniciando em 60s\n\`\`\`${err.message.substring(0, 100)}\`\`\``;
-    
-    await sendTelegramAlert(errorMessage);
-    
-    setTimeout(() => {
-        console.log('🔄 Reiniciando bot...');
-        process.exit(1);
-    }, 60000);
+process.on('SIGINT', () => {
+    log('Desligando...', 'warning');
+    saveCooldowns();
+    process.exit(0);
 });
 
-process.on('unhandledRejection', async (reason) => {
-    console.error('\n❌ UNHANDLED REJECTION:', reason);
-});
-
-// =====================================================================
-// === START ===
-// =====================================================================
-console.log('🚀 Iniciando Titanium Prime com CCI 4H como critério obrigatório...');
-startBot().catch(async error => {
-    console.error('❌ Erro fatal:', error);
-    
-    try {
-        await sendTelegramAlert(`❌ ERRO FATAL - BOT PAROU\n\`\`\`${error.message}\`\`\``);
-    } catch {}
-    
-    cleanupManager.stop();
-    process.exit(1);
-});
+startScanner().catch(console.error);
