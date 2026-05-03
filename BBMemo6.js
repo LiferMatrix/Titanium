@@ -10,8 +10,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHaVFs_0A',
-        CHAT_ID: '-1001297'
+        BOT_TOKEN: '7867596992:AAHldcC1sxG97H0FhnvHnN12qm76_cbxIvQ',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 5,
