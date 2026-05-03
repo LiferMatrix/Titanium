@@ -1261,7 +1261,7 @@ function formatAlertMessage(data) {
     if (bollingerText) message += `${bollingerText}\n`;
     if (wickText) message += `${wickText}\n`;
     message += `🤖...Não é recomendação de investimento.\n`;
-    message += `Titanium Cronus Scalper by @J4Rviz</i>`;
+    message += `Titanium  by @J4Rviz</i>`;
     
     return message;
 }
