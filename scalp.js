@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 /// =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7633398974:AAHa0A',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7867596992:AAHldcC1sxG97H0FhnvHnN12qm76_cbxIvQ',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 5,
@@ -1172,7 +1172,7 @@ function formatAlertMessage(data) {
     const tradingViewLink = `https://www.tradingview.com/chart/?symbol=BINANCE:${data.symbol}&interval=60`;
     
     const titleEmoji = data.finalDirection.includes('COMPRA') ? '🟢' : '🔴';
-    const directionText = data.finalDirection.includes('COMPRA') ? 'Compra' : 'Venda';
+    const directionText = data.finalDirection.includes('COMPRA') ? 'Compra' : 'Correção';
     const arrowEmoji = data.finalDirection.includes('COMPRA') ? '⤴️' : '⤵️';
     
     // Divergência
@@ -1190,7 +1190,7 @@ function formatAlertMessage(data) {
     // Volume 3m
     let volume3mText = '';
     if (data.volume3mCheck && data.volume3mCheck.passed) {
-        volume3mText = `📊 Volume 3m: ${data.volume3mCheck.volumeRatio.toFixed(1)}x média (${data.volume3mCheck.volumeDirection.toUpperCase()}) 🎯`;
+        volume3mText = ` Vol: ${data.volume3mCheck.volumeRatio.toFixed(1)}x média (${data.volume3mCheck.volumeDirection.toUpperCase()}) `;
     }
     
     // CCI Trend
@@ -1223,18 +1223,18 @@ function formatAlertMessage(data) {
     let bollingerText = '';
     if (data.bollingerResults && data.bollingerResults[0] && data.bollingerResults[0].passed && data.bollingerResults[0].isTouching) {
         const distance = data.bollingerResults[0].distance;
-        bollingerText = `⬆️ Bollinger OK (${distance.toFixed(2)}%) 🎯`;
+        bollingerText = ` Bollinger  (${distance.toFixed(2)}%) `;
     } else if (data.bollingerResults && data.bollingerResults[0] && data.bollingerResults[0].passed) {
-        bollingerText = `⬆️ Bollinger OK 🎯`;
+        bollingerText = ` Bollinger `;
     }
     
     // Wick Rejection
     let wickText = '';
     if (data.wickRejection && data.wickRejection.hasRejection && data.wickRejection.details && data.wickRejection.details.length > 0) {
         const wick = data.wickRejection.details[data.wickRejection.details.length - 1];
-        wickText = `🕯️ Candle (${wick.ratio.toFixed(1)}x corpo) 🎯`;
+        wickText = ` Candle (${wick.ratio.toFixed(1)}x corpo) `;
     } else if (data.wickRejection && data.wickRejection.passed) {
-        wickText = `🕯️ Wick Rejection OK 🎯`;
+        wickText = ` Wick Rejection OK `;
     }
     
     // Funding
@@ -1250,9 +1250,9 @@ function formatAlertMessage(data) {
     if (supportText) message += `${supportText}\n`;
     if (resistanceText) message += `${resistanceText}\n`;
     if (lsrText) message += `${lsrText}\n`;
-    message += `🎯 TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}\n`;
+    message += `Alvos: TP1: ${formatPrice(data.tp1)} | TP2: ${formatPrice(data.tp2)} | TP3: ${formatPrice(data.tp3)}\n`;
     message += `⛔️ Stop: ${formatPrice(data.stop)} (${stopDistance}%)\n`;
-    message += `#RSI 1h: ${data.bestDivergence?.rsiValue?.toFixed(0) || '50'}  | <a href="${tradingViewLink}">🔗 Gráfico</a>\n`;
+    message += `#RSI 1h: ${data.bestDivergence?.rsiValue?.toFixed(0) || '50'}  | <a href="${tradingViewLink}">🔗 Ver_Gráfico</a>\n`;
     if (fundingText) message += `${fundingText}\n`;
     message += `Stoch 1D: ${formatStochastic(data.stoch1d)}\n`;
     message += `Stoch 4H: ${formatStochastic(data.stoch4h)}\n`;
@@ -1261,7 +1261,7 @@ function formatAlertMessage(data) {
     if (bollingerText) message += `${bollingerText}\n`;
     if (wickText) message += `${wickText}\n`;
     message += `🤖...Não é recomendação de investimento.\n`;
-    message += `Titanium by @J4Rviz</i>`;
+    message += `Titanium Cronus Scalper by @J4Rviz</i>`;
     
     return message;
 }
