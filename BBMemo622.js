@@ -9,8 +9,8 @@ if (!globalThis.fetch) globalThis.fetch = fetch;
 // =====================================================================
 const CONFIG = {
     TELEGRAM: {
-        BOT_TOKEN: '7867596992vQ',
-        CHAT_ID: '-10017'
+        BOT_TOKEN: '7867596992:AAHldcC1sxG97H0FhnvHnN12qm76_cbxIvQ',
+        CHAT_ID: '-1001990889297'
     },
     SCAN: {
         BATCH_SIZE: 6,
@@ -50,7 +50,7 @@ const CONFIG = {
             LOW_VOLUME: 50
         },
         MIN_VOLUME_USDT: 100000,
-        MIN_VOLUME_RATIO: 1.7,
+        MIN_VOLUME_RATIO: 1.5,
         MIN_24H_VOLUME_USDT: 300000,
         VOLUME_DIRECTION: {
             BUY_MIN_PERCENTAGE: 45,
@@ -2629,7 +2629,7 @@ function getPivotStrength(touches) {
 }
 
 // =====================================================================
-// === FORMATAR MENSAGEM ===
+// === FORMATAR MENSAGEM (OTIMIZADA - SEM ESPAÇOS VAZIOS) ===
 // =====================================================================
 function formatAlert(data) {
     const time = getBrazilianDateTime();
@@ -2748,6 +2748,13 @@ function formatAlert(data) {
         wickRejectionLine = ` ${data.wickMessage}\n   +${data.wickBonus}`;
     }
     
+    let lsrInfoLine = '';
+    if (data.lsrInfoText && data.lsrInfoText.trim() !== '') {
+        lsrInfoLine = data.lsrInfoText;
+    } else if (data.lsrTightened && data.lsrDynamicThreshold) {
+        lsrInfoLine = `📊 LSR Dinâmico: ${data.lsrValue?.toFixed(2)} ${data.isGreenAlert ? '≤' : '≥'} ${data.lsrDynamicThreshold.toFixed(1)} ✅`;
+    }
+    
     let studyInfo = '';
     if (data.studyInfo) {
         const studyTime = new Date(data.studyInfo.studiedAt).toLocaleTimeString();
@@ -2762,30 +2769,40 @@ function formatAlert(data) {
                           data.usedTimeframe === '4h' ? ' 4 Horas' : 
                           data.usedTimeframe === '1h' ? ' 1 Hora' : ' 15 Minutos';
     
-    return `<i>${data.direction} - ${symbolName} | 💲 ${formatPrice(data.price)}
-${scoreEmoji} #SCORE: ${finalScore.toFixed(1)} (Pivôs +${totalPivotBonus.toFixed(1)}) | Data: ${formattedDateTime}
-🔍 ${divergencesText}
-${wickRejectionLine}
-${targets}
-${stop}
-▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}
-#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 Ver_Gráfico</a>
-${volume3mLine}
-${volume1hLine}
-#LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%
-Stoch 1D: ${data.stoch1d}
-Stoch 4H: ${data.stoch4h}
-CCI 4H:${cci4hText}
-CCI 1D:${cciDailyText}
-📌 Pivôs (${timeframeText}):
-${supportLine ? supportLine : ''}
-${resistanceLine ? resistanceLine : ''}
-${pivotDivergenceLine}
-${data.lsrInfoText ? data.lsrInfoText : ''}
-${penaltiesLine}
-${studyInfo}
- 🤖...Não é recomendação de investimento.
-Titanium Prime X by @J4Rviz</i>`;
+    // Construção dinâmica da mensagem (SEM ESPAÇOS VAZIOS)
+    let messageLines = [];
+    
+    messageLines.push(`${data.direction} - ${symbolName} | 💲 ${formatPrice(data.price)}`);
+    messageLines.push(`${scoreEmoji} #SCORE: ${finalScore.toFixed(1)} (Pivôs +${totalPivotBonus.toFixed(1)}) | Data: ${formattedDateTime}`);
+    messageLines.push(`🔍 ${divergencesText}`);
+    
+    if (wickRejectionLine) messageLines.push(wickRejectionLine);
+    
+    messageLines.push(targets);
+    messageLines.push(stop);
+    messageLines.push(`▫️Vol 24h: ${data.volume24h.pct} ${data.volume24h.text}`);
+    messageLines.push(`#RSI 1h: ${data.rsi.toFixed(0)} ${rsiEmoji} | <a href="${tradingViewLink}">🔗 Ver_Gráfico</a>`);
+    messageLines.push(volume3mLine);
+    messageLines.push(volume1hLine);
+    messageLines.push(`#LSR: ${lsr} | #Fund: ${fundingSign}${fundingPct}%`);
+    messageLines.push(`Stoch 1D: ${data.stoch1d}`);
+    messageLines.push(`Stoch 4H: ${data.stoch4h}`);
+    messageLines.push(`CCI 4H:${cci4hText}`);
+    messageLines.push(`CCI 1D:${cciDailyText}`);
+    messageLines.push(`📌 Pivôs (${timeframeText}):`);
+    
+    if (supportLine) messageLines.push(supportLine);
+    if (resistanceLine) messageLines.push(resistanceLine);
+    if (pivotDivergenceLine) messageLines.push(pivotDivergenceLine);
+    if (lsrInfoLine) messageLines.push(lsrInfoLine);
+    if (penaltiesLine) messageLines.push(penaltiesLine);
+    if (studyInfo) messageLines.push(studyInfo);
+    
+    messageLines.push(` 🤖...Não é recomendação de investimento.`);
+    messageLines.push(`Titanium Prime X by @J4Rviz`);
+    
+    // Filtra linhas vazias e junta com quebra de linha
+    return `<i>${messageLines.filter(line => line && line.trim() !== '').join('\n')}</i>`;
 }
 
 // =====================================================================
